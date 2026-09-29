@@ -945,7 +945,7 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
 |---|---|---|
 | Language | TypeScript, strict mode, modern ES modules only | The Agent SDK is TypeScript, types are shared between server and UI, and the leading coding agents are TypeScript |
 | Runtime | **Bun** | Ships as one installable binary (`bun build --compile`) with the web UI embedded, the way Claude Code installs. SQLite, test runner, bundler, package manager, shell and OS-keychain access are built in, which means fewer dependencies and a smaller supply-chain surface. Fast CLI startup. Anthropic maintains Bun, and Claude Code itself ships on it. |
-| Type checking | TypeScript 6; code kept compatible with TypeScript 7, and switch when 7 is stable | The native compiler gives much faster type checks |
+| Type checking | TypeScript 7 (native compiler) | Stable since 7.0; much faster type checks |
 | Monorepo | Bun workspaces (isolated installs, version catalogs) + Turborepo | Isolated installs enforce package boundaries; Turborepo caches builds |
 | Server core | **Effect 4** on `@effect/platform-bun` (Schema, RPC over WebSocket, SQL, Stream). Confirm in M0 whether 4 is stable enough, else use 3.x. | Cancellation, cleanup and streaming are Goldiloop's hardest problems, and Effect is designed for them. Effect Schema converts old stored events to the current shape. |
 | Router | Plain pure TypeScript | Easy to reason about; runs in the browser for the live preview |
