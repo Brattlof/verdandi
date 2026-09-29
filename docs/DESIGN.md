@@ -1163,7 +1163,7 @@ Everything that makes Hermes Agent good, and where it lives in Verdandi.
 - [x] Hooks registered through the SDK alongside the user's own hooks. → ADR 0005.
 - [x] Serving an MCP server in-process through the SDK, for Verdandi tools. → ADR 0005.
 - [x] Sending a message to a running Claude Code session (steer). → ADR 0003: lands at the next tool boundary; `priority: "now"` aborts and restarts.
-- [ ] `bun:sqlite`: FTS5 and trigram tokenizer support on all three OSes. → ADR 0006: Windows yes; macOS and Linux in CI before M3.
+- [x] `bun:sqlite`: FTS5 and trigram tokenizer support on all three OSes. → ADR 0006: yes on all three, checked in CI.
 - [x] Effect 4 RC on `@effect/platform-bun`: stability of RPC over WebSocket, SQL and Stream. → ADR 0008: works; stopping a stream early wedges the connection in rc.115, avoided by design until fixed.
 - [x] The PTY host on Windows 11 (ConPTY): resizing, heavy output, Ctrl+C, killing process trees. → ADR 0007: Bun's built-in PTY, with fixes for Ctrl+C, tree kill and output batching.
 - [x] `laya-ts` under Bun: `onnxruntime-node`, or `onnxruntime-web` (WASM) as a fallback; CPU latency of a routing request. → ADR 0009: `onnxruntime-node` works; p50 1.45 s, 1.7 GB.
