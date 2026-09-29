@@ -2,17 +2,15 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.2 — for review |
+| **Status** | Draft v0.3 — for review |
 | **Owner** | @Brattlof |
 | **Last updated** | 2026-09-29 |
 | **Repo** | [Brattlof/goldiloop](https://github.com/Brattlof/goldiloop) (private) |
 
-> **Changes since v0.1**
-> - Goldiloop now has its **own agent loop** (the *native harness*) alongside Claude Code, and supports many model providers.
-> - Routing now covers **harness × provider × model × effort**, across subscription, metered and local access.
-> - The design now includes the full set of agent capabilities: learning, memory, skills, trajectories, scheduler, messaging gateway, execution backends, profiles, plugins, and more interfaces (API, ACP, MCP).
-> - The tech stack is final: Node, pnpm, Effect and Electron, plus a Python `lab/`.
-> - The milestones have been re-planned.
+> **Changes since v0.2**
+> - The runtime is **Bun** instead of Node (§19).
+> - New **decision layer** (§9.8). Small judgments go to decision models instead of LLM calls: Laya runs locally, and Jev is a cloud option you have to turn on. The layer is used for routing, background review, memory selection, compaction, approvals, injection scanning and gateway triage.
+> - Terminals run in a separate PTY host process (§13).
 
 ---
 
@@ -26,7 +24,7 @@ Goldiloop is a local-first workspace and personal agent platform for AI coding a
    - **Claude Code**, driven through your installed and logged-in CLI, which uses your subscription;
    - **Goldiloop's own native agent**, which calls model APIs directly: Anthropic API credits, OpenAI, OpenRouter, Google, local models through Ollama, and more;
    - other agent CLIs later.
-4. **A task router.** This is the defining feature. For every task it picks the harness, provider, model and effort level that will finish the task at the lowest *effective* cost. It shows why, and it learns from the outcome.
+4. **A task router.** This is the defining feature. For every task it picks the harness, provider, model and effort level that will finish the task at the lowest *effective* cost. It shows why, and it learns from the outcome. The small judgments along the way go to fast decision models instead of LLMs. Examples: what type of task this is, whether a command is safe, what to remember, which context to keep.
 
 Goldiloop starts with Claude Code, because that's what the owner uses every day. Every other part is designed from the start to work with any harness and any provider.
 
@@ -126,6 +124,7 @@ flowchart LR
     ROUTER[Router]
     HREG[Harness registry]
     TOOLS[Goldiloop tools]
+    DEC[Decision layer<br/>rules · Laya · Jev]
     LEARN[Memory · Skills · Session index · Trajectories]
     WSVC[Workspace<br/>git · worktrees · checkpoints · PTY]
     EXEC[Execution backends<br/>local · docker · ssh · cloud]
@@ -151,6 +150,8 @@ flowchart LR
 
   WEB & DESK & CLI & GW & API & ACP --> RPC --> ORCH
   ORCH <--> ROUTER
+  ROUTER -.-> DEC
+  LEARN -.-> DEC
   ORCH --> HREG --> CC & NAT & OTH
   NAT --> ANT & OAI & GOO & ORT & LOC
   NAT --> TOOLS
@@ -166,7 +167,8 @@ flowchart LR
 |---|---|
 | **goldiloopd** | One long-running local process that owns all state and every session. All the surfaces are thin clients. |
 | **Orchestrator** | Turns commands into events and events into projections. Side effects happen only in *reactors*. |
-| **Router** | A pure function from `(signals, policy, thread state, catalog, budget)` to a `RouteDecision`. |
+| **Router** | A pure function from `(signals, policy, thread state, catalog, budget)` to a `RouteDecision`. The classifier is passed in from outside, so the router itself stays pure. |
+| **Decision layer** | Answers small typed questions (pick one, score, yes/no) with calibrated probabilities. It uses local or cloud decision models instead of LLM calls (§9.8). |
 | **Harness registry** | Holds one adapter per harness: Claude Code, native, and later others. Each declares its capabilities. |
 | **Native harness** | Goldiloop's own agent loop. It handles tool use, subagents, context management and prompt caching across providers. |
 | **Model providers** | Adapters for each API format, the model catalog, credentials, fallbacks and health checks. Used by the native harness and for auxiliary tasks. |
@@ -299,9 +301,9 @@ flowchart TD
   - *Routing memory:* how similar tasks in this project went before (§8.8).
 - **Stage 3 · Classify.** The classifier is pluggable:
   - `rules`: free, deterministic, with golden tests. This is the default.
-  - `local`: a small model through Ollama, e.g. Arch-Router-1.5B.
-  - `api`: Haiku or another cheap metered model, with structured output.
-  - `learned`: a model trained in `lab/` and served through ONNX or Ollama.
+  - `decision`: the decision layer (§9.8). One request asks a pick-one question for the task class and a score question for difficulty. The probabilities that come back are **calibrated**, so the confidence threshold below means what it says. It runs on local Laya, or on Jev if you've turned it on.
+  - `api`: Haiku or another cheap metered model, with structured output. This is the fallback when the decision layer isn't confident enough.
+  - `learned`: a Laya model fine-tuned in `lab/` on our own outcomes (§8.8), served through the decision layer.
 
   If confidence is below a threshold, the router uses the budget mode's safe default instead of guessing.
 - **Stage 4 · Policy and cost.** The policy sets a **quality bar** for each class, meaning which targets and efforts are acceptable. Among the candidates that meet it, the router picks the lowest effective cost.
@@ -368,7 +370,7 @@ Defaults differ between models, so **the router always sets effort explicitly**.
 ```yaml
 # <repo>/.goldiloop/routing.yaml
 mode: balanced                       # thrifty | balanced | max
-classifier: rules                    # rules | local | api | learned
+classifier: rules                    # rules | decision | api | learned
 minConfidence: 0.6
 
 targets:                             # named targets used below
@@ -392,7 +394,7 @@ quota:
   subscription: { spillTo: [api-sonnet, local-code], spillWhenRemainingBelow: 0.15 }
 
 escalation:
-  verifiers: ["pnpm test", "pnpm typecheck"]
+  verifiers: ["bun test", "bun run typecheck"]
   ladder: [effort, model, ask]
   maxAutoEscalations: 1
 
@@ -442,7 +444,7 @@ interface TaskOutcome {
 These outcomes are used at three levels:
 1. **Routing memory per project** (M2), e.g. "debug tasks on Sonnet escalated 7 times out of 10, so start on Opus".
 2. **Offline replay:** re-run the router over saved tasks to see how a policy change would have routed them.
-3. **A learned router** trained in `lab/` (M6). It is adopted only if it beats `rules` on the eval set.
+3. **A learned router** (M6). Recorded outcomes become fine-tuning data for a Laya decision model in `lab/`. The fine-tuned model is exported to ONNX and runs inside goldiloopd through `laya-ts`. `laya-ts` also runs in the browser, so the composer's live routing preview can use the same model. The learned router is adopted only if it beats `rules` on the eval set.
 
 ### 8.9 Budgets
 
@@ -582,18 +584,57 @@ interface HarnessAdapter {
 
 ### 9.7 Auxiliary tasks
 
-Some jobs are small, but a model still has to do them:
-- titles and commit messages,
-- handoff summaries,
-- context compression,
-- vision descriptions,
-- background review,
-- judging whether a command is safe,
-- routing classification.
+Some jobs are small, but a model still has to do them. They fall into two kinds:
 
-These are **routed tasks** (`aux.*` classes) with their own policy entries, so they automatically use the cheapest acceptable target: usually a local model, then Haiku.
+- **Judgments** have a fixed set of possible answers. Examples: routing classification, whether a command is safe, whether a task is worth reviewing, whether to keep or drop a piece of context. These go to the **decision layer** (§9.8), not to an LLM.
+- **Generation** means writing text. Examples: titles, commit messages, handoff summaries, vision descriptions, and the background review itself. These are **routed tasks** (`aux.*` classes) with their own policy entries, so they automatically use the cheapest acceptable target: usually a local model, then Haiku.
 
-### 9.8 More harnesses (M6)
+### 9.8 Decision layer (System 1)
+
+Goldiloop makes a lot of small judgments. What type of task is this? Is this command destructive? Is anything here worth remembering? Should this old tool result stay in the context? Sending each one to an LLM is slow and costs tokens. Sending it to a rule is free but brittle. The decision layer sits in between.
+
+It uses **decision models**. A decision model takes some context (the *state*) plus typed questions, and returns typed answers with calibrated probabilities in one forward pass. It never writes text, so there's nothing to parse and nothing to make up. There are three question types:
+- **choice:** pick one option from a list;
+- **score:** place the state on a scale;
+- **noul:** yes or no, answered as a probability.
+
+**Interface.** A `Decide` service takes `(state, questions)` and returns answers, probabilities and confidence. Requests and responses use TypeSafe's `/v1/systemone` format, which ollaya also accepts, so one client works with every backend.
+
+**Backends**, cheapest first. Policy chooses the backend for each kind of question:
+
+| Backend | Where it runs | Cost | Notes |
+|---|---|---|---|
+| `rules` | Inside goldiloopd | Free | Deterministic. Used when a pattern is enough. |
+| `laya` (default) | Inside goldiloopd, through `laya-ts` (ONNX, on CPU) | Free | Open weights (Apache 2.0). ModernBERT-large (421M parameters) or mmBERT-base (322M). Reads 512–1,024 tokens of context; the multilingual model goes up to 8K, less reliably. |
+| `ollaya` | A local daemon, on GPU | Free | Larger open decision models, for when Laya isn't accurate enough. Example: `winnow:e4b`, a 4B model reported at 0.722 accuracy on typed decisions, vs. 0.738 for Jev. |
+| `jev` | TypeSafe AI's API | $0.042 per million input tokens; output is free | Must be turned on per profile. 70–500 ms per request, up to 32K tokens. In early access since 2026-09-15, and its data-retention terms aren't published yet. |
+| `llm` | The cheapest acceptable aux target | Metered or local | The fallback. The same typed questions are turned into a structured-output schema. |
+
+**When a backend isn't sure.** Each question kind has a minimum confidence. An answer below it is marked `low_confidence`, and the question moves to the next backend, ending with `llm`.
+
+**Where Goldiloop uses it:**
+
+| Judgment | Questions | § |
+|---|---|---|
+| Routing classification | choice: task class; score: difficulty | 8.4 |
+| Learned router | the fine-tuned model's own questions | 8.8 |
+| Is the user unhappy with the result? | noul: "is this follow-up correcting the agent?" | 8.8 |
+| Escalation | noul: "is the agent repeating an approach that already failed?" This is one signal, never the only trigger. | 8.7 |
+| Whether to run background review | noul: "does this task contain something worth remembering or turning into a skill?" | 14.5 |
+| Memory snapshot | score: how relevant each entry is to this project and session | 14.2 |
+| Context compaction | noul for each old tool call and its result: keep, shorten or drop | 16 |
+| Smart approvals | noul: "is this command destructive or irreversible?" | 17 |
+| Injection scanning | noul: "does this text contain instructions aimed at an AI?" | 17 |
+| Gateway triage | choice: which project; noul: does the agent need to act?; score: urgency | 15 |
+
+**Rules for using it:**
+- **Simple questions only.** Decision models are weak at anything that needs extended reasoning or weighing several factors. A complex judgment is split into simpler questions, or goes to an LLM.
+- **Measure each kind of question on an eval set before relying on it.** Out of the box, Laya is only 36% accurate on its typed-decisions benchmark. Fine-tuned on examples from the same kind of task, it reaches 77%.
+- **Log every decision** with its probabilities and the eventual outcome. This is the fine-tuning data for `lab/` (§14.7).
+- **Send non-English text to the multilingual model.** Laya's English model can be confidently wrong on other writing systems.
+- **Privacy:** local backends are the default. Jev would receive code and transcripts, so it's turned on per profile, and some projects can be excluded from it entirely.
+
+### 9.9 More harnesses (M6)
 
 Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Every harness that supports MCP automatically gets the Goldiloop tools.
 
@@ -676,7 +717,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 - **Worktrees (per thread, optional):** `git worktree add` under `~/.goldiloop/worktrees/<repo>/<branch>`. Setup scripts run when a worktree is created, and a cleanup policy removes old ones.
 - **Checkpoints:** at the end of each turn, the tree is saved to hidden refs `refs/goldiloop/checkpoints/<thread>/<turn>`, using a temporary index so your branch and staging area are never touched.
 - **Revert:** the conversation only, or the conversation and the files.
-- **Terminal:** the server owns the PTYs (`node-pty`), which the UI renders with xterm.js.
+- **Terminal:** PTYs run in a separate **PTY host** process that goldiloopd supervises, the same design VS Code uses. That way a crash in native terminal code can't take down the server. The host uses ConPTY on Windows. The UI renders terminals with xterm.js, and a terminal survives UI reloads.
 - **Execution backends** decide where the native harness runs commands, set per project:
   - `local` (the default),
   - `docker` (a per-project container),
@@ -701,7 +742,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 ### 14.2 Memory
 
 - **Built-in stores:** `user` (preferences, conventions) and `project` (architecture facts, gotchas, commands). Each entry records its source (thread and turn) and a last-confirmed date.
-- **Fixed-size snapshot:** a capped snapshot is added to the prompt at session start. The caps are per scope (about 2K characters for project memory and 1.5K for user memory). It doesn't change for the rest of the session, which protects the cache. Anything written during the session shows up in the next session's snapshot.
+- **Fixed-size snapshot:** a capped snapshot is added to the prompt at session start. The caps are per scope (about 2K characters for project memory and 1.5K for user memory). It doesn't change for the rest of the session, which protects the cache. Anything written during the session shows up in the next session's snapshot. Entries are chosen by relevance first, using a score from the decision layer (§9.8), then by recency.
 - **Lookups:** `memory_search` results are added to the current user turn, never to the system prompt.
 - **Memory is capped on purpose.** When the cap is reached, a save fails and asks the agent to **consolidate**: merge, rewrite or drop older entries.
 - **Periodic nudges:** every *N* turns the agent is prompted to consider saving memory.
@@ -742,7 +783,7 @@ Every turn from every harness goes into an FTS5 index, so past solutions can be 
 
 ### 14.5 Background review
 
-After a task finishes, a background job reviews it on a cheap auxiliary target, working from a short **digest** rather than the full transcript. It proposes:
+After a task finishes, the decision layer first checks whether it contains anything worth remembering or turning into a skill (§9.8). Most tasks don't, and those skip the review, which saves an LLM call each time. Otherwise, a background job reviews the task on a cheap auxiliary target, working from a short **digest** rather than the full transcript. It proposes:
 - memories to save,
 - skills to create or patch,
 - routing notes.
@@ -760,6 +801,7 @@ With the native harness, the review can be a *fork* of the session that keeps th
   - **message JSONL** (OpenAI-style, with tool calls), for fine-tuning;
   - **preference pairs** from race mode and overrides (the route that won vs. the one that lost), for DPO-style training;
   - **routing datasets** (signals → outcome per target), for training the router;
+  - **decision datasets** (state, questions, answers, eventual outcome), for fine-tuning decision models;
   - **Parquet**, for analysis.
 
   Secrets are masked on export, and you can exclude projects.
@@ -771,9 +813,10 @@ With the native harness, the review can be a *fork* of the session that keeps th
 - Lives in `lab/`: a Python project managed with uv, using ruff, ty and pytest.
 - **Jobs:**
   - build datasets from exports;
-  - train the router;
+  - train the router: fine-tune Laya on routing outcomes and export it to ONNX;
+  - fine-tune decision models for other judgments, from logged decisions and their outcomes;
   - analyse evals;
-  - optionally fine-tune *local* models.
+  - optionally fine-tune *local* generative models.
 - **Talks to the app only through files.** Exports go into the lab. Trained artifacts come back out: ONNX classifiers, or models served through Ollama.
 - **Never loaded by goldiloopd,** so the running app stays pure TypeScript.
 
@@ -807,6 +850,7 @@ Trajectories from open or local models don't have this restriction. The exporter
   - One gateway process inside goldiloopd, with a `PlatformAdapter` for each platform.
   - **Platforms:** Telegram, Discord and Slack first. Then WhatsApp, Signal, Matrix and email as plugins.
   - Each chat is **bound to a thread**. Approvals appear as buttons.
+  - **Triage:** the decision layer sorts incoming messages by project, by whether the agent needs to act, and by urgency (§9.8).
   - Only users on each channel's allowlist can use it.
   - Connections are outbound only, so no ports need opening.
   - Webhooks for inbound triggers, e.g. CI failed → start a fix task.
@@ -819,11 +863,15 @@ Trajectories from open or local models don't have this restriction. The exporter
 
 Claude Code manages its own context. The native harness has a pluggable `ContextEngine`, whose default is a compressor:
 
-1. **Trigger:** compression starts at a set fraction of the context window (a default around 50%, lower for large windows), and again as a safety measure at around 85%.
-2. **Prune first, without an LLM call:** trim old tool outputs. Oversized tool results are written to disk, with a pointer left in their place.
-3. **Pick the head and tail to keep,** within a token budget, never splitting a tool call from its result.
-4. **Summarize the middle** with the auxiliary compression target, using the handoff sections (§8.2). The summary is updated on each later compression.
-5. **Save memory first** (a background review flush), then compress. **Compression is the only allowed cache break.**
+1. **Trigger:** compression starts at a set fraction of the context window (about 50% by default, later for windows under 512K), and again as a safety measure at about 85%.
+2. **Save memory first** (a background review flush), so nothing worth keeping is lost.
+3. **Prune without an LLM call:** oversized tool results are written to disk, with a pointer left in their place.
+4. **Keep or drop, word for word.** The decision layer looks at the whole conversation and answers, for each old tool call, whether the call and its result are still needed (§9.8). Unneeded results are shortened, or dropped together with their call. Everything kept stays word for word, so exact paths, errors and constraints survive. If this frees enough room, compression stops here.
+5. **Otherwise, summarize the middle.** Keep a head and a tail within a token budget, never splitting a tool call from its result. Summarize what's between them with the auxiliary compression target, using the handoff sections (§8.2). The summary is updated on each later compression.
+
+**Compression is the only allowed cache break.**
+
+Claude Code manages its own context, but step 4 can replace its compaction summary through hooks, the way the `fast-jev-compaction` plugin does. Goldiloop offers this as an optional, experimental plugin (M4).
 
 ---
 
@@ -845,17 +893,17 @@ Claude Code manages its own context. The native harness has a pluggable `Context
   | **Full access** | Everything allowed. Must be chosen explicitly. |
 
   Each harness maps these modes to its own settings. Scheduled and gateway tasks have their own restricted profiles.
-- **Smart approvals (native harness):** an auxiliary model rates a command's risk, so safe commands don't need an approval prompt. Anything destructive or irreversible is never auto-approved.
+- **Smart approvals (native harness):** the decision layer rates a command's risk (§9.8), so safe commands don't need an approval prompt. A command is auto-approved only when the model is very confident it's safe. Hard rules still catch destructive patterns, and nothing destructive or irreversible is ever auto-approved.
 - **Prompt-injection defence:**
-  - context files, memory entries and skill files are scanned before use;
+  - context files, memory entries, skill files and gateway messages are scanned before use, with pattern rules plus a decision-layer check (§9.8);
   - tool outputs are marked as untrusted data;
   - gateway messages from users not on the allowlist are ignored.
 - **Plugins run inside goldiloopd with full trust.** They must be installed explicitly and pinned to a version, and each one is listed with the permissions it has.
 - **Supply chain:**
   - every dependency pinned to an exact version;
-  - pnpm `minimumReleaseAge`;
+  - a minimum release age for new package versions (Bun's install setting), so versions published only hours ago can't be installed;
   - OSV scanning;
-  - lockfile-diff review in CI;
+  - lockfile-diff review in CI (`bun.lock` is a text file, so its diffs can be reviewed);
   - Python in `lab/` pinned through `uv.lock`.
 
 ---
@@ -882,25 +930,26 @@ Claude Code manages its own context. The native harness has a pluggable `Context
 | Area | Choice | Why |
 |---|---|---|
 | Language | TypeScript, strict mode, modern ES modules only | The Agent SDK is TypeScript, types are shared between server and UI, and the leading coding agents are TypeScript |
-| Runtime | **Node 24 LTS**, then 26 LTS once released (Oct 2026) | `node-pty`, Electron's built-in Node, the SDK's test matrix, Windows robustness, and running `.ts` directly |
+| Runtime | **Bun** | Ships as one installable binary (`bun build --compile`) with the web UI embedded, the way Claude Code installs. SQLite, test runner, bundler, package manager, shell and OS-keychain access are built in, which means fewer dependencies and a smaller supply-chain surface. Fast CLI startup. Anthropic maintains Bun, and Claude Code itself ships on it. |
 | Type checking | TypeScript 6; code kept compatible with TypeScript 7, and switch when 7 is stable | The native compiler gives much faster type checks |
-| Monorepo | pnpm workspaces + version catalogs + Turborepo | pnpm's strictness enforces package boundaries; Turborepo caches builds |
-| Server core | **Effect 4** (Schema, RPC over WebSocket, SQL, Stream). Confirm in M0 whether 4 is stable enough, else use 3.x. | Cancellation, cleanup and streaming are Goldiloop's hardest problems, and Effect is designed for them. Effect Schema converts old stored events to the current shape. |
+| Monorepo | Bun workspaces (isolated installs, version catalogs) + Turborepo | Isolated installs enforce package boundaries; Turborepo caches builds |
+| Server core | **Effect 4** on `@effect/platform-bun` (Schema, RPC over WebSocket, SQL, Stream). Confirm in M0 whether 4 is stable enough, else use 3.x. | Cancellation, cleanup and streaming are Goldiloop's hardest problems, and Effect is designed for them. Effect Schema converts old stored events to the current shape. |
 | Router | Plain pure TypeScript | Easy to reason about; runs in the browser for the live preview |
 | Model SDKs | `@anthropic-ai/sdk`, `openai`, `@google/genai` | Official SDKs, with full access to cost features |
 | Agent SDK | `@anthropic-ai/claude-agent-sdk`, exact version pinned | Claude Code harness |
-| Database | SQLite in WAL mode via `node:sqlite` (**check FTS5 support in M0**, else `better-sqlite3`) | Local, and no native addon for Electron |
-| Terminal | `node-pty` + xterm.js (WebGL) | The same pair VS Code uses |
+| Database | SQLite in WAL mode via `bun:sqlite` + Effect SQL | Built in and fast, with no native addon; FTS5 for search |
+| Terminal | A PTY host process using `bun-pty` (ConPTY on Windows), plus xterm.js (WebGL) in the UI | A separate process keeps native terminal crashes away from the server. VS Code uses the same design. |
 | Git | The `git` command line, through a typed wrapper | Worktrees and low-level checkpoint commands |
-| Credentials | OS keychain (`@napi-rs/keyring`) + `keyCommand` | No plain-text keys |
+| Credentials | OS keychain through `Bun.secrets`, plus `keyCommand` | No plain-text keys, and no native addon |
+| Decision models | `laya-ts` (ONNX) inside goldiloopd; ollaya for larger local models; the Jev API if turned on | §9.8 |
 | Web UI | React 19 + React Compiler, Vite, TanStack Router + TanStack Virtual, Zustand | Type-safe routes, virtualized long threads |
 | UI kit | Tailwind 4, shadcn/ui, Streamdown, Shiki, `@pierre/diffs`, Tiptap | Each is built for its job |
-| Desktop | **Electron** + electron-builder, with auto-update | Same Chromium on every OS. The server is Node already. VS Code, Cursor, T3 Code and Hermes all ship on it. |
+| Desktop | **Electron** + electron-builder, with auto-update. It runs the compiled goldiloopd binary as a separate process. | Same Chromium on every OS. VS Code, Cursor, T3 Code and Hermes all ship on it. The server runs independently of the window, which the scheduler and gateway need anyway. |
 | Gateway | Official or leading SDK for each platform, as plugins | — |
 | Local models | Ollama (and any OpenAI-compatible local server) | Free auxiliary and classifier work, and a local agent option |
-| Tests | Vitest (with Effect's test helpers), Playwright, golden tests for the router, install and update end-to-end tests on all three OSes | Covers everything from the router's rules to the installer |
+| Tests | `bun test` (with Effect's test services, e.g. TestClock), Playwright, golden tests for the router, install and update end-to-end tests on all three OSes | Covers everything from the router's rules to the installer |
 | Lint and format | Biome | One fast tool for both |
-| Release | tsdown (server bundle + npm `goldiloop`), Vite (web), electron-builder (desktop), Changesets | — |
+| Release | `bun build --compile` (one `goldiloop` binary per platform, via an install script and npm), Vite (web), electron-builder (desktop), Changesets | — |
 | CI | GitHub Actions on Windows, macOS and Ubuntu, plus supply-chain jobs | — |
 | **lab/** | Python 3.13+, uv, ruff, ty, pytest; PyTorch, TRL and scikit-learn as needed; ONNX export | ML tooling lives here, outside the app |
 
@@ -938,6 +987,8 @@ goldiloop/
 │  ├─ memory/                    # memory stores, snapshot, scanners, session index,
 │  │                             #   MemoryProvider interface
 │  ├─ skills/                    # skill store, skill_manage, curator, hub client
+│  ├─ decisions/                 # decision layer: Decide service + backends
+│  │                             #   (rules, laya, ollaya, jev, llm)
 │  ├─ trajectories/              # recording format, exporters, batch runner core
 │  ├─ exec/                      # execution backends: local, docker, ssh
 │  ├─ client/                    # shared client runtime (web + desktop)
@@ -953,18 +1004,18 @@ goldiloop/
 │  ├─ decisions/                 # ADRs
 │  └─ internals/
 ├─ AGENTS.md · CLAUDE.md (→ @AGENTS.md)
-└─ package.json · pnpm-workspace.yaml · turbo.json · biome.json · tsconfig.base.json
+└─ package.json · bunfig.toml · bun.lock · turbo.json · biome.json · tsconfig.base.json
 ```
 
 **Dependency rules:**
 - `contracts` depends on nothing.
 - `router` depends only on `contracts`, and never imports I/O code.
-- Harness, model, memory, skills, tools and trajectories packages depend on `contracts` and `shared` helpers.
+- Harness, model, decisions, memory, skills, tools and trajectories packages depend on `contracts` and `shared` helpers.
 - `apps/server` depends on everything.
 - `web` never imports from `server`.
 - `lab/` never imports TypeScript code. It reads exported files only.
 
-pnpm's strict mode enforces these rules at the package level.
+Bun's isolated installs enforce these rules at the package level: an import fails if the package isn't declared as a dependency.
 
 **Packages are created when their milestone starts,** not all up front.
 
@@ -974,13 +1025,13 @@ pnpm's strict mode enforces these rules at the package level.
 
 | Milestone | Scope | Exit criteria |
 |---|---|---|
-| **M0 · Spike** (1–2 weeks) | Agent SDK on Node and Windows; effort and model switching; the `agents` option; hooks; the in-process MCP server; `node:sqlite` with FTS5; Effect 4 RC; `node-pty` | Every item in Appendix D answered and written up as ADRs |
+| **M0 · Spike** (1–2 weeks) | Agent SDK under Bun on Windows; effort and model switching; the `agents` option; hooks; the in-process MCP server; `bun:sqlite` with FTS5; Effect 4 RC on `@effect/platform-bun`; the PTY host; `laya-ts` under Bun | Every item in Appendix D answered and written up as ADRs |
 | **M1 · Core loop** | goldiloopd + web UI on the Claude Code harness: threads, streaming, approvals, plan mode, diffs, resume, steer; event store; usage ledger; **trajectory recording**; fake harness for tests | You do a full day's work in Goldiloop |
-| **M2 · Router v1** | `rules` classifier, policy files, pins, switch-cost gate, decision records and explanations, plan→execute split, subagent routing, budget modes, routing memory, spend dashboard | At least 30% lower cost per completed task than always-Opus, with no drop in success rate |
-| **M3 · Memory, skills, safe autonomy** | Worktrees, checkpoints and revert, terminal, verifiers and escalation; memory with fixed-size snapshots, scanners and panel; session search; skill lifecycle + curator; background review; Goldiloop tools over MCP to Claude Code | Skills are created and reused; escalation fixes more than half of first-attempt failures |
-| **M4 · Native harness and providers** | Agent loop, prompt assembly, context engine, subagents; Anthropic API, OpenAI-compatible (OpenRouter, Ollama…) and Gemini providers; credentials, fallbacks, health; auxiliary tasks routed; routing across harnesses; quota-based pricing and moving work to other targets | Chores run on local or cheap targets automatically; a thread can hand off between Claude Code and native |
+| **M2 · Router v1** | `rules` classifier, policy files, pins, switch-cost gate, decision records and explanations, plan→execute split, subagent routing, budget modes, routing memory, spend dashboard; **decision layer** with a Laya classifier backend, measured against `rules` | At least 30% lower cost per completed task than always-Opus, with no drop in success rate |
+| **M3 · Memory, skills, safe autonomy** | Worktrees, checkpoints and revert, terminal, verifiers and escalation; memory with fixed-size snapshots, scanners and panel; session search; skill lifecycle + curator; background review, skipped when the decision layer finds nothing worth saving; injection scanning; Goldiloop tools over MCP to Claude Code | Skills are created and reused; escalation fixes more than half of first-attempt failures |
+| **M4 · Native harness and providers** | Agent loop, prompt assembly, context engine, subagents; Anthropic API, OpenAI-compatible (OpenRouter, Ollama…) and Gemini providers; credentials, fallbacks, health; auxiliary tasks routed; routing across harnesses; quota-based pricing and moving work to other targets; keep-or-drop compaction; Jev backend (off by default); optional compaction plugin for Claude Code | Chores run on local or cheap targets automatically; a thread can hand off between Claude Code and native |
 | **M5 · Always-on** | Scheduler, gateway (Telegram, Discord, Slack), webhooks, profiles, desktop app, smart approvals, remote access | Nightly jobs run unattended within budget; tasks are approved from your phone |
-| **M6 · Learn and reach** | `lab/` (datasets, router training), batch runner, race mode, learned classifier; execution backends (Docker, SSH, cloud); plugins + skills hub; external memory providers; more harnesses (Codex, OpenCode, ACP); OpenAI-compatible API, ACP and MCP servers; `execute_code`, `browser`, mixture-of-agents | The learned router beats `rules` on APGR (or is dropped); at least one plugin of each major kind works |
+| **M6 · Learn and reach** | `lab/` (datasets, router training), batch runner, race mode, a router fine-tuned from Laya, fine-tuned decision models; execution backends (Docker, SSH, cloud); plugins + skills hub; external memory providers; more harnesses (Codex, OpenCode, ACP); OpenAI-compatible API, ACP and MCP servers; `execute_code`, `browser`, mixture-of-agents | The learned router beats `rules` on APGR (or is dropped); at least one plugin of each major kind works |
 
 ---
 
@@ -995,7 +1046,8 @@ pnpm's strict mode enforces these rules at the package level.
 | Cache effects cancel out the routing savings | Switch-cost gate. Prefer effort and subagents. Measure baseline (c) early. |
 | Misrouting hurts trust | Conservative defaults, confidence threshold, one-click override, escalation, override rate as a KPI |
 | The native harness is weaker than Claude Code at coding | Route coding to Claude Code by default. Native handles chores, chat, automation and non-Claude models. Measure before changing this. |
-| Effect 4 RC or `node:sqlite` turn out not to be ready | Settle both in M0: fall back to Effect 3 and `better-sqlite3` |
+| Effect 4 RC isn't ready, or Bun lacks something we need (PTY, a native-addon package) | Settle in M0. Fall back to Effect 3. Run the PTY host on `bun-pty` or as a small helper process. Use WASM builds (e.g. `onnxruntime-web`) instead of native addons. |
+| Decision models are new: Jev is weeks old, and Laya is weak out of the box | Local backends by default, each kind of question measured, LLM fallback below the confidence threshold, fine-tuning on our own data |
 | A malicious plugin or dependency | Explicit installs, pinned versions, supply-chain CI, scanners |
 | Prompt injection through gateway messages, memory or skills | Allowlists, scanning, untrusted-data marking, approval gates |
 
@@ -1011,6 +1063,7 @@ pnpm's strict mode enforces these rules at the package level.
 6. **Local models:** which local coding and chat models to target first, and on what hardware?
 7. **Moving to credits when quota runs low:** on by default, or ask each time (recommended: ask the first time, then remember)?
 8. **Terminal UI:** is `goldiloop chat` enough, or do you want a full terminal UI later?
+9. **Jev:** keep it off until TypeSafe publishes data-retention terms (recommended), or turn it on now for selected projects?
 
 ---
 
@@ -1026,6 +1079,8 @@ pnpm's strict mode enforces these rules at the package level.
 | | [Cursor Router](https://cursor.com/blog/how-cursor-router-works), [Copilot Auto](https://docs.github.com/en/copilot/concepts/models/auto-model-selection) | Complexity scoring; switching only at cache boundaries; learning from implicit satisfaction |
 | | [FrugalGPT](https://arxiv.org/abs/2305.05176) | Cascade with escalation when a scorer judges the answer too weak |
 | | [Advisor strategy](https://claude.com/blog/the-advisor-strategy), `opusplan` | Planning with a big model and executing with a small one |
+| Decision models | [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) (TypeSafe AI), [Laya](https://github.com/NandhaKishorM/laya), [ollaya](https://github.com/ollaya-dev/ollaya) | Typed judgments with calibrated probabilities instead of LLM calls; one request format for cloud and local backends |
+| | [fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction) | Compaction by keeping or dropping tool calls, so whatever is kept stays word for word |
 | Evaluation | [RouterBench](https://arxiv.org/abs/2403.12031) | Cost–quality curves; offline router scoring |
 
 ## Appendix B — Hermes capability map
@@ -1064,7 +1119,7 @@ Everything that makes Hermes Agent good, and where it lives in Goldiloop.
 | Batch runner, trajectory compression, RL environments | Batch runner, trajectory exporters, `lab/` | 14.6, 14.7 | M1 (recording) → M6 |
 | Exact pins, supply-chain CI | Supply chain | 17 | M0 |
 | Terminal UI | `goldiloop chat` (a full terminal UI is an open question) | 11 | M1 |
-| **Not in Hermes** | Task routing across harnesses and access modes, workspace GUI, worktrees, checkpoints, race mode, learned routing | 8, 12, 13 | M1 → M6 |
+| **Not in Hermes** | Task routing across harnesses and access modes, decision layer, workspace GUI, worktrees, checkpoints, race mode, learned routing | 8, 9.8, 12, 13 | M1 → M6 |
 
 ## Appendix C — Glossary
 
@@ -1078,6 +1133,8 @@ Everything that makes Hermes Agent good, and where it lives in Goldiloop.
 - **Verifier:** a command whose exit code tells whether the work is correct.
 - **Switch cost:** the cost of re-reading the cached context, plus a handoff, when the target changes.
 - **Trajectory:** a recorded task (messages, tools, route, outcome), exportable for training.
+- **Decision model:** a model that answers typed questions (choice, score, noul) with calibrated probabilities instead of writing text. Jev and Laya are examples.
+- **Noul:** a yes/no question, answered as a probability.
 - **APGR:** Average Performance Gap Recovered. How much of the quality gap between the weak and strong model the router recovers, averaged across cost levels.
 
 ## Appendix D — To verify in the M0 spike
@@ -1092,6 +1149,8 @@ Everything that makes Hermes Agent good, and where it lives in Goldiloop.
 - [ ] Hooks registered through the SDK alongside the user's own hooks.
 - [ ] Serving an MCP server in-process through the SDK, for Goldiloop tools.
 - [ ] Sending a message to a running Claude Code session (steer).
-- [ ] `node:sqlite`: FTS5 and trigram tokenizer support.
-- [ ] Effect 4 RC: stability of RPC over WebSocket, SQL and Stream.
-- [ ] `node-pty` + ConPTY on Windows 11, and running under Electron's Node.
+- [ ] `bun:sqlite`: FTS5 and trigram tokenizer support on all three OSes.
+- [ ] Effect 4 RC on `@effect/platform-bun`: stability of RPC over WebSocket, SQL and Stream.
+- [ ] The PTY host on Windows 11 (ConPTY through `bun-pty`): resizing, heavy output, Ctrl+C, killing process trees.
+- [ ] `laya-ts` under Bun: `onnxruntime-node`, or `onnxruntime-web` (WASM) as a fallback; CPU latency of a routing request.
+- [ ] Laya's accuracy out of the box on our task taxonomy, compared with `rules`.
