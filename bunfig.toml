@@ -1,0 +1,5 @@
+[install]
+# Dependency versions must be at least 14 days old (AGENTS.md), including transitive ones.
+minimumReleaseAge = 1209600
+exact = true
+linker = "isolated"

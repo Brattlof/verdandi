@@ -13,3 +13,6 @@ spikes/
 
 .DS_Store
 Thumbs.db
+
+# Dev server state (per worktree)
+.goldiloop-dev/
