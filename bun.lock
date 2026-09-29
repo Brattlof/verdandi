@@ -16,6 +16,13 @@
         "effect": "4.0.0-rc.115",
       },
     },
+    "packages/testkit": {
+      "name": "@goldiloop/testkit",
+      "dependencies": {
+        "@goldiloop/contracts": "workspace:*",
+        "effect": "4.0.0-rc.115",
+      },
+    },
   },
   "overrides": {
     "@effect/platform-node-shared": "4.0.0-rc.115",
@@ -41,6 +48,8 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.13", "", { "os": "win32", "cpu": "x64" }, "sha512-VOofU/nW761XWzUeUNE8zzYNyPrxuMuNFMizL0qz7J75yeV8N7WFheUlk1/K6dOkaFpH9wJ+lDKlwjAbw0346w=="],
 
     "@goldiloop/contracts": ["@goldiloop/contracts@workspace:packages/contracts"],
+
+    "@goldiloop/testkit": ["@goldiloop/testkit@workspace:packages/testkit"],
 
     "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
