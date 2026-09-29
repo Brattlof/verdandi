@@ -43,7 +43,8 @@ export type ThreadFeed = typeof ThreadFeed.Type;
 
 /**
  * The client API. Feeds are long-lived: a client ends one with ThreadUnsubscribe, never by
- * stopping the stream early (ADR 0008).
+ * stopping the stream early (ADR 0008). Make other calls outside a feed consumer, as `goldiloop chat`
+ * does: awaiting one inside the consumer hung a test on macOS CI.
  */
 export class Api extends RpcGroup.make(
   Rpc.make("CommandDispatch", { payload: ClientCommand, success: Receipt, error: CommandRejected }),
