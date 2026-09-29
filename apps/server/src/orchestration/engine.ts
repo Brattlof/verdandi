@@ -74,6 +74,8 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
           }),
         );
 
+      // Uninterruptible: once a command commits, its reactions must run. A client disconnecting mid-dispatch
+      // would otherwise leave a committed turn.started with no harness run, and the thread busy.
       const dispatch = (command: Command) =>
         commit(command).pipe(
           Effect.tap(({ stored }) =>
@@ -88,6 +90,7 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
             ),
           ),
           Effect.map(({ receipt }) => receipt),
+          Effect.uninterruptible,
         );
 
       const feed = (threadId: ThreadId) =>
