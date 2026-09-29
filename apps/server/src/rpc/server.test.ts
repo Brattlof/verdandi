@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { CommandId, ThreadFeed, ThreadId, TurnId } from "@goldiloop/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@goldiloop/testkit";
-import { Effect, Fiber, ManagedRuntime, Stream } from "effect";
+import { Deferred, Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { Reactor } from "../orchestration/reactor.ts";
 import { connect } from "./client.ts";
 import { ServerInfo, ServerLayer } from "./server.ts";
@@ -115,10 +115,15 @@ describe("rpc server", () => {
   test("turn survives client disconnect", async () => {
     const { info, fake, drain } = await startServer();
     const threadId = uuid<ThreadId>();
+    const step = <A, E>(label: string, e: Effect.Effect<A, E>) =>
+      e.pipe(Effect.timeoutOrElse({ duration: "2 seconds", orElse: () => Effect.die(`step timed out: ${label}`) }));
     await withClient(info.port, info.token, (c) =>
       Effect.gen(function* () {
-        yield* createThread(c, threadId);
-        yield* c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), text: "gate" });
+        yield* step("create", createThread(c, threadId));
+        yield* step(
+          "send",
+          c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), text: "gate" }),
+        );
       }),
     );
     fake.release();
@@ -126,15 +131,22 @@ describe("rpc server", () => {
     const statuses = await withClient(info.port, info.token, (c) =>
       Effect.gen(function* () {
         const subscriptionId = crypto.randomUUID();
-        let statuses: string[] = [];
-        // End the feed with ThreadUnsubscribe, never by stopping the stream early (ADR 0008).
-        yield* c.ThreadSubscribe({ threadId, subscriptionId }).pipe(
-          Stream.runForEach((f: ThreadFeed) => {
-            if (f.kind !== "snapshot") return Effect.void;
-            statuses = f.thread.turns.map((t) => t.status);
-            return c.ThreadUnsubscribe({ subscriptionId });
-          }),
+        const snapshot = yield* Deferred.make<string[]>();
+        // The consumer only records; the unsubscribe happens outside it, as the CLI does.
+        const feed = yield* c.ThreadSubscribe({ threadId, subscriptionId }).pipe(
+          Stream.runForEach((f: ThreadFeed) =>
+            f.kind === "snapshot"
+              ? Deferred.succeed(
+                  snapshot,
+                  f.thread.turns.map((t) => t.status),
+                )
+              : Effect.void,
+          ),
+          Effect.forkChild,
         );
+        const statuses = yield* step("snapshot", Deferred.await(snapshot));
+        yield* step("unsubscribe", c.ThreadUnsubscribe({ subscriptionId }));
+        yield* step("feed end", Fiber.join(feed));
         return statuses;
       }),
     );
