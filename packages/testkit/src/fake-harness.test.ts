@@ -40,6 +40,19 @@ test("reuses the session when resumed", async () => {
   expect(fake.calls[1]?.resumeSessionId).toBe(started.sessionId);
 });
 
+test("a gated turn waits until released", async () => {
+  const fake = makeFakeHarness();
+  let done = false;
+  const running = collect(fake.run({ ...base, resumeSessionId: undefined, turnId: "u1" as TurnId, text: "gate" })).then((e) => {
+    done = true;
+    return e;
+  });
+  await Bun.sleep(0);
+  expect(done).toBe(false);
+  fake.release();
+  expect((await running).at(-1)).toEqual({ type: "turn.finished", status: "success" });
+});
+
 test("reports a scripted failure as a failed turn", async () => {
   const fake = makeFakeHarness();
   const events = await collect(fake.run({ ...base, resumeSessionId: undefined, turnId: "u1" as TurnId, text: "fail" }));
