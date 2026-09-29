@@ -1,0 +1,73 @@
+import { describe, expect, test } from "bun:test";
+import { assistant, init, rateLimit, result, textDelta, toolResult, turn1Usage, turn2Usage } from "./fixtures.ts";
+import { initialContext, normalize } from "./normalize.ts";
+
+const events = (msg: Parameters<typeof normalize>[0], ctx = initialContext()) => normalize(msg, ctx).events;
+
+describe("normalize", () => {
+  test("init starts the session with the Claude Code version", () => {
+    expect(events(init)).toEqual([{ type: "session.started", sessionId: "sess-1", harnessVersion: "2.1.284" }]);
+  });
+
+  test("main-thread text deltas stream; subagent deltas don't", () => {
+    expect(events(textDelta("Hel"))).toEqual([{ type: "text.delta", text: "Hel" }]);
+    expect(events(textDelta("sub", "toolu_1"))).toEqual([]);
+  });
+
+  test("assistant text and tool calls become items", () => {
+    const msg = assistant([
+      { type: "text", text: "Reading it." },
+      { type: "tool_use", id: "toolu_1", name: "Read", input: { file_path: "a.ts" } },
+    ]);
+    expect(events(msg)).toEqual([
+      { type: "item", item: { kind: "assistant.message", text: "Reading it." } },
+      { type: "item", item: { kind: "tool.call", toolUseId: "toolu_1", name: "Read", input: { file_path: "a.ts" } } },
+    ]);
+  });
+
+  test("tool results become items with their text", () => {
+    expect(events(toolResult("toolu_1", [{ type: "text", text: "line 1" }], true))).toEqual([
+      { type: "item", item: { kind: "tool.result", toolUseId: "toolu_1", isError: true, content: "line 1" } },
+    ]);
+    expect(events(toolResult("toolu_2", "plain"))).toEqual([
+      { type: "item", item: { kind: "tool.result", toolUseId: "toolu_2", isError: false, content: "plain" } },
+    ]);
+  });
+
+  test("usage is per turn, including auxiliary models", () => {
+    const first = normalize(result(turn1Usage), initialContext());
+    const second = normalize(result(turn2Usage), first.context);
+    const usage = second.events.filter((e) => e.type === "usage");
+    expect(usage).toEqual([
+      {
+        type: "usage",
+        model: "claude-sonnet-5-5",
+        accessMode: "subscription",
+        inputTokens: 2,
+        outputTokens: 50,
+        cacheReadTokens: 18000,
+        cacheWriteTokens: 100,
+        costUsd: expect.closeTo(0.03, 10) as unknown as number,
+      },
+    ]);
+    expect(second.events.at(-1)).toEqual({ type: "turn.finished", status: "success" });
+    expect(first.events.filter((e) => e.type === "usage").map((e) => e.type === "usage" && e.model)).toEqual([
+      "claude-sonnet-5-5",
+      "claude-haiku-4-5-20251001",
+    ]);
+  });
+
+  test("marks usage metered while using overage", () => {
+    const after = normalize(rateLimit({ status: "rejected", isUsingOverage: true }), initialContext()).context;
+    const usage = normalize(result(turn1Usage), after).events.find((e) => e.type === "usage");
+    expect(usage?.type === "usage" && usage.accessMode).toBe("metered");
+  });
+
+  test("error results finish the turn with the SDK's error text", () => {
+    expect(events(result(turn1Usage, "error_max_turns", ["Reached maximum number of turns (1)"])).at(-1)).toEqual({
+      type: "turn.finished",
+      status: "error",
+      error: "Reached maximum number of turns (1)",
+    });
+  });
+});
