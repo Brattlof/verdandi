@@ -1,0 +1,15 @@
+import { Schema } from "effect";
+
+export const ProjectId = Schema.String.pipe(Schema.brand("ProjectId"));
+export type ProjectId = typeof ProjectId.Type;
+
+export const ThreadId = Schema.String.pipe(Schema.brand("ThreadId"));
+export type ThreadId = typeof ThreadId.Type;
+
+/** Also sent to Claude Code as the prompt's `uuid`, so a turn can be forked at later (ADR 0004). */
+export const TurnId = Schema.String.pipe(Schema.brand("TurnId"));
+export type TurnId = typeof TurnId.Type;
+
+/** Client-generated; retrying a command with the same id returns the same receipt. */
+export const CommandId = Schema.String.pipe(Schema.brand("CommandId"));
+export type CommandId = typeof CommandId.Type;
