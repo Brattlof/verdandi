@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { chat } from "./cli/chat.ts";
+import { requireBun } from "./config/bun-version.ts";
 import { start } from "./main.ts";
 
 const usage = `Usage:
@@ -15,6 +16,7 @@ if (!command) {
   process.exit(1);
 }
 try {
+  requireBun(Bun.version);
   await command(argv);
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));

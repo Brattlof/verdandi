@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Command, CommandId, StoredEvent, ThreadId, TurnId } from "@goldiloop/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@goldiloop/testkit";
-import { Effect, ManagedRuntime } from "effect";
+import { Effect, Fiber, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { SqlLive } from "../persistence/db.ts";
 import { AppLayer } from "./app.ts";
-import { Engine } from "./engine.ts";
+import { Engine, EngineLive } from "./engine.ts";
 import { loadThreadView, project } from "./projector.ts";
-import { Reactor } from "./reactor.ts";
+import { HarnessRegistry, Reactor, ReactorLive } from "./reactor.ts";
 
 const homes: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];
@@ -151,5 +152,41 @@ describe("engine", () => {
       }),
     );
     expect(v?.turns.map((t) => t.status)).toEqual(["interrupted", "success"]);
+  });
+
+  test("a dispatch interrupted after its commit still starts the turn", async () => {
+    // A client that disconnects right after sending interrupts its dispatch fiber. A reaction
+    // registered before the reactor's pauses the dispatch after commit, so the interrupt lands there.
+    const entered = Promise.withResolvers<void>();
+    const proceed = Promise.withResolvers<void>();
+    const pause = Layer.effectDiscard(
+      Effect.gen(function* () {
+        const engine = yield* Engine;
+        yield* engine.react((s) =>
+          s.event.type === "turn.started"
+            ? Effect.andThen(
+                Effect.sync(() => entered.resolve()),
+                Effect.promise(() => proceed.promise),
+              )
+            : Effect.void,
+        );
+      }),
+    );
+    const layer = ReactorLive.pipe(
+      Layer.provideMerge(pause.pipe(Layer.provideMerge(EngineLive()))),
+      Layer.provideMerge(Layer.succeed(HarnessRegistry, { fake: makeFakeHarness() })),
+      Layer.provideMerge(SqlLive(newHome())),
+    );
+    const runtime = ManagedRuntime.make(layer);
+    runtimes.push(runtime as never);
+    await runtime.runPromise(dispatch(create));
+    const sending = runtime.runFork(dispatch(send("hi")));
+    await entered.promise;
+    const interrupting = runtime.runPromise(Fiber.interrupt(sending));
+    proceed.resolve();
+    await interrupting;
+    const v = await runtime.runPromise(Effect.andThen(drain, view));
+    expect(v?.busy).toBe(false);
+    expect(v?.turns.map((t) => t.status)).toEqual(["success"]);
   });
 });
