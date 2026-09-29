@@ -6,3 +6,4 @@ export * from "./harness.ts";
 export * from "./ids.ts";
 export * from "./items.ts";
 export * from "./route.ts";
+export * from "./rpc.ts";
