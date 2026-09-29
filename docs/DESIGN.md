@@ -248,7 +248,7 @@ interface RouteDecision {
 | # | Lever | Effect on the cache | Mechanism |
 |---|---|---|---|
 | 1 | **Subagent routing:** send exploration, search and review to cheaper or stronger subagents | Main thread's cache untouched | Claude Code: `agents` with a `model` per agent. Native: `delegate_task`, routed per child. |
-| 2 | **Effort:** same model, more or less thinking | Small, or none (verify for each harness) | Effort setting for the harness |
+| 2 | **Effort:** same model, more or less thinking, set per task and adjusted per turn (§8.7) | Small, or none (verify for each harness) | Effort setting for the harness |
 | 3 | **Plan / execute split** | Switch happens at plan approval, a natural boundary | Plan mode, then a model switch |
 | 4 | **Switch the main model** mid-thread | Full cache miss | Only if it passes the switch-cost gate |
 | 5 | **New session with a handoff**, possibly on another **harness or provider** | Starts a new, small context | Fresh session, seeded with a structured handoff summary |
@@ -382,7 +382,7 @@ targets:                             # named targets used below
 
 routes:
   chore.git:          { prefer: [local-code, cc-haiku], effort: low }
-  debug.investigate:  { prefer: [cc-opus], effort: high, thrifty: { prefer: [cc-sonnet], effort: high } }
+  debug.investigate:  { prefer: [cc-opus], effort: high, effortBand: [medium, max], thrifty: { prefer: [cc-sonnet], effort: high } }
   code.feature:
     plan:    { prefer: [cc-opus], effort: high }
     execute: { prefer: [cc-sonnet, api-sonnet], effort: medium }
@@ -422,6 +422,20 @@ Research shows that turn count alone is barely better than chance at predicting 
 By default, at most one step happens per task without asking you.
 
 **De-escalation** happens after you approve a plan, and after the verifiers pass when only mechanical work is left.
+
+**Auto effort within a task.** The model is chosen per task, because switching it breaks the cache. Effort is cheaper to move, so on harnesses that can change it mid-session without a cache miss, the router also sets effort **per turn**, inside the band the task's route allows:
+- **Down** for turns that are clearly light: a confirmation, "yes, go on", a rename the agent already planned, a commit after verifiers pass.
+- **Up** for turns that are clearly heavy: a new stack trace, "think hard", a failing verifier, a design question in the middle of an edit.
+- **Otherwise** it stays at the route's effort.
+
+The band is one step either side of the route's effort by default, and the policy can widen, narrow or disable it per class (`effortBand` in `routing.yaml`). The signals are the same cheap local ones as Stage 2, so this adds no model call to the turn. Each change is persisted with a one-line reason and shown on the turn, like any routing decision, and a pinned effort turns auto effort off for that thread.
+
+Per harness:
+- **Claude Code:** supported if M0 shows effort can change mid-session without invalidating the cache (Appendix D); applied before `sendTurn`.
+- **Native:** supported; effort is a per-request parameter, subject to the same cache check per provider.
+- **Other harnesses:** only if `inSessionEffortSwitch` is true and the cache survives; otherwise effort stays fixed for the task.
+
+Raising effort one step through auto effort does not count as the escalation ladder's first step; escalation is about the task failing, auto effort is about the turn's size.
 
 ### 8.8 Learning loop for routing
 
@@ -1139,7 +1153,7 @@ Everything that makes Hermes Agent good, and where it lives in Goldiloop.
 
 ## Appendix D — To verify in the M0 spike
 
-- [ ] How to set **effort** through the SDK (option, settings or env var). Can it change within a session, and what does that do to the cache?
+- [ ] How to set **effort** through the SDK (option, settings or env var). Can it change within a session, and what does that do to the cache? This decides whether per-turn auto effort (§8.7) ships for Claude Code.
 - [ ] What `setModel()` does inside a session: does it keep the transcript, and what does the first turn after a switch cost?
 - [ ] The `agents` option with a `model` per agent, and how subagent usage shows up in `modelUsage`.
 - [ ] `maxTurns`, and whether a dollar-budget option exists.
