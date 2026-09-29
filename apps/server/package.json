@@ -1,0 +1,14 @@
+{
+  "name": "@goldiloop/server",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0-rc.115",
+    "@effect/sql-sqlite-bun": "4.0.0-rc.115",
+    "@goldiloop/contracts": "workspace:*",
+    "effect": "4.0.0-rc.115"
+  },
+  "devDependencies": {
+    "@goldiloop/testkit": "workspace:*"
+  }
+}
