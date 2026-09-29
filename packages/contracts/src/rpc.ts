@@ -34,7 +34,8 @@ export const ThreadView = Schema.Struct({
 export type ThreadView = typeof ThreadView.Type;
 
 export const ThreadFeed = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("snapshot"), thread: ThreadView }),
+  /** `seq` is the last event the snapshot includes; later events follow in order. */
+  Schema.Struct({ kind: Schema.Literal("snapshot"), thread: ThreadView, seq: Schema.Number }),
   Schema.Struct({ kind: Schema.Literal("event"), stored: StoredEvent }),
   Schema.Struct({ kind: Schema.Literal("delta"), turnId: TurnId, text: Schema.String }),
 ]);
@@ -46,6 +47,11 @@ export type ThreadFeed = typeof ThreadFeed.Type;
  */
 export class Api extends RpcGroup.make(
   Rpc.make("CommandDispatch", { payload: ClientCommand, success: Receipt, error: CommandRejected }),
-  Rpc.make("ThreadSubscribe", { payload: { threadId: ThreadId, subscriptionId: Schema.String }, success: ThreadFeed, stream: true }),
+  Rpc.make("ThreadSubscribe", {
+    payload: { threadId: ThreadId, subscriptionId: Schema.String },
+    success: ThreadFeed,
+    error: CommandRejected,
+    stream: true,
+  }),
   Rpc.make("ThreadUnsubscribe", { payload: { subscriptionId: Schema.String } }),
 ) {}
