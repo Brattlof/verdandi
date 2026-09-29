@@ -248,7 +248,7 @@ interface RouteDecision {
 | # | Lever | Effect on the cache | Mechanism |
 |---|---|---|---|
 | 1 | **Subagent routing:** send exploration, search and review to cheaper or stronger subagents | Main thread's cache untouched | Claude Code: `agents` with a `model` per agent. Native: `delegate_task`, routed per child. |
-| 2 | **Effort:** same model, more or less thinking, set per task and adjusted per turn (§8.7) | Small, or none (verify for each harness) | Effort setting for the harness |
+| 2 | **Effort:** same model, more or less thinking, set per task and, where the cache allows, adjusted per turn (§8.7) | Claude Code: system and tools stay cached, the conversation is re-written (ADR 0002). Other harnesses: verify per provider. | Effort setting for the harness |
 | 3 | **Plan / execute split** | Switch happens at plan approval, a natural boundary | Plan mode, then a model switch |
 | 4 | **Switch the main model** mid-thread | Full cache miss | Only if it passes the switch-cost gate |
 | 5 | **New session with a handoff**, possibly on another **harness or provider** | Starts a new, small context | Fresh session, seeded with a structured handoff summary |
@@ -431,7 +431,7 @@ By default, at most one step happens per task without asking you.
 The band is one step either side of the route's effort by default, and the policy can widen, narrow or disable it per class (`effortBand` in `routing.yaml`). The signals are the same cheap local ones as Stage 2, so this adds no model call to the turn. Each change is persisted with a one-line reason and shown on the turn, like any routing decision, and a pinned effort turns auto effort off for that thread.
 
 Per harness:
-- **Claude Code:** supported if M0 shows effort can change mid-session without invalidating the cache (Appendix D); applied before `sendTurn`.
+- **Claude Code:** not supported. An effort change mid-session re-writes the whole conversation to the cache (ADR 0002), so effort is set per task, and a mid-task change passes the switch-cost gate.
 - **Native:** supported; effort is a per-request parameter, subject to the same cache check per provider.
 - **Other harnesses:** only if `inSessionEffortSwitch` is true and the cache survives; otherwise effort stays fixed for the task.
 
@@ -463,8 +463,8 @@ These outcomes are used at three levels:
 ### 8.9 Budgets
 
 - **Metered:** real dollars. Daily and monthly caps per profile, and per project.
-- **Subscription:** quota tracking (if the CLI reports rate-limit state; verify in M0), quota-based pricing, and moving work to other targets when quota runs low (§8.3).
-- **Per task:** `maxTurns` and `maxCost`.
+- **Subscription:** quota tracking from Claude Code's rate-limit events and usage request (ADR 0005), quota-based pricing, and moving work to other targets when quota runs low (§8.3). When the plan window is used up and the account's extra usage is on, Claude Code keeps working on paid credits without an error; Goldiloop prices those turns as metered and shows the switch.
+- **Per task:** `maxTurns` and `maxCost` (Claude Code: `maxBudgetUsd`).
 - **The spend dashboard** shows real spend, quota use, and savings vs. always-Opus. The savings figure is labelled as an estimate.
 
 ### 8.10 Evaluation
@@ -527,11 +527,11 @@ interface HarnessAdapter {
 
 ### 9.3 Claude Code harness
 
-- **Transport:** the Claude Agent SDK for TypeScript, in streaming-input mode, with `pathToClaudeCodeExecutable` pointing at **your installed `claude`**. Your authentication, settings, plugins, CLAUDE.md files and skills all apply unchanged. Raw stream-JSON is kept as a fallback.
+- **Transport:** the Claude Agent SDK for TypeScript, in streaming-input mode, with `pathToClaudeCodeExecutable` pointing at **your installed `claude`**. Your authentication, settings, plugins, MCP servers, CLAUDE.md files and skills all apply unchanged, with one exception: claude.ai connectors are switched off (`disableClaudeAiConnectors`), because they attach nondeterministically and would change the tool list between turns (ADR 0001). Raw stream-JSON is kept as a fallback.
 - **Routing controls:**
   - model via `setModel()`;
   - plan mode and permissions via `setPermissionMode()`;
-  - effort through the SDK option, settings or env var (decided in M0);
+  - effort per task through the `effort` option; a mid-task change through `applyFlagSettings({ effortLevel })` (ADR 0002);
   - subagents via `agents`, each with its own `model`.
 - **Approvals:** `canUseTool` becomes an approval event. `AskUserQuestion` becomes a user-input request.
 - **Sessions:** resume, fork, and resuming at a given message. Transcripts stay where Claude Code keeps them; Goldiloop stores pointers and a normalized copy for trajectories.
@@ -1075,7 +1075,7 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 4. **Fable:** allow in Max mode only (recommended)?
 5. **First gateway platform:** Telegram (recommended: simplest bot API, good inline buttons) or Discord?
 6. **Local models:** which local coding and chat models to target first, and on what hardware?
-7. **Moving to credits when quota runs low:** on by default, or ask each time (recommended: ask the first time, then remember)?
+7. **Moving to credits when quota runs low:** decided. Goldiloop asks the first time, then remembers. Claude Code's own silent move to extra usage is never hidden: those turns are priced as metered and shown (ADR 0005).
 8. **Terminal UI:** is `goldiloop chat` enough, or do you want a full terminal UI later?
 9. **Jev:** keep it off until TypeSafe publishes data-retention terms (recommended), or turn it on now for selected projects?
 
@@ -1153,16 +1153,16 @@ Everything that makes Hermes Agent good, and where it lives in Goldiloop.
 
 ## Appendix D — To verify in the M0 spike
 
-- [ ] How to set **effort** through the SDK (option, settings or env var). Can it change within a session, and what does that do to the cache? This decides whether per-turn auto effort (§8.7) ships for Claude Code.
-- [ ] What `setModel()` does inside a session: does it keep the transcript, and what does the first turn after a switch cost?
-- [ ] The `agents` option with a `model` per agent, and how subagent usage shows up in `modelUsage`.
-- [ ] `maxTurns`, and whether a dollar-budget option exists.
-- [ ] Rate-limit and quota signals for subscription users, which feed quota-based pricing.
-- [ ] How `canUseTool`, `AskUserQuestion` and `ExitPlanMode` behave in the approval flow.
-- [ ] Resuming at a given message and `forkSession`, as the basis for revert.
-- [ ] Hooks registered through the SDK alongside the user's own hooks.
-- [ ] Serving an MCP server in-process through the SDK, for Goldiloop tools.
-- [ ] Sending a message to a running Claude Code session (steer).
+- [x] How to set **effort** through the SDK (option, settings or env var). Can it change within a session, and what does that do to the cache? This decides whether per-turn auto effort (§8.7) ships for Claude Code. → ADR 0002: yes, but it re-writes the conversation to the cache, so no per-turn auto effort for Claude Code.
+- [x] What `setModel()` does inside a session: does it keep the transcript, and what does the first turn after a switch cost? → ADR 0002: keeps it; a cold write of the new model's full prefix.
+- [x] The `agents` option with a `model` per agent, and how subagent usage shows up in `modelUsage`. → ADR 0005.
+- [x] `maxTurns`, and whether a dollar-budget option exists. → ADR 0005: `maxBudgetUsd`.
+- [x] Rate-limit and quota signals for subscription users, which feed quota-based pricing. → ADR 0005.
+- [x] How `canUseTool`, `AskUserQuestion` and `ExitPlanMode` behave in the approval flow. → ADR 0003.
+- [x] Resuming at a given message and `forkSession`, as the basis for revert. → ADR 0004.
+- [x] Hooks registered through the SDK alongside the user's own hooks. → ADR 0005.
+- [x] Serving an MCP server in-process through the SDK, for Goldiloop tools. → ADR 0005.
+- [x] Sending a message to a running Claude Code session (steer). → ADR 0003: lands at the next tool boundary; `priority: "now"` aborts and restarts.
 - [ ] `bun:sqlite`: FTS5 and trigram tokenizer support on all three OSes.
 - [ ] Effect 4 RC on `@effect/platform-bun`: stability of RPC over WebSocket, SQL and Stream.
 - [ ] The PTY host on Windows 11 (ConPTY through `bun-pty`): resizing, heavy output, Ctrl+C, killing process trees.

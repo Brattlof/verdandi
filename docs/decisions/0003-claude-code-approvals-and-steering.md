@@ -1,0 +1,36 @@
+# 0003 · Claude Code approvals, questions, plans and steering
+
+## Status
+
+Accepted (M0 spike 003, 2026-09-29).
+
+## Context
+
+M1 needs approvals, plan mode and steering on the Claude Code harness (DESIGN §9.3, §21). Appendix D asked how `canUseTool`, `AskUserQuestion` and `ExitPlanMode` behave in the approval flow, and whether a running session can take a message (steer).
+
+Spike 003 exercised each on the installed Claude Code 2.1.284 through Agent SDK 0.3.272, in streaming-input mode.
+
+## Decision
+
+The Claude Code adapter maps SDK mechanisms to Goldiloop events and commands:
+
+| Goldiloop | SDK |
+|---|---|
+| Approval request | `canUseTool` for any tool; answer `allow` / `deny` |
+| "Always allow" | return the callback's `suggestions` as `updatedPermissions` |
+| User-input request | `canUseTool` for `AskUserQuestion`; answer `allow` with `updatedInput.answers` keyed by question text |
+| Plan approval | `canUseTool` for `ExitPlanMode` (`plan`, `planFilePath`); allow leaves plan mode |
+| Deny with feedback | neutral `deny`, plus the feedback as a user message with `priority: "next"` |
+| Steer | user message without priority: lands at the next tool boundary of the running turn |
+| Stop and send | user message with `priority: "now"`: aborts the running tool, starts a new turn |
+| Stop | `q.interrupt()` |
+
+The adapter holds exactly one iterator per session.
+
+## Consequences
+
+- A deny message reaches the model as an error tool_result, which the model rightly treats as untrusted. User feedback must travel as a user message; this matches the invariant that tool output is data, not instructions.
+- Approval text is built from `toolName` and `input`; the SDK's `title` / `decisionReason` are often absent.
+- Plan files live in `~/.claude/plans/`. Goldiloop stores the plan text from the `ExitPlanMode` input and the path as a pointer.
+- An interrupted turn ends with `error_during_execution`; the session stays usable, so Stop is not a one-way door.
+- Exiting a `for await` over the `Query` closes the CLI process; the adapter must not do it.
