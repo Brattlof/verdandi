@@ -458,7 +458,7 @@ interface TaskOutcome {
 These outcomes are used at three levels:
 1. **Routing memory per project** (M2), e.g. "debug tasks on Sonnet escalated 7 times out of 10, so start on Opus".
 2. **Offline replay:** re-run the router over saved tasks to see how a policy change would have routed them.
-3. **A learned router** (M6). Recorded outcomes become fine-tuning data for a Laya decision model in `lab/`. The fine-tuned model is exported to ONNX and runs inside goldiloopd through `laya-ts`. `laya-ts` also runs in the browser, so the composer's live routing preview can use the same model. The learned router is adopted only if it beats `rules` on the eval set.
+3. **A learned router** (M6). Recorded outcomes become fine-tuning data for a Laya decision model in `lab/`. The fine-tuned model is exported to ONNX and runs in a decision worker process through `onnxruntime-node` (ADR 0009); the composer's live routing preview asks goldiloopd. The learned router is adopted only if it beats `rules` on the eval set.
 
 ### 8.9 Budgets
 
@@ -618,8 +618,8 @@ It uses **decision models**. A decision model takes some context (the *state*) p
 
 | Backend | Where it runs | Cost | Notes |
 |---|---|---|---|
-| `rules` | Inside goldiloopd | Free | Deterministic. Used when a pattern is enough. |
-| `laya` (default) | Inside goldiloopd, through `laya-ts` (ONNX, on CPU) | Free | Open weights (Apache 2.0). ModernBERT-large (421M parameters) or mmBERT-base (322M). Reads 512–1,024 tokens of context; the multilingual model goes up to 8K, less reliably. |
+| `rules` (default) | Inside goldiloopd | Free | Deterministic. The default for every question kind until another backend beats it on that kind (ADR 0009). |
+| `laya` | A worker process, through ONNX on CPU (`onnxruntime-node`) | Free; ~1.5 s CPU and ~1.7 GB memory per loaded model (ADR 0009) | Open weights (Apache 2.0). ModernBERT-large (421M parameters) or mmBERT-base (322M). Reads 512–1,024 tokens of context; the multilingual model goes up to 8K, less reliably. |
 | `ollaya` | A local daemon, on GPU | Free | Larger open decision models, for when Laya isn't accurate enough. Example: `winnow:e4b`, a 4B model reported at 0.722 accuracy on typed decisions, vs. 0.738 for Jev. |
 | `jev` | TypeSafe AI's API | $0.042 per million input tokens; output is free | Must be turned on per profile. 70–500 ms per request, up to 32K tokens. In early access since 2026-09-15, and its data-retention terms aren't published yet. |
 | `llm` | The cheapest acceptable aux target | Metered or local | The fallback. The same typed questions are turned into a structured-output schema. |
@@ -952,10 +952,10 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
 | Model SDKs | `@anthropic-ai/sdk`, `openai`, `@google/genai` | Official SDKs, with full access to cost features |
 | Agent SDK | `@anthropic-ai/claude-agent-sdk`, exact version pinned | Claude Code harness |
 | Database | SQLite in WAL mode via `bun:sqlite` + Effect SQL | Built in and fast, with no native addon; FTS5 for search |
-| Terminal | A PTY host process using `bun-pty` (ConPTY on Windows), plus xterm.js (WebGL) in the UI | A separate process keeps native terminal crashes away from the server. VS Code uses the same design. |
+| Terminal | A PTY host process using Bun's built-in PTY (ConPTY on Windows; ADR 0007), plus xterm.js (WebGL) in the UI | A separate process keeps native terminal crashes away from the server. VS Code uses the same design. |
 | Git | The `git` command line, through a typed wrapper | Worktrees and low-level checkpoint commands |
 | Credentials | OS keychain through `Bun.secrets`, plus `keyCommand` | No plain-text keys, and no native addon |
-| Decision models | `laya-ts` (ONNX) inside goldiloopd; ollaya for larger local models; the Jev API if turned on | §9.8 |
+| Decision models | `rules` by default; Laya (ONNX through `onnxruntime-node`) in a worker process where it beats rules (ADR 0009); ollaya for larger local models; the Jev API if turned on | §9.8 |
 | Web UI | React 19 + React Compiler, Vite, TanStack Router + TanStack Virtual, Zustand | Type-safe routes, virtualized long threads |
 | UI kit | Tailwind 4, shadcn/ui, Streamdown, Shiki, `@pierre/diffs`, Tiptap | Each is built for its job |
 | Desktop | **Electron** + electron-builder, with auto-update. It runs the compiled goldiloopd binary as a separate process. | Same Chromium on every OS. VS Code, Cursor, T3 Code and Hermes all ship on it. The server runs independently of the window, which the scheduler and gateway need anyway. |
@@ -1041,7 +1041,7 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 |---|---|---|
 | **M0 · Spike** (1–2 weeks) | Agent SDK under Bun on Windows; effort and model switching; the `agents` option; hooks; the in-process MCP server; `bun:sqlite` with FTS5; Effect 4 RC on `@effect/platform-bun`; the PTY host; `laya-ts` under Bun | Every item in Appendix D answered and written up as ADRs |
 | **M1 · Core loop** | goldiloopd + web UI on the Claude Code harness: threads, streaming, approvals, plan mode, diffs, resume, steer; event store; usage ledger; **trajectory recording**; fake harness for tests | You do a full day's work in Goldiloop |
-| **M2 · Router v1** | `rules` classifier, policy files, pins, switch-cost gate, decision records and explanations, plan→execute split, subagent routing, budget modes, routing memory, spend dashboard; **decision layer** with a Laya classifier backend, measured against `rules` | At least 30% lower cost per completed task than always-Opus, with no drop in success rate |
+| **M2 · Router v1** | `rules` classifier, policy files, pins, switch-cost gate, decision records and explanations, plan→execute split, subagent routing, budget modes, routing memory, spend dashboard; **decision layer** on `rules`, with decisions logged so Laya can be measured against it on real data | At least 30% lower cost per completed task than always-Opus, with no drop in success rate |
 | **M3 · Memory, skills, safe autonomy** | Worktrees, checkpoints and revert, terminal, verifiers and escalation; memory with fixed-size snapshots, scanners and panel; session search; skill lifecycle + curator; background review, skipped when the decision layer finds nothing worth saving; injection scanning; Goldiloop tools over MCP to Claude Code | Skills are created and reused; escalation fixes more than half of first-attempt failures |
 | **M4 · Native harness and providers** | Agent loop, prompt assembly, context engine, subagents; Anthropic API, OpenAI-compatible (OpenRouter, Ollama…) and Gemini providers; credentials, fallbacks, health; auxiliary tasks routed; routing across harnesses; quota-based pricing and moving work to other targets; keep-or-drop compaction; Jev backend (off by default); optional compaction plugin for Claude Code | Chores run on local or cheap targets automatically; a thread can hand off between Claude Code and native |
 | **M5 · Always-on** | Scheduler, gateway (Telegram, Discord, Slack), webhooks, profiles, desktop app, smart approvals, remote access | Nightly jobs run unattended within budget; tasks are approved from your phone |
@@ -1060,7 +1060,7 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 | Cache effects cancel out the routing savings | Switch-cost gate. Prefer effort and subagents. Measure baseline (c) early. |
 | Misrouting hurts trust | Conservative defaults, confidence threshold, one-click override, escalation, override rate as a KPI |
 | The native harness is weaker than Claude Code at coding | Route coding to Claude Code by default. Native handles chores, chat, automation and non-Claude models. Measure before changing this. |
-| Effect 4 RC isn't ready, or Bun lacks something we need (PTY, a native-addon package) | Settle in M0. Fall back to Effect 3. Run the PTY host on `bun-pty` or as a small helper process. Use WASM builds (e.g. `onnxruntime-web`) instead of native addons. |
+| Effect 4 RC isn't ready, or Bun lacks something we need (PTY, a native-addon package) | Settle in M0. Fall back to Effect 3. The PTY host runs on Bun's built-in PTY (ADR 0007); `bun-pty` behaved the same and is the fallback. Use WASM builds (e.g. `onnxruntime-web`) instead of native addons. |
 | Decision models are new: Jev is weeks old, and Laya is weak out of the box | Local backends by default, each kind of question measured, LLM fallback below the confidence threshold, fine-tuning on our own data |
 | A malicious plugin or dependency | Explicit installs, pinned versions, supply-chain CI, scanners |
 | Prompt injection through gateway messages, memory or skills | Allowlists, scanning, untrusted-data marking, approval gates |
@@ -1070,7 +1070,7 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 ## 23. Open questions (owner decisions)
 
 1. **Distribution:** stay personal, or share or open-source it someday? This decides how much work goes into the API-key path early.
-2. **Effect 4 RC vs. Effect 3 stable:** decided in M0.
+2. **Effect 4 RC vs. Effect 3 stable:** M0 recommends Effect 4 RC, pinned, with one stream workaround (ADR 0008, proposed).
 3. **Default permission posture:** Ask (recommended) or Auto-edits?
 4. **Fable:** allow in Max mode only (recommended)?
 5. **First gateway platform:** Telegram (recommended: simplest bot API, good inline buttons) or Discord?
@@ -1163,8 +1163,8 @@ Everything that makes Hermes Agent good, and where it lives in Goldiloop.
 - [x] Hooks registered through the SDK alongside the user's own hooks. → ADR 0005.
 - [x] Serving an MCP server in-process through the SDK, for Goldiloop tools. → ADR 0005.
 - [x] Sending a message to a running Claude Code session (steer). → ADR 0003: lands at the next tool boundary; `priority: "now"` aborts and restarts.
-- [ ] `bun:sqlite`: FTS5 and trigram tokenizer support on all three OSes.
-- [ ] Effect 4 RC on `@effect/platform-bun`: stability of RPC over WebSocket, SQL and Stream.
-- [ ] The PTY host on Windows 11 (ConPTY through `bun-pty`): resizing, heavy output, Ctrl+C, killing process trees.
-- [ ] `laya-ts` under Bun: `onnxruntime-node`, or `onnxruntime-web` (WASM) as a fallback; CPU latency of a routing request.
-- [ ] Laya's accuracy out of the box on our task taxonomy, compared with `rules`.
+- [ ] `bun:sqlite`: FTS5 and trigram tokenizer support on all three OSes. → ADR 0006: Windows yes; macOS and Linux in CI before M3.
+- [x] Effect 4 RC on `@effect/platform-bun`: stability of RPC over WebSocket, SQL and Stream. → ADR 0008 (proposed): works; stopping a stream early wedges the connection in rc.115, avoided by design until fixed.
+- [x] The PTY host on Windows 11 (ConPTY): resizing, heavy output, Ctrl+C, killing process trees. → ADR 0007: Bun's built-in PTY, with fixes for Ctrl+C, tree kill and output batching.
+- [x] `laya-ts` under Bun: `onnxruntime-node`, or `onnxruntime-web` (WASM) as a fallback; CPU latency of a routing request. → ADR 0009: `onnxruntime-node` works; p50 1.45 s, 1.7 GB.
+- [x] Laya's accuracy out of the box on our task taxonomy, compared with `rules`. → ADR 0009: 63% vs 81% (n = 52); `rules` is the default.
