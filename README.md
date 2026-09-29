@@ -83,16 +83,16 @@ Policy lives in plain files (`<repo>/.verdandi/routing.yaml`), so you can read, 
 
 ## Surfaces
 
-| Surface | What it's for |
-| --- | --- |
-| **Web UI** | The main workspace. |
-| **CLI** (`verdandi`) | `start`, `chat` today; `open`, `doctor`, headless `run "<task>"` and `batch` later. |
-| **Desktop app** | Tray, notifications, auto-update, manages the server. |
-| **Messaging gateway** | Start, steer and approve tasks from chat apps. |
-| **OpenAI-compatible API** | `model: "verdandi/auto"`, so any tool can use Verdandi as a routed model. |
-| **ACP and MCP servers** | Use the native agent from ACP editors, and share memory, skills and sessions with other MCP clients. |
+| Surface | What it's for | Available |
+| --- | --- | --- |
+| **CLI** (`verdandi`) | `start`, `chat` today; `open`, `doctor`, headless `run "<task>"` and `batch` later. | Now |
+| **Web UI** | The main workspace. | M1 |
+| **Desktop app** | Tray, notifications, auto-update, manages the server. | M5 |
+| **Messaging gateway** | Start, steer and approve tasks from chat apps. | M5 |
+| **OpenAI-compatible API** | `model: "verdandi/auto"`, so any tool can use Verdandi as a routed model. | M6 |
+| **ACP and MCP servers** | Use the native agent from ACP editors, and share memory, skills and sessions with other MCP clients. | M6 |
 
-Clients talk to `verdandid` over a WebSocket on `127.0.0.1` with a per-profile token.
+Clients talk to `verdandid` over a WebSocket on `127.0.0.1`, with a token the server writes to `server.json` in the profile's home each time it starts.
 
 ---
 

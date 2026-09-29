@@ -4,7 +4,7 @@ Verdandi is a local-first workspace and personal agent platform for coding agent
 
 The design lives in `docs/DESIGN.md`. Read the section that covers what you're changing before you change it.
 
-**Status:** pre-code. The repo currently holds the design doc and this agent configuration. Packages are created when their milestone starts (DESIGN.md §20–21), not before.
+**Status:** M1 (core loop) in progress. `verdandid`, the event store, the Claude Code harness and a terminal chat exist; the web UI and everything after it do not yet. Packages are created when their milestone starts (DESIGN.md §20–21), not before.
 
 ## What we never compromise on
 
@@ -157,27 +157,32 @@ The most common defect is a change that works on the path you tested and is miss
 
 | Working in | Read |
 |---|---|
-| — | — |
+| `apps/server/src/orchestration/` | [`apps/server/src/orchestration/AGENTS.md`](apps/server/src/orchestration/AGENTS.md) |
 
-## How it works (planned)
+## How it works
 
-- **Commands and events:** clients send typed RPC over a local WebSocket. The server turns requests into *commands*, a pure *decider* turns commands into persisted *events*, and *projectors* build the read models the UI renders.
-- **Harnesses and routing:** harnesses run behind adapters. The router picks a route for each task. Small judgments go to the decision layer instead of an LLM.
-- **Side effects:** side effects run in *reactors*, which emit receipts when they finish.
-- **Checkpoints:** each turn ends with a *checkpoint*, a hidden git ref.
+What runs today (M1, in progress):
 
-See DESIGN.md §6–§10.
+- **Commands and events:** clients send typed RPC (`packages/contracts/src/rpc.ts`) over a WebSocket on `127.0.0.1`, authenticated with the token in the profile's `server.json`. `CommandDispatch` hands a command to the engine, a pure *decider* turns it into *events*, and *projectors* update the read models in the same SQLite transaction. The receipt returns once that transaction commits.
+- **Side effects:** after a commit, *reactors* run the side effects. The only one today runs a harness turn on `turn.started` and reports what the harness does back as `harness.report` commands.
+- **Feeds:** `ThreadSubscribe` streams a snapshot of the thread, then its events and unstored text deltas. Clients end it with `ThreadUnsubscribe` (ADR 0008).
+- **Harnesses:** Claude Code runs through the Agent SDK behind the `HarnessAdapter` contract. The route (harness, model, effort) is set when a thread is created; there is no router yet.
+
+Not built yet: the web UI, the router and decision layer, checkpoints, worktrees, memory, skills and everything later in DESIGN.md §21. For how those will fit in, see DESIGN.md §6–§10.
 
 ## Where code lives
 
 - **Now:**
+  - `apps/server`: verdandid and the `verdandi` CLI (`start`, `chat`). `src/orchestration` holds the decider, projector, engine and reactor; `src/rpc` the WebSocket API; `src/persistence` SQLite and migrations; `src/config` the Verdandi home and flags;
+  - `packages/contracts`: every schema sent over the wire or persisted (commands, events, RPC, harness contract, routes);
+  - `packages/harness-claude-code`: the Claude Code adapter and event normalization. `src/smoke.ts` is a manual live check, never run in tests;
+  - `packages/testkit`: the fake harness and temporary Verdandi homes for tests;
   - `docs/`: design and decisions;
   - `.agents/`: agent configuration and skills;
   - `scripts/`: repo tooling.
 - **Planned (DESIGN.md §20):**
-  - `apps/server`: verdandid and the CLI;
   - `apps/web`, `apps/desktop`;
-  - `packages/contracts`, `packages/router` (pure);
-  - `packages/harness-*`, `packages/models`, `packages/decisions`, `packages/tools`, `packages/memory`, `packages/skills`, `packages/trajectories`, `packages/testkit`;
+  - `packages/router` (pure);
+  - more `packages/harness-*`, `packages/models`, `packages/decisions`, `packages/tools`, `packages/memory`, `packages/skills`, `packages/trajectories`;
   - `plugins/`;
   - `lab/` (Python, offline).
