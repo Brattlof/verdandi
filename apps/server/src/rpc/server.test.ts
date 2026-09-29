@@ -38,6 +38,10 @@ const startServer = async () => {
 const withClient = <A, E>(port: number, token: string, f: (client: Effect.Success<ReturnType<typeof connect>>) => Effect.Effect<A, E>) =>
   Effect.runPromise(Effect.scoped(Effect.flatMap(connect({ port, token }), f)));
 
+/** Fails with the step's name instead of hanging until the test timeout, so a CI hang says where it stuck. */
+const step = <A, E>(label: string, e: Effect.Effect<A, E>) =>
+  e.pipe(Effect.timeoutOrElse({ duration: "2 seconds", orElse: () => Effect.die(`step timed out: ${label}`) }));
+
 const createThread = (client: Effect.Success<ReturnType<typeof connect>>, threadId: ThreadId) =>
   client.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: "C:/Users/a b/repo", route });
 
@@ -88,20 +92,30 @@ describe("rpc server", () => {
     const threadId = uuid<ThreadId>();
     const [kinds, after] = await withClient(info.port, info.token, (c) =>
       Effect.gen(function* () {
-        yield* createThread(c, threadId);
+        yield* step("create", createThread(c, threadId));
         const subscriptionId = crypto.randomUUID();
         const seen: string[] = [];
-        yield* c.ThreadSubscribe({ threadId, subscriptionId }).pipe(
-          Stream.runForEach((f: ThreadFeed) =>
-            Effect.gen(function* () {
-              seen.push(f.kind === "event" ? f.stored.event.type : f.kind);
-              if (f.kind === "snapshot")
-                yield* c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), text: "hi" });
-              if (f.kind === "event" && f.stored.event.type === "turn.completed") yield* c.ThreadUnsubscribe({ subscriptionId });
-            }),
-          ),
+        const snapshot = yield* Deferred.make<void>();
+        const completed = yield* Deferred.make<void>();
+        // The consumer only records; the send and the unsubscribe happen outside it, as the CLI does.
+        const feed = yield* c.ThreadSubscribe({ threadId, subscriptionId }).pipe(
+          Stream.runForEach((f: ThreadFeed) => {
+            seen.push(f.kind === "event" ? f.stored.event.type : f.kind);
+            if (f.kind === "snapshot") return Deferred.succeed(snapshot, undefined);
+            if (f.kind === "event" && f.stored.event.type === "turn.completed") return Deferred.succeed(completed, undefined);
+            return Effect.void;
+          }),
+          Effect.forkChild,
         );
-        const after = yield* createThread(c, uuid<ThreadId>());
+        yield* step("snapshot", Deferred.await(snapshot));
+        yield* step(
+          "send",
+          c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), text: "hi" }),
+        );
+        yield* step("turn.completed", Deferred.await(completed));
+        yield* step("unsubscribe", c.ThreadUnsubscribe({ subscriptionId }));
+        yield* step("feed end", Fiber.join(feed));
+        const after = yield* step("create after", createThread(c, uuid<ThreadId>()));
         return [seen, after] as const;
       }),
     );
@@ -115,8 +129,6 @@ describe("rpc server", () => {
   test("turn survives client disconnect", async () => {
     const { info, fake, drain } = await startServer();
     const threadId = uuid<ThreadId>();
-    const step = <A, E>(label: string, e: Effect.Effect<A, E>) =>
-      e.pipe(Effect.timeoutOrElse({ duration: "2 seconds", orElse: () => Effect.die(`step timed out: ${label}`) }));
     await withClient(info.port, info.token, (c) =>
       Effect.gen(function* () {
         yield* step("create", createThread(c, threadId));
