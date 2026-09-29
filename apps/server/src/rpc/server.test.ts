@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { CommandId, ThreadFeed, ThreadId, TurnId } from "@goldiloop/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@goldiloop/testkit";
-import { Effect, ManagedRuntime, Stream } from "effect";
+import { Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { Reactor } from "../orchestration/reactor.ts";
 import { connect } from "./client.ts";
 import { ServerInfo, ServerLayer } from "./server.ts";
@@ -42,6 +42,31 @@ const createThread = (client: Effect.Success<ReturnType<typeof connect>>, thread
   client.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: "C:/Users/a b/repo", route });
 
 describe("rpc server", () => {
+  test("shuts down while a client is still connected", async () => {
+    const home = makeTempHome();
+    cleanups.push(async () => removeTempHome(home));
+    const runtime = ManagedRuntime.make(ServerLayer(home, { fake: makeFakeHarness() }));
+    const info = await runtime.runPromise(
+      Effect.gen(function* () {
+        return yield* ServerInfo;
+      }),
+    );
+    const connected = Promise.withResolvers<void>();
+    const client = Effect.runFork(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const c = yield* connect(info);
+          yield* createThread(c, uuid<ThreadId>());
+          connected.resolve();
+          yield* Effect.never; // stays connected, like an open `goldiloop chat`
+        }),
+      ),
+    );
+    cleanups.push(() => Effect.runPromise(Fiber.interrupt(client)).then(() => undefined));
+    await connected.promise;
+    await runtime.dispose(); // must not wait for the client to leave
+  });
+
   test("rejects a connection without the right token", async () => {
     const { info } = await startServer();
     const wrong = await Effect.runPromise(
