@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { BunHttpServer } from "@effect/platform-bun";
-import { Api, type HarnessAdapter, type HarnessId } from "@goldiloop/contracts";
+import { Api, type HarnessAdapter, type HarnessId } from "@verdandi/contracts";
 import { Context, Deferred, Effect, Layer, Stream } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -8,7 +8,7 @@ import { AppLayer } from "../orchestration/app.ts";
 import { Engine } from "../orchestration/engine.ts";
 
 /** Where the running server listens, and the token clients must present. */
-export class ServerInfo extends Context.Service<ServerInfo, { readonly port: number; readonly token: string }>()("goldiloop/ServerInfo") {}
+export class ServerInfo extends Context.Service<ServerInfo, { readonly port: number; readonly token: string }>()("verdandi/ServerInfo") {}
 
 const Handlers = Api.toLayer(
   Effect.gen(function* () {
@@ -53,7 +53,7 @@ const ProtocolWithToken = (token: string) =>
           const request = yield* HttpServerRequest.HttpServerRequest;
           const given = new URL(request.url, "http://localhost").searchParams.get("token");
           if (!sameToken(given, token)) {
-            return HttpServerResponse.text("Missing or wrong token. Clients read it from server.json in the Goldiloop home.", {
+            return HttpServerResponse.text("Missing or wrong token. Clients read it from server.json in the Verdandi home.", {
               status: 401,
             });
           }
@@ -64,7 +64,7 @@ const ProtocolWithToken = (token: string) =>
     }),
   );
 
-/** goldiloopd: the core plus a token-protected WebSocket API on 127.0.0.1. Port 0 picks a free port. */
+/** verdandid: the core plus a token-protected WebSocket API on 127.0.0.1. Port 0 picks a free port. */
 export const ServerLayer = (
   home: string,
   harnesses: Partial<Record<HarnessId, HarnessAdapter>>,
@@ -82,7 +82,7 @@ export const ServerLayer = (
         hostname: "127.0.0.1",
         port: options.port ?? 0,
         // Bun's server.stop() waits for open WebSockets. The default "preemptive" stop runs before the
-        // RPC layer closes its client sockets, so a connected `goldiloop chat` blocked shutdown. Without
+        // RPC layer closes its client sockets, so a connected `verdandi chat` blocked shutdown. Without
         // it, the RPC layer closes the sockets first and the final stop() resolves.
         disablePreemptiveShutdown: true,
       }),
@@ -91,7 +91,7 @@ export const ServerLayer = (
   const info = Layer.effect(ServerInfo)(
     Effect.gen(function* () {
       const { address } = yield* HttpServer.HttpServer;
-      if (address._tag === "UnixPathAddress") return yield* Effect.die("goldiloopd must listen on TCP");
+      if (address._tag === "UnixPathAddress") return yield* Effect.die("verdandid must listen on TCP");
       return { port: address.port, token };
     }),
   );

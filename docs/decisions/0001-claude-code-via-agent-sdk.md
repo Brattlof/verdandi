@@ -22,5 +22,5 @@ Spike 001 ran `@anthropic-ai/claude-agent-sdk@0.3.272` under Bun 1.3.14 on Windo
 - Streaming, `session_id`, resume, `total_cost_usd` and per-model `modelUsage` (including cache and thinking tokens) work as documented; `rate_limit_event` arrives each turn on subscription. The usage ledger can be built on `modelUsage`.
 - SDK and CLI versions can skew (12 releases worked). The SDK is pinned exactly; a CLI update can still change behaviour, so harness contract tests run against the installed CLI version.
 - Unpinned, claude.ai connectors made the tool list differ between a fresh turn and its resume, which breaks the prompt cache. Pinning makes the list deterministic.
-- claude.ai connectors are unavailable inside Goldiloop's Claude Code sessions. Whether the user's other MCP servers load deterministically was not tested; spike 001 only saw connectors flap.
+- claude.ai connectors are unavailable inside Verdandi's Claude Code sessions. Whether the user's other MCP servers load deterministically was not tested; spike 001 only saw connectors flap.
 - First-delta latency is about 2–3 s on the installed CLI, mostly process start. Long-lived streaming-input sessions (spikes 002–003) avoid paying it per turn.

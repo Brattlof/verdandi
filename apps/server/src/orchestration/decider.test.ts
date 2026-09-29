@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Command, CommandId, ThreadId, TurnId } from "@goldiloop/contracts";
+import type { Command, CommandId, ThreadId, TurnId } from "@verdandi/contracts";
 import { Result } from "effect";
 import { type DeciderState, decide, projectIdFor } from "./decider.ts";
 
@@ -58,7 +58,7 @@ describe("decide", () => {
 
   test("recovering a running turn marks it interrupted", () => {
     expect(events(decide(running, { type: "turn.recover", commandId, threadId, turnId }))).toEqual([
-      { type: "turn.completed", v: 1, threadId, turnId, status: "interrupted", error: "goldiloopd stopped during this turn" },
+      { type: "turn.completed", v: 1, threadId, turnId, status: "interrupted", error: "verdandid stopped during this turn" },
     ]);
     expect(events(decide(idle, { type: "turn.recover", commandId, threadId, turnId }))).toEqual([]);
   });

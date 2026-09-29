@@ -1,5 +1,5 @@
 import type { ModelUsage, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { HarnessEvent, Item } from "@goldiloop/contracts";
+import type { HarnessEvent, Item } from "@verdandi/contracts";
 
 /** What normalizing carries from one message to the next within a session. */
 export type NormalizeContext = {
@@ -35,7 +35,7 @@ const usageEvents = (context: NormalizeContext, modelUsage: Record<string, Model
   });
 
 /**
- * Pure: one SDK message in, Goldiloop harness events out. Only the main thread is reported;
+ * Pure: one SDK message in, Verdandi harness events out. Only the main thread is reported;
  * subagent messages (non-null `parent_tool_use_id`) are skipped for now.
  */
 export const normalize = (msg: SDKMessage, context: NormalizeContext): { events: HarnessEvent[]; context: NormalizeContext } => {

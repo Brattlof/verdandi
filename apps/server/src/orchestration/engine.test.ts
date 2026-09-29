@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Command, CommandId, StoredEvent, ThreadId, TurnId } from "@goldiloop/contracts";
-import { makeFakeHarness, makeTempHome, removeTempHome } from "@goldiloop/testkit";
+import type { Command, CommandId, StoredEvent, ThreadId, TurnId } from "@verdandi/contracts";
+import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Fiber, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { SqlLive } from "../persistence/db.ts";

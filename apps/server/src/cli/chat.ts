@@ -1,15 +1,15 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type CommandId, Route, type ThreadFeed, type ThreadId, type TurnId } from "@goldiloop/contracts";
+import { type CommandId, Route, type ThreadFeed, type ThreadId, type TurnId } from "@verdandi/contracts";
 import { Context, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import { flag, resolveHome, type ServerFile, serverFile } from "../config/home.ts";
 import { connect } from "../rpc/client.ts";
 
-class Client extends Context.Service<Client, Effect.Success<ReturnType<typeof connect>>>()("goldiloop/cli/Client") {}
+class Client extends Context.Service<Client, Effect.Success<ReturnType<typeof connect>>>()("verdandi/cli/Client") {}
 
 const uuid = <T>() => crypto.randomUUID() as T;
 
-/** The CLI remembers one thread per folder, in the Goldiloop home. */
+/** The CLI remembers one thread per folder, in the Verdandi home. */
 const threadsFile = (home: string) => join(home, "cli-threads.json");
 const readThreads = (home: string): Record<string, string> =>
   existsSync(threadsFile(home)) ? JSON.parse(readFileSync(threadsFile(home), "utf8")) : {};
@@ -21,10 +21,10 @@ const summary = (status: string, error: string | undefined, usage: Usage[]) => {
   return `\n[${status}${error ? `: ${error}` : ""}${parts.length ? ` · ${parts.join(" · ")}` : ""}]\n`;
 };
 
-/** `goldiloop chat`: a simple terminal chat with the thread for the current folder. */
+/** `verdandi chat`: a simple terminal chat with the thread for the current folder. */
 export const chat = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
-  if (!existsSync(serverFile(home))) throw new Error(`goldiloopd is not running for ${home}. Start it with: goldiloop start`);
+  if (!existsSync(serverFile(home))) throw new Error(`verdandid is not running for ${home}. Start it with: verdandi start`);
   const server = JSON.parse(readFileSync(serverFile(home), "utf8")) as ServerFile;
   const route = Schema.decodeUnknownSync(Route)({
     harness: flag(argv, "--harness") ?? "claude-code",

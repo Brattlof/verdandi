@@ -1,6 +1,6 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
-// Minimal SDK messages with only the fields Goldiloop reads. Full SDK types carry dozens of
+// Minimal SDK messages with only the fields Verdandi reads. Full SDK types carry dozens of
 // unrelated required fields, so these are cast; keep them in step with the pinned sdk.d.ts.
 const sdk = (m: object) => m as unknown as SDKMessage;
 

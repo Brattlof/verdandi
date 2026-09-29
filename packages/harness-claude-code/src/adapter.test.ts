@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { HarnessRunInput, ThreadId, TurnId } from "@goldiloop/contracts";
-import { makeTempHome, removeTempHome } from "@goldiloop/testkit";
+import type { HarnessRunInput, ThreadId, TurnId } from "@verdandi/contracts";
+import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Stream } from "effect";
 import { makeClaudeCodeAdapter, type QueryFn } from "./adapter.ts";
 import { init, result, textDelta, turn1Usage } from "./fixtures.ts";

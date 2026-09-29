@@ -4,7 +4,7 @@ The canonical agent configuration for this repo. Instructions live in the root `
 
 ## Skill sources
 
-Vendored skills are byte-identical copies of upstream at the commit shown, with each upstream's license in the skill folder. To update one, re-copy the folder at a newer commit and update this table. Goldiloop-specific overrides go in `AGENTS.md`, never into vendored files.
+Vendored skills are byte-identical copies of upstream at the commit shown, with each upstream's license in the skill folder. To update one, re-copy the folder at a newer commit and update this table. Verdandi-specific overrides go in `AGENTS.md`, never into vendored files.
 
 | Skills | Upstream | Commit | License |
 |---|---|---|---|
@@ -18,4 +18,4 @@ Vendored skills are byte-identical copies of upstream at the commit shown, with 
 - **`using-superpowers`:** it tells the agent to invoke skills before *any* response, which costs tokens on every turn. Two vendored skills link to its `references/` folder; read those files [upstream](https://github.com/obra/superpowers/tree/8ca22db/skills/using-superpowers/references) if needed.
 - **`diagnosing-superpowers`, `ponytail-gain`, `ponytail-help`:** these are about the plugins themselves, not about this repo.
 - **Hermes's own versions** of the superpowers skills and of `grill-me`: we vendor the originals instead, because the Hermes copies call Hermes-only tools.
-- **Hermes's user-facing skill library** (email, media, finance and so on): it isn't for developing Goldiloop. The candidates for Goldiloop's own bundled skills are covered in DESIGN.md §14.4.
+- **Hermes's user-facing skill library** (email, media, finance and so on): it isn't for developing Verdandi. The candidates for Verdandi's own bundled skills are covered in DESIGN.md §14.4.

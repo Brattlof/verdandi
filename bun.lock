@@ -11,40 +11,40 @@
       },
     },
     "apps/server": {
-      "name": "@goldiloop/server",
+      "name": "@verdandi/server",
       "bin": {
-        "goldiloop": "./src/bin.ts",
+        "verdandi": "./src/bin.ts",
       },
       "dependencies": {
         "@effect/platform-bun": "4.0.0-rc.115",
         "@effect/sql-sqlite-bun": "4.0.0-rc.115",
-        "@goldiloop/contracts": "workspace:*",
-        "@goldiloop/harness-claude-code": "workspace:*",
-        "@goldiloop/testkit": "workspace:*",
+        "@verdandi/contracts": "workspace:*",
+        "@verdandi/harness-claude-code": "workspace:*",
+        "@verdandi/testkit": "workspace:*",
         "effect": "4.0.0-rc.115",
       },
     },
     "packages/contracts": {
-      "name": "@goldiloop/contracts",
+      "name": "@verdandi/contracts",
       "dependencies": {
         "effect": "4.0.0-rc.115",
       },
     },
     "packages/harness-claude-code": {
-      "name": "@goldiloop/harness-claude-code",
+      "name": "@verdandi/harness-claude-code",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "0.3.272",
-        "@goldiloop/contracts": "workspace:*",
+        "@verdandi/contracts": "workspace:*",
         "effect": "4.0.0-rc.115",
       },
       "devDependencies": {
-        "@goldiloop/testkit": "workspace:*",
+        "@verdandi/testkit": "workspace:*",
       },
     },
     "packages/testkit": {
-      "name": "@goldiloop/testkit",
+      "name": "@verdandi/testkit",
       "dependencies": {
-        "@goldiloop/contracts": "workspace:*",
+        "@verdandi/contracts": "workspace:*",
         "effect": "4.0.0-rc.115",
       },
     },
@@ -100,14 +100,6 @@
 
     "@effect/sql-sqlite-bun": ["@effect/sql-sqlite-bun@4.0.0-rc.115", "", { "peerDependencies": { "effect": "^4.0.0-rc.115" } }, "sha512-CypwmCPAUSOOhopcnSI9ocgpKHfpgOdERpei3GuXZm5cCGP31pk2NUETqNaYhonhr2bWd+6Rc8atctnEbIYKYQ=="],
 
-    "@goldiloop/contracts": ["@goldiloop/contracts@workspace:packages/contracts"],
-
-    "@goldiloop/harness-claude-code": ["@goldiloop/harness-claude-code@workspace:packages/harness-claude-code"],
-
-    "@goldiloop/server": ["@goldiloop/server@workspace:apps/server"],
-
-    "@goldiloop/testkit": ["@goldiloop/testkit@workspace:packages/testkit"],
-
     "@hono/node-server": ["@hono/node-server@2.1.1", "", { "peerDependencies": { "hono": "^4" } }, "sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg=="],
 
     "@modelcontextprotocol/sdk": ["@modelcontextprotocol/sdk@1.30.0", "", { "dependencies": { "@hono/node-server": "^1.19.9 || ^2.0.5", "ajv": "^8.17.1", "ajv-formats": "^3.0.1", "content-type": "^1.0.5", "cors": "^2.8.5", "cross-spawn": "^7.0.5", "eventsource": "^3.0.2", "eventsource-parser": "^3.0.0", "express": "^5.2.1", "express-rate-limit": "^8.2.1", "hono": "^4.11.4", "jose": "^6.1.3", "json-schema-typed": "^8.0.2", "pkce-challenge": "^5.0.0", "raw-body": "^3.0.0", "zod": "^3.25 || ^4.0", "zod-to-json-schema": "^3.25.1" }, "peerDependencies": { "@cfworker/json-schema": "^4.1.1" }, "optionalPeers": ["@cfworker/json-schema"] }, "sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA=="],
@@ -159,6 +151,14 @@
     "@typescript/typescript-win32-arm64": ["@typescript/typescript-win32-arm64@7.0.2", "", { "os": "win32", "cpu": "arm64" }, "sha512-Gyl1Vy6OsWesLzmq+EP0Fb7b4Nid5232AvcA2SFcdYreldpNtYFFofPjnt62y9hQy7VTaZp65ICJjuAQRaVcIQ=="],
 
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
+
+    "@verdandi/contracts": ["@verdandi/contracts@workspace:packages/contracts"],
+
+    "@verdandi/harness-claude-code": ["@verdandi/harness-claude-code@workspace:packages/harness-claude-code"],
+
+    "@verdandi/server": ["@verdandi/server@workspace:apps/server"],
+
+    "@verdandi/testkit": ["@verdandi/testkit@workspace:packages/testkit"],
 
     "accepts": ["accepts@2.0.0", "", { "dependencies": { "mime-types": "^3.0.0", "negotiator": "^1.0.0" } }, "sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng=="],
 

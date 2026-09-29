@@ -1,16 +1,16 @@
 {
-  "name": "@goldiloop/server",
+  "name": "@verdandi/server",
   "private": true,
   "type": "module",
   "dependencies": {
     "@effect/platform-bun": "4.0.0-rc.115",
     "@effect/sql-sqlite-bun": "4.0.0-rc.115",
-    "@goldiloop/contracts": "workspace:*",
+    "@verdandi/contracts": "workspace:*",
     "effect": "4.0.0-rc.115",
-    "@goldiloop/harness-claude-code": "workspace:*",
-    "@goldiloop/testkit": "workspace:*"
+    "@verdandi/harness-claude-code": "workspace:*",
+    "@verdandi/testkit": "workspace:*"
   },
   "bin": {
-    "goldiloop": "./src/bin.ts"
+    "verdandi": "./src/bin.ts"
   }
 }

@@ -12,9 +12,9 @@ Spike 003 exercised each on the installed Claude Code 2.1.284 through Agent SDK 
 
 ## Decision
 
-The Claude Code adapter maps SDK mechanisms to Goldiloop events and commands:
+The Claude Code adapter maps SDK mechanisms to Verdandi events and commands:
 
-| Goldiloop | SDK |
+| Verdandi | SDK |
 |---|---|
 | Approval request | `canUseTool` for any tool; answer `allow` / `deny` |
 | "Always allow" | return the callback's `suggestions` as `updatedPermissions` |
@@ -31,6 +31,6 @@ The adapter holds exactly one iterator per session.
 
 - A deny message reaches the model as an error tool_result, which the model rightly treats as untrusted. User feedback must travel as a user message; this matches the invariant that tool output is data, not instructions.
 - Approval text is built from `toolName` and `input`; the SDK's `title` / `decisionReason` are often absent.
-- Plan files live in `~/.claude/plans/`. Goldiloop stores the plan text from the `ExitPlanMode` input and the path as a pointer.
+- Plan files live in `~/.claude/plans/`. Verdandi stores the plan text from the `ExitPlanMode` input and the path as a pointer.
 - An interrupted turn ends with `error_during_execution`; the session stays usable, so Stop is not a one-way door.
 - Exiting a `for await` over the `Query` closes the CLI process; the adapter must not do it.

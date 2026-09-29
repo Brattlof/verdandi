@@ -3,12 +3,12 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { flag, resolveHome } from "./home.ts";
 
-test("defaults to the default profile in ~/.goldiloop", () => {
-  expect(resolveHome([])).toBe(join(homedir(), ".goldiloop", "profiles", "default"));
+test("defaults to the default profile in ~/.verdandi", () => {
+  expect(resolveHome([])).toBe(join(homedir(), ".verdandi", "profiles", "default"));
 });
 
 test("--home takes a folder, relative to the current directory", () => {
-  expect(resolveHome(["chat", "--home", "./.goldiloop-dev"])).toBe(resolve(".goldiloop-dev"));
+  expect(resolveHome(["chat", "--home", "./.verdandi-dev"])).toBe(resolve(".verdandi-dev"));
 });
 
 test("--home without a folder fails with the fix in the message", () => {

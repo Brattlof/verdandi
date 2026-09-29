@@ -10,7 +10,7 @@ import {
   type ThreadFeed,
   type ThreadId,
   type TurnId,
-} from "@goldiloop/contracts";
+} from "@verdandi/contracts";
 import { Context, Effect, Layer, PubSub, Result, Stream } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { decide } from "./decider.ts";
@@ -34,7 +34,7 @@ export class Engine extends Context.Service<
     readonly publishDelta: (threadId: ThreadId, turnId: TurnId, text: string) => Effect.Effect<void>;
     readonly react: (reaction: Reaction) => Effect.Effect<void>;
   }
->()("goldiloop/Engine") {}
+>()("verdandi/Engine") {}
 
 export const EngineLive = (options: { readonly project?: Projector } = {}) =>
   Layer.effect(

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { type HarnessAdapter, HarnessError, type HarnessId } from "@goldiloop/contracts";
-import { findClaude, makeClaudeCodeAdapter } from "@goldiloop/harness-claude-code";
-import { makeFakeHarness } from "@goldiloop/testkit";
+import { type HarnessAdapter, HarnessError, type HarnessId } from "@verdandi/contracts";
+import { findClaude, makeClaudeCodeAdapter } from "@verdandi/harness-claude-code";
+import { makeFakeHarness } from "@verdandi/testkit";
 import { Effect, ManagedRuntime, Stream } from "effect";
 import { flag, resolveHome, type ServerFile, serverFile } from "./config/home.ts";
 import { ServerInfo, ServerLayer } from "./rpc/server.ts";
@@ -20,7 +20,7 @@ const claudeMissing: HarnessAdapter = {
   run: () => Stream.fail(new HarnessError({ message: "Claude Code CLI not found on PATH. Install it and run `claude` once to log in." })),
 };
 
-/** `goldiloop start`: runs goldiloopd in the foreground until Ctrl+C. */
+/** `verdandi start`: runs verdandid in the foreground until Ctrl+C. */
 export const start = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
   mkdirSync(home, { recursive: true });
@@ -28,7 +28,7 @@ export const start = async (argv: readonly string[]) => {
   if (existsSync(file)) {
     const running = JSON.parse(readFileSync(file, "utf8")) as ServerFile;
     if (alive(running.pid))
-      throw new Error(`goldiloopd is already running for ${home} (pid ${running.pid}). Stop it before starting another.`);
+      throw new Error(`verdandid is already running for ${home} (pid ${running.pid}). Stop it before starting another.`);
   }
   const claudePath = findClaude();
   const harnesses: Partial<Record<HarnessId, HarnessAdapter>> = {
@@ -44,7 +44,7 @@ export const start = async (argv: readonly string[]) => {
     }),
   );
   writeFileSync(file, JSON.stringify({ port: info.port, token: info.token, pid: process.pid } satisfies ServerFile), { mode: 0o600 });
-  console.log(`goldiloopd listening on 127.0.0.1:${info.port} (home: ${home})`);
+  console.log(`verdandid listening on 127.0.0.1:${info.port} (home: ${home})`);
   if (!claudePath) console.log("Claude Code CLI not found on PATH; claude-code turns will fail until it is installed.");
 
   const stop = async () => {

@@ -4,8 +4,8 @@ import { requireBun } from "./config/bun-version.ts";
 import { start } from "./main.ts";
 
 const usage = `Usage:
-  goldiloop start [--home <dir>] [--port <n>]      run goldiloopd in the foreground
-  goldiloop chat  [--home <dir>] [--model <m>] [--effort <e>]   chat with the thread for this folder`;
+  verdandi start [--home <dir>] [--port <n>]      run verdandid in the foreground
+  verdandi chat  [--home <dir>] [--model <m>] [--effort <e>]   chat with the thread for this folder`;
 
 const commands: Record<string, (argv: readonly string[]) => Promise<void>> = { start, chat };
 

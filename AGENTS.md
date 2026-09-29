@@ -1,6 +1,6 @@
-# Goldiloop
+# Verdandi
 
-Goldiloop is a local-first workspace and personal agent platform for coding agents. It drives *harnesses* (Claude Code first, then its own native agent loop, then others) and routes every task to the harness, provider, model and effort level that finishes it at the lowest effective cost. It also remembers, learns skills, runs on schedules and can be reached from chat apps.
+Verdandi is a local-first workspace and personal agent platform for coding agents. It drives *harnesses* (Claude Code first, then its own native agent loop, then others) and routes every task to the harness, provider, model and effort level that finishes it at the lowest effective cost. It also remembers, learns skills, runs on schedules and can be reached from chat apps.
 
 The design lives in `docs/DESIGN.md`. Read the section that covers what you're changing before you change it.
 
@@ -49,10 +49,10 @@ These are good defaults, not laws. The developer's preferences override anything
 
 ## Glossary
 
-- **you:** the agent reading this file and changing Goldiloop.
-- **we / maintainers:** the people building Goldiloop, i.e. the people you're talking to.
-- **user:** a person using Goldiloop to direct agents.
-- **agent:** an AI agent running inside Goldiloop. Depending on context, this can include you.
+- **you:** the agent reading this file and changing Verdandi.
+- **we / maintainers:** the people building Verdandi, i.e. the people you're talking to.
+- **user:** a person using Verdandi to direct agents.
+- **agent:** an AI agent running inside Verdandi. Depending on context, this can include you.
 - **harness:** whatever runs the agent loop (Claude Code, the native harness, Codex, …).
 - **provider:** where inference runs (Anthropic API, OpenRouter, Ollama, …).
 - **access mode:** `subscription`, `metered` or `local`.
@@ -61,16 +61,16 @@ These are good defaults, not laws. The developer's preferences override anything
 - **task:** a run of turns under one route. The unit of routing.
 - **thread:** a durable conversation in a project.
 - **turn:** one user message and everything the agent does in response.
-- **profile:** an isolated Goldiloop home (`work`, `personal`).
+- **profile:** an isolated Verdandi home (`work`, `personal`).
 - **decision model:** a model that answers typed questions (choice, score, yes/no) with calibrated probabilities (Jev, Laya).
-- **Goldiloop home:** `~/.goldiloop/`, where the user's real state lives.
+- **Verdandi home:** `~/.verdandi/`, where the user's real state lives.
 
 The full glossary is DESIGN.md Appendix C.
 
 ## Ways to hurt yourself
 
 1. **Killing by pattern.** Never use `pkill -f`, `taskkill /IM`, `Stop-Process -Name`, or kill any PID you found by matching a name, path or worktree string. Your own agent process and other dev servers match those patterns too. Kill only PIDs you captured when you started the process.
-2. **Touching live state.** `~/.goldiloop/` holds the developer's real database, memory, skills and settings, in use while you work. Reading and copying from it is fine, and a good source of realistic test data. Never start a dev server against it, open it read-write or clean it up. Dev servers use a gitignored per-worktree state directory.
+2. **Touching live state.** `~/.verdandi/` holds the developer's real database, memory, skills and settings, in use while you work. Reading and copying from it is fine, and a good source of realistic test data. Never start a dev server against it, open it read-write or clean it up. Dev servers use a gitignored per-worktree state directory.
 3. **Touching credentials.** Never read, print, copy or log Claude Code's credentials, OS keychain entries or provider API keys. Secrets never go into fixtures, trajectories, commits, PR text or logs.
 4. **Rewriting persisted history.** Stored events must stay readable forever. Never change or delete a past event schema: add a new version and an upgrade instead. Migrations are append-only.
 
@@ -120,7 +120,7 @@ The most common defect is a change that works on the path you tested and is miss
 - **What tests assert:** behaviour and invariants. Each bug fix gets one or two tests that you've seen fail before the fix.
 - **Banned tests:** tests that freeze current values (catalogue counts, snapshots of lists), tests that read source text, and tests that restate the implementation.
 - **No waiting:** the server is event-sourced, so tests wait on receipts and drained workers, never on sleeps or polling. A test that needs a timeout to pass is wrong.
-- **Test environment:** tests run with credentials unset, `TZ=UTC`, and a temporary Goldiloop home. Behaviour specific to one OS is tested on that OS, never by faking the platform.
+- **Test environment:** tests run with credentials unset, `TZ=UTC`, and a temporary Verdandi home. Behaviour specific to one OS is tested on that OS, never by faking the platform.
 - **No live model calls in tests:** use the fake harness and fake provider in `packages/testkit`.
 - **Evidence before claims:** before saying something is done, show the evidence (see `verification-before-completion`).
 
@@ -152,7 +152,7 @@ The most common defect is a change that works on the path you tested and is miss
 - **`.agents/skills/` is the single source of skills.** Codex, Cursor, Gemini CLI, GitHub Copilot, OpenCode, Amp and others read it directly. Claude Code, Windsurf, Roo Code, Kiro, Goose and a few others read it through symlinks. `bun scripts/agents-link.ts` creates or repairs those links, and `--check` verifies them.
 - **Check the skills list before starting non-trivial work** (debugging, planning, a feature, a review, a spike). If a skill fits, use it. Trivial requests don't need a skill check.
 - **Edit skills only in `.agents/skills/`,** never through a link. A skill's folder name must equal its `name`, and its description says what it does and when to use it (see `writing-skills`).
-- **Vendored skills stay byte-identical to upstream** (sources in `.agents/README.md`). Put Goldiloop-specific overrides in this file instead. A reference like `superpowers:<name>` means the `<name>` skill in `.agents/skills/`.
+- **Vendored skills stay byte-identical to upstream** (sources in `.agents/README.md`). Put Verdandi-specific overrides in this file instead. A reference like `superpowers:<name>` means the `<name>` skill in `.agents/skills/`.
 - **Area files:** when a directory develops its own conventions, give it an `AGENTS.md` (aim for under about 8k characters) and add it to this table:
 
 | Working in | Read |
@@ -175,7 +175,7 @@ See DESIGN.md §6–§10.
   - `.agents/`: agent configuration and skills;
   - `scripts/`: repo tooling.
 - **Planned (DESIGN.md §20):**
-  - `apps/server`: goldiloopd and the CLI;
+  - `apps/server`: verdandid and the CLI;
   - `apps/web`, `apps/desktop`;
   - `packages/contracts`, `packages/router` (pure);
   - `packages/harness-*`, `packages/models`, `packages/decisions`, `packages/tools`, `packages/memory`, `packages/skills`, `packages/trajectories`, `packages/testkit`;

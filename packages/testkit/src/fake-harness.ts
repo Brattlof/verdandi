@@ -1,4 +1,4 @@
-import type { HarnessAdapter, HarnessEvent, HarnessRunInput } from "@goldiloop/contracts";
+import type { HarnessAdapter, HarnessEvent, HarnessRunInput } from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
 
 /**

@@ -7,7 +7,7 @@ import {
   type ProjectId,
   type ThreadId,
   type TurnId,
-} from "@goldiloop/contracts";
+} from "@verdandi/contracts";
 import { Result } from "effect";
 
 /** What the decider needs to know about the command's thread; `undefined` when it doesn't exist. */
@@ -80,7 +80,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
           threadId: c.threadId,
           turnId: c.turnId,
           status: "interrupted",
-          error: "goldiloopd stopped during this turn",
+          error: "verdandid stopped during this turn",
         })
       : accept(),
 };

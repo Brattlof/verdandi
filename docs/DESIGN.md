@@ -1,11 +1,11 @@
-# Goldiloop — Design Document
+# Verdandi — Design Document
 
 | | |
 |---|---|
 | **Status** | Draft v0.3 — for review |
 | **Owner** | @Brattlof |
 | **Last updated** | 2026-09-29 |
-| **Repo** | [Brattlof/goldiloop](https://github.com/Brattlof/goldiloop) (private) |
+| **Repo** | [Brattlof/verdandi](https://github.com/Brattlof/verdandi) (private) |
 
 > **Changes since v0.2**
 > - The runtime is **Bun** instead of Node (§19).
@@ -16,19 +16,19 @@
 
 ## 1. Summary
 
-Goldiloop is a local-first workspace and personal agent platform for AI coding and automation. It combines four things:
+Verdandi is a local-first workspace and personal agent platform for AI coding and automation. It combines four things:
 
 1. **A fast workspace GUI.** It covers threads, diffs, approvals, worktrees, checkpoints and a terminal.
 2. **An agent that runs all the time and learns.** It keeps memory across sessions and writes and improves its own skills. It records its trajectories, meaning full session histories with their outcomes, as data it can learn from. It also runs scheduled jobs and can be reached from chat apps.
 3. **Many harnesses and providers.** A *harness* is whatever runs the agent loop:
    - **Claude Code**, driven through your installed and logged-in CLI, which uses your subscription;
-   - **Goldiloop's own native agent**, which calls model APIs directly: Anthropic API credits, OpenAI, OpenRouter, Google, local models through Ollama, and more;
+   - **Verdandi's own native agent**, which calls model APIs directly: Anthropic API credits, OpenAI, OpenRouter, Google, local models through Ollama, and more;
    - other agent CLIs later.
 4. **A task router.** This is the defining feature. For every task it picks the harness, provider, model and effort level that will finish the task at the lowest *effective* cost. It shows why, and it learns from the outcome. The small judgments along the way go to fast decision models instead of LLMs. Examples: what type of task this is, whether a command is safe, what to remember, which context to keep.
 
-Goldiloop starts with Claude Code, because that's what the owner uses every day. Every other part is designed from the start to work with any harness and any provider.
+Verdandi starts with Claude Code, because that's what the owner uses every day. Every other part is designed from the start to work with any harness and any provider.
 
-> **The name.** Goldilocks rejected the porridge that was too hot and the one that was too cold, and ate the one that was just right. Goldiloop gives every task the model that's just right for it: not too big, not too small. "Loop" refers to the agent loop.
+> **The name.** In Norse myth, the three Norns weave the threads of fate at the roots of Yggdrasil. Verðandi is the Norn of the present: what is happening now. Verdandi works the same way. Everything happens in threads, and for each one it decides, right now, which model and how much effort the next task gets: not too big, not too small.
 
 ---
 
@@ -70,7 +70,7 @@ Goldiloop starts with Claude Code, because that's what the owner uses every day.
 
 **Primary user:** a developer who runs agents across many repos on Windows, macOS or Linux. They have a Claude subscription, possibly API credits with one or more providers, and possibly local models.
 
-| # | Scenario | What Goldiloop does |
+| # | Scenario | What Verdandi does |
 |---|---|---|
 | S1 | "Rename `userId` to `accountId` across the app" | Claude Code, Sonnet at `low`. Search subagents run on Haiku. |
 | S2 | "Why does the websocket drop after ~30 min?" | Claude Code, Opus at `high`. |
@@ -78,7 +78,7 @@ Goldiloop starts with Claude Code, because that's what the owner uses every day.
 | S4 | "Write a commit message" / "title this thread" | Native harness with a local model, at no cost. If no local model is configured, Haiku. |
 | S5 | Subscription quota almost used up at 4 pm | The router gets stricter about what's worth spending quota on. Chores move to API credits or local models, if your policy allows. |
 | S6 | Nightly "update deps, fix breakages" | A scheduled task runs in a worktree, within a budget. The result goes to Telegram, and you approve the PR from your phone. |
-| S7 | You fix the same kind of CI failure for the third time | Goldiloop proposes a skill with a routing hint. Next time the fix runs on a cheaper route. |
+| S7 | You fix the same kind of CI failure for the third time | Verdandi proposes a skill with a routing hint. Next time the fix runs on a cheaper route. |
 | S8 | You pin Opus on a thread | The pin always wins. The override is recorded as feedback for the router. |
 
 ---
@@ -92,7 +92,7 @@ Goldiloop starts with Claude Code, because that's what the owner uses every day.
 5. **The user always wins, and every override is data.**
 6. **Complexity lives in the adapters; the core stays pure.** Each harness, provider and platform is an adapter behind a small interface. Orchestration and routing are deterministic.
 7. **Save intent before acting.** Every command is saved as an event before anything else happens. The UI is a view of that event log.
-8. **Use a harness's built-in features.** With Claude Code, use its subagents, skills, hooks, MCP and plan mode. With the native harness, Goldiloop provides those features itself.
+8. **Use a harness's built-in features.** With Claude Code, use its subagents, skills, hooks, MCP and plan mode. With the native harness, Verdandi provides those features itself.
 9. **Learn from everything.** Every task records its route, outcome and trajectory in a format that can be trained on.
 10. **Keep the core small: the Footprint Ladder.** Before adding anything to the core, try these, cheapest first:
     1. extend existing code;
@@ -112,18 +112,18 @@ flowchart LR
   subgraph Surfaces
     WEB[Web UI]
     DESK[Desktop app]
-    CLI[goldiloop CLI]
+    CLI[verdandi CLI]
     GW[Messaging gateway]
     API[OpenAI-compatible API]
     ACP[ACP / MCP servers]
   end
 
-  subgraph goldiloopd["goldiloopd (local server)"]
+  subgraph verdandid["verdandid (local server)"]
     RPC[RPC + auth]
     ORCH[Orchestrator<br/>commands → events → projections]
     ROUTER[Router]
     HREG[Harness registry]
-    TOOLS[Goldiloop tools]
+    TOOLS[Verdandi tools]
     DEC[Decision layer<br/>rules · Laya · Jev]
     LEARN[Memory · Skills · Session index · Trajectories]
     WSVC[Workspace<br/>git · worktrees · checkpoints · PTY]
@@ -134,7 +134,7 @@ flowchart LR
 
   subgraph Harnesses
     CC[Claude Code harness<br/>Agent SDK → your claude CLI]
-    NAT[Native harness<br/>Goldiloop agent loop]
+    NAT[Native harness<br/>Verdandi agent loop]
     OTH[Codex · OpenCode · ACP agents]
   end
 
@@ -165,14 +165,14 @@ flowchart LR
 
 | Component | Responsibility |
 |---|---|
-| **goldiloopd** | One long-running local process that owns all state and every session. All the surfaces are thin clients. |
+| **verdandid** | One long-running local process that owns all state and every session. All the surfaces are thin clients. |
 | **Orchestrator** | Turns commands into events and events into projections. Side effects happen only in *reactors*. |
 | **Router** | A pure function from `(signals, policy, thread state, catalog, budget)` to a `RouteDecision`. The classifier is passed in from outside, so the router itself stays pure. |
 | **Decision layer** | Answers small typed questions (pick one, score, yes/no) with calibrated probabilities. It uses local or cloud decision models instead of LLM calls (§9.8). |
 | **Harness registry** | Holds one adapter per harness: Claude Code, native, and later others. Each declares its capabilities. |
-| **Native harness** | Goldiloop's own agent loop. It handles tool use, subagents, context management and prompt caching across providers. |
+| **Native harness** | Verdandi's own agent loop. It handles tool use, subagents, context management and prompt caching across providers. |
 | **Model providers** | Adapters for each API format, the model catalog, credentials, fallbacks and health checks. Used by the native harness and for auxiliary tasks. |
-| **Goldiloop tools** | Memory, skills, session search, scheduling, messaging and so on. Each tool is implemented **once**. The native harness calls it directly; other harnesses reach it over MCP. |
+| **Verdandi tools** | Memory, skills, session search, scheduling, messaging and so on. Each tool is implemented **once**. The native harness calls it directly; other harnesses reach it over MCP. |
 | **Learning** | Memory, session search, the skill lifecycle, background review, and recording trajectories. |
 | **Execution backends** | Where the native harness runs commands: locally, in Docker, over SSH, or in a cloud sandbox. |
 | **Scheduler** | Runs tasks on a schedule, without you present. |
@@ -194,7 +194,7 @@ Profile ─┬─ Project ─┬─ Thread ─┬─ Task ─┬─ Turn ──�
 UsageRecord ── per turn → rolled up per task / thread / project / day
 ```
 
-- **Profile:** a completely separate Goldiloop home, e.g. `work` vs `personal`. Each has its own database, memory, skills, credentials and gateway bindings.
+- **Profile:** a completely separate Verdandi home, e.g. `work` vs `personal`. Each has its own database, memory, skills, credentials and gateway bindings.
 - **Project:** a local repo, or a non-code workspace such as the default "Chat" project that gateway conversations go into.
 - **Thread:** a lasting conversation. It can have a worktree, and a channel binding (e.g. a Telegram chat).
 - **Task:** the unit of routing. A task is a continuous run of turns under **one** `RouteDecision`. A new task starts when:
@@ -364,11 +364,11 @@ Defaults differ between models, so **the router always sets effort explicitly**.
 **Policy.** Policies are layered, and each layer overrides the one before:
 1. built-in defaults
 2. profile policy
-3. project policy (`.goldiloop/routing.yaml`)
+3. project policy (`.verdandi/routing.yaml`)
 4. thread pin
 
 ```yaml
-# <repo>/.goldiloop/routing.yaml
+# <repo>/.verdandi/routing.yaml
 mode: balanced                       # thrifty | balanced | max
 classifier: rules                    # rules | decision | api | learned
 minConfidence: 0.6
@@ -458,18 +458,18 @@ interface TaskOutcome {
 These outcomes are used at three levels:
 1. **Routing memory per project** (M2), e.g. "debug tasks on Sonnet escalated 7 times out of 10, so start on Opus".
 2. **Offline replay:** re-run the router over saved tasks to see how a policy change would have routed them.
-3. **A learned router** (M6). Recorded outcomes become fine-tuning data for a Laya decision model in `lab/`. The fine-tuned model is exported to ONNX and runs in a decision worker process through `onnxruntime-node` (ADR 0009); the composer's live routing preview asks goldiloopd. The learned router is adopted only if it beats `rules` on the eval set.
+3. **A learned router** (M6). Recorded outcomes become fine-tuning data for a Laya decision model in `lab/`. The fine-tuned model is exported to ONNX and runs in a decision worker process through `onnxruntime-node` (ADR 0009); the composer's live routing preview asks verdandid. The learned router is adopted only if it beats `rules` on the eval set.
 
 ### 8.9 Budgets
 
 - **Metered:** real dollars. Daily and monthly caps per profile, and per project.
-- **Subscription:** quota tracking from Claude Code's rate-limit events and usage request (ADR 0005), quota-based pricing, and moving work to other targets when quota runs low (§8.3). When the plan window is used up and the account's extra usage is on, Claude Code keeps working on paid credits without an error; Goldiloop prices those turns as metered and shows the switch.
+- **Subscription:** quota tracking from Claude Code's rate-limit events and usage request (ADR 0005), quota-based pricing, and moving work to other targets when quota runs low (§8.3). When the plan window is used up and the account's extra usage is on, Claude Code keeps working on paid credits without an error; Verdandi prices those turns as metered and shows the switch.
 - **Per task:** `maxTurns` and `maxCost` (Claude Code: `maxBudgetUsd`).
 - **The spend dashboard** shows real spend, quota use, and savings vs. always-Opus. The savings figure is labelled as an estimate.
 
 ### 8.10 Evaluation
 
-- **Eval set:** 30–100 real tasks, each with a verifier. Each is replayed in a temporary worktree from a pinned commit (`goldiloop batch`, §14.6).
+- **Eval set:** 30–100 real tasks, each with a verifier. Each is replayed in a temporary worktree from a pinned commit (`verdandi batch`, §14.6).
 - **Baselines:**
   - (a) always Opus at default effort,
   - (b) always Sonnet at `high`,
@@ -486,7 +486,7 @@ These outcomes are used at three levels:
 
 - **Harness:** runs the agent loop, meaning it plans, calls tools and edits files.
   - *External* harnesses bring their own loop and authentication: Claude Code, and later Codex, OpenCode and ACP agents.
-  - The *native* harness is Goldiloop's own loop.
+  - The *native* harness is Verdandi's own loop.
 - **Model provider:** where inference happens. The native harness and auxiliary tasks call providers directly. External harnesses reach their models themselves.
 - **Access mode:** `subscription`, `metered` or `local` (§8.3).
 
@@ -507,7 +507,7 @@ interface HarnessAdapter {
     planMode: boolean;
     subagentRouting: boolean;
     rollback: boolean;
-    mcpClient: boolean;             // can reach Goldiloop tools over MCP
+    mcpClient: boolean;             // can reach Verdandi tools over MCP
     costReporting: "usd" | "tokens" | "none";
   };
   targets(): Promise<RouteTarget[]>;          // what this harness can run
@@ -534,14 +534,14 @@ interface HarnessAdapter {
   - effort per task through the `effort` option; a mid-task change through `applyFlagSettings({ effortLevel })` (ADR 0002);
   - subagents via `agents`, each with its own `model`.
 - **Approvals:** `canUseTool` becomes an approval event. `AskUserQuestion` becomes a user-input request.
-- **Sessions:** resume, fork, and resuming at a given message. Transcripts stay where Claude Code keeps them; Goldiloop stores pointers and a normalized copy for trajectories.
-- **Goldiloop tools reach Claude Code over MCP**, through an MCP server running inside goldiloopd (§9.6). This gives Claude Code sessions Goldiloop's memory, session search, scheduling, messaging and escalation.
+- **Sessions:** resume, fork, and resuming at a given message. Transcripts stay where Claude Code keeps them; Verdandi stores pointers and a normalized copy for trajectories.
+- **Verdandi tools reach Claude Code over MCP**, through an MCP server running inside verdandid (§9.6). This gives Claude Code sessions Verdandi's memory, session search, scheduling, messaging and escalation.
 - **Hooks:**
   - `PostToolUse` checks verifier results.
   - `Stop` and `SubagentStop` mark the end of a task and its outcome.
 - **Telemetry:** usage per message, and `modelUsage` from the result, go into the usage ledger.
 
-### 9.4 Native harness (Goldiloop's own agent loop)
+### 9.4 Native harness (Verdandi's own agent loop)
 
 - **The loop:**
   1. Call the model.
@@ -560,7 +560,7 @@ interface HarnessAdapter {
   - the memory snapshot.
 
   Anything that changes between turns goes into user turns.
-- **Tools:** the full Goldiloop tool set (§9.6), plus MCP servers you configure. When there are many MCP tools, **tool search** replaces their full schemas with a small search tool, so they don't fill the context.
+- **Tools:** the full Verdandi tool set (§9.6), plus MCP servers you configure. When there are many MCP tools, **tool search** replaces their full schemas with a small search tool, so they don't fill the context.
 - **Subagents:** `delegate_task` starts child sessions with fresh context and gets back a summary. **Each child is routed as its own task**, e.g. a frontier model plans and cheap models do the work. Concurrency and nesting depth are limited.
 - **Context management:** see §16.
 - **Mixture-of-agents (optional, M6):** several reference models give advice, and one aggregator acts on it. It's offered as a route type for hard design questions.
@@ -578,7 +578,7 @@ interface HarnessAdapter {
 - **Credentials:** environment variables, the OS keychain, or a `keyCommand` (e.g. a password-manager CLI). Multiple keys per provider rotate when one hits a rate limit.
 - **Resilience:** a fallback chain for rate limits, server errors and auth errors, with backoff until the limit resets. Per-provider health feeds router Stage 1.
 
-### 9.6 Goldiloop tools: implemented once, available everywhere
+### 9.6 Verdandi tools: implemented once, available everywhere
 
 | Tool | Native harness | Claude Code and others (via MCP) |
 |---|---|---|
@@ -591,7 +591,7 @@ interface HarnessAdapter {
 | `todo`, `clarify` | ✔ | — (Claude Code has its own) |
 | `delegate_task` | ✔ | — (Claude Code has Task subagents) |
 | `terminal`, file read/write/patch, search | ✔ (through execution backends) | — (Claude Code has its own) |
-| `web_search`, `web_fetch` | ✔ (provider server tools, or Goldiloop's own) | — |
+| `web_search`, `web_fetch` | ✔ (provider server tools, or Verdandi's own) | — |
 | `vision` (describe an image through an auxiliary model) | ✔ | — |
 | `execute_code` (a sandboxed script that calls tools through RPC) | ✔ (M6) | — |
 | `browser` | ✔ (M6, Playwright) | — |
@@ -605,7 +605,7 @@ Some jobs are small, but a model still has to do them. They fall into two kinds:
 
 ### 9.8 Decision layer (System 1)
 
-Goldiloop makes a lot of small judgments. What type of task is this? Is this command destructive? Is anything here worth remembering? Should this old tool result stay in the context? Sending each one to an LLM is slow and costs tokens. Sending it to a rule is free but brittle. The decision layer sits in between.
+Verdandi makes a lot of small judgments. What type of task is this? Is this command destructive? Is anything here worth remembering? Should this old tool result stay in the context? Sending each one to an LLM is slow and costs tokens. Sending it to a rule is free but brittle. The decision layer sits in between.
 
 It uses **decision models**. A decision model takes some context (the *state*) plus typed questions, and returns typed answers with calibrated probabilities in one forward pass. It never writes text, so there's nothing to parse and nothing to make up. There are three question types:
 - **choice:** pick one option from a list;
@@ -618,7 +618,7 @@ It uses **decision models**. A decision model takes some context (the *state*) p
 
 | Backend | Where it runs | Cost | Notes |
 |---|---|---|---|
-| `rules` (default) | Inside goldiloopd | Free | Deterministic. The default for every question kind until another backend beats it on that kind (ADR 0009). |
+| `rules` (default) | Inside verdandid | Free | Deterministic. The default for every question kind until another backend beats it on that kind (ADR 0009). |
 | `laya` | A worker process, through ONNX on CPU (`onnxruntime-node`) | Free; ~1.5 s CPU and ~1.7 GB memory per loaded model (ADR 0009) | Open weights (Apache 2.0). ModernBERT-large (421M parameters) or mmBERT-base (322M). Reads 512–1,024 tokens of context; the multilingual model goes up to 8K, less reliably. |
 | `ollaya` | A local daemon, on GPU | Free | Larger open decision models, for when Laya isn't accurate enough. Example: `winnow:e4b`, a 4B model reported at 0.722 accuracy on typed decisions, vs. 0.738 for Jev. |
 | `jev` | TypeSafe AI's API | $0.042 per million input tokens; output is free | Must be turned on per profile. 70–500 ms per request, up to 32K tokens. In early access since 2026-09-15, and its data-retention terms aren't published yet. |
@@ -626,7 +626,7 @@ It uses **decision models**. A decision model takes some context (the *state*) p
 
 **When a backend isn't sure.** Each question kind has a minimum confidence. An answer below it is marked `low_confidence`, and the question moves to the next backend, ending with `llm`.
 
-**Where Goldiloop uses it:**
+**Where Verdandi uses it:**
 
 | Judgment | Questions | § |
 |---|---|---|
@@ -650,7 +650,7 @@ It uses **decision models**. A decision model takes some context (the *state*) p
 
 ### 9.9 More harnesses (M6)
 
-Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Every harness that supports MCP automatically gets the Goldiloop tools.
+Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Every harness that supports MCP automatically gets the Verdandi tools.
 
 ---
 
@@ -674,7 +674,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
   | Learning | `memories` (+ FTS5), `session_index` (FTS5, including a trigram index for Chinese, Japanese and Korean text and for substring search), `skills`, `skill_runs`, `trajectories` |
   | Automation | `schedules`, `schedule_runs`, `channels`, `channel_bindings` |
 
-- **Location:** one database per profile, at `~/.goldiloop/profiles/<name>/goldiloop.db`, in WAL mode, with numbered migrations.
+- **Location:** one database per profile, at `~/.verdandi/profiles/<name>/verdandi.db`, in WAL mode, with numbered migrations.
 
 ---
 
@@ -683,10 +683,10 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 | Surface | Purpose | Milestone |
 |---|---|---|
 | **Web UI** | The primary workspace | M1 |
-| **CLI** (`goldiloop`) | `start`, `open`, `doctor`, `run "<task>"` (headless), `chat` (simple terminal chat), `batch` (eval and trajectory runs) | M1 → M6 |
+| **CLI** (`verdandi`) | `start`, `open`, `doctor`, `run "<task>"` (headless), `chat` (simple terminal chat), `batch` (eval and trajectory runs) | M1 → M6 |
 | **Desktop app** (Electron) | Tray, notifications, auto-update, manages the server process | M5 |
 | **Messaging gateway** | Start, steer and approve tasks from chat apps (§15) | M5 |
-| **OpenAI-compatible API** | `model: "goldiloop/auto"`, so any tool can use Goldiloop as a routed model | M6 |
+| **OpenAI-compatible API** | `model: "verdandi/auto"`, so any tool can use Verdandi as a routed model | M6 |
 | **ACP server** | Use the native agent from editors that support ACP | M6 |
 | **MCP server** | Expose memory, skills and sessions to other MCP clients | M3 (for Claude Code), then public in M6 |
 
@@ -728,10 +728,10 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 
 ## 13. Workspaces and execution
 
-- **Worktrees (per thread, optional):** `git worktree add` under `~/.goldiloop/worktrees/<repo>/<branch>`. Setup scripts run when a worktree is created, and a cleanup policy removes old ones.
-- **Checkpoints:** at the end of each turn, the tree is saved to hidden refs `refs/goldiloop/checkpoints/<thread>/<turn>`, using a temporary index so your branch and staging area are never touched.
+- **Worktrees (per thread, optional):** `git worktree add` under `~/.verdandi/worktrees/<repo>/<branch>`. Setup scripts run when a worktree is created, and a cleanup policy removes old ones.
+- **Checkpoints:** at the end of each turn, the tree is saved to hidden refs `refs/verdandi/checkpoints/<thread>/<turn>`, using a temporary index so your branch and staging area are never touched.
 - **Revert:** the conversation only, or the conversation and the files.
-- **Terminal:** PTYs run in a separate **PTY host** process that goldiloopd supervises, the same design VS Code uses. That way a crash in native terminal code can't take down the server. The host uses ConPTY on Windows. The UI renders terminals with xterm.js, and a terminal survives UI reloads.
+- **Terminal:** PTYs run in a separate **PTY host** process that verdandid supervises, the same design VS Code uses. That way a crash in native terminal code can't take down the server. The host uses ConPTY on Windows. The UI renders terminals with xterm.js, and a terminal survives UI reloads.
 - **Execution backends** decide where the native harness runs commands, set per project:
   - `local` (the default),
   - `docker` (a per-project container),
@@ -749,8 +749,8 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 
 | Kind | What it is | Where it runs |
 |---|---|---|
-| **1. Memory and skills** | Memory, session search, writing and improving skills, background review | Inside goldiloopd, all the time (TypeScript) |
-| **2. Router learning** | Routing memory, then a learned classifier | Statistics in goldiloopd; training in `lab/` |
+| **1. Memory and skills** | Memory, session search, writing and improving skills, background review | Inside verdandid, all the time (TypeScript) |
+| **2. Router learning** | Routing memory, then a learned classifier | Statistics in verdandid; training in `lab/` |
 | **3. Model training** | Fine-tuning or RL on trajectories | `lab/`, offline, often on a GPU machine |
 
 ### 14.2 Memory
@@ -772,7 +772,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
   - when work is delegated.
 
   This makes room for user modelling (e.g. Honcho) and vector memories (e.g. mem0). One external provider can be active, always *in addition to* the built-in stores.
-- **Relation to CLAUDE.md:** Goldiloop never silently edits CLAUDE.md or AGENTS.md. It proposes changes as diffs for you to approve.
+- **Relation to CLAUDE.md:** Verdandi never silently edits CLAUDE.md or AGENTS.md. It proposes changes as diffs for you to approve.
 
 ### 14.3 Session search
 
@@ -782,7 +782,7 @@ Every turn from every harness goes into an FTS5 index, so past solutions can be 
 
 - **Format:** the Agent Skills `SKILL.md` format (the agentskills.io standard, also used by Claude Code). A skill folder can include `scripts/`, `references/` and `templates/`.
 - **Locations:**
-  - `~/.goldiloop/profiles/<p>/skills/` (yours);
+  - `~/.verdandi/profiles/<p>/skills/` (yours);
   - `<repo>/.claude/skills/` (project; Claude Code loads these natively);
   - read-only extra folders (e.g. `~/.agents/skills`).
 - **Progressive disclosure:** a compact skills index sits in the prompt. `skill_view(name)` loads the whole skill, and `skill_view(name, path)` loads a file inside it.
@@ -791,8 +791,8 @@ Every turn from every harness goes into an FTS5 index, so past solutions can be 
   2. **Review.** Nothing is added without your approval by default. A linter gives advice.
   3. **Use.** Claude Code picks skills up natively. The native harness uses the skills index plus `skill_view`.
   4. **Improve.** When a run of a skill fails, a *patch* is proposed; small patches are preferred over full rewrites.
-  5. **Curate.** A skill Goldiloop created moves from *active* to *stale* after 14 days unused, and to *archived* after 30. Archived skills are hidden but never deleted. Merging near-duplicate skills is opt-in.
-- **Routing link: learn with Opus, repeat with Haiku.** A skill's frontmatter can carry a routing hint, e.g. `goldiloop: { route: { prefer: [cc-haiku], effort: low } }`. The hint is checked against outcome tracking like any other route.
+  5. **Curate.** A skill Verdandi created moves from *active* to *stale* after 14 days unused, and to *archived* after 30. Archived skills are hidden but never deleted. Merging near-duplicate skills is opt-in.
+- **Routing link: learn with Opus, repeat with Haiku.** A skill's frontmatter can carry a routing hint, e.g. `verdandi: { route: { prefer: [cc-haiku], effort: low } }`. The hint is checked against outcome tracking like any other route.
 - **Skills hub (M6):** install skills from a curated index, Git repos, or other people's shared folders. Each installed skill is pinned to a version.
 
 ### 14.5 Background review
@@ -819,7 +819,7 @@ With the native harness, the review can be a *fork* of the session that keeps th
   - **Parquet**, for analysis.
 
   Secrets are masked on export, and you can exclude projects.
-- **Batch runner:** `goldiloop batch tasks.yaml --routes a,b,c` runs task lists headless across routes in temporary worktrees. It's used for evals, router training data, and generating trajectories on purpose.
+- **Batch runner:** `verdandi batch tasks.yaml --routes a,b,c` runs task lists headless across routes in temporary worktrees. It's used for evals, router training data, and generating trajectories on purpose.
 - **RL environments (M6+):** the native harness can be wrapped as an environment for RL frameworks from `lab/`.
 
 ### 14.7 The lab (Python, offline)
@@ -832,7 +832,7 @@ With the native harness, the review can be a *fork* of the session that keeps th
   - analyse evals;
   - optionally fine-tune *local* generative models.
 - **Talks to the app only through files.** Exports go into the lab. Trained artifacts come back out: ONNX classifiers, or models served through Ollama.
-- **Never loaded by goldiloopd,** so the running app stays pure TypeScript.
+- **Never loaded by verdandid,** so the running app stays pure TypeScript.
 
 ### 14.8 Terms caution
 
@@ -861,7 +861,7 @@ Trajectories from open or local models don't have this restriction. The exporter
     - are stopped by a watchdog after a period with no activity,
     - **propose** memories for review instead of saving them.
 - **Messaging gateway:**
-  - One gateway process inside goldiloopd, with a `PlatformAdapter` for each platform.
+  - One gateway process inside verdandid, with a `PlatformAdapter` for each platform.
   - **Platforms:** Telegram, Discord and Slack first. Then WhatsApp, Signal, Matrix and email as plugins.
   - Each chat is **bound to a thread**. Approvals appear as buttons.
   - **Triage:** the decision layer sorts incoming messages by project, by whether the agent needs to act, and by urgency (§9.8).
@@ -885,17 +885,17 @@ Claude Code manages its own context. The native harness has a pluggable `Context
 
 **Compression is the only allowed cache break.**
 
-Claude Code manages its own context, but step 4 can replace its compaction summary through hooks, the way the `fast-jev-compaction` plugin does. Goldiloop offers this as an optional, experimental plugin (M4).
+Claude Code manages its own context, but step 4 can replace its compaction summary through hooks, the way the `fast-jev-compaction` plugin does. Verdandi offers this as an optional, experimental plugin (M4).
 
 ---
 
 ## 17. Security and privacy
 
-- **Network:** goldiloopd listens on `127.0.0.1` only, and requires a token for each profile. Remote access is opt-in, through Tailscale.
+- **Network:** verdandid listens on `127.0.0.1` only, and requires a token for each profile. Remote access is opt-in, through Tailscale.
 - **Claude Code credentials are never touched.** The harness drives your own logged-in CLI.
   - Anthropic's Agent SDK docs say third-party developers may not offer claude.ai login or rate limits in their products without approval.
   - For personal use, this is you using your own CLI.
-  - **If Goldiloop is ever distributed**, check this policy again. The native harness with API keys would be the supported path.
+  - **If Verdandi is ever distributed**, check this policy again. The native harness with API keys would be the supported path.
 - **Provider API keys** (native harness) are stored in the OS keychain or fetched through a `keyCommand`, never in plain-text config. They're masked in logs, trajectories and exports.
 - **Permissions:**
 
@@ -912,7 +912,7 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
   - context files, memory entries, skill files and gateway messages are scanned before use, with pattern rules plus a decision-layer check (§9.8);
   - tool outputs are marked as untrusted data;
   - gateway messages from users not on the allowlist are ignored.
-- **Plugins run inside goldiloopd with full trust.** They must be installed explicitly and pinned to a version, and each one is listed with the permissions it has.
+- **Plugins run inside verdandid with full trust.** They must be installed explicitly and pinned to a version, and each one is listed with the permissions it has.
 - **Supply chain:**
   - every dependency pinned to an exact version;
   - a minimum release age for new package versions (Bun's install setting), so versions published only hours ago can't be installed;
@@ -933,7 +933,7 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
   - execution backend,
   - skill source,
   - context engine.
-- **Packaging:** an npm package or a local folder, with a `goldiloop-plugin.json` manifest. Loaded inside goldiloopd, and only when explicitly installed.
+- **Packaging:** an npm package or a local folder, with a `verdandi-plugin.json` manifest. Loaded inside verdandid, and only when explicitly installed.
 - **First-party plugins** live in `plugins/` in the repo, as proof that the interfaces work.
 - **Footprint Ladder** (principle 10): a new capability starts as a skill or plugin, and only moves into the core when it has to.
 
@@ -947,7 +947,7 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
 | Runtime | **Bun** | Ships as one installable binary (`bun build --compile`) with the web UI embedded, the way Claude Code installs. SQLite, test runner, bundler, package manager, shell and OS-keychain access are built in, which means fewer dependencies and a smaller supply-chain surface. Fast CLI startup. Anthropic maintains Bun, and Claude Code itself ships on it. |
 | Type checking | TypeScript 7 (native compiler) | Stable since 7.0; much faster type checks |
 | Monorepo | Bun workspaces (isolated installs, version catalogs) + Turborepo | Isolated installs enforce package boundaries; Turborepo caches builds |
-| Server core | **Effect 4** on `@effect/platform-bun` (Schema, RPC over WebSocket, SQL, Stream). Confirm in M0 whether 4 is stable enough, else use 3.x. | Cancellation, cleanup and streaming are Goldiloop's hardest problems, and Effect is designed for them. Effect Schema converts old stored events to the current shape. |
+| Server core | **Effect 4** on `@effect/platform-bun` (Schema, RPC over WebSocket, SQL, Stream). Confirm in M0 whether 4 is stable enough, else use 3.x. | Cancellation, cleanup and streaming are Verdandi's hardest problems, and Effect is designed for them. Effect Schema converts old stored events to the current shape. |
 | Router | Plain pure TypeScript | Easy to reason about; runs in the browser for the live preview |
 | Model SDKs | `@anthropic-ai/sdk`, `openai`, `@google/genai` | Official SDKs, with full access to cost features |
 | Agent SDK | `@anthropic-ai/claude-agent-sdk`, exact version pinned | Claude Code harness |
@@ -958,12 +958,12 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
 | Decision models | `rules` by default; Laya (ONNX through `onnxruntime-node`) in a worker process where it beats rules (ADR 0009); ollaya for larger local models; the Jev API if turned on | §9.8 |
 | Web UI | React 19 + React Compiler, Vite, TanStack Router + TanStack Virtual, Zustand | Type-safe routes, virtualized long threads |
 | UI kit | Tailwind 4, shadcn/ui, Streamdown, Shiki, `@pierre/diffs`, Tiptap | Each is built for its job |
-| Desktop | **Electron** + electron-builder, with auto-update. It runs the compiled goldiloopd binary as a separate process. | Same Chromium on every OS. VS Code, Cursor, T3 Code and Hermes all ship on it. The server runs independently of the window, which the scheduler and gateway need anyway. |
+| Desktop | **Electron** + electron-builder, with auto-update. It runs the compiled verdandid binary as a separate process. | Same Chromium on every OS. VS Code, Cursor, T3 Code and Hermes all ship on it. The server runs independently of the window, which the scheduler and gateway need anyway. |
 | Gateway | Official or leading SDK for each platform, as plugins | — |
 | Local models | Ollama (and any OpenAI-compatible local server) | Free auxiliary and classifier work, and a local agent option |
 | Tests | `bun test` (with Effect's test services, e.g. TestClock), Playwright, golden tests for the router, install and update end-to-end tests on all three OSes | Covers everything from the router's rules to the installer |
 | Lint and format | Biome | One fast tool for both |
-| Release | `bun build --compile` (one `goldiloop` binary per platform, via an install script and npm), Vite (web), electron-builder (desktop), Changesets | — |
+| Release | `bun build --compile` (one `verdandi` binary per platform, via an install script and npm), Vite (web), electron-builder (desktop), Changesets | — |
 | CI | GitHub Actions on Windows, macOS and Ubuntu, plus supply-chain jobs | — |
 | **lab/** | Python 3.13+, uv, ruff, ty, pytest; PyTorch, TRL and scikit-learn as needed; ONNX export | ML tooling lives here, outside the app |
 
@@ -972,9 +972,9 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
 ## 20. Repository layout
 
 ```
-goldiloop/
+verdandi/
 ├─ apps/
-│  ├─ server/                    # goldiloopd + `goldiloop` CLI
+│  ├─ server/                    # verdandid + `verdandi` CLI
 │  │  └─ src/
 │  │     ├─ bin.ts · main.ts      # CLI entry · service wiring (Layer composition)
 │  │     ├─ config/ · http/ · rpc/
@@ -995,9 +995,9 @@ goldiloop/
 │  │                             #   routing, catalog, rpc
 │  ├─ router/                    # PURE routing engine (server + browser)
 │  ├─ harness-claude-code/       # Agent SDK adapter
-│  ├─ harness-native/            # Goldiloop agent loop, prompt assembly, context engine
+│  ├─ harness-native/            # Verdandi agent loop, prompt assembly, context engine
 │  ├─ models/                    # provider adapters, catalog, credentials, fallbacks
-│  ├─ tools/                     # Goldiloop tools (native + MCP exposure)
+│  ├─ tools/                     # Verdandi tools (native + MCP exposure)
 │  ├─ memory/                    # memory stores, snapshot, scanners, session index,
 │  │                             #   MemoryProvider interface
 │  ├─ skills/                    # skill store, skill_manage, curator, hub client
@@ -1040,9 +1040,9 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 | Milestone | Scope | Exit criteria |
 |---|---|---|
 | **M0 · Spike** (1–2 weeks) | Agent SDK under Bun on Windows; effort and model switching; the `agents` option; hooks; the in-process MCP server; `bun:sqlite` with FTS5; Effect 4 RC on `@effect/platform-bun`; the PTY host; `laya-ts` under Bun | Every item in Appendix D answered and written up as ADRs |
-| **M1 · Core loop** | goldiloopd + web UI on the Claude Code harness: threads, streaming, approvals, plan mode, diffs, resume, steer; event store; usage ledger; **trajectory recording**; fake harness for tests | You do a full day's work in Goldiloop |
+| **M1 · Core loop** | verdandid + web UI on the Claude Code harness: threads, streaming, approvals, plan mode, diffs, resume, steer; event store; usage ledger; **trajectory recording**; fake harness for tests | You do a full day's work in Verdandi |
 | **M2 · Router v1** | `rules` classifier, policy files, pins, switch-cost gate, decision records and explanations, plan→execute split, subagent routing, budget modes, routing memory, spend dashboard; **decision layer** on `rules`, with decisions logged so Laya can be measured against it on real data | At least 30% lower cost per completed task than always-Opus, with no drop in success rate |
-| **M3 · Memory, skills, safe autonomy** | Worktrees, checkpoints and revert, terminal, verifiers and escalation; memory with fixed-size snapshots, scanners and panel; session search; skill lifecycle + curator; background review, skipped when the decision layer finds nothing worth saving; injection scanning; Goldiloop tools over MCP to Claude Code | Skills are created and reused; escalation fixes more than half of first-attempt failures |
+| **M3 · Memory, skills, safe autonomy** | Worktrees, checkpoints and revert, terminal, verifiers and escalation; memory with fixed-size snapshots, scanners and panel; session search; skill lifecycle + curator; background review, skipped when the decision layer finds nothing worth saving; injection scanning; Verdandi tools over MCP to Claude Code | Skills are created and reused; escalation fixes more than half of first-attempt failures |
 | **M4 · Native harness and providers** | Agent loop, prompt assembly, context engine, subagents; Anthropic API, OpenAI-compatible (OpenRouter, Ollama…) and Gemini providers; credentials, fallbacks, health; auxiliary tasks routed; routing across harnesses; quota-based pricing and moving work to other targets; keep-or-drop compaction; Jev backend (off by default); optional compaction plugin for Claude Code | Chores run on local or cheap targets automatically; a thread can hand off between Claude Code and native |
 | **M5 · Always-on** | Scheduler, gateway (Telegram, Discord, Slack), webhooks, profiles, desktop app, smart approvals, remote access | Nightly jobs run unattended within budget; tasks are approved from your phone |
 | **M6 · Learn and reach** | `lab/` (datasets, router training), batch runner, race mode, a router fine-tuned from Laya, fine-tuned decision models; execution backends (Docker, SSH, cloud); plugins + skills hub; external memory providers; more harnesses (Codex, OpenCode, ACP); OpenAI-compatible API, ACP and MCP servers; `execute_code`, `browser`, mixture-of-agents | The learned router beats `rules` on APGR (or is dropped); at least one plugin of each major kind works |
@@ -1075,8 +1075,8 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 4. **Fable:** allow in Max mode only (recommended)?
 5. **First gateway platform:** Telegram (recommended: simplest bot API, good inline buttons) or Discord?
 6. **Local models:** which local coding and chat models to target first, and on what hardware?
-7. **Moving to credits when quota runs low:** decided. Goldiloop asks the first time, then remembers. Claude Code's own silent move to extra usage is never hidden: those turns are priced as metered and shown (ADR 0005).
-8. **Terminal UI:** is `goldiloop chat` enough, or do you want a full terminal UI later?
+7. **Moving to credits when quota runs low:** decided. Verdandi asks the first time, then remembers. Claude Code's own silent move to extra usage is never hidden: those turns are priced as metered and shown (ADR 0005).
+8. **Terminal UI:** is `verdandi chat` enough, or do you want a full terminal UI later?
 9. **Jev:** keep it off until TypeSafe publishes data-retention terms (recommended), or turn it on now for selected projects?
 
 ---
@@ -1099,9 +1099,9 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 
 ## Appendix B — Hermes capability map
 
-Everything that makes Hermes Agent good, and where it lives in Goldiloop.
+Everything that makes Hermes Agent good, and where it lives in Verdandi.
 
-| Hermes capability | Goldiloop equivalent | § | Milestone |
+| Hermes capability | Verdandi equivalent | § | Milestone |
 |---|---|---|---|
 | Own agent loop: parallel tools, interrupts, `/steer`, iteration budgets | Native harness | 9.4 | M4 |
 | ~40 model providers, 3 API formats | Model provider layer: Anthropic, OpenAI-compatible, Gemini, and more as plugins | 9.5 | M4 → M6 |
@@ -1132,7 +1132,7 @@ Everything that makes Hermes Agent good, and where it lives in Goldiloop.
 | Mixture-of-agents | MoA route type | 9.4 | M6 |
 | Batch runner, trajectory compression, RL environments | Batch runner, trajectory exporters, `lab/` | 14.6, 14.7 | M1 (recording) → M6 |
 | Exact pins, supply-chain CI | Supply chain | 17 | M0 |
-| Terminal UI | `goldiloop chat` (a full terminal UI is an open question) | 11 | M1 |
+| Terminal UI | `verdandi chat` (a full terminal UI is an open question) | 11 | M1 |
 | **Not in Hermes** | Task routing across harnesses and access modes, decision layer, workspace GUI, worktrees, checkpoints, race mode, learned routing | 8, 9.8, 12, 13 | M1 → M6 |
 
 ## Appendix C — Glossary
@@ -1161,7 +1161,7 @@ Everything that makes Hermes Agent good, and where it lives in Goldiloop.
 - [x] How `canUseTool`, `AskUserQuestion` and `ExitPlanMode` behave in the approval flow. → ADR 0003.
 - [x] Resuming at a given message and `forkSession`, as the basis for revert. → ADR 0004.
 - [x] Hooks registered through the SDK alongside the user's own hooks. → ADR 0005.
-- [x] Serving an MCP server in-process through the SDK, for Goldiloop tools. → ADR 0005.
+- [x] Serving an MCP server in-process through the SDK, for Verdandi tools. → ADR 0005.
 - [x] Sending a message to a running Claude Code session (steer). → ADR 0003: lands at the next tool boundary; `priority: "now"` aborts and restarts.
 - [ ] `bun:sqlite`: FTS5 and trigram tokenizer support on all three OSes. → ADR 0006: Windows yes; macOS and Linux in CI before M3.
 - [x] Effect 4 RC on `@effect/platform-bun`: stability of RPC over WebSocket, SQL and Stream. → ADR 0008: works; stopping a stream early wedges the connection in rc.115, avoided by design until fixed.

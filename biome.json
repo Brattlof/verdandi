@@ -1,5 +1,5 @@
 {
-  "files": { "includes": ["**", "!**/dist", "!spikes", "!.plans", "!.superpowers", "!.goldiloop-dev", "!.agents", "!.claude"] },
+  "files": { "includes": ["**", "!**/dist", "!spikes", "!.plans", "!.superpowers", "!.verdandi-dev", "!.agents", "!.claude"] },
   "formatter": { "indentStyle": "space", "lineWidth": 140 },
   "linter": { "rules": { "preset": "recommended" } },
   "assist": { "actions": { "source": { "organizeImports": "on" } } }

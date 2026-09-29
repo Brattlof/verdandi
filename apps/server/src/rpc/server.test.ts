@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { CommandId, ThreadFeed, ThreadId, TurnId } from "@goldiloop/contracts";
-import { makeFakeHarness, makeTempHome, removeTempHome } from "@goldiloop/testkit";
+import type { CommandId, ThreadFeed, ThreadId, TurnId } from "@verdandi/contracts";
+import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { Reactor } from "../orchestration/reactor.ts";
 import { connect } from "./client.ts";
@@ -58,7 +58,7 @@ describe("rpc server", () => {
           const c = yield* connect(info);
           yield* createThread(c, uuid<ThreadId>());
           connected.resolve();
-          yield* Effect.never; // stays connected, like an open `goldiloop chat`
+          yield* Effect.never; // stays connected, like an open `verdandi chat`
         }),
       ),
     );

@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { CommandId, HarnessAdapter, HarnessEvent, HarnessId, Route, ThreadId, TurnId } from "@goldiloop/contracts";
+import type { CommandId, HarnessAdapter, HarnessEvent, HarnessId, Route, ThreadId, TurnId } from "@verdandi/contracts";
 import { Cause, Context, Effect, FiberSet, Layer, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Engine } from "./engine.ts";
 
 export class HarnessRegistry extends Context.Service<HarnessRegistry, Partial<Record<HarnessId, HarnessAdapter>>>()(
-  "goldiloop/HarnessRegistry",
+  "verdandi/HarnessRegistry",
 ) {}
 
 export class Reactor extends Context.Service<
@@ -14,14 +14,14 @@ export class Reactor extends Context.Service<
     /** Completes when no turn is running. Tests wait on this instead of sleeping. */
     readonly drain: Effect.Effect<void>;
   }
->()("goldiloop/Reactor") {}
+>()("verdandi/Reactor") {}
 
 const errorMessage = (cause: Cause.Cause<unknown>) => {
   const error = Cause.findErrorOption(cause);
   if (error._tag === "Some" && typeof error.value === "object" && error.value !== null && "message" in error.value) {
     return String(error.value.message);
   }
-  return `Goldiloop hit an internal error while running this turn. Details: ${Cause.pretty(cause)}`;
+  return `Verdandi hit an internal error while running this turn. Details: ${Cause.pretty(cause)}`;
 };
 
 /** Runs harness turns as side effects of `turn.started`, and recovers turns a previous run left behind. */
@@ -45,7 +45,7 @@ export const ReactorLive = Layer.effect(
         if (!thread) return yield* fail(`Thread ${threadId} disappeared before its turn ran.`);
         const route = JSON.parse(thread.route) as Route;
         const adapter = registry[route.harness];
-        if (!adapter) return yield* fail(`The ${route.harness} harness is not available in this goldiloopd. Pick another route.`);
+        if (!adapter) return yield* fail(`The ${route.harness} harness is not available in this verdandid. Pick another route.`);
         yield* adapter.run({ threadId, cwd: thread.path, route, resumeSessionId: thread.session_id ?? undefined, turnId, text }).pipe(
           Stream.runForEach((event) => {
             if (event.type === "text.delta") return engine.publishDelta(threadId, turnId, event.text);

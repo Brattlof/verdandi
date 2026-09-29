@@ -15,4 +15,4 @@ spikes/
 Thumbs.db
 
 # Dev server state (per worktree)
-.goldiloop-dev/
+.verdandi-dev/
