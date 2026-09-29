@@ -1,12 +1,12 @@
 {
-  "name": "@goldiloop/testkit",
+  "name": "@verdandi/testkit",
   "private": true,
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@goldiloop/contracts": "workspace:*",
+    "@verdandi/contracts": "workspace:*",
     "effect": "4.0.0-rc.115"
   }
 }

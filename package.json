@@ -1,5 +1,5 @@
 {
-  "name": "goldiloop",
+  "name": "verdandi",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -10,8 +10,8 @@
     "typecheck": "tsc -b",
     "lint": "biome check .",
     "test": "bun test",
-    "dev": "bun apps/server/src/bin.ts start --home ./.goldiloop-dev",
-    "goldiloop": "bun apps/server/src/bin.ts"
+    "dev": "bun apps/server/src/bin.ts start --home ./.verdandi-dev",
+    "verdandi": "bun apps/server/src/bin.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13",

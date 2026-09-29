@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { HarnessEvent, ThreadId, TurnId } from "@goldiloop/contracts";
+import type { HarnessEvent, ThreadId, TurnId } from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
 import { makeFakeHarness } from "./fake-harness.ts";
 

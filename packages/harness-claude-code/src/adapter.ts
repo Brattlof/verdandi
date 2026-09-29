@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { type HarnessAdapter, HarnessError, type HarnessEvent, type HarnessRunInput, type ThreadId } from "@goldiloop/contracts";
+import { type HarnessAdapter, HarnessError, type HarnessEvent, type HarnessRunInput, type ThreadId } from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
 import { initialContext, type NormalizeContext, normalize } from "./normalize.ts";
 
@@ -44,7 +44,7 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
       includePartialMessages: true,
       // Connectors attach nondeterministically and would change the tool list between turns (ADR 0001).
       settings: { disableClaudeAiConnectors: true },
-      canUseTool: async () => ({ behavior: "deny", message: "Approvals arrive in a later Goldiloop build." }),
+      canUseTool: async () => ({ behavior: "deny", message: "Approvals arrive in a later Verdandi build." }),
     },
   });
   // One iterator for the session's lifetime: leaving a for-await early would close the CLI (ADR 0003).

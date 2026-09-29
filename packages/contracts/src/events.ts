@@ -87,7 +87,7 @@ export const decodeStoredEvent = (row: EventRow): Effect.Effect<Event, EventDeco
   if (!schema) {
     return Effect.fail(
       new EventDecodeError({
-        message: `Stored event ${row.type} v${row.v} is newer than this build of Goldiloop understands. Update Goldiloop to read this database.`,
+        message: `Stored event ${row.type} v${row.v} is newer than this build of Verdandi understands. Update Verdandi to read this database.`,
       }),
     );
   }

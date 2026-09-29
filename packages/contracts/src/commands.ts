@@ -26,7 +26,7 @@ export const HarnessReport = Schema.Struct({
   turnId: TurnId,
   event: HarnessEvent,
 });
-/** Internal: marks a turn left running by a previous goldiloopd as interrupted. */
+/** Internal: marks a turn left running by a previous verdandid as interrupted. */
 export const TurnRecover = Schema.Struct({
   type: Schema.Literal("turn.recover"),
   commandId: CommandId,

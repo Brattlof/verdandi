@@ -12,7 +12,7 @@ Session search (DESIGN §14.3) needs substring search over transcripts that are 
 
 1. Session search uses an FTS5 table with `tokenize = 'trigram remove_diacritics 1'` in the main SQLite database.
 2. User input is always quoted as an FTS5 phrase before `MATCH`. Queries under 3 characters don't use the index.
-3. CI runs the spike's checks on macOS and Linux before M3. If a platform's SQLite lacks FTS5 or trigram, Goldiloop loads a bundled SQLite there through `Database.setCustomSQLite()`.
+3. CI runs the spike's checks on macOS and Linux before M3. If a platform's SQLite lacks FTS5 or trigram, Verdandi loads a bundled SQLite there through `Database.setCustomSQLite()`.
 
 ## Consequences
 

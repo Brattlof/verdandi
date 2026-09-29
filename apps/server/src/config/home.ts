@@ -11,19 +11,19 @@ export const flag = (argv: readonly string[], name: string): string | undefined 
 };
 
 /**
- * The Goldiloop home to use: `--home <dir>`, else the default profile. Dev servers pass
- * `--home ./.goldiloop-dev` so they never touch the real `~/.goldiloop`.
+ * The Verdandi home to use: `--home <dir>`, else the default profile. Dev servers pass
+ * `--home ./.verdandi-dev` so they never touch the real `~/.verdandi`.
  */
 export const resolveHome = (argv: readonly string[]): string => {
   let home: string | undefined;
   try {
     home = flag(argv, "--home");
   } catch {
-    throw new Error("--home needs a folder, e.g. --home ./.goldiloop-dev");
+    throw new Error("--home needs a folder, e.g. --home ./.verdandi-dev");
   }
-  return home === undefined ? join(homedir(), ".goldiloop", "profiles", "default") : resolve(home);
+  return home === undefined ? join(homedir(), ".verdandi", "profiles", "default") : resolve(home);
 };
 
-/** Written by `goldiloop start`, read by clients: where the server listens and its token. */
+/** Written by `verdandi start`, read by clients: where the server listens and its token. */
 export const serverFile = (home: string) => join(home, "server.json");
 export type ServerFile = { readonly port: number; readonly token: string; readonly pid: number };

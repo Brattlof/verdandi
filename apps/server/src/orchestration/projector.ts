@@ -1,4 +1,4 @@
-import type { Event, Item, Route, StoredEvent, ThreadId, ThreadView, TurnView } from "@goldiloop/contracts";
+import type { Event, Item, Route, StoredEvent, ThreadId, ThreadView, TurnView } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import type { DeciderState } from "./decider.ts";

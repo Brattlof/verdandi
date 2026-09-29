@@ -6,13 +6,13 @@ Accepted (M0 spike 008, 2026-09-29; owner sign-off the same day). Settles open q
 
 ## Context
 
-goldiloopd is built on Effect with RPC over a local WebSocket, SQL on `bun:sqlite`, and Streams (DESIGN §6, §19). Effect 4 is a release candidate; Effect 3 is stable but a later migration to 4 would touch every service. Appendix D asked how stable Effect 4 RC is on `@effect/platform-bun` for RPC over WebSocket, SQL and Stream.
+verdandid is built on Effect with RPC over a local WebSocket, SQL on `bun:sqlite`, and Streams (DESIGN §6, §19). Effect 4 is a release candidate; Effect 3 is stable but a later migration to 4 would touch every service. Appendix D asked how stable Effect 4 RC is on `@effect/platform-bun` for RPC over WebSocket, SQL and Stream.
 
 Spike 008 ran `4.0.0-rc.115` (the newest version at least 14 days old) on Bun 1.3.14 / Windows 11: a separate server process with an RPC group backed by SQLite + FTS5, and a client measuring latency, throughput, streaming, early stream stop and reconnect.
 
 ## Decision
 
-1. goldiloopd uses Effect 4, pinned to an exact RC and upgraded deliberately.
+1. verdandid uses Effect 4, pinned to an exact RC and upgraded deliberately.
 2. Until an Effect release passes the spike's `hol3.ts` check, clients never stop a server stream early on a shared connection. Live feeds are subscriptions ended by an explicit unsubscribe RPC; finite streams are read to the end.
 3. Every Effect upgrade re-runs the early-stop check; when it passes, rule 2 is dropped.
 

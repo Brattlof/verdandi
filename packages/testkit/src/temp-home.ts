@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/** A throwaway Goldiloop home. The path contains a space on purpose (Windows paths with spaces). */
-export const makeTempHome = () => mkdtempSync(join(tmpdir(), "goldiloop test "));
+/** A throwaway Verdandi home. The path contains a space on purpose (Windows paths with spaces). */
+export const makeTempHome = () => mkdtempSync(join(tmpdir(), "verdandi test "));
 
 export const removeTempHome = (home: string) => {
   try {
