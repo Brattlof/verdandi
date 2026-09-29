@@ -150,6 +150,7 @@ The most common defect is a change that works on the path you tested and is miss
 
 - **This file is canonical.** `CLAUDE.md` and `GEMINI.md` only import it.
 - **`.agents/skills/` is the single source of skills.** Codex, Cursor, Gemini CLI, GitHub Copilot, OpenCode, Amp and others read it directly. Claude Code, Windsurf, Roo Code, Kiro, Goose and a few others read it through symlinks. `bun scripts/agents-link.ts` creates or repairs those links, and `--check` verifies them.
+- **Check the skills list before starting non-trivial work** (debugging, planning, a feature, a review, a spike). If a skill fits, use it. Trivial requests don't need a skill check.
 - **Edit skills only in `.agents/skills/`,** never through a link. A skill's folder name must equal its `name`, and its description says what it does and when to use it (see `writing-skills`).
 - **Vendored skills stay byte-identical to upstream** (sources in `.agents/README.md`). Put Goldiloop-specific overrides in this file instead. A reference like `superpowers:<name>` means the `<name>` skill in `.agents/skills/`.
 - **Area files:** when a directory develops its own conventions, give it an `AGENTS.md` (aim for under about 8k characters) and add it to this table:
