@@ -76,7 +76,18 @@ export const ServerLayer = (
     Layer.provide(ProtocolWithToken(token)),
     Layer.provide(RpcSerialization.layerNdjson),
   );
-  const http = HttpRouter.serve(rpc).pipe(Layer.provideMerge(BunHttpServer.layer({ hostname: "127.0.0.1", port: options.port ?? 0 })));
+  const http = HttpRouter.serve(rpc).pipe(
+    Layer.provideMerge(
+      BunHttpServer.layer({
+        hostname: "127.0.0.1",
+        port: options.port ?? 0,
+        // Bun's server.stop() waits for open WebSockets. The default "preemptive" stop runs before the
+        // RPC layer closes its client sockets, so a connected `goldiloop chat` blocked shutdown. Without
+        // it, the RPC layer closes the sockets first and the final stop() resolves.
+        disablePreemptiveShutdown: true,
+      }),
+    ),
+  );
   const info = Layer.effect(ServerInfo)(
     Effect.gen(function* () {
       const { address } = yield* HttpServer.HttpServer;
