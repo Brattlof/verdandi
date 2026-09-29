@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (M0 spike 008, 2026-09-29). Waiting for owner sign-off: open question 2.
+Accepted (M0 spike 008, 2026-09-29; owner sign-off the same day). Settles open question 2.
 
 ## Context
 

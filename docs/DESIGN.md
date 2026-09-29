@@ -1070,7 +1070,7 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 ## 23. Open questions (owner decisions)
 
 1. **Distribution:** stay personal, or share or open-source it someday? This decides how much work goes into the API-key path early.
-2. **Effect 4 RC vs. Effect 3 stable:** M0 recommends Effect 4 RC, pinned, with one stream workaround (ADR 0008, proposed).
+2. **Effect 4 RC vs. Effect 3 stable:** decided. Effect 4 RC, pinned, with one stream workaround (ADR 0008).
 3. **Default permission posture:** Ask (recommended) or Auto-edits?
 4. **Fable:** allow in Max mode only (recommended)?
 5. **First gateway platform:** Telegram (recommended: simplest bot API, good inline buttons) or Discord?
@@ -1164,7 +1164,7 @@ Everything that makes Hermes Agent good, and where it lives in Goldiloop.
 - [x] Serving an MCP server in-process through the SDK, for Goldiloop tools. → ADR 0005.
 - [x] Sending a message to a running Claude Code session (steer). → ADR 0003: lands at the next tool boundary; `priority: "now"` aborts and restarts.
 - [ ] `bun:sqlite`: FTS5 and trigram tokenizer support on all three OSes. → ADR 0006: Windows yes; macOS and Linux in CI before M3.
-- [x] Effect 4 RC on `@effect/platform-bun`: stability of RPC over WebSocket, SQL and Stream. → ADR 0008 (proposed): works; stopping a stream early wedges the connection in rc.115, avoided by design until fixed.
+- [x] Effect 4 RC on `@effect/platform-bun`: stability of RPC over WebSocket, SQL and Stream. → ADR 0008: works; stopping a stream early wedges the connection in rc.115, avoided by design until fixed.
 - [x] The PTY host on Windows 11 (ConPTY): resizing, heavy output, Ctrl+C, killing process trees. → ADR 0007: Bun's built-in PTY, with fixes for Ctrl+C, tree kill and output batching.
 - [x] `laya-ts` under Bun: `onnxruntime-node`, or `onnxruntime-web` (WASM) as a fallback; CPU latency of a routing request. → ADR 0009: `onnxruntime-node` works; p50 1.45 s, 1.7 GB.
 - [x] Laya's accuracy out of the box on our task taxonomy, compared with `rules`. → ADR 0009: 63% vs 81% (n = 52); `rules` is the default.
