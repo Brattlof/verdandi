@@ -1,0 +1,33 @@
+# Store text as LF in the repo and check it out as LF on every OS.
+* text=auto eol=lf
+
+# Batch files need CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files: no line-ending conversion, no textual diff.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.onnx binary
+*.gguf binary
+*.safetensors binary
+*.parquet binary
+*.db binary
+*.sqlite binary
+*.wasm binary
+
+# Keep the lockfile diffable (for supply-chain review), but collapse it in GitHub PR views.
+bun.lock linguist-generated=true

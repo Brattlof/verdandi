@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.turbo/
+*.log
+
+.env
+.env.*
+!.env.example
+
+# Agent working material: plans, specs and spike code are never committed.
+.plans/
+spikes/
+
+.DS_Store
+Thumbs.db
