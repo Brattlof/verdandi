@@ -47,7 +47,17 @@ export const createStore = <S>(initial: S) => {
 export type Store<S> = ReturnType<typeof createStore<S>>;
 export const useStore = <S>(store: Store<S>) => useSyncExternalStore(store.subscribe, store.get);
 
-export const uuid = <T>() => crypto.randomUUID() as T;
+/**
+ * A random v4 UUID. Built from `crypto.getRandomValues`, since browsers drop `crypto.randomUUID` outside secure
+ * contexts, and a page opened from another device on the local network (`verdandi start --host`) is one.
+ */
+export const uuid = <T = string>() => {
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = ((b[6] ?? 0) & 0x0f) | 0x40;
+  b[8] = ((b[8] ?? 0) & 0x3f) | 0x80;
+  const hex = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}` as T;
+};
 
 const makeClient = RpcClient.make(Api);
 class Client extends Context.Service<Client, Effect.Success<typeof makeClient>>()("verdandi/web/Client") {}
@@ -167,7 +177,7 @@ export const connect = (token: string) => {
     onMessage: (message: A) => void,
     onRejected: (message: string) => void,
   ) => {
-    const subscriptionId = crypto.randomUUID();
+    const subscriptionId = uuid();
     const started = Promise.withResolvers<void>();
     let ended = false;
     void run((rpc) =>

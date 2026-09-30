@@ -3,7 +3,7 @@ import { describeRouteChange, type InteractionMode, type Item, type ThreadId, ty
 import { memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ArchiveButton } from "./archive.tsx";
 import { TurnAttachments } from "./attachments.tsx";
-import { type Connection, createStore, useStore } from "./client.ts";
+import { type Connection, createStore, useStore, uuid } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
 import { SidePanel } from "./diff.tsx";
 import { Markdown } from "./markdown.tsx";
@@ -30,7 +30,7 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
   // Diffs are fetched only when asked for: opening the panel, switching what it shows, or Refresh.
   const fetchDiff = useCallback(
     (turnId: TurnId | undefined, all: boolean) => {
-      const request = crypto.randomUUID();
+      const request = uuid();
       setPanel({ type: "fetch", turnId, all, request });
       void connection.diff(threadId, all ? undefined : turnId).then((result) => setPanel({ type: "result", request, result }));
     },
