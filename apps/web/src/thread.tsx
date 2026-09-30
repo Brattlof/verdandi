@@ -1,10 +1,11 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { InteractionMode, Item, ThreadId, TurnId, TurnView } from "@verdandi/contracts";
-import { memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { type Connection, createStore, useStore } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
 import { SidePanel } from "./diff.tsx";
 import { Markdown } from "./markdown.tsx";
+import { RouteMarkers } from "./route.tsx";
 import { applyDiffPanel, applyThreadFeed, closedPanel, type LiveThread, type LiveTurn } from "./state.ts";
 
 export const ThreadPane = ({ connection, threadId }: { connection: Connection; threadId: ThreadId }) => {
@@ -35,7 +36,6 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
   const showTurnDiff = useCallback((turnId: TurnId) => fetchDiff(turnId, false), [fetchDiff]);
   if (error) return <p role="alert">{error}</p>;
   if (!thread) return null;
-  const { harness, model, effort } = thread.route;
   const last = thread.turns.at(-1);
   const lastFinished = thread.turns.findLast((t) => t.status !== "running");
   const turnIndex = panel.open ? thread.turns.findIndex((t) => t.turnId === panel.turnId) : -1;
@@ -45,9 +45,6 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
         <header className="thread-header">
           <span title={thread.projectPath}>{thread.projectPath}</span>
           <span className="header-end">
-            <span className="chip">
-              {harness} · {model} · {effort}
-            </span>
             <button
               type="button"
               aria-pressed={panel.open}
@@ -57,7 +54,7 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
             </button>
           </span>
         </header>
-        <Conversation turns={thread.turns} onChanges={showTurnDiff} />
+        <Conversation turns={thread.turns} routeChanges={thread.routeChanges} onChanges={showTurnDiff} />
         <Requests connection={connection} threadId={threadId} requests={thread.pendingRequests} onPlanApproved={() => setMode("build")} />
         <Composer connection={connection} thread={thread} mode={mode ?? last?.mode ?? "build"} onMode={setMode} />
         <div role="status" className="sr-only">
@@ -80,10 +77,22 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
   );
 };
 
-/** Only the turns in view are rendered. The list follows new output while scrolled to the bottom. */
-const Conversation = ({ turns, onChanges }: { turns: readonly LiveTurn[]; onChanges: (turnId: TurnId) => void }) => {
+/**
+ * Only the turns in view are rendered. The list follows new output while scrolled to the bottom.
+ * Route changes show above the turn that followed them, or after the last turn.
+ */
+const Conversation = ({
+  turns,
+  routeChanges,
+  onChanges,
+}: {
+  turns: readonly LiveTurn[];
+  routeChanges: LiveThread["routeChanges"];
+  onChanges: (turnId: TurnId) => void;
+}) => {
   const scroller = useRef<HTMLElement>(null);
   const atBottom = useRef(true);
+  const changesBefore = useMemo(() => Map.groupBy(routeChanges, (c) => c.afterTurns), [routeChanges]);
   const virtualizer = useVirtualizer({
     count: turns.length,
     getScrollElement: () => scroller.current,
@@ -121,12 +130,14 @@ const Conversation = ({ turns, onChanges }: { turns: readonly LiveTurn[]; onChan
                 className="row"
                 style={{ transform: `translateY(${row.start}px)` }}
               >
+                <RouteMarkers changes={changesBefore.get(row.index)} />
                 <Turn turn={turn} onChanges={onChanges} />
               </div>
             )
           );
         })}
       </div>
+      <RouteMarkers changes={changesBefore.get(turns.length)} />
     </section>
   );
 };

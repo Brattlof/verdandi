@@ -19,6 +19,7 @@ import type { DeciderState, PendingRequest } from "./decider.ts";
 type Projection<T extends Event["type"]> = (
   event: Extract<Event, { type: T }>,
   at: string,
+  seq: number,
 ) => Effect.Effect<unknown, SqlError.SqlError, SqlClient.SqlClient>;
 
 const withSql = <A>(f: (sql: SqlClient.SqlClient) => Effect.Effect<A, SqlError.SqlError>) => Effect.flatMap(SqlClient.SqlClient, f);
@@ -48,11 +49,16 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       ),
     ),
   // A session belongs to one harness, so switching harness starts a fresh one on the next turn.
-  "thread.route.changed": (e) =>
+  "thread.route.changed": (e, at, seq) =>
     withSql((sql) =>
-      e.from.harness === e.to.harness
-        ? sql`update threads set route = ${JSON.stringify(e.to)} where id = ${e.threadId}`
-        : sql`update threads set route = ${JSON.stringify(e.to)}, session_id = null where id = ${e.threadId}`,
+      Effect.andThen(
+        e.from.harness === e.to.harness
+          ? sql`update threads set route = ${JSON.stringify(e.to)} where id = ${e.threadId}`
+          : sql`update threads set route = ${JSON.stringify(e.to)}, session_id = null where id = ${e.threadId}`,
+        sql`insert into route_changes (seq, thread_id, from_route, to_route, by, after_turns, at)
+            values (${seq}, ${e.threadId}, ${JSON.stringify(e.from)}, ${JSON.stringify(e.to)}, ${e.by},
+              (select count(*) from turns where thread_id = ${e.threadId}), ${at})`,
+      ),
     ),
   "turn.started": (e, at) =>
     withSql((sql) =>
@@ -95,7 +101,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
 
 /** Applies one event to the read models. Runs inside the engine's transaction. */
 export const project = (stored: StoredEvent) =>
-  (projections[stored.event.type] as Projection<Event["type"]>)(stored.event, stored.at).pipe(Effect.asVoid);
+  (projections[stored.event.type] as Projection<Event["type"]>)(stored.event, stored.at, stored.seq).pipe(Effect.asVoid);
 
 export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState, SqlError.SqlError, SqlClient.SqlClient> =>
   withSql((sql) =>
@@ -142,6 +148,8 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
       const usageByTurn = Map.groupBy(usage, (u) => u.turn_id);
       const pending = yield* sql<{ payload: string }>`
         select payload from requests where thread_id = ${threadId} and resolution is null order by requested_at, rowid`;
+      const routeChanges = yield* sql<{ from_route: string; to_route: string; by: "user"; after_turns: number; at: string }>`
+        select from_route, to_route, by, after_turns, at from route_changes where thread_id = ${threadId} order by seq`;
       return {
         threadId,
         projectPath: thread.path,
@@ -167,6 +175,13 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
             ...(t.error === null ? {} : { error: t.error }),
           }),
         ),
+        routeChanges: routeChanges.map((r) => ({
+          from: JSON.parse(r.from_route) as Route,
+          to: JSON.parse(r.to_route) as Route,
+          by: r.by,
+          at: r.at,
+          afterTurns: r.after_turns,
+        })),
         pendingRequests: pending.map((r) => JSON.parse(r.payload) as ThreadView["pendingRequests"][number]),
       };
     }),

@@ -33,12 +33,18 @@ const addRequest = (thread: LiveThread, request: ThreadView["pendingRequests"][n
   pendingRequests: [...thread.pendingRequests, request],
 });
 
-type Apply<T extends Event["type"]> = (thread: LiveThread, event: Extract<Event, { type: T }>) => LiveThread;
+type Apply<T extends Event["type"]> = (thread: LiveThread, event: Extract<Event, { type: T }>, at: string) => LiveThread;
 
 // Mirrors the server's projector, so a live thread matches the snapshot a reload would fetch.
 const apply: { [T in Event["type"]]: Apply<T> } = {
   "thread.created": (thread) => thread,
-  "thread.route.changed": (thread, e) => ({ ...thread, route: e.to }),
+  "thread.route.changed": (thread, e, at) => ({
+    ...thread,
+    route: e.to,
+    // A session belongs to one harness: a new harness starts a fresh one.
+    sessionId: e.from.harness === e.to.harness ? thread.sessionId : null,
+    routeChanges: [...thread.routeChanges, { from: e.from, to: e.to, by: e.by, at, afterTurns: thread.turns.length }],
+  }),
   "turn.started": (thread, e) => ({
     ...thread,
     busy: true,
@@ -76,9 +82,9 @@ export const applyThreadFeed = (thread: LiveThread | undefined, feed: ThreadFeed
   if (feed.kind === "snapshot") return { ...feed.thread, turns: feed.thread.turns.map((t) => ({ ...t, streaming: "" })), seq: feed.seq };
   if (!thread) return thread;
   if (feed.kind === "delta") return updateTurn(thread, feed.turnId, (t) => ({ ...t, streaming: t.streaming + feed.text }));
-  const { seq, event } = feed.stored;
+  const { seq, event, at } = feed.stored;
   if (seq <= thread.seq) return thread;
-  return { ...(apply[event.type] as Apply<Event["type"]>)(thread, event), seq };
+  return { ...(apply[event.type] as Apply<Event["type"]>)(thread, event, at), seq };
 };
 
 /** The sidebar's data: threads most recently active first. */

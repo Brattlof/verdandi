@@ -93,6 +93,7 @@ test("projects a full turn into the thread view", async () => {
         ],
       },
     ],
+    routeChanges: [],
     pendingRequests: [],
   });
 });

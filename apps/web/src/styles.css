@@ -210,12 +210,6 @@ button.link {
   color: var(--accent);
   text-decoration: underline;
 }
-.chip {
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  font-size: 12px;
-}
 .thread {
   display: flex;
   flex: 1;
@@ -474,4 +468,42 @@ button.link {
 }
 .diff-del {
   background: var(--removed);
+}
+.route {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+.route summary {
+  display: inline-block;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.cost {
+  color: var(--accent);
+}
+.route-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.route-form .muted,
+.route-form .cost,
+.route-form .actions {
+  flex-basis: 100%;
+  margin: 0;
+}
+.route-change {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 4px 16px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
 }

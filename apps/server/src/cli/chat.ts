@@ -1,22 +1,23 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type {
-  ClientCommand,
-  CommandId,
-  DiffView,
-  InteractionMode,
-  ProjectsFeed,
-  Resolution,
-  ThreadFeed,
-  ThreadId,
-  ThreadView,
-  TurnId,
+import {
+  type ClientCommand,
+  type CommandId,
+  type DiffView,
+  describeRouteChange,
+  type InteractionMode,
+  type ProjectsFeed,
+  type Resolution,
+  type ThreadFeed,
+  type ThreadId,
+  type ThreadView,
+  type TurnId,
 } from "@verdandi/contracts";
 import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { flag, readServerFile, resolveHome } from "../config/home.ts";
 import { connect } from "../rpc/client.ts";
 import { approvalPrompt, type PendingRequest, parseAnswer, planPrompt, questionPrompt } from "./requests.ts";
-import { describeRouteChange, routeFromFlags } from "./route-flags.ts";
+import { routeFromFlags } from "./route-flags.ts";
 import { threadList } from "./thread-list.ts";
 
 class Client extends Context.Service<Client, Effect.Success<ReturnType<typeof connect>>>()("verdandi/cli/Client") {}

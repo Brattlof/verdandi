@@ -12,10 +12,3 @@ export const routeFromFlags = (argv: readonly string[], current: Route = default
     model: flag(argv, "--model") ?? current.model,
     effort: flag(argv, "--effort") ?? current.effort,
   });
-
-/** What differs between two routes, e.g. `model sonnet → opus, effort medium → high`; empty when nothing does. */
-export const describeRouteChange = (from: Route, to: Route) =>
-  (["harness", "model", "effort"] as const)
-    .filter((k) => from[k] !== to[k])
-    .map((k) => `${k} ${from[k]} → ${to[k]}`)
-    .join(", ");

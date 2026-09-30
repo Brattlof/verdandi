@@ -4,6 +4,7 @@ import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit
 import { Deferred, Effect, Fiber, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { SqlLive } from "../persistence/db.ts";
+import { migrations } from "../persistence/migrations.ts";
 import { AppLayer } from "./app.ts";
 import { Engine, EngineLive } from "./engine.ts";
 import { loadThreadView, project } from "./projector.ts";
@@ -199,6 +200,31 @@ describe("engine", () => {
       ["fake", "low", undefined],
       ["fake-2", "high", "fake-session-1"],
     ]);
+  });
+
+  test("route changes sit between the turns they came between, and the migration rebuilds them from the log", async () => {
+    const { runtime } = start(newHome());
+    const setRoute = (model: string) =>
+      dispatch({ type: "thread.route.set", commandId: id<CommandId>(), threadId, route: { ...route, model } });
+    const [live, rebuilt] = await runtime.runPromise(
+      Effect.gen(function* () {
+        yield* dispatch(create);
+        yield* setRoute("fake-2");
+        yield* dispatch(send("one"));
+        yield* drain;
+        yield* setRoute("fake-3");
+        const live = yield* view;
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`drop table route_changes`;
+        yield* migrations["5_route_changes"];
+        return [live, yield* view] as const;
+      }),
+    );
+    expect(live?.routeChanges.map((c) => [c.from.model, c.to.model, c.afterTurns])).toEqual([
+      ["fake", "fake-2", 0],
+      ["fake-2", "fake-3", 1],
+    ]);
+    expect(rebuilt).toEqual(live);
   });
 
   test("switching harness starts a fresh session on the new one", async () => {

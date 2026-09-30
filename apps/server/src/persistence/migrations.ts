@@ -85,4 +85,32 @@ const trajectories = Effect.gen(function* () {
   )`;
 });
 
-export const migrations = { "1_init": init, "2_requests": requests, "3_turn_modes": turnModes, "4_trajectories": trajectories };
+/**
+ * Each thread's route changes, placed between turns by `after_turns`: how many turns had started.
+ * Filled from the route changes already in the event log.
+ */
+const routeChanges = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table route_changes (
+    seq integer primary key,
+    thread_id text not null references threads (id),
+    from_route text not null,
+    to_route text not null,
+    by text not null,
+    after_turns integer not null,
+    at text not null
+  )`;
+  yield* sql`create index route_changes_thread on route_changes (thread_id, seq)`;
+  yield* sql`insert into route_changes (seq, thread_id, from_route, to_route, by, after_turns, at)
+    select e.seq, e.thread_id, json_extract(e.payload, '$.from'), json_extract(e.payload, '$.to'), json_extract(e.payload, '$.by'),
+      (select count(*) from events s where s.thread_id = e.thread_id and s.type = 'turn.started' and s.seq < e.seq), e.at
+    from events e where e.type = 'thread.route.changed'`;
+});
+
+export const migrations = {
+  "1_init": init,
+  "2_requests": requests,
+  "3_turn_modes": turnModes,
+  "4_trajectories": trajectories,
+  "5_route_changes": routeChanges,
+};
