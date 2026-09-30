@@ -1,6 +1,6 @@
 import { type AttachmentRef, type AttachmentUpload, attachmentLimits, formatBytes, imageMediaTypes } from "@verdandi/contracts";
 import { useEffect, useState } from "react";
-import type { Connection } from "./client.ts";
+import { type Connection, uuid } from "./client.ts";
 
 /** An attachment waiting to go with the next turn. `preview` is an object URL for an image's thumbnail. */
 export type Pending = AttachmentUpload & { readonly key: string; readonly size: number; readonly preview: string | undefined };
@@ -35,7 +35,7 @@ export const addFiles = async (
     return { added: [], error: `A turn's attachments can add up to ${formatBytes(attachmentLimits.maxTotalBytes)} at most.` };
   const added = await Promise.all(
     files.map(async (f) => ({
-      key: crypto.randomUUID(),
+      key: uuid(),
       name: f.name || "pasted image",
       mediaType: f.type || "application/octet-stream",
       size: f.size,
