@@ -54,10 +54,11 @@ cd verdandi
 bun install
 ```
 
-Start the server against a throwaway dev home, then chat from a second terminal:
+Start the server against a throwaway dev home, then open the web UI or chat from a second terminal:
 
 ```bash
 bun run dev                                          # verdandid, state in ./.verdandi-dev
+bun run verdandi open --home ./.verdandi-dev         # the web UI in your browser
 bun run verdandi chat --home ./.verdandi-dev         # chat with the thread for this folder
 bun run verdandi chat --home ./.verdandi-dev --model opus --effort high
 ```

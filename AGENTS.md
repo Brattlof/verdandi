@@ -4,7 +4,7 @@ Verdandi is a local-first workspace and personal agent platform for coding agent
 
 The design lives in `docs/DESIGN.md`. Read the section that covers what you're changing before you change it.
 
-**Status:** M1 (core loop) in progress. `verdandid`, the event store, the Claude Code harness and a terminal chat exist; the web UI and everything after it do not yet. Packages are created when their milestone starts (DESIGN.md §20–21), not before.
+**Status:** M1 (core loop) in progress. `verdandid`, the event store, the Claude Code harness, a terminal chat and a first web UI exist; everything after them does not yet. Packages are created when their milestone starts (DESIGN.md §20–21), not before.
 
 ## What we never compromise on
 
@@ -171,14 +171,16 @@ What runs today (M1, in progress):
 - **Interrupting:** `turn.interrupt` ends the running turn as `interrupted` at once, denying its open requests. The reactor then interrupts the turn's fiber, and the thread's next turn waits for the harness to wind down and continues the same session (Claude Code: resumed by id in a fresh process).
 - **Feeds:** `ThreadSubscribe` streams a snapshot of the thread, then its events and unstored text deltas. `ProjectsSubscribe` streams every project and a small summary of each thread (title from its first turn, busy, last activity, route), then a thread's summary again whenever it is created or a turn starts or ends; the CLI uses it for `verdandi chat --list`. Clients end a feed with `Unsubscribe` (ADR 0008).
 - **Diffs:** `DiffGet` returns the thread's project working tree against `HEAD` per file, or with a `turnId` only the files that turn's file tools touched; `verdandi chat` shows it with `/diff` (last turn) and `/diff all`. It runs git read-only and stores nothing, and checkpoints replace its base in M3 (ADR 0010).
+- **Web UI:** verdandid serves `apps/web` at `/`: Bun bundles it from its HTML import on the first request. `verdandi open` opens it with the token in the URL fragment, so the token never reaches server logs or a `Referer`; the page keeps it in session storage. The page talks to verdandid over the same RPC as the CLI, and imports only `@verdandi/contracts`.
 - **Harnesses:** Claude Code runs through the Agent SDK behind the `HarnessAdapter` contract. The route (harness, model, effort) is set when a thread is created and changed with `thread.route.set`, which applies from the next turn; there is no router yet.
 
-Not built yet: the web UI, the router and decision layer, checkpoints, worktrees, memory, skills and everything later in DESIGN.md §21. For how those will fit in, see DESIGN.md §6–§10.
+Not built yet: the router and decision layer, checkpoints, worktrees, memory, skills and everything later in DESIGN.md §21. For how those will fit in, see DESIGN.md §6–§10.
 
 ## Where code lives
 
 - **Now:**
-  - `apps/server`: verdandid and the `verdandi` CLI (`start`, `chat`). `src/orchestration` holds the decider, projector, engine and reactor; `src/rpc` the WebSocket API; `src/persistence` SQLite and migrations; `src/config` the Verdandi home and flags;
+  - `apps/server`: verdandid and the `verdandi` CLI (`start`, `open`, `chat`). `src/orchestration` holds the decider, projector, engine and reactor; `src/rpc` the WebSocket API; `src/persistence` SQLite and migrations; `src/config` the Verdandi home and flags;
+  - `apps/web`: the web UI (React). `src/state.ts` folds feed messages into what the page shows; the rest is components and the RPC connection;
   - `packages/contracts`: every schema sent over the wire or persisted (commands, events, RPC, harness contract, routes);
   - `packages/harness-claude-code`: the Claude Code adapter and event normalization. `src/smoke.ts` is a manual live check, never run in tests;
   - `packages/trajectories`: builds a turn's trajectory from its events and redacts secrets; the reactor saves it to the `trajectories` table (DESIGN §14.6);
@@ -187,7 +189,7 @@ Not built yet: the web UI, the router and decision layer, checkpoints, worktrees
   - `.agents/`: agent configuration and skills;
   - `scripts/`: repo tooling.
 - **Planned (DESIGN.md §20):**
-  - `apps/web`, `apps/desktop`;
+  - `apps/desktop`;
   - `packages/router` (pure);
   - more `packages/harness-*`, `packages/models`, `packages/decisions`, `packages/tools`, `packages/memory`, `packages/skills`;
   - `plugins/`;

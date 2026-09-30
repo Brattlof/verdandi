@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import type { Event, StoredEvent, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import type { SqlClient } from "effect/unstable/sql";
 import { SqlLive } from "../persistence/db.ts";
 import { loadThreadView, project } from "./projector.ts";
 
@@ -73,14 +73,28 @@ test("projects a full turn into the thread view", async () => {
     route: { harness: "fake", model: "fake", effort: "low" },
     sessionId: "s1",
     busy: false,
-    turns: [{ turnId, text: "hi", mode: "build", status: "success", items: [{ kind: "assistant.message", text: "echo: hi" }] }],
+    turns: [
+      {
+        turnId,
+        text: "hi",
+        mode: "build",
+        status: "success",
+        items: [{ kind: "assistant.message", text: "echo: hi" }],
+        usage: [
+          {
+            model: "fake",
+            accessMode: "subscription",
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            costUsd: 0,
+          },
+        ],
+      },
+    ],
     pendingRequests: [],
   });
-  const usage = await run(
-    home,
-    Effect.flatMap(SqlClient.SqlClient, (sql) => sql`select model, input_tokens from usage_ledger`),
-  );
-  expect(usage).toEqual([{ model: "fake", input_tokens: 10 }]);
 });
 
 test("a running turn makes the thread busy", async () => {

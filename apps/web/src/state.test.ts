@@ -1,0 +1,110 @@
+import { expect, test } from "bun:test";
+import type { Event, ProjectId, ThreadFeed, ThreadId, ThreadSummary, TurnId } from "@verdandi/contracts";
+import { applyProjectsFeed, applyThreadFeed, type LiveThread } from "./state.ts";
+
+const threadId = "thread-1" as ThreadId;
+const turnId = "turn-1" as TurnId;
+const route = { harness: "fake", model: "fake", effort: "low" } as const;
+
+const snapshot: ThreadFeed = {
+  kind: "snapshot",
+  seq: 1,
+  thread: { threadId, projectPath: "C:/Users/a b/repo", route, sessionId: null, busy: false, turns: [], pendingRequests: [] },
+};
+const event = (seq: number, e: Event): ThreadFeed => ({
+  kind: "event",
+  stored: { seq, eventId: `e${seq}`, commandId: `c${seq}`, at: "", event: e },
+});
+const fold = (feeds: ThreadFeed[]) => feeds.reduce<LiveThread | undefined>(applyThreadFeed, undefined);
+
+test("a streamed turn: deltas show until the stored message replaces them, and completion ends it", () => {
+  const started = fold([
+    snapshot,
+    event(2, { type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "plan" }),
+    { kind: "delta", turnId, text: "echo: " },
+    { kind: "delta", turnId, text: "hi" },
+  ]);
+  expect(started?.busy).toBe(true);
+  expect(started?.turns[0]).toMatchObject({ text: "hi", mode: "plan", status: "running", streaming: "echo: hi" });
+
+  const done = fold([
+    snapshot,
+    event(2, { type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "plan" }),
+    { kind: "delta", turnId, text: "echo: hi" },
+    event(3, { type: "turn.item.added", v: 1, threadId, turnId, item: { kind: "assistant.message", text: "echo: hi" } }),
+    event(4, {
+      type: "turn.usage.recorded",
+      v: 1,
+      threadId,
+      turnId,
+      model: "fake",
+      accessMode: "subscription",
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0.01,
+    }),
+    event(5, { type: "turn.completed", v: 1, threadId, turnId, status: "success" }),
+  ]);
+  expect(done?.busy).toBe(false);
+  expect(done?.seq).toBe(5);
+  expect(done?.turns[0]).toMatchObject({
+    status: "success",
+    streaming: "",
+    items: [{ kind: "assistant.message", text: "echo: hi" }],
+    usage: [{ model: "fake", inputTokens: 10, outputTokens: 5, costUsd: 0.01 }],
+  });
+});
+
+test("events the snapshot already includes are skipped", () => {
+  const thread = fold([{ ...snapshot, seq: 3 }, event(3, { type: "turn.started", v: 1, threadId, turnId, text: "replayed" })]);
+  expect(thread?.turns).toEqual([]);
+});
+
+test("a plan waits as a pending request and leaves a plan item once answered", () => {
+  const feeds = [
+    snapshot,
+    event(2, { type: "turn.started", v: 1, threadId, turnId, text: "plan" }),
+    event(3, { type: "plan.requested", v: 1, threadId, turnId, requestId: "r1", plan: "1. Edit a.txt" }),
+  ];
+  expect(fold(feeds)?.pendingRequests.map((r) => r.requestId)).toEqual(["r1"]);
+  const answered = fold([
+    ...feeds,
+    event(4, { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r1", resolution: { decision: "allow" } }),
+  ]);
+  expect(answered?.pendingRequests).toEqual([]);
+  expect(answered?.turns[0]?.items).toEqual([{ kind: "plan", text: "1. Edit a.txt" }]);
+});
+
+test("the projects feed adds new threads on top and moves a changed thread up", () => {
+  const projectId = "p1" as ProjectId;
+  const summary = (id: string, lastActivityAt: string, busy = false): ThreadSummary => ({
+    threadId: id as ThreadId,
+    projectId,
+    title: id,
+    busy,
+    lastActivityAt,
+    route,
+  });
+  let sidebar = applyProjectsFeed(undefined, {
+    kind: "snapshot",
+    projects: [{ projectId, path: "/repo" }],
+    threads: [summary("b", "2026-09-30T10:00:00.000Z"), summary("a", "2026-09-30T09:00:00.000Z")],
+    seq: 5,
+  });
+  sidebar = applyProjectsFeed(sidebar, { kind: "thread", thread: summary("a", "2026-09-30T11:00:00.000Z", true), seq: 6 });
+  expect(sidebar?.threads.map((t) => [t.threadId as string, t.busy])).toEqual([
+    ["a", true],
+    ["b", false],
+  ]);
+  const other = "p2" as ProjectId;
+  sidebar = applyProjectsFeed(sidebar, {
+    kind: "thread",
+    thread: { ...summary("c", "2026-09-30T12:00:00.000Z"), projectId: other },
+    project: { projectId: other, path: "/other" },
+    seq: 7,
+  });
+  expect(sidebar?.threads.map((t) => t.threadId as string)).toEqual(["c", "a", "b"]);
+  expect(sidebar?.projects.map((p) => p.path)).toEqual(["/repo", "/other"]);
+});

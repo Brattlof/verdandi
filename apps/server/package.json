@@ -9,7 +9,8 @@
     "effect": "4.0.0-rc.115",
     "@verdandi/harness-claude-code": "workspace:*",
     "@verdandi/testkit": "workspace:*",
-    "@verdandi/trajectories": "workspace:*"
+    "@verdandi/trajectories": "workspace:*",
+    "@verdandi/web": "workspace:*"
   },
   "bin": {
     "verdandi": "./src/bin.ts"
