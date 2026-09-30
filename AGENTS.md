@@ -4,7 +4,7 @@ Verdandi is a local-first workspace and personal agent platform for coding agent
 
 The design lives in `docs/DESIGN.md`. Read the section that covers what you're changing before you change it.
 
-**Status:** M1 (core loop) in progress. `verdandid`, the event store, the Claude Code harness, a terminal chat and a first web UI exist; everything after them does not yet. Packages are created when their milestone starts (DESIGN.md §20–21), not before.
+**Status:** M1 (core loop) in progress. `verdandid`, the event store, the Claude Code harness, a terminal chat and a first web UI exist, and M2 has begun with the pure router package; everything after them does not yet. Packages are created when their milestone starts (DESIGN.md §20–21), not before.
 
 ## What we never compromise on
 
@@ -177,7 +177,9 @@ What runs today (M1, in progress):
 - **Tasks:** a thread's first turn starts a task (`task.started`, named after that turn), and so does the first turn after a route change. On each turn end and route change the reactor rebuilds the thread's `TaskOutcome`s from its events into `task_outcomes`: status from the task's last turn, usage by model, running time, and a route change as the user's override. `TaskCostsList` (and `verdandi costs`) sums them into cost per completed task by route, failed tasks' cost included. Trajectories carry their task's id.
 - **Harnesses:** Claude Code runs through the Agent SDK behind the `HarnessAdapter` contract. The route (harness, model, effort) is set when a thread is created and changed with `thread.route.set` (`verdandi chat` flags, or the web UI's route chip, which offers only the harnesses `HarnessesList` reports), which applies from the next turn. Each change is kept in `ThreadView.routeChanges` and shown between the turns it came between; there is no router yet.
 
-Not built yet: the router and decision layer, checkpoints, worktrees, memory, skills and everything later in DESIGN.md §21. For how those will fit in, see DESIGN.md §6–§10.
+- **Router:** `packages/router` turns a task (text, mode, pin, warm session, provider health and quota) into a `RouteDecision` with a one-sentence reason and a trace: stages 0–5 of DESIGN §8.4, the `rules` classifier, and the catalog and built-in policy as JSON with profile and project layers on top. Nothing calls it yet; verdandid still routes by hand.
+
+Not built yet: routing inside verdandid, the decision layer, checkpoints, worktrees, memory, skills and everything later in DESIGN.md §21. For how those will fit in, see DESIGN.md §6–§10.
 
 ## Where code lives
 
@@ -187,13 +189,13 @@ Not built yet: the router and decision layer, checkpoints, worktrees, memory, sk
   - `packages/contracts`: every schema sent over the wire or persisted (commands, events, RPC, harness contract, routes);
   - `packages/harness-claude-code`: the Claude Code adapter and event normalization. `src/smoke.ts` is a manual live check, never run in tests;
   - `packages/trajectories`: builds a turn's trajectory and each task's outcome from events, and redacts secrets; the reactor saves them to `trajectories` and `task_outcomes` (DESIGN §8.8, §14.6);
+  - `packages/router`: the pure routing engine; `src/catalog.json` and `src/policy.json` are its data;
   - `packages/testkit`: the fake harness and temporary Verdandi homes for tests;
   - `docs/`: design and decisions;
   - `.agents/`: agent configuration and skills;
   - `scripts/`: repo tooling.
 - **Planned (DESIGN.md §20):**
   - `apps/desktop`;
-  - `packages/router` (pure);
   - more `packages/harness-*`, `packages/models`, `packages/decisions`, `packages/tools`, `packages/memory`, `packages/skills`;
   - `plugins/`;
   - `lab/` (Python, offline).

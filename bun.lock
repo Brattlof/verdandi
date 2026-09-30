@@ -57,6 +57,12 @@
         "@verdandi/testkit": "workspace:*",
       },
     },
+    "packages/router": {
+      "name": "@verdandi/router",
+      "dependencies": {
+        "@verdandi/contracts": "workspace:*",
+      },
+    },
     "packages/testkit": {
       "name": "@verdandi/testkit",
       "dependencies": {
@@ -185,6 +191,8 @@
     "@verdandi/contracts": ["@verdandi/contracts@workspace:packages/contracts"],
 
     "@verdandi/harness-claude-code": ["@verdandi/harness-claude-code@workspace:packages/harness-claude-code"],
+
+    "@verdandi/router": ["@verdandi/router@workspace:packages/router"],
 
     "@verdandi/server": ["@verdandi/server@workspace:apps/server"],
 

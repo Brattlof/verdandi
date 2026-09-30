@@ -1,0 +1,38 @@
+[
+  {
+    "harness": "claude-code",
+    "provider": "claude-subscription",
+    "model": "haiku",
+    "access": "subscription",
+    "tier": "S",
+    "context": 200000,
+    "price": { "input": 1, "output": 5, "cacheRead": 0.1, "cacheWrite": 1.25 }
+  },
+  {
+    "harness": "claude-code",
+    "provider": "claude-subscription",
+    "model": "sonnet",
+    "access": "subscription",
+    "tier": "M",
+    "context": 1000000,
+    "price": { "input": 2, "output": 10, "cacheRead": 0.2, "cacheWrite": 2.5 }
+  },
+  {
+    "harness": "claude-code",
+    "provider": "claude-subscription",
+    "model": "opus",
+    "access": "subscription",
+    "tier": "L",
+    "context": 1000000,
+    "price": { "input": 4, "output": 20, "cacheRead": 0.4, "cacheWrite": 5 }
+  },
+  {
+    "harness": "claude-code",
+    "provider": "claude-subscription",
+    "model": "fable",
+    "access": "subscription",
+    "tier": "XL",
+    "context": 1000000,
+    "price": { "input": 10, "output": 50, "cacheRead": 1, "cacheWrite": 12.5 }
+  }
+]

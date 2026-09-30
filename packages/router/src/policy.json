@@ -1,0 +1,95 @@
+{
+  "mode": "balanced",
+  "classifier": "rules",
+  "minConfidence": 0.6,
+  "targets": {
+    "cc-haiku": { "harness": "claude-code", "provider": "claude-subscription", "model": "haiku" },
+    "cc-sonnet": { "harness": "claude-code", "provider": "claude-subscription", "model": "sonnet" },
+    "cc-opus": { "harness": "claude-code", "provider": "claude-subscription", "model": "opus" },
+    "cc-fable": { "harness": "claude-code", "provider": "claude-subscription", "model": "fable" }
+  },
+  "routes": {
+    "ask.search": { "prefer": ["cc-haiku"], "effort": "low", "max": { "prefer": ["cc-sonnet"] }, "tokens": 30000 },
+    "ask.explain": {
+      "prefer": ["cc-sonnet"],
+      "effort": "low",
+      "thrifty": { "prefer": ["cc-haiku"] },
+      "max": { "effort": "medium" },
+      "tokens": 60000
+    },
+    "chore.git": { "prefer": ["cc-haiku"], "effort": "low", "max": { "prefer": ["cc-sonnet"] }, "tokens": 20000 },
+    "docs.write": {
+      "prefer": ["cc-sonnet"],
+      "effort": "low",
+      "thrifty": { "prefer": ["cc-haiku"] },
+      "max": { "effort": "medium" },
+      "tokens": 80000
+    },
+    "code.edit.mechanical": {
+      "prefer": ["cc-sonnet"],
+      "effort": "low",
+      "thrifty": { "prefer": ["cc-haiku"] },
+      "max": { "effort": "medium" },
+      "tokens": 150000
+    },
+    "code.edit.local": {
+      "prefer": ["cc-sonnet"],
+      "effort": "medium",
+      "thrifty": { "effort": "low" },
+      "max": { "effort": "high" },
+      "tokens": 200000
+    },
+    "test.write": {
+      "prefer": ["cc-sonnet"],
+      "effort": "medium",
+      "thrifty": { "effort": "low" },
+      "max": { "effort": "high" },
+      "tokens": 250000
+    },
+    "code.feature": {
+      "prefer": ["cc-sonnet"],
+      "effort": "medium",
+      "thrifty": { "effort": "low" },
+      "max": { "effort": "high" },
+      "plan": { "prefer": ["cc-opus"], "effort": "high", "thrifty": { "effort": "medium" }, "max": { "effort": "xhigh" } },
+      "tokens": 800000
+    },
+    "code.refactor.large": {
+      "prefer": ["cc-sonnet"],
+      "effort": "high",
+      "thrifty": { "effort": "medium" },
+      "max": { "effort": "xhigh" },
+      "plan": { "prefer": ["cc-opus"], "effort": "high", "thrifty": { "effort": "medium" }, "max": { "effort": "xhigh" } },
+      "tokens": 1500000
+    },
+    "debug.investigate": {
+      "prefer": ["cc-opus"],
+      "effort": "high",
+      "thrifty": { "prefer": ["cc-sonnet"] },
+      "max": { "prefer": ["cc-fable"] },
+      "tokens": 600000
+    },
+    "review": {
+      "prefer": ["cc-opus"],
+      "effort": "medium",
+      "thrifty": { "effort": "low" },
+      "max": { "effort": "high" },
+      "tokens": 300000
+    },
+    "design.architecture": {
+      "prefer": ["cc-opus"],
+      "effort": "high",
+      "thrifty": { "effort": "medium" },
+      "max": { "prefer": ["cc-fable"] },
+      "tokens": 200000
+    },
+    "chat.general": { "prefer": ["cc-haiku"], "effort": "low", "max": { "prefer": ["cc-sonnet"] }, "tokens": 10000 }
+  },
+  "fallback": {
+    "prefer": ["cc-sonnet"],
+    "effort": "medium",
+    "thrifty": { "effort": "low" },
+    "max": { "prefer": ["cc-opus"] },
+    "tokens": 200000
+  }
+}

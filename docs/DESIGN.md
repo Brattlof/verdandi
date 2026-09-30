@@ -384,8 +384,10 @@ routes:
   chore.git:          { prefer: [local-code, cc-haiku], effort: low }
   debug.investigate:  { prefer: [cc-opus], effort: high, effortBand: [medium, max], thrifty: { prefer: [cc-sonnet], effort: high } }
   code.feature:
-    plan:    { prefer: [cc-opus], effort: high }
-    execute: { prefer: [cc-sonnet, api-sonnet], effort: medium }
+    prefer: [cc-sonnet, api-sonnet]  # executing
+    effort: medium
+    plan: { prefer: [cc-opus], effort: high, max: { effort: xhigh } }   # tasks started in plan mode
+    tokens: 800000                   # rough task size, for cost estimates and the switch-cost gate
     subagents:
       explorer: { prefer: [cc-haiku], effort: low }
       reviewer: { prefer: [cc-opus], effort: medium }
@@ -402,7 +404,11 @@ restrictions:
   - match: "packages/billing/**"
     forbid: [local]                   # never route billing code to local models
     minTier: L
+
+fallback: { prefer: [cc-sonnet], effort: medium, max: { prefer: [cc-opus] } }   # safe default below minConfidence
 ```
+
+A class's route is its Balanced route. `thrifty` and `max` change only the keys they set for those modes, and `plan` does the same for tasks started in plan mode. Layers merge key by key, except `restrictions`, which add up, so a project can't lift a profile's restriction. Unknown keys are errors that name the file and the key. `effortBand`, `subagents`, `quota` and `escalation` are rejected until the features behind them land (§8.7, §8.9, M2 subagent routing).
 
 ### 8.7 Escalation and de-escalation while a task runs
 
@@ -995,7 +1001,8 @@ verdandi/
 ├─ packages/
 │  ├─ contracts/                 # schemas: ids, commands, events, harness events,
 │  │                             #   routing, catalog, rpc, trajectories
-│  ├─ router/                    # PURE routing engine (server + browser)
+│  ├─ router/                    # PURE routing engine; src/catalog.json + src/policy.json
+│  │                             #   are the model catalog and built-in policy (data)
 │  ├─ harness-claude-code/       # Agent SDK adapter
 │  ├─ harness-native/            # Verdandi agent loop, prompt assembly, context engine
 │  ├─ models/                    # provider adapters, catalog, credentials, fallbacks
@@ -1011,7 +1018,6 @@ verdandi/
 │  └─ testkit/                   # FAKE harness + fake provider, fixtures, helpers
 ├─ plugins/                      # first-party: platform-telegram, platform-discord,
 │                                #   platform-slack, memory-*, exec-*
-├─ policies/                     # default routing policy + model catalog (data)
 ├─ evals/                        # eval task sets + harness configs
 ├─ lab/                          # Python (uv): datasets/, router/, finetune/, notebooks/
 ├─ scripts/
