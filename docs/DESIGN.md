@@ -901,7 +901,7 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
 
 ## 17. Security and privacy
 
-- **Network:** verdandid listens on `127.0.0.1` only, and requires a token for each profile. Remote access is opt-in, through Tailscale.
+- **Network:** verdandid listens on `127.0.0.1` only, and requires a token for each profile. `verdandi start --host` opts in to the local network through a gate that relays to it and refuses every request from outside private and loopback ranges; a public `--host` address is refused. Remote access beyond the local network is opt-in, through Tailscale.
 - **Claude Code credentials are never touched.** The harness drives your own logged-in CLI.
   - Anthropic's Agent SDK docs say third-party developers may not offer claude.ai login or rate limits in their products without approval.
   - For personal use, this is you using your own CLI.
