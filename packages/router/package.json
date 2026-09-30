@@ -1,0 +1,11 @@
+{
+  "name": "@verdandi/router",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@verdandi/contracts": "workspace:*"
+  }
+}

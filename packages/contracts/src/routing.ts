@@ -1,0 +1,116 @@
+import { Schema } from "effect";
+import { Effort, HarnessId } from "./route.ts";
+
+/** The v1 task taxonomy (DESIGN §8.5). A task's class picks its route from the policy. */
+export const TaskClass = Schema.Literals([
+  "ask.search",
+  "ask.explain",
+  "chore.git",
+  "docs.write",
+  "code.edit.mechanical",
+  "code.edit.local",
+  "test.write",
+  "code.feature",
+  "code.refactor.large",
+  "debug.investigate",
+  "review",
+  "design.architecture",
+  "chat.general",
+]);
+export type TaskClass = typeof TaskClass.Type;
+
+/** How far routes move from the balanced table: Thrifty one step down, Max one step up (DESIGN §8.5). */
+export const BudgetMode = Schema.Literals(["thrifty", "balanced", "max"]);
+export type BudgetMode = typeof BudgetMode.Type;
+
+export const Access = Schema.Literals(["subscription", "metered", "local"]);
+export type Access = typeof Access.Type;
+
+/** Model capability tier, S < M < L < XL. A switch to a higher tier always passes the switch-cost gate. */
+export const Tier = Schema.Literals(["S", "M", "L", "XL"]);
+export type Tier = typeof Tier.Type;
+
+export const RouteTarget = Schema.Struct({ harness: HarnessId, provider: Schema.String, model: Schema.String, access: Access });
+export type RouteTarget = typeof RouteTarget.Type;
+
+/** A model as one harness and provider serve it (DESIGN §8.6). Prices are $/MTok list prices. */
+export const CatalogEntry = Schema.Struct({
+  ...RouteTarget.fields,
+  tier: Tier,
+  context: Schema.Int,
+  price: Schema.Struct({ input: Schema.Number, output: Schema.Number, cacheRead: Schema.Number, cacheWrite: Schema.Number }),
+});
+export type CatalogEntry = typeof CatalogEntry.Type;
+
+export const Catalog = Schema.Array(CatalogEntry);
+export type Catalog = typeof Catalog.Type;
+export const decodeCatalog = Schema.decodeUnknownSync(Catalog);
+
+/** A partial route: layers merge key by key, so a later layer can change only the effort. */
+export const RouteSpec = Schema.Struct({
+  /** Acceptable targets by name; the router picks the cheapest available one, ties going to the earlier. */
+  prefer: Schema.optionalKey(Schema.NonEmptyArray(Schema.String)),
+  effort: Schema.optionalKey(Effort),
+});
+export type RouteSpec = typeof RouteSpec.Type;
+
+const PhaseRule = Schema.Struct({ ...RouteSpec.fields, thrifty: Schema.optionalKey(RouteSpec), max: Schema.optionalKey(RouteSpec) });
+
+/** A class's route: balanced by default, per budget mode on top, and a `plan` override for tasks started in plan mode. */
+export const RouteRule = Schema.Struct({
+  ...PhaseRule.fields,
+  plan: Schema.optionalKey(PhaseRule),
+  /** Rough size of a task of this class, for cost estimates and the switch-cost gate. */
+  tokens: Schema.optionalKey(Schema.Int),
+});
+export type RouteRule = typeof RouteRule.Type;
+
+/**
+ * One layer of routing policy (DESIGN §8.6): built-in defaults, then profile, then project
+ * (`.verdandi/routing.yaml`). Unknown keys are errors, so a typo never silently does nothing.
+ */
+export const Policy = Schema.Struct({
+  mode: Schema.optionalKey(BudgetMode),
+  /** Only `rules` exists today; `decision`, `api` and `learned` come later (DESIGN §8.4). */
+  classifier: Schema.optionalKey(Schema.Literal("rules")),
+  /** Below this confidence the router uses `fallback`, the budget mode's safe default, instead of guessing. */
+  minConfidence: Schema.optionalKey(Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))),
+  targets: Schema.optionalKey(
+    Schema.Record(Schema.String, Schema.Struct({ harness: HarnessId, provider: Schema.String, model: Schema.String })),
+  ),
+  routes: Schema.optionalKey(Schema.Record(TaskClass, Schema.optionalKey(RouteRule))),
+  fallback: Schema.optionalKey(RouteRule),
+  /** When a task touches a path matching `match` (a glob), drop targets with a forbidden access mode or below `minTier`. */
+  restrictions: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({ match: Schema.String, forbid: Schema.optionalKey(Schema.Array(Access)), minTier: Schema.optionalKey(Tier) }),
+    ),
+  ),
+});
+export type Policy = typeof Policy.Type;
+
+/** Decodes one policy layer. Throws with every problem and its key path, e.g. `at ["routes"]["review"]["effort"]`. */
+export const decodePolicy = (data: unknown) => Schema.decodeUnknownSync(Policy)(data, { onExcessProperty: "error", errors: "all" });
+
+/** One step of how the router reached a decision, shown when the user opens the route's trace. */
+export const RuleTrace = Schema.Struct({
+  stage: Schema.Literals(["pin", "candidates", "signals", "classify", "policy", "switch"]),
+  note: Schema.String,
+});
+export type RuleTrace = typeof RuleTrace.Type;
+
+/** The router's answer for a task (DESIGN §8.1). Pinned tasks are classified too, so overrides can be learned from. */
+export const RouteDecision = Schema.Struct({
+  source: Schema.Literals(["pin", "policy"]),
+  taskClass: TaskClass,
+  difficulty: Schema.Number,
+  confidence: Schema.Number,
+  target: RouteTarget,
+  effort: Effort,
+  /** Effective cost in dollar equivalents (DESIGN §8.3). Absent for a pinned target the catalog doesn't know. */
+  estimate: Schema.optionalKey(Schema.Struct({ tokens: Schema.Int, cost: Schema.Number, switchCost: Schema.Number })),
+  /** One sentence, shown in the UI. */
+  reason: Schema.String,
+  trace: Schema.Array(RuleTrace),
+});
+export type RouteDecision = typeof RouteDecision.Type;

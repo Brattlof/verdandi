@@ -4,6 +4,7 @@
     { "path": "packages/contracts" },
     { "path": "packages/testkit" },
     { "path": "packages/trajectories" },
+    { "path": "packages/router" },
     { "path": "packages/harness-claude-code" },
     { "path": "apps/server" },
     { "path": "apps/web" }
