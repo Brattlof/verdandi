@@ -25,6 +25,16 @@ export const resolveHome = (argv: readonly string[]): string => {
   return home === undefined ? join(homedir(), ".verdandi", "profiles", "default") : resolve(home);
 };
 
+/** Whether a process with this pid exists: tells a running verdandid from a stale `server.json`. */
+export const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0); // signal 0 only checks that the process exists
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /** Written by `verdandi start`, read by clients: where the server listens and its token. */
 export const serverFile = (home: string) => join(home, "server.json");
 export type ServerFile = { readonly port: number; readonly token: string; readonly pid: number };

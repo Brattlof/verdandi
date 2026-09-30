@@ -61,6 +61,7 @@ bun run dev                                          # verdandid, state in ./.ve
 bun run verdandi open --home ./.verdandi-dev         # the web UI in your browser
 bun run verdandi chat --home ./.verdandi-dev         # chat with the thread for this folder
 bun run verdandi chat --home ./.verdandi-dev --model opus --effort high
+bun run verdandi doctor --home ./.verdandi-dev       # check Bun, Claude Code, git, the database and the server
 ```
 
 Without `--home`, Verdandi uses your real profile in `~/.verdandi/profiles/default`.
