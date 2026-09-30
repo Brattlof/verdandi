@@ -16,7 +16,8 @@ import { Effect, Stream } from "effect";
  * `release()`, "overage" reports a used-up subscription window and answers on metered usage, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan, each
  * finishing once `respond` answers, "steer" waits for the first steer and answers it, "edit <path>"
  * appends a line to that file through an Edit tool call, "subagent" delegates a read to a subagent whose
- * steps carry `parentToolUseId`; anything else is echoed back with fixed usage on the route's model.
+ * steps carry `parentToolUseId`, "background" does the same in a background subagent that reports after the main
+ * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back with fixed usage on the route's model.
  * `calls` records every run.
  */
 export const makeFakeHarness = () => {
@@ -143,6 +144,20 @@ export const makeFakeHarness = () => {
           ] satisfies Item[]
         ).map((item): HarnessEvent => ({ type: "item", item }));
         return Stream.concat(Stream.fromIterable([...start, ...steps]), reply(input.route.model, "the subagent read a.txt"));
+      }
+      if (input.text === "background") {
+        const parentToolUseId = "fake-agent-1";
+        const steps = (
+          [
+            { kind: "tool.call", toolUseId: parentToolUseId, name: "Agent", input: { prompt: "Read a.txt", run_in_background: true } },
+            { kind: "tool.result", toolUseId: parentToolUseId, isError: false, content: "Async agent launched successfully." },
+            { kind: "assistant.message", text: "launched a subagent" },
+            { kind: "tool.call", toolUseId: "fake-read-1", name: "Read", input: { file_path: "a.txt" }, parentToolUseId },
+            { kind: "tool.result", toolUseId: "fake-read-1", isError: false, content: "hello", parentToolUseId },
+            { kind: "assistant.message", text: "a.txt says hello", parentToolUseId },
+          ] satisfies Item[]
+        ).map((item): HarnessEvent => ({ type: "item", item }));
+        return Stream.concat(Stream.fromIterable([...start, ...steps]), reply(input.route.model, "the background subagent read a.txt"));
       }
       const echo = Stream.concat(
         Stream.fromIterable<HarnessEvent>([

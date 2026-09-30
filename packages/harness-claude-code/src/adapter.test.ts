@@ -4,7 +4,7 @@ import type { HarnessRunInput, InteractionMode, Route, ThreadId, TurnId } from "
 import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Fiber, Stream } from "effect";
 import { makeClaudeCodeAdapter, type QueryFn } from "./adapter.ts";
-import { assistant, init, result, textDelta, turn1Usage, turn2Usage } from "./fixtures.ts";
+import { assistant, init, result, sessionState, textDelta, toolResult, turn1Usage, turn2Usage } from "./fixtures.ts";
 
 const U1 = "00000000-0000-4000-8000-000000000001";
 const U2 = "00000000-0000-4000-8000-000000000002";
@@ -331,6 +331,72 @@ describe("Claude Code adapter", () => {
       const steer = spawns[0]?.prompts[1];
       expect(steer?.message.content).toBe("go left");
       expect(steer?.priority).toBeUndefined();
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("a background subagent's steps, and the reply to them, stay in the turn that started it", async () => {
+    const home = makeTempHome();
+    try {
+      // Claude Code 2.1.285: the result comes as soon as the main agent stops; the subagent reports after it,
+      // Claude Code answers it in a result of its own, and only then goes idle.
+      const { query } = stubQuery((prompt) =>
+        prompt === "delegate"
+          ? [
+              sessionState("running"),
+              assistant([{ type: "tool_use", id: "toolu_agent", name: "Agent", input: { run_in_background: true } }]),
+              toolResult("toolu_agent", "Async agent launched successfully."),
+              assistant([{ type: "text", text: "launched" }]),
+              result(turn1Usage),
+              assistant([{ type: "text", text: "found it" }], "toolu_agent"),
+              assistant([{ type: "text", text: "the agent found it" }]),
+              result(turn2Usage),
+              sessionState("idle"),
+            ]
+          : [sessionState("running"), result(turn2Usage), sessionState("idle")],
+      );
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const events = Array.from(await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "delegate", U1)))));
+      expect(events.filter((e) => e.type === "item").map((e) => e.item)).toEqual([
+        { kind: "tool.call", toolUseId: "toolu_agent", name: "Agent", input: { run_in_background: true } },
+        { kind: "tool.result", toolUseId: "toolu_agent", isError: false, content: "Async agent launched successfully." },
+        { kind: "assistant.message", text: "launched" },
+        { kind: "assistant.message", text: "found it", parentToolUseId: "toolu_agent" },
+        { kind: "assistant.message", text: "the agent found it" },
+      ]);
+      expect(events.filter((e) => e.type === "usage")).toHaveLength(3);
+      expect(events.filter((e) => e.type === "turn.finished")).toEqual([{ type: "turn.finished", status: "success" }]);
+      expect(events.at(-1)?.type).toBe("turn.finished");
+      // The next turn reads its own messages, not leftovers.
+      const next = Array.from(await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "next", U2, "sess-1")))));
+      expect(next.map((e) => e.type)).toEqual(["turn.finished"]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("interrupting a turn that only waits on a background subagent stops it without waiting out the grace", async () => {
+    const home = makeTempHome();
+    try {
+      // Without perTaskStopAffordance, Claude Code's interrupt kills background tasks and goes idle, with no result.
+      const { query, spawns } = stubQuery(async function* (_prompt, _options, _m, interrupted) {
+        yield sessionState("running");
+        yield assistant([{ type: "text", text: "launched" }]);
+        yield result(turn1Usage);
+        await interrupted;
+        yield sessionState("idle");
+      });
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const launched = Promise.withResolvers<void>();
+      const running = Effect.runFork(
+        adapter.run(input(home, "delegate", U1)).pipe(Stream.runForEach((e) => Effect.sync(() => e.type === "item" && launched.resolve()))),
+      );
+      await launched.promise;
+      const started = Date.now();
+      await Effect.runPromise(Fiber.interrupt(running));
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(spawns[0]?.log).toEqual(["prompt delegate", "interrupt", "close"]);
     } finally {
       removeTempHome(home);
     }
