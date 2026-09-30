@@ -249,6 +249,56 @@ describe("Claude Code adapter", () => {
     }
   });
 
+  test("a reroute lands before the plan's approval reaches Claude Code, and the next turn needs no switch (ADR 0013)", async () => {
+    const home = makeTempHome();
+    try {
+      const { query: stub, spawns } = stubQuery(async function* (prompt, options) {
+        if (prompt !== "plan it") return yield result(turn2Usage);
+        await options.canUseTool?.(
+          "ExitPlanMode",
+          { plan: "v1" },
+          { signal: new AbortController().signal, toolUseID: "toolu_1", requestId: "c1" },
+        );
+        spawns[0]?.log.push("approved");
+        yield result(turn1Usage);
+      });
+      // A model switch that settles a macrotask later, so an approval that didn't wait for it would log first.
+      const query = ((params: Parameters<QueryFn>[0]) => {
+        const q = stub(params);
+        const setModel = q.setModel.bind(q);
+        return Object.assign(q, {
+          setModel: async (model?: string) => {
+            await new Promise((resolve) => setImmediate(resolve));
+            await setModel(model);
+          },
+        });
+      }) as QueryFn;
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const sonnet: Route = { harness: "claude-code", model: "sonnet", effort: "medium" };
+      await Effect.runPromise(
+        adapter
+          .run(input(home, "plan it", U1, undefined, Stream.empty, haikuLow, "plan"))
+          .pipe(
+            Stream.runForEach((e) =>
+              e.type === "plan.requested"
+                ? Effect.andThen(adapter.reroute(threadId, sonnet), adapter.respond(threadId, e.requestId, { decision: "allow" }))
+                : Effect.void,
+            ),
+          ),
+      );
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "next", U2, "sess-1", Stream.empty, sonnet))));
+      expect(spawns[0]?.log).toEqual([
+        "prompt plan it",
+        "setModel sonnet",
+        'applyFlagSettings {"effortLevel":"medium"}',
+        "approved",
+        "prompt next",
+      ]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
   test("a live session the thread is no longer bound to is replaced", async () => {
     const home = makeTempHome();
     try {

@@ -27,8 +27,8 @@ const errorMessage = (cause: Cause.Cause<unknown>) => {
 };
 
 /**
- * Runs harness turns as side effects of `turn.started`, feeds them `turn.steered` messages, passes
- * `approval.resolved` answers back to the harness, stops turns the user interrupted, records each
+ * Runs harness turns as side effects of `turn.started`, feeds them `turn.steered` messages, moves a
+ * running turn to an approved plan's build route, passes `approval.resolved` answers back to the harness, stops turns the user interrupted, records each
  * completed turn's trajectory and its task's outcome, and recovers turns a previous run left behind.
  */
 export const ReactorLive = Layer.effect(
@@ -132,6 +132,8 @@ export const ReactorLive = Layer.effect(
         const queue = steerQueues.get(e.turnId);
         return queue ? Queue.offer(queue, e.text).pipe(Effect.asVoid) : Effect.void;
       }
+      // Committed right before the approval it goes with, so the harness switches before the agent's next step.
+      if (e.type === "task.rerouted") return live.get(e.threadId)?.reroute(e.threadId, e.to) ?? Effect.void;
       if (e.type === "approval.resolved") return live.get(e.threadId)?.respond(e.threadId, e.requestId, e.resolution) ?? Effect.void;
       if (e.type === "turn.completed") {
         const turn = latest.get(e.threadId);

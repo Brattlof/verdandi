@@ -7,6 +7,7 @@ import {
   type CommandId,
   type CommandRejected,
   describeRouteChange,
+  type Resolution,
   type Route,
   type RouteDecision,
   type TaskId,
@@ -15,7 +16,7 @@ import {
   type TurnId,
 } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
-import { Effect, ManagedRuntime } from "effect";
+import { Deferred, Effect, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AppLayer } from "../orchestration/app.ts";
 import { Engine } from "../orchestration/engine.ts";
@@ -320,5 +321,65 @@ describe("the decision layer", () => {
     expect(rows[0]).toMatchObject({ kind: "routing.task-class", low_confidence: 1 });
     expect(v?.task?.reason).toStartWith("Not sure what kind of task this is");
     expect(fake.calls.map((c) => c.route)).toEqual([{ harness: "fake", model: "fake-large", effort: "medium" }]);
+  });
+});
+
+describe("an approved plan's build", () => {
+  // The fake's "plan" text is chat.general at confidence 0.5, so the test lowers minConfidence to route it by class.
+  // Its models are free, so only a move to a stronger one passes the switch-cost gate: the plan runs small, the build large.
+  const planned = `${policy}  chat.general: { prefer: [large], effort: medium, plan: { prefer: [small], effort: high } }
+minConfidence: 0.4
+`;
+  const large: Route = { harness: "fake", model: "fake-large", effort: "medium" };
+
+  /** Sends the fake's "plan" in plan mode, answers its plan with `resolution`, and returns the pending request and the view after. */
+  const planTurn = (projectPath: string, resolution: Resolution, route?: Route) =>
+    Effect.gen(function* () {
+      const engine = yield* Engine;
+      const raised = yield* Deferred.make<void>();
+      yield* engine.react((s) =>
+        s.event.type === "plan.requested" ? Deferred.succeed(raised, undefined).pipe(Effect.asVoid) : Effect.void,
+      );
+      yield* dispatch(create(projectPath, route));
+      yield* dispatch({ type: "turn.send", commandId: id<CommandId>(), threadId, turnId: id<TurnId>(), text: "plan", mode: "plan" });
+      yield* Deferred.await(raised);
+      const request = (yield* view)?.pendingRequests[0];
+      if (request?.type !== "plan.requested") throw new Error("no plan request");
+      yield* dispatch({ type: "approval.respond", commandId: id<CommandId>(), threadId, requestId: request.requestId, resolution });
+      yield* drain;
+      return { request, after: yield* view };
+    });
+  test("moves the rest of the turn to the class's build route and says why", async () => {
+    const s = setup(planned);
+    const { request, after } = await s.run(planTurn(s.projectPath, { decision: "allow" }));
+    const reason = "The plan for this chat.general task is approved, so it runs on fake-large at medium effort.";
+    expect(request.execute?.reason).toBe(reason);
+    expect(s.fake.calls.map((c) => c.route.model)).toEqual(["fake-small"]);
+    expect(s.fake.reroutes.map((r) => r.route)).toEqual([large]);
+    expect(after?.route).toEqual(large);
+    expect(after?.task).toMatchObject({ source: "policy", reason });
+    const turn = after?.turns[0];
+    expect(turn?.items.map((i) => i.kind)).toEqual(["plan", "route.switch", "assistant.message"]);
+    expect(turn?.items[1]).toEqual({
+      kind: "route.switch",
+      from: { harness: "fake", model: "fake-small", effort: "high" },
+      to: large,
+      reason,
+    });
+    expect(turn?.usage.map((u) => u.model)).toEqual(["fake-large"]);
+  });
+
+  test("a rejected plan and a pinned thread stay on their route", async () => {
+    const denied = setup(planned);
+    const kept = await denied.run(planTurn(denied.projectPath, { decision: "deny" }));
+    expect(kept.request.execute).toBeDefined();
+    expect(denied.fake.reroutes).toEqual([]);
+    expect(kept.after?.route.model).toBe("fake-small");
+
+    const pinnedThread = setup(planned);
+    const onPin = await pinnedThread.run(planTurn(pinnedThread.projectPath, { decision: "allow" }, pinned));
+    expect(onPin.request.execute).toBeUndefined();
+    expect(pinnedThread.fake.reroutes).toEqual([]);
+    expect(onPin.after?.route).toEqual(pinned);
   });
 });

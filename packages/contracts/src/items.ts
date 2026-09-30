@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { Route } from "./route.ts";
 
 /** Set on a subagent's steps: the tool call that started the subagent. Absent on the main agent's. */
 const parentToolUseId = Schema.optionalKey(Schema.String);
@@ -24,6 +25,8 @@ export const Item = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("user.steer"), text: Schema.String }),
   /** A plan the agent proposed for approval. `filePath` points at the harness's own copy, when it keeps one. */
   Schema.Struct({ kind: Schema.Literal("plan"), text: Schema.String, filePath: Schema.optionalKey(Schema.String) }),
+  /** The router moved the rest of the turn to another route when the user approved its plan (DESIGN §8.2 lever 3). */
+  Schema.Struct({ kind: Schema.Literal("route.switch"), from: Route, to: Route, reason: Schema.String }),
 ]);
 export type Item = typeof Item.Type;
 

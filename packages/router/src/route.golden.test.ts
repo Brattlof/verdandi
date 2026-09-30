@@ -106,3 +106,25 @@ for (const g of GOLDENS) {
 test("every taxonomy class has a golden", () => {
   expect(new Set(GOLDENS.map((g) => g.taskClass)).size).toBe(Object.keys(loadPolicy().routes).length);
 });
+
+// An approved plan's build (DESIGN §8.2 lever 3): the task's class keeps, and its route drops the `plan` override.
+const PLANNED: { taskClass: TaskClass; routes: Record<BudgetMode, string> }[] = [
+  { taskClass: "code.feature", routes: { thrifty: "sonnet low", balanced: "sonnet medium", max: "sonnet high" } },
+  { taskClass: "code.refactor.large", routes: { thrifty: "sonnet medium", balanced: "sonnet high", max: "sonnet xhigh" } },
+];
+
+for (const g of PLANNED) {
+  for (const mode of ["thrifty", "balanced", "max"] as const) {
+    test(`${g.taskClass} after its plan is approved, in ${mode}: ${g.routes[mode]}`, () => {
+      const classify = () => ({ taskClass: g.taskClass, difficulty: 0.5, confidence: 0.9, why: "the task's class" });
+      const d = route(
+        { text: "1. Edit src/a.ts", mode: "build", planApproved: true },
+        loadPolicy([{ source: "test", data: { mode } }]),
+        classify,
+      );
+      expect(`${d.target.model} ${d.effort}`).toBe(g.routes[mode]);
+      expect(d.reason).toStartWith(`The plan for this ${g.taskClass} task is approved, so`);
+      expect(d.reason).toEndWith(`it runs on ${g.routes[mode].replace(" ", " at ")} effort.`);
+    });
+  }
+}

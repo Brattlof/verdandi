@@ -9,14 +9,21 @@ import {
   type HarnessEvent,
   type ProjectId,
   type Resolution,
+  type RouteDecision,
   type TaskId,
   type ThreadId,
   type TurnId,
 } from "@verdandi/contracts";
 import { Result } from "effect";
-import { decideRoute, type RoutingContext, type RoutingThread, routeOf } from "../routing/routing.ts";
+import { decideExecuteRoute, decideRoute, type RoutingContext, type RoutingThread, routeOf } from "../routing/routing.ts";
 
-export type PendingRequest = { readonly requestId: string; readonly turnId: TurnId; readonly kind: "approval" | "user-input" | "plan" };
+export type PendingRequest = {
+  readonly requestId: string;
+  readonly turnId: TurnId;
+  readonly kind: "approval" | "user-input" | "plan";
+  /** A plan's route for the build, when approving it moves the task (`plan.requested`'s `execute`). */
+  readonly execute?: RouteDecision;
+};
 
 /** What the decider needs to know about the command's thread; `undefined` when it doesn't exist. */
 export type DeciderState = {
@@ -28,10 +35,16 @@ export type DeciderState = {
         readonly taskId: TaskId | null;
         /** How many turns the thread has had. */
         readonly turns: number;
+        /** Why that task runs on its route, and whether it started in plan mode. Null without a task, or one from before routing. */
+        readonly taskDecision: RouteDecision | null;
+        readonly taskPlanned: boolean;
         readonly pendingRequests: readonly PendingRequest[];
       })
     | undefined;
-  /** Loaded only when a `turn.send` starts a task. Without it the task keeps the thread's route, unexplained. */
+  /**
+   * Loaded only when a `turn.send` starts a task, or a routed task's plan is proposed. Without it a task keeps
+   * the thread's route, unexplained, and an approved plan's build stays on it.
+   */
   readonly routing?: RoutingContext;
   /** The decision layer's answers about a `turn.send`'s text, asked by the engine: recorded, and routing reads them. */
   readonly decisions?: { readonly questions: readonly DecisionQuestion[]; readonly answers: readonly DecisionAnswer[] };
@@ -83,8 +96,15 @@ const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, ev
       return accept({ ...event, v: 1, threadId, turnId });
     case "user-input.requested":
       return accept({ ...event, v: 1, threadId, turnId });
-    case "plan.requested":
-      return accept({ ...event, v: 1, threadId, turnId });
+    case "plan.requested": {
+      // A routed task started in plan mode moves its build to the class's own route when the plan is approved.
+      const { thread, routing } = state;
+      const execute =
+        thread?.taskPlanned && thread.taskDecision && routing
+          ? decideExecuteRoute(thread, routing, thread.taskDecision, event.plan)
+          : undefined;
+      return accept({ ...event, v: 1, threadId, turnId, ...(execute && { execute }) });
+    }
     case "turn.finished":
       return accept(...denyPending(state, threadId, turnId, "The turn ended before this was answered."), {
         type: "turn.completed",
@@ -161,14 +181,23 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
         `A ${request.kind} request takes ${fits[request.kind].join(" or ")}, not ${c.resolution.decision}.`,
       );
     }
-    return accept({
+    const resolved: Event = {
       type: "approval.resolved",
       v: 1,
       threadId: c.threadId,
       turnId: request.turnId,
       requestId: c.requestId,
       resolution: c.resolution,
-    });
+    };
+    // The build moves only if the thread is still routed and on the task the plan was made for.
+    const { execute } = request;
+    const { pinned, taskId, route } = state.thread;
+    if (c.resolution.decision !== "allow" || !execute || pinned || !taskId) return accept(resolved);
+    const to = routeOf(execute);
+    return accept(
+      { type: "task.rerouted", v: 1, threadId: c.threadId, taskId, turnId: request.turnId, from: route, to, decision: execute },
+      resolved,
+    );
   },
   "turn.steer": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);

@@ -174,6 +174,9 @@ export const chat = async (argv: readonly string[]) => {
           if (e.type === "task.started" && e.decision?.source === "policy") {
             process.stdout.write(`[routed to ${e.route.model} ${e.route.effort} on ${e.route.harness}: ${e.decision.reason}]\n`);
           }
+          if (e.type === "task.rerouted") {
+            process.stdout.write(`[plan approved: the build runs on ${e.to.model} ${e.to.effort}: ${e.decision.reason}]\n`);
+          }
           if (e.type === "turn.started") running = lastTurn = e.turnId;
           if (e.type === "approval.requested" || e.type === "user-input.requested" || e.type === "plan.requested") addRequest(e);
           if (e.type === "approval.resolved") removeRequest(e.requestId);

@@ -98,8 +98,17 @@ export const EngineLive = (options: EngineOptions = {}) =>
             const state = yield* loadDeciderState(command.threadId);
             const current = state.thread;
             const send = command.type === "turn.send" && current?.runningTurnId === null ? command : undefined;
-            // Routing reads the project's policy file, so only when this command starts a task.
-            const routing = send && current?.taskId === null && options.routing ? yield* options.routing(current.projectPath) : undefined;
+            // A routed task started in plan mode routes its build when it proposes its plan.
+            const plans =
+              command.type === "harness.report" &&
+              command.event.type === "plan.requested" &&
+              current?.pinned === false &&
+              current.taskPlanned;
+            // Routing reads the project's policy file, so only when this command starts a task or routes a planned task's build.
+            const routing =
+              current && ((send && current.taskId === null) || plans) && options.routing
+                ? yield* options.routing(current.projectPath)
+                : undefined;
             // A new task is classified, and a later turn is asked whether it corrects the agent's last answer.
             const questions = send ? [...(routing ? taskQuestions(routing) : []), ...(current?.turns ? [correctingQuestion] : [])] : [];
             // ponytail: asked inside the write transaction, which is free on `rules`; ask before it once a backend takes real time (ADR 0009).

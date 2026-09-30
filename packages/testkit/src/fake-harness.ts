@@ -8,13 +8,14 @@ import type {
   Item,
   Resolution,
   Route,
+  ThreadId,
 } from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
 
 /**
  * A scripted harness for tests. Text "fail" fails the turn, "hang" runs until interrupted, "gate" waits for
  * `release()`, "overage" reports a used-up subscription window and answers on metered usage, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan, each
- * finishing once `respond` answers, "steer" waits for the first steer and answers it, "edit <path>"
+ * finishing once `respond` answers on the model of the route `reroute` last moved the turn to, "steer" waits for the first steer and answers it, "edit <path>"
  * appends a line to that file through an Edit tool call, "subagent" delegates a read to a subagent whose
  * steps carry `parentToolUseId`, "background" does the same in a background subagent that reports after the main
  * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back with fixed usage on the route's model.
@@ -22,6 +23,10 @@ import { Effect, Stream } from "effect";
  */
 export const makeFakeHarness = () => {
   const calls: { resumeSessionId: string | undefined; route: Route; text: string; mode: InteractionMode }[] = [];
+  /** Every `reroute`, in order. A rerouted turn answers on its new route's model. */
+  const reroutes: { threadId: ThreadId; route: Route }[] = [];
+  const routes = new Map<ThreadId, Route>();
+  const routeOf = (input: HarnessRunInput) => routes.get(input.threadId) ?? input.route;
   const waiting = new Map<string, (resolution: Resolution) => void>();
   let sessions = 0;
   let requests = 0;
@@ -45,22 +50,25 @@ export const makeFakeHarness = () => {
     ]);
 
   /** Reports the request, then replies with what `answer` makes of the resolution. */
-  const request = (model: string, event: (requestId: string) => HarnessEvent, answer: (r: Resolution) => string) => {
+  const request = (input: HarnessRunInput, event: (requestId: string) => HarnessEvent, answer: (r: Resolution) => string) => {
     const requestId = `fake-request-${++requests}`;
     // Registered before the request is reported, so an answer can never arrive first.
     const answered = new Promise<Resolution>((resolve) => waiting.set(requestId, resolve));
     return Stream.concat(
       Stream.succeed(event(requestId)),
-      Stream.unwrap(Effect.promise(() => answered).pipe(Effect.map((r) => reply(model, answer(r))))),
+      // Read once answered: `reroute` may have moved the turn meanwhile.
+      Stream.unwrap(Effect.promise(() => answered).pipe(Effect.map((r) => reply(routeOf(input).model, answer(r))))),
     );
   };
 
-  const adapter: HarnessAdapter & { calls: typeof calls; release: () => void } = {
+  const adapter: HarnessAdapter & { calls: typeof calls; reroutes: typeof reroutes; release: () => void } = {
     id: "fake",
     calls,
+    reroutes,
     release: () => release(),
     run(input: HarnessRunInput) {
       calls.push({ resumeSessionId: input.resumeSessionId, route: input.route, text: input.text, mode: input.mode });
+      routes.set(input.threadId, input.route);
       const start: HarnessEvent[] =
         input.resumeSessionId === undefined
           ? [{ type: "session.started", sessionId: `fake-session-${++sessions}`, harnessVersion: "fake" }]
@@ -76,7 +84,7 @@ export const makeFakeHarness = () => {
       }
       if (input.text === "approve") {
         const edit = request(
-          input.route.model,
+          input,
           (requestId) => ({ type: "approval.requested", requestId, toolName: "Edit", input: { file_path: "a.txt" } }),
           (r) => (r.decision === "allow" ? "edited a.txt" : "left a.txt alone"),
         );
@@ -85,7 +93,7 @@ export const makeFakeHarness = () => {
       if (input.text === "ask") {
         const question = "Which color?";
         const ask = request(
-          input.route.model,
+          input,
           (requestId) => ({
             type: "user-input.requested",
             requestId,
@@ -107,7 +115,7 @@ export const makeFakeHarness = () => {
       }
       if (input.text === "plan") {
         const plan = request(
-          input.route.model,
+          input,
           (requestId) => ({ type: "plan.requested", requestId, plan: "1. Edit a.txt" }),
           (r) =>
             r.decision === "allow" ? "built the plan" : `kept planning${r.decision === "deny" && r.feedback ? `: ${r.feedback}` : ""}`,
@@ -173,6 +181,11 @@ export const makeFakeHarness = () => {
       Effect.sync(() => {
         waiting.get(requestId)?.(resolution);
         waiting.delete(requestId);
+      }),
+    reroute: (threadId, route) =>
+      Effect.sync(() => {
+        reroutes.push({ threadId, route });
+        if (routes.has(threadId)) routes.set(threadId, route);
       }),
   };
   return adapter;

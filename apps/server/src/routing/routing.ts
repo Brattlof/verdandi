@@ -1,14 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type {
-  BudgetMode,
-  Catalog,
-  DecisionAnswer,
-  HarnessId,
-  InteractionMode,
-  Route,
-  RouteDecision,
-  RouteTarget,
+import {
+  type BudgetMode,
+  type Catalog,
+  type DecisionAnswer,
+  describeRouteChange,
+  type HarnessId,
+  type InteractionMode,
+  type Route,
+  type RouteDecision,
+  type RouteTarget,
 } from "@verdandi/contracts";
 import { classificationOf, followUpRules, makeDecide, routingQuestions, routingRules, rulesBackend } from "@verdandi/decisions";
 import { builtInCatalog, loadPolicy, PolicyError, type ResolvedPolicy, RouterError, route, rules, signals } from "@verdandi/router";
@@ -85,6 +86,43 @@ export const taskQuestions = (routing: RoutingContext) =>
 
 /** When the answers hold no classification, the router takes its safe default. */
 const unclassified = { taskClass: "chat.general", difficulty: 0, confidence: 0, lowConfidence: true, why: "no classification" } as const;
+
+/**
+ * Pure: where the build moves when the user approves `plan`, the plan of the routed task that `task`
+ * decided in plan mode (DESIGN §8.2 lever 3): its class's route without the plan-mode override, through
+ * the switch-cost gate, on the harness the turn is running on. Undefined when the build stays put: the
+ * route is the same, the gate keeps the warm session, the policy is broken, or no target is left.
+ */
+export const decideExecuteRoute = (
+  thread: RoutingThread,
+  routing: RoutingContext,
+  task: RouteDecision,
+  plan: string,
+): RouteDecision | undefined => {
+  if (thread.pinned || task.source !== "policy" || Result.isFailure(routing.policy)) return undefined;
+  const policy = thread.budgetMode ? { ...routing.policy.success, mode: thread.budgetMode } : routing.policy.success;
+  const current = { target: targetOf(thread.route, policy.catalog), effort: thread.route.effort };
+  const { taskClass, difficulty, confidence } = task;
+  const classify = () => ({ taskClass, difficulty, confidence, why: "the task's class, from when it started" });
+  try {
+    const decision = route(
+      {
+        text: plan,
+        mode: "build",
+        planApproved: true,
+        // A running turn can't change harness.
+        harnesses: [thread.route.harness],
+        ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens } }),
+      },
+      policy,
+      classify,
+    );
+    return describeRouteChange(thread.route, routeOf(decision)) === "" ? undefined : decision;
+  } catch (e) {
+    if (e instanceof RouterError) return undefined;
+    throw e;
+  }
+};
 
 /**
  * Pure: the decision for a new task in `thread` starting with `text`, classified by the decision layer's

@@ -31,6 +31,11 @@ export type RouteInput = {
   readonly providers?: Readonly<Record<string, { readonly healthy?: boolean; readonly remaining?: number }>>;
   /** The harnesses verdandid runs; targets on any other are dropped. Absent, every harness counts. */
   readonly harnesses?: readonly HarnessId[];
+  /**
+   * The user approved the task's plan: route the build that follows (DESIGN §8.2 lever 3). `text` is the
+   * plan, and the classifier should return the task's own class, so the class's route without its `plan` override applies.
+   */
+  readonly planApproved?: boolean;
 };
 
 /** No target is available at all. The message says why each one dropped out. */
@@ -75,7 +80,7 @@ const describe = (t: RouteTarget, effort: Effort) => `${t.model} at ${effort} ef
  */
 export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Classifier): RouteDecision => {
   const trace: RuleTrace[] = [];
-  const planning = input.mode === "plan";
+  const planning = input.mode === "plan" && !input.planApproved;
 
   // Stages 2 and 3 run even for pins, so the decision records what the user overrode.
   const sig = signals(input.text, input.mode);
@@ -154,13 +159,15 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
     preferred.length > 0 ? cheapest(preferred) : cheapest(above.length > 0 ? above : others.filter((t) => rank(t.tier) === strongest));
   const lead = unsure
     ? `Not sure what kind of task this is (best guess ${c.taskClass}, confidence ${c.confidence.toFixed(2)})`
-    : `Looks like ${c.taskClass}${planning ? " in plan mode" : ""}`;
+    : input.planApproved
+      ? `The plan for this ${c.taskClass} task is approved`
+      : `Looks like ${c.taskClass}${planning ? " in plan mode" : ""}`;
   // Named only when it moved the route off the balanced one, so the reason says why a task ran cheaper or stronger.
   const balanced = resolveSpec(rule, "balanced", planning);
   const byMode = balanced.effort !== spec.effort || balanced.prefer?.join() !== spec.prefer?.join() ? `in ${policy.mode} mode ` : "";
   trace.push({
     stage: "policy",
-    note: `${unsure ? "fallback" : c.taskClass}${planning ? " (plan)" : ""} in ${policy.mode} mode accepts ${accepted.join(", ") || "nothing"} at ${effort}; picked ${pick.model}, ~${kTokens(tokens)} tokens for ${dollars(cost(pick))}`,
+    note: `${unsure ? "fallback" : c.taskClass}${planning ? " (plan)" : input.planApproved ? " (build after its plan)" : ""} in ${policy.mode} mode accepts ${accepted.join(", ") || "nothing"} at ${effort}; picked ${pick.model}, ~${kTokens(tokens)} tokens for ${dollars(cost(pick))}`,
   });
   let reason =
     preferred.length > 0

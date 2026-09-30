@@ -20,6 +20,8 @@ type Draft = {
   readonly taskId: TaskId;
   readonly threadId: ThreadId;
   readonly route: Route;
+  /** The route the task runs on now: an approved plan moves it off `route`. */
+  current: Route;
   turns: number;
   /** The status of the task's last turn; undefined while that turn runs. */
   last: TurnStatus | undefined;
@@ -45,7 +47,17 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
   let current: Draft | undefined;
   for (const { event: e, at } of events) {
     if (e.type === "task.started") {
-      tasks.push({ ...e, turns: 0, last: undefined, startedMs: 0, wallMs: 0, corrections: 0, override: undefined, usage: new Map() });
+      tasks.push({
+        ...e,
+        current: e.route,
+        turns: 0,
+        last: undefined,
+        startedMs: 0,
+        wallMs: 0,
+        corrections: 0,
+        override: undefined,
+        usage: new Map(),
+      });
       continue;
     }
     const task = tasks.at(-1);
@@ -53,7 +65,10 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
     switch (e.type) {
       case "thread.route.changed":
         // Pinning the route the router picked keeps the task's route: nothing was overridden.
-        if (describeRouteChange(e.from, e.to) !== "") task.override = { from: task.route, to: e.to };
+        if (describeRouteChange(e.from, e.to) !== "") task.override = { from: task.current, to: e.to };
+        break;
+      case "task.rerouted":
+        task.current = e.to;
         break;
       case "turn.started":
         current = task;
