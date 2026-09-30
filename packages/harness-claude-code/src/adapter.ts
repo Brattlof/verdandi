@@ -58,6 +58,8 @@ type Session = {
   sessionId: string | undefined;
   /** The session's transcript file, as Claude Code's hooks report it. */
   transcriptPath: string | undefined;
+  /** Whether the CLI reports `session_state_changed`. Older ones don't, and their turns end at the last result. */
+  reportsState: boolean;
 };
 
 const decodeQuestions = Schema.decodeUnknownOption(Schema.Struct({ questions: Schema.Array(Question) }));
@@ -155,6 +157,8 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
           },
         ],
       },
+      // `idle` marks the real end of a turn: after the result, background subagents can still run and be answered (ADR 0011).
+      env: { ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1" },
       // Connectors attach nondeterministically and would change the tool list between turns (ADR 0001).
       settings: { disableClaudeAiConnectors: true },
       canUseTool,
@@ -184,6 +188,7 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
     buildMode: undefined,
     sessionId: undefined,
     transcriptPath: undefined,
+    reportsState: false,
   };
   return session;
 };
@@ -256,10 +261,12 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
       ),
     );
 
-  /** Reads the turn `run` opened until its last result. */
+  /** Reads the turn `run` opened until Claude Code goes idle, or on CLIs that don't report state, until its last result. */
   async function* turn(session: Session, input: HarnessRunInput): AsyncGenerator<HarnessEvent> {
     // Read lazily: a read left pending when the turn finishes would swallow the next turn's first message.
     let pending: Promise<IteratorResult<SDKMessage>> | undefined;
+    /** A success held until `idle`: background subagents report after it, and Claude Code answers them in a result of its own. */
+    let held: HarnessEvent | undefined;
     while (true) {
       pending ??= session.next();
       // While canUseTool waits for an answer the SDK sends nothing, so requests are raced against the next message.
@@ -274,6 +281,16 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
         });
       }
       const msg = step.value;
+      if (msg.type === "system" && msg.subtype === "session_state_changed") {
+        session.reportsState = true;
+        // An interrupt while only background work runs goes idle with no result of its own; the turn has already ended as interrupted then.
+        if (msg.state === "idle" && held) {
+          session.live = false;
+          yield held;
+          return;
+        }
+        continue;
+      }
       if (msg.type === "system" && msg.subtype === "init" && msg.permissionMode !== "plan") session.buildMode = msg.permissionMode;
       const normalized = normalize(msg, session.context);
       session.context = normalized.context;
@@ -287,6 +304,11 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
         continue;
       }
       const finished = events.find((e) => e.type === "turn.finished");
+      if (finished?.status === "success" && session.reportsState) {
+        held = finished;
+        yield* events.filter((e) => e !== finished);
+        continue;
+      }
       if (finished) session.live = false;
       yield* events;
       if (finished) {

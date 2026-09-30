@@ -29,6 +29,9 @@ export const toolResult = (tool_use_id: string, content: unknown, is_error = fal
     message: { role: "user", content: [{ type: "tool_result", tool_use_id, content, is_error }] },
   });
 
+/** Sent only when `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS` is set; `idle` comes after background subagents are done too. */
+export const sessionState = (state: "running" | "idle") => sdk({ type: "system", subtype: "session_state_changed", state });
+
 export const rateLimit = (info: object) => sdk({ type: "rate_limit_event", rate_limit_info: info });
 
 const usage = (input: number, output: number, cacheRead: number, cacheWrite: number, cost: number) => ({

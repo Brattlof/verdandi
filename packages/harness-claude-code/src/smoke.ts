@@ -2,7 +2,8 @@
 // Runs one Haiku turn, a resumed second turn, a steered third turn and a planned fourth turn in a temp
 // folder, printing the normalized events. The third turn should end with STEERED; the fourth should
 // propose two plans, the first rejected with feedback, and end with greeting.txt created. The fifth
-// delegates to a subagent, whose steps should carry parentToolUseId.
+// delegates to a subagent, whose steps should carry parentToolUseId. The sixth delegates to a background
+// subagent: its steps and the reply to them should arrive before the turn's turn.finished.
 //   bun packages/harness-claude-code/src/smoke.ts
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -74,3 +75,11 @@ await turn(
 console.log(
   `subagent steps: ${subagentSteps}, transcript: ${transcriptPath} (exists: ${transcriptPath ? existsSync(transcriptPath) : false})`,
 );
+console.log("-- turn 6, a background subagent");
+subagentSteps = 0;
+await turn(
+  "Use the Agent tool with run_in_background: true to have a general-purpose subagent run `sleep 3; echo hi` with Bash. Do not wait for it: reply with exactly LAUNCHED now, and once it reports, reply with exactly: DONE",
+);
+console.log(`background subagent steps in the turn: ${subagentSteps}`);
+// Each turn's adapter keeps its Claude Code process open, which would keep Bun running.
+process.exit(0);

@@ -536,7 +536,7 @@ interface HarnessAdapter {
   - effort per task through the `effort` option; a mid-task change through `applyFlagSettings({ effortLevel })` (ADR 0002);
   - subagents via `agents`, each with its own `model`.
 - **Approvals:** `canUseTool` becomes an approval event. `AskUserQuestion` becomes a user-input request.
-- **Sessions:** resume, fork, and resuming at a given message. Transcripts stay where Claude Code keeps them; Verdandi stores pointers (the session id, and the file its `UserPromptSubmit` hook reports) and a normalized copy for trajectories. Subagents' messages are forwarded whole (`forwardSubagentText`) and recorded as items tagged with the tool call that started the subagent.
+- **Sessions:** resume, fork, and resuming at a given message. Transcripts stay where Claude Code keeps them; Verdandi stores pointers (the session id, and the file its `UserPromptSubmit` hook reports) and a normalized copy for trajectories. Subagents' messages are forwarded whole (`forwardSubagentText`) and recorded as items tagged with the tool call that started the subagent. A turn ends when Claude Code goes idle, not at its first result, so a background subagent's steps, and Claude Code's answer to them, stay in the turn that started it (ADR 0011).
 - **Verdandi tools reach Claude Code over MCP**, through an MCP server running inside verdandid (§9.6). This gives Claude Code sessions Verdandi's memory, session search, scheduling, messaging and escalation.
 - **Hooks:**
   - `PostToolUse` checks verifier results.

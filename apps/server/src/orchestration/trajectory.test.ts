@@ -1,10 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
-import { type Command, type CommandId, type ThreadId, Trajectory, type TurnId } from "@verdandi/contracts";
+import { type Command, type CommandId, type Item, type ThreadId, Trajectory, type TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AppLayer } from "./app.ts";
 import { Engine } from "./engine.ts";
+import { loadThreadView } from "./projector.ts";
 import { Reactor } from "./reactor.ts";
 
 const homes: string[] = [];
@@ -68,6 +69,26 @@ test("a completed turn's trajectory reads back with its provenance, and includes
   });
   const subagentSteps = delegated?.trajectory.items.filter((i) => "parentToolUseId" in i && i.parentToolUseId === "fake-agent-1");
   expect(subagentSteps?.map((i) => i.kind)).toEqual(["tool.call", "tool.result", "assistant.message"]);
+});
+
+test("a background subagent's steps land under the turn that started it, in the thread view and the trajectory", async () => {
+  const [turnId, view, rows] = await withApp(
+    newHome(),
+    Effect.gen(function* () {
+      yield* create;
+      const id = yield* runTurn("background");
+      yield* runTurn("hi");
+      return [id, yield* loadThreadView(threadId), yield* trajectories] as const;
+    }),
+  );
+  const underAgent = (items: readonly Item[] | undefined) =>
+    items?.filter((i) => "parentToolUseId" in i && i.parentToolUseId === "fake-agent-1").map((i) => i.kind);
+  const turn = view?.turns.find((t) => t.turnId === turnId);
+  expect(turn?.status).toBe("success");
+  expect(underAgent(turn?.items)).toEqual(["tool.call", "tool.result", "assistant.message"]);
+  expect(turn?.items.at(-1)).toEqual({ kind: "assistant.message", text: "the background subagent read a.txt" });
+  expect(underAgent(rows.find((r) => r.turn_id === turnId)?.trajectory.items)).toEqual(["tool.call", "tool.result", "assistant.message"]);
+  expect(view?.turns.filter((t) => t.turnId !== turnId).flatMap((t) => underAgent(t.items) ?? [])).toEqual([]);
 });
 
 test("a turn left without a trajectory gets one when verdandid next starts", async () => {
