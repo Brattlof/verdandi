@@ -15,6 +15,7 @@ const idle: DeciderState = {
     projectPath: "C:/r",
     route,
     pinned: true,
+    budgetMode: null,
     cachedTokens: 0,
     runningTurnId: null,
     sessionId: null,
@@ -27,6 +28,7 @@ const running: DeciderState = {
     projectPath: "C:/r",
     route,
     pinned: true,
+    budgetMode: null,
     cachedTokens: 0,
     runningTurnId: turnId,
     sessionId: "s1",
@@ -39,6 +41,7 @@ const waiting: DeciderState = {
     projectPath: "C:/r",
     route,
     pinned: true,
+    budgetMode: null,
     cachedTokens: 0,
     runningTurnId: turnId,
     sessionId: "s1",
@@ -165,6 +168,7 @@ describe("decide", () => {
         projectPath: "C:/r",
         route,
         pinned: true,
+        budgetMode: null,
         cachedTokens: 0,
         runningTurnId: turnId,
         sessionId: "s1",
@@ -197,6 +201,15 @@ describe("decide", () => {
     ]);
     expect(events(decide(idle, { type: "thread.route.set", commandId, threadId, route }))).toEqual([]);
     expect(reason(decide(none, { type: "thread.route.set", commandId, threadId, route: to }))).toBe("ThreadNotFound");
+  });
+
+  test("records a budget mode change, and clearing it, but not setting the one the thread has", () => {
+    const set = (mode: "max" | null) => ({ type: "thread.budget.set", commandId, threadId, mode }) as const;
+    expect(events(decide(running, set("max")))).toEqual([{ type: "thread.budget.changed", v: 1, threadId, mode: "max" }]);
+    expect(events(decide(running, set(null)))).toEqual([]);
+    const withMax = { thread: running.thread && { ...running.thread, budgetMode: "max" as const } };
+    expect(events(decide(withMax, set(null)))).toEqual([{ type: "thread.budget.changed", v: 1, threadId, mode: null }]);
+    expect(reason(decide(none, set("max")))).toBe("ThreadNotFound");
   });
 
   test("a running turn defers a model change but blocks a harness change", () => {

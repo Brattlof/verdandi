@@ -5,7 +5,7 @@ import { ApprovalRequested, PlanRequested, StoredEvent, TurnStatus, UserInputReq
 import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, Usage } from "./items.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
-import { RouteDecision } from "./routing.ts";
+import { BudgetMode, RouteDecision } from "./routing.ts";
 import { RouteCost } from "./task.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
@@ -77,6 +77,8 @@ export const ThreadView = Schema.Struct({
   route: Route,
   /** True when the user picked the route; false when the router picks each new task's. */
   pinned: Schema.Boolean,
+  /** The budget mode the user set for this thread's tasks; null when the policy's applies. */
+  budgetMode: Schema.NullOr(BudgetMode),
   /**
    * The task the next turn continues, and why it runs on `route`; null when the next turn starts a new
    * one. `source` and `reason` are absent on tasks from before routing.

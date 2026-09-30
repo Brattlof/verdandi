@@ -157,6 +157,12 @@ const routeDecisions = Effect.gen(function* () {
   yield* sql`alter table threads add column pinned integer not null default 1`;
 });
 
+/** The budget mode the user set for a thread's tasks (DESIGN §8.3); null uses the policy's. */
+const budgetMode = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table threads add column budget_mode text`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -166,4 +172,5 @@ export const migrations = {
   "6_quota": quota,
   "7_tasks": tasks,
   "8_route_decisions": routeDecisions,
+  "9_budget_mode": budgetMode,
 };

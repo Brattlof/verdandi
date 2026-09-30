@@ -3,6 +3,7 @@ import { HarnessEvent } from "./harness.ts";
 import { CommandId, ThreadId, TurnId } from "./ids.ts";
 import { Resolution } from "./requests.ts";
 import { InteractionMode, Route } from "./route.ts";
+import { BudgetMode } from "./routing.ts";
 
 export const ThreadCreate = Schema.Struct({
   type: Schema.Literal("thread.create"),
@@ -58,6 +59,17 @@ export const ThreadRouteUnpin = Schema.Struct({
   threadId: ThreadId,
 });
 
+/**
+ * The user choosing how the router trades cost against strength for this thread's tasks; `null` goes back
+ * to the policy's mode. It applies from the next task, which the thread's next turn starts.
+ */
+export const ThreadBudgetSet = Schema.Struct({
+  type: Schema.Literal("thread.budget.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  mode: Schema.NullOr(BudgetMode),
+});
+
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
   type: Schema.Literal("harness.report"),
@@ -82,6 +94,7 @@ export const ClientCommand = Schema.Union([
   TurnInterrupt,
   ThreadRouteSet,
   ThreadRouteUnpin,
+  ThreadBudgetSet,
   ApprovalRespond,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
@@ -93,6 +106,7 @@ export const Command = Schema.Union([
   TurnInterrupt,
   ThreadRouteSet,
   ThreadRouteUnpin,
+  ThreadBudgetSet,
   ApprovalRespond,
   HarnessReport,
   TurnRecover,

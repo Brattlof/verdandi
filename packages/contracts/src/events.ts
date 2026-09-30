@@ -3,7 +3,7 @@ import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields } from "./items.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
-import { RouteDecision } from "./routing.ts";
+import { BudgetMode, RouteDecision } from "./routing.ts";
 
 // Events are append-only and must stay readable forever. To change one, add a v2 schema
 // next to v1 and upgrade v1 to v2 when it is read; never edit or delete a published version.
@@ -51,6 +51,16 @@ export const ThreadRouteUnpinned = Schema.Struct({
   type: Schema.Literal("thread.route.unpinned"),
   v: v1,
   threadId: ThreadId,
+});
+/**
+ * The user set the thread's budget mode, or cleared it back to the policy's (`null`). An unrouted
+ * thread's next turn starts a new task routed under it; a pinned thread keeps it for when it's unpinned.
+ */
+export const ThreadBudgetChanged = Schema.Struct({
+  type: Schema.Literal("thread.budget.changed"),
+  v: v1,
+  threadId: ThreadId,
+  mode: Schema.NullOr(BudgetMode),
 });
 export const TurnStarted = Schema.Struct({
   type: Schema.Literal("turn.started"),
@@ -154,6 +164,7 @@ export const Event = Schema.Union([
   ThreadCreated,
   ThreadRouteChanged,
   ThreadRouteUnpinned,
+  ThreadBudgetChanged,
   TaskStarted,
   TurnStarted,
   HarnessSessionBound,
@@ -184,6 +195,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.created@1": ThreadCreated,
   "thread.route.changed@1": ThreadRouteChanged,
   "thread.route.unpinned@1": ThreadRouteUnpinned,
+  "thread.budget.changed@1": ThreadBudgetChanged,
   "task.started@1": TaskStarted,
   "turn.started@1": TurnStarted,
   "harness.session.bound@1": HarnessSessionBound,

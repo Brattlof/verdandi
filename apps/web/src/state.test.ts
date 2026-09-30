@@ -25,6 +25,7 @@ const snapshot: ThreadFeed = {
     projectPath: "C:/Users/a b/repo",
     route,
     pinned: true,
+    budgetMode: null,
     task: null,
     sessionId: null,
     busy: false,
@@ -224,4 +225,13 @@ test("a routed task moves the thread to its route with its reason; a pick pins i
   const picked = applyThreadFeed(started, event(3, { type: "thread.route.changed", v: 1, threadId, from: routed, to: routed, by: "user" }));
   expect(picked).toMatchObject({ pinned: true, task: null });
   expect(applyThreadFeed(picked, event(4, { type: "thread.route.unpinned", v: 1, threadId }))).toMatchObject({ pinned: false, task: null });
+});
+
+test("a budget mode change ends a routed thread's task but keeps a pinned one's, matching the projector", () => {
+  const taskId = turnId as string as TaskId;
+  const task = event(2, { type: "task.started", v: 1, threadId, taskId, route });
+  const budget = event(3, { type: "thread.budget.changed", v: 1, threadId, mode: "max" });
+  const routed = fold([{ ...snapshot, thread: { ...snapshot.thread, pinned: false } }, task, budget]);
+  expect(routed).toMatchObject({ budgetMode: "max", task: null });
+  expect(fold([snapshot, task, budget])).toMatchObject({ budgetMode: "max", task: { taskId } });
 });

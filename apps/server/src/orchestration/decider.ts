@@ -127,6 +127,12 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     return accept({ type: "thread.route.changed", v: 1, threadId: c.threadId, from, to: c.route, by: "user" });
   },
+  "thread.budget.set": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
+    return state.thread.budgetMode === c.mode
+      ? accept()
+      : accept({ type: "thread.budget.changed", v: 1, threadId: c.threadId, mode: c.mode });
+  },
   "thread.route.unpin": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     return state.thread.pinned ? accept({ type: "thread.route.unpinned", v: 1, threadId: c.threadId }) : accept();

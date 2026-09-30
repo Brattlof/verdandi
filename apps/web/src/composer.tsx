@@ -1,4 +1,4 @@
-import type { CommandId, InteractionMode, Question, Resolution, ThreadId, ThreadView, TurnId } from "@verdandi/contracts";
+import type { BudgetMode, CommandId, InteractionMode, Question, Resolution, ThreadId, ThreadView, TurnId } from "@verdandi/contracts";
 import { type FormEvent, type KeyboardEvent, useEffect, useId, useState } from "react";
 import { type Connection, type Routed, uuid } from "./client.ts";
 import { RouteChip } from "./route.tsx";
@@ -97,6 +97,7 @@ export const Composer = ({
             {hint}
             {running ? "; applies from the next turn" : ""}
           </span>
+          <BudgetSwitch connection={connection} thread={thread} running={running !== undefined} onError={setError} />
         </fieldset>
         <label className="sr-only" htmlFor="message">
           {running ? "Steer the running turn" : "Message"}
@@ -132,6 +133,63 @@ export const Composer = ({
   );
 };
 
+const budgets: { value: BudgetMode | null; label: string }[] = [
+  { value: null, label: "Policy" },
+  { value: "thrifty", label: "Thrifty" },
+  { value: "balanced", label: "Balanced" },
+  { value: "max", label: "Max" },
+];
+
+/**
+ * How the router trades cost against strength for this thread (DESIGN §8.3). A change starts a new task
+ * with the next turn, routed under the new mode; a pinned thread's route doesn't move until it's unpinned.
+ */
+const BudgetSwitch = ({
+  connection,
+  thread,
+  running,
+  onError,
+}: {
+  connection: Connection;
+  thread: LiveThread;
+  running: boolean;
+  onError: (message: string) => void;
+}) => {
+  const [sending, setSending] = useState(false);
+  const id = useId();
+  const set = async (mode: BudgetMode | null) => {
+    setSending(true);
+    const result = await connection.dispatch({ type: "thread.budget.set", commandId: uuid<CommandId>(), threadId: thread.threadId, mode });
+    setSending(false);
+    if (!result.ok) onError(result.message);
+  };
+  const note = thread.pinned
+    ? "Pinned: the router doesn't pick, so the budget mode waits until you let it."
+    : running
+      ? "Applies from the next turn, which starts a new task."
+      : "Policy uses the routing policy's mode.";
+  return (
+    <label className="ml-auto text-xs" title={note}>
+      Budget{" "}
+      <select
+        value={thread.budgetMode ?? ""}
+        disabled={thread.pinned || sending}
+        aria-describedby={`${id}-note`}
+        onChange={(e) => void set(budgets.find((b) => (b.value ?? "") === e.target.value)?.value ?? null)}
+      >
+        {budgets.map((b) => (
+          <option key={b.label} value={b.value ?? ""}>
+            {b.label}
+          </option>
+        ))}
+      </select>
+      <span id={`${id}-note`} className="sr-only">
+        {note}
+      </span>
+    </label>
+  );
+};
+
 /**
  * What the router would pick if this draft were sent now (DESIGN §12), asked once typing pauses. A
  * slower answer for an older draft never replaces a newer one.
@@ -149,7 +207,8 @@ const RoutePreview = ({
 }) => {
   const [routed, setRouted] = useState<Routed>();
   const draft = text.trim();
-  const { threadId } = thread;
+  const { threadId, budgetMode } = thread;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: verdandid reads the budget mode from the thread, so a new one asks again.
   useEffect(() => {
     if (!draft) return setRouted(undefined);
     let current = true;
@@ -158,7 +217,7 @@ const RoutePreview = ({
       current = false;
       clearTimeout(timer);
     };
-  }, [connection, threadId, draft, mode]);
+  }, [connection, threadId, draft, mode, budgetMode]);
   const decision = routed?.ok ? routed.decision : undefined;
   return (
     <p id="route-preview" className="mt-1 text-xs text-muted" aria-live="polite">
