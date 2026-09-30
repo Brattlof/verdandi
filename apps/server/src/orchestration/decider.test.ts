@@ -25,7 +25,7 @@ const waiting: DeciderState = {
 };
 
 const create: Command = { type: "thread.create", commandId, threadId, projectPath: "C:/r", route };
-const send: Command = { type: "turn.send", commandId, threadId, turnId, text: "hi" };
+const send: Command = { type: "turn.send", commandId, threadId, turnId, text: "hi", mode: "plan" };
 const report = (event: Extract<Command, { type: "harness.report" }>["event"]): Command => ({
   type: "harness.report",
   commandId,
@@ -56,7 +56,7 @@ describe("decide", () => {
   });
 
   test("starts a turn on an idle thread", () => {
-    expect(events(decide(idle, send))).toEqual([{ type: "turn.started", v: 1, threadId, turnId, text: "hi" }]);
+    expect(events(decide(idle, send))).toEqual([{ type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "plan" }]);
   });
 
   test("rejects a second turn while one is running", () => {
@@ -123,6 +123,25 @@ describe("decide", () => {
     expect(reason(decide(running, respond("r1", { decision: "allow" })))).toBe("RequestNotPending");
     expect(reason(decide(waiting, respond("r1", { decision: "answer", answers: {} })))).toBe("InvalidResolution");
     expect(reason(decide(waiting, respond("r2", { decision: "allow" })))).toBe("InvalidResolution");
+  });
+
+  test("a proposed plan waits for allow or deny, and a deny can carry feedback", () => {
+    expect(events(decide(running, report({ type: "plan.requested", requestId: "p1", plan: "1. Edit" })))).toEqual([
+      { type: "plan.requested", v: 1, threadId, turnId, requestId: "p1", plan: "1. Edit" },
+    ]);
+    const planning: DeciderState = {
+      thread: {
+        projectPath: "C:/r",
+        route,
+        runningTurnId: turnId,
+        sessionId: "s1",
+        pendingRequests: [{ requestId: "p1", turnId, kind: "plan" }],
+      },
+    };
+    expect(events(decide(planning, respond("p1", { decision: "deny", feedback: "smaller" })))).toEqual([
+      { type: "approval.resolved", v: 1, threadId, turnId, requestId: "p1", resolution: { decision: "deny", feedback: "smaller" } },
+    ]);
+    expect(reason(decide(planning, respond("p1", { decision: "answer", answers: {} })))).toBe("InvalidResolution");
   });
 
   test("a turn that ends denies its pending requests, then completes", () => {

@@ -2,7 +2,7 @@ import { Data, Effect, Schema } from "effect";
 import { ProjectId, ThreadId, TurnId } from "./ids.ts";
 import { Item, UsageFields } from "./items.ts";
 import { Question, Resolution } from "./requests.ts";
-import { Route } from "./route.ts";
+import { InteractionMode, Route } from "./route.ts";
 
 // Events are append-only and must stay readable forever. To change one, add a v2 schema
 // next to v1 and upgrade v1 to v2 when it is read; never edit or delete a published version.
@@ -32,6 +32,8 @@ export const TurnStarted = Schema.Struct({
   threadId: ThreadId,
   turnId: TurnId,
   text: Schema.String,
+  /** Absent on turns from before modes existed; those ran as `build`. */
+  mode: Schema.optionalKey(InteractionMode),
 });
 export const HarnessSessionBound = Schema.Struct({
   type: Schema.Literal("harness.session.bound"),
@@ -81,6 +83,16 @@ export const UserInputRequested = Schema.Struct({
   requestId: Schema.String,
   questions: Schema.Array(Question),
 });
+/** The agent proposes a plan and waits for the user to approve it (`allow`) or reject it (`deny`). Projected as a `plan` item too. */
+export const PlanRequested = Schema.Struct({
+  type: Schema.Literal("plan.requested"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  requestId: Schema.String,
+  plan: Schema.String,
+  filePath: Schema.optionalKey(Schema.String),
+});
 export const ApprovalResolved = Schema.Struct({
   type: Schema.Literal("approval.resolved"),
   v: v1,
@@ -111,6 +123,7 @@ export const Event = Schema.Union([
   TurnUsageRecorded,
   ApprovalRequested,
   UserInputRequested,
+  PlanRequested,
   ApprovalResolved,
   TurnCompleted,
 ]);
@@ -137,6 +150,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "turn.usage.recorded@1": TurnUsageRecorded,
   "approval.requested@1": ApprovalRequested,
   "user-input.requested@1": UserInputRequested,
+  "plan.requested@1": PlanRequested,
   "approval.resolved@1": ApprovalResolved,
   "turn.completed@1": TurnCompleted,
 };

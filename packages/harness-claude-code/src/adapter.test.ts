@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { HarnessRunInput, Route, ThreadId, TurnId } from "@verdandi/contracts";
+import type { HarnessRunInput, InteractionMode, Route, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Fiber, Stream } from "effect";
 import { makeClaudeCodeAdapter, type QueryFn } from "./adapter.ts";
@@ -18,6 +18,7 @@ const stubQuery = (
     message: SDKUserMessage,
     interrupted: Promise<void>,
   ) => SDKMessage[] | AsyncIterable<SDKMessage> = () => [textDelta("ok"), result(turn1Usage)],
+  first: SDKMessage = init,
 ) => {
   const spawns: { options: Options; prompts: SDKUserMessage[]; log: string[] }[] = [];
   const query = ((params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
@@ -25,7 +26,7 @@ const stubQuery = (
     spawns.push(record);
     const interrupted = Promise.withResolvers<void>();
     const messages = (async function* () {
-      yield init;
+      yield first;
       for await (const m of params.prompt) {
         record.prompts.push(m);
         record.log.push(`prompt ${m.message.content}`);
@@ -35,6 +36,7 @@ const stubQuery = (
     return Object.assign(messages, {
       setModel: async (model: string) => void record.log.push(`setModel ${model}`),
       applyFlagSettings: async (settings: object) => void record.log.push(`applyFlagSettings ${JSON.stringify(settings)}`),
+      setPermissionMode: async (mode: string) => void record.log.push(`setPermissionMode ${mode}`),
       interrupt: async () => {
         record.log.push("interrupt");
         interrupted.resolve();
@@ -55,6 +57,7 @@ const input = (
   resumeSessionId?: string,
   steers: Stream.Stream<string> = Stream.empty,
   route = haikuLow,
+  mode: InteractionMode = "build",
 ): HarnessRunInput => ({
   threadId,
   cwd,
@@ -62,6 +65,7 @@ const input = (
   resumeSessionId,
   turnId: turnId as TurnId,
   text,
+  mode,
   steers,
 });
 
@@ -164,6 +168,82 @@ describe("Claude Code adapter", () => {
         "prompt two",
         "prompt three",
       ]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("a mode change reaches the live session before the next prompt; build restores the user's own mode", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery(undefined, { ...init, permissionMode: "acceptEdits" } as SDKMessage);
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const turn = (text: string, turnId: string, mode: InteractionMode) =>
+        Effect.runPromise(Stream.runCollect(adapter.run(input(home, text, turnId, "sess-1", Stream.empty, haikuLow, mode))));
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "one", U1))));
+      await turn("two", U2, "plan");
+      await turn("three", U3, "ask");
+      await turn("four", "00000000-0000-4000-8000-000000000004", "build");
+      expect(spawns).toHaveLength(1);
+      expect(spawns[0]?.options.permissionMode).toBeUndefined();
+      expect(spawns[0]?.log).toEqual([
+        "prompt one",
+        "setPermissionMode plan",
+        "prompt two",
+        "prompt three",
+        "setPermissionMode acceptEdits",
+        "prompt four",
+      ]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("ExitPlanMode asks for plan approval; a rejection's feedback keeps planning, approval leaves plan mode", async () => {
+    const home = makeTempHome();
+    try {
+      const decisions: unknown[] = [];
+      const { query, spawns } = stubQuery(async function* (prompt, options, m) {
+        const exit = (plan: string) =>
+          options.canUseTool?.(
+            "ExitPlanMode",
+            { plan, planFilePath: "C:/Users/a b/.claude/plans/p.md" },
+            { signal: new AbortController().signal, toolUseID: "toolu_1", requestId: "c1" },
+          );
+        if (prompt === "plan it") decisions.push(await exit("v1"));
+        else if (prompt === "smaller") {
+          decisions.push(await exit("v2"));
+          yield { ...result(turn1Usage), user_message_uuids: [m.uuid] } as SDKMessage;
+        } else yield result(turn2Usage);
+      });
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const plans: unknown[] = [];
+      await Effect.runPromise(
+        adapter.run(input(home, "plan it", U1, undefined, Stream.empty, haikuLow, "plan")).pipe(
+          Stream.runForEach((e) => {
+            if (e.type !== "plan.requested") return Effect.void;
+            plans.push({ plan: e.plan, filePath: e.filePath });
+            return adapter.respond(
+              threadId,
+              e.requestId,
+              plans.length === 1 ? { decision: "deny", feedback: "smaller" } : { decision: "allow" },
+            );
+          }),
+        ),
+      );
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "next", U2, "sess-1"))));
+      expect(plans).toEqual([
+        { plan: "v1", filePath: "C:/Users/a b/.claude/plans/p.md" },
+        { plan: "v2", filePath: "C:/Users/a b/.claude/plans/p.md" },
+      ]);
+      expect(decisions).toEqual([
+        { behavior: "deny", message: "The user denied this." },
+        { behavior: "allow", updatedInput: { plan: "v2", planFilePath: "C:/Users/a b/.claude/plans/p.md" } },
+      ]);
+      expect(spawns[0]?.options.permissionMode).toBe("plan");
+      expect(spawns[0]?.prompts[1]).toMatchObject({ message: { content: "smaller" }, priority: "next" });
+      // The approval already left plan mode, so the build turn needs no switch.
+      expect(spawns[0]?.log).toEqual(["prompt plan it", "prompt smaller", "prompt next"]);
     } finally {
       removeTempHome(home);
     }

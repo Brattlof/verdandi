@@ -73,7 +73,7 @@ test("projects a full turn into the thread view", async () => {
     route: { harness: "fake", model: "fake", effort: "low" },
     sessionId: "s1",
     busy: false,
-    turns: [{ turnId, text: "hi", status: "success", items: [{ kind: "assistant.message", text: "echo: hi" }] }],
+    turns: [{ turnId, text: "hi", mode: "build", status: "success", items: [{ kind: "assistant.message", text: "echo: hi" }] }],
     pendingRequests: [],
   });
   const usage = await run(

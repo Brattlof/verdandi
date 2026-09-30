@@ -110,7 +110,14 @@ describe("rpc server", () => {
         yield* step("snapshot", Deferred.await(snapshot));
         yield* step(
           "send",
-          c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), text: "hi" }),
+          c.CommandDispatch({
+            type: "turn.send",
+            commandId: uuid<CommandId>(),
+            threadId,
+            turnId: uuid<TurnId>(),
+            text: "hi",
+            mode: "build",
+          }),
         );
         yield* step("turn.completed", Deferred.await(completed));
         yield* step("unsubscribe", c.ThreadUnsubscribe({ subscriptionId }));
@@ -134,7 +141,14 @@ describe("rpc server", () => {
         yield* step("create", createThread(c, threadId));
         yield* step(
           "send",
-          c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), text: "gate" }),
+          c.CommandDispatch({
+            type: "turn.send",
+            commandId: uuid<CommandId>(),
+            threadId,
+            turnId: uuid<TurnId>(),
+            text: "gate",
+            mode: "build",
+          }),
         );
       }),
     );
@@ -171,7 +185,16 @@ describe("rpc server", () => {
     await withClient(info.port, info.token, (c) => createThread(c, threadId));
     const send = () =>
       withClient(info.port, info.token, (c) =>
-        Effect.exit(c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), text: "gate" })),
+        Effect.exit(
+          c.CommandDispatch({
+            type: "turn.send",
+            commandId: uuid<CommandId>(),
+            threadId,
+            turnId: uuid<TurnId>(),
+            text: "gate",
+            mode: "build",
+          }),
+        ),
       );
     const results = await Promise.all([send(), send()]);
     fake.release();

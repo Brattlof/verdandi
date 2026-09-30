@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
   type CanUseTool,
+  type PermissionMode,
   type PermissionResult,
   type Query,
   query,
@@ -13,6 +14,7 @@ import {
   HarnessError,
   type HarnessEvent,
   type HarnessRunInput,
+  type InteractionMode,
   Question,
   type Resolution,
   type Route,
@@ -48,11 +50,33 @@ type Session = {
   readonly unanswered: Set<string>;
   /** The route the process is running on now. */
   route: Route;
+  /** Whether Claude Code is in its read-only plan mode, which ask and plan turns run in. */
+  planning: boolean;
+  /** The permission mode Claude Code last reported outside plan mode: the user's own default, which build restores. */
+  buildMode: PermissionMode | undefined;
   /** Claude Code's session id, once its init message arrives. */
   sessionId: string | undefined;
 };
 
 const decodeQuestions = Schema.decodeUnknownOption(Schema.Struct({ questions: Schema.Array(Question) }));
+/** `ExitPlanMode` carries the plan text and where Claude Code saved it (ADR 0003). */
+const decodePlan = Schema.decodeUnknownOption(Schema.Struct({ plan: Schema.String, planFilePath: Schema.optionalKey(Schema.String) }));
+
+/** The request `canUseTool` raises for a tool call. */
+const requestFor = (requestId: string, toolName: string, input: Record<string, unknown>): HarnessEvent => {
+  if (toolName === "AskUserQuestion") {
+    const asked = decodeQuestions(input);
+    if (Option.isSome(asked)) return { type: "user-input.requested", requestId, questions: asked.value.questions };
+  }
+  if (toolName === "ExitPlanMode") {
+    const proposed = decodePlan(input);
+    if (Option.isSome(proposed)) {
+      const { plan, planFilePath } = proposed.value;
+      return { type: "plan.requested", requestId, plan, ...(planFilePath === undefined ? {} : { filePath: planFilePath }) };
+    }
+  }
+  return { type: "approval.requested", requestId, toolName, input };
+};
 
 /** The SDK answer for a resolution. Deny messages stay neutral: they reach the model as tool output (ADR 0003). */
 const toPermission = (input: Record<string, unknown>, resolution: Resolution): PermissionResult => {
@@ -87,22 +111,21 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
     onRaise?.();
   };
 
-  // Every tool the user's own settings don't allow lands here; AskUserQuestion becomes a user-input request.
+  // Every tool the user's own settings don't allow lands here; AskUserQuestion becomes a user-input
+  // request and ExitPlanMode a plan request.
   const canUseTool: CanUseTool = (toolName, toolInput, { signal }) =>
     new Promise((resolve) => {
       const requestId = randomUUID();
       const answer = (resolution: Resolution) => {
-        waiting.delete(requestId);
+        if (!waiting.delete(requestId)) return;
         resolve(toPermission(toolInput, resolution));
+        // Allowing ExitPlanMode makes Claude Code leave plan mode for the mode it was in before.
+        if (toolName === "ExitPlanMode" && resolution.decision === "allow") session.planning = false;
+        if (resolution.decision === "deny" && resolution.feedback) say(session, resolution.feedback, "next");
       };
       waiting.set(requestId, answer);
       signal.addEventListener("abort", () => answer({ decision: "deny" }), { once: true });
-      const asked = toolName === "AskUserQuestion" ? decodeQuestions(toolInput) : Option.none();
-      raise(
-        Option.isSome(asked)
-          ? { type: "user-input.requested", requestId, questions: asked.value.questions }
-          : { type: "approval.requested", requestId, toolName, input: toolInput },
-      );
+      raise(requestFor(requestId, toolName, toolInput));
     });
 
   const q = queryFn({
@@ -113,6 +136,7 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
       model: input.route.model,
       effort: input.route.effort,
       ...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),
+      ...(input.mode === "build" ? {} : { permissionMode: "plan" as const }),
       includePartialMessages: true,
       // Connectors attach nondeterministically and would change the tool list between turns (ADR 0001).
       settings: { disableClaudeAiConnectors: true },
@@ -121,7 +145,7 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
   });
   // One iterator for the session's lifetime: leaving a for-await early would close the CLI (ADR 0003).
   const iterator = q[Symbol.asyncIterator]();
-  return {
+  const session: Session = {
     query: q,
     push: (message) => {
       queue.push(message);
@@ -139,8 +163,11 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
     live: false,
     unanswered: new Set(),
     route: input.route,
+    planning: input.mode !== "build",
+    buildMode: undefined,
     sessionId: undefined,
   };
+  return session;
 };
 
 /** Moves a live session onto the turn's route, between turns (ADR 0002). Each change breaks the message cache once. */
@@ -150,12 +177,23 @@ const applyRoute = async (session: Session, route: Route) => {
   session.route = route;
 };
 
-/** Steers go in without `priority`, so they land at the next tool boundary of the running turn (ADR 0003). */
-const steer = (session: Session, text: string) => {
+/** Moves a live session into the turn's mode, between turns. Ask and plan both run in Claude Code's read-only plan mode. */
+const applyMode = async (session: Session, mode: InteractionMode) => {
+  const planning = mode !== "build";
+  if (session.planning === planning) return;
+  await session.query.setPermissionMode(planning ? "plan" : (session.buildMode ?? "default"));
+  session.planning = planning;
+};
+
+/**
+ * A user message for the running turn, which stays open until the agent has answered it. Steers go in
+ * without `priority`, so they land at the next tool boundary; a deny's feedback goes in as `next` (ADR 0003).
+ */
+const say = (session: Session, text: string, priority?: "next") => {
   if (!session.live) return;
   const uuid = randomUUID();
   session.unanswered.add(uuid);
-  session.push({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, uuid });
+  session.push({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, uuid, ...(priority && { priority }) });
 };
 
 /**
@@ -217,10 +255,12 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
           message: "Claude Code exited before finishing the turn. Run `claude` in a terminal to check it still works.",
         });
       }
-      const { events, context } = normalize(step.value, session.context);
+      const msg = step.value;
+      if (msg.type === "system" && msg.subtype === "init" && msg.permissionMode !== "plan") session.buildMode = msg.permissionMode;
+      const { events, context } = normalize(msg, session.context);
       session.context = context;
       for (const e of events) if (e.type === "session.started") session.sessionId = e.sessionId;
-      if (continues(session, step.value)) {
+      if (continues(session, msg)) {
         yield* events.filter((e) => e.type !== "turn.finished");
         continue;
       }
@@ -251,11 +291,14 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
           const session = sessions.get(input.threadId) ?? openSession(options.query ?? query, options.claudePath, input);
           sessions.set(input.threadId, session);
           yield* Effect.tryPromise({
-            try: () => applyRoute(session, input.route),
+            try: async () => {
+              await applyRoute(session, input.route);
+              await applyMode(session, input.mode);
+            },
             catch: (error) => {
               end(input.threadId);
               return new HarnessError({
-                message: `Claude Code could not switch to ${input.route.model} at ${input.route.effort} effort: ${String(error)}`,
+                message: `Claude Code could not switch to ${input.route.model} at ${input.route.effort} effort in ${input.mode} mode: ${String(error)}`,
               });
             },
           });
@@ -275,7 +318,7 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
             end(input.threadId);
             return error instanceof HarnessError ? error : new HarnessError({ message: `Claude Code failed: ${String(error)}` });
           }).pipe(
-            Stream.drainFork(input.steers.pipe(Stream.tap((text) => Effect.sync(() => steer(session, text))))),
+            Stream.drainFork(input.steers.pipe(Stream.tap((text) => Effect.sync(() => say(session, text))))),
             Stream.onExit((exit) => (Exit.hasInterrupts(exit) ? stop(input.threadId, session, events) : Effect.void)),
           );
         }),

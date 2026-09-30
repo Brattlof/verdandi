@@ -1,14 +1,14 @@
-import type { HarnessAdapter, HarnessEvent, HarnessRunInput, Resolution, Route } from "@verdandi/contracts";
+import type { HarnessAdapter, HarnessEvent, HarnessRunInput, InteractionMode, Resolution, Route } from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
 
 /**
  * A scripted harness for tests. Text "fail" fails the turn, "hang" runs until interrupted, "gate" waits for
- * `release()`, "approve" asks to edit a file and "ask" asks a question, each finishing once `respond`
- * answers, "steer" waits for the first steer and answers it; anything else is echoed back with fixed
- * usage on the route's model. `calls` records every run.
+ * `release()`, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan, each
+ * finishing once `respond` answers, "steer" waits for the first steer and answers it; anything else is
+ * echoed back with fixed usage on the route's model. `calls` records every run.
  */
 export const makeFakeHarness = () => {
-  const calls: { resumeSessionId: string | undefined; route: Route; text: string }[] = [];
+  const calls: { resumeSessionId: string | undefined; route: Route; text: string; mode: InteractionMode }[] = [];
   const waiting = new Map<string, (resolution: Resolution) => void>();
   let sessions = 0;
   let requests = 0;
@@ -47,7 +47,7 @@ export const makeFakeHarness = () => {
     calls,
     release: () => release(),
     run(input: HarnessRunInput) {
-      calls.push({ resumeSessionId: input.resumeSessionId, route: input.route, text: input.text });
+      calls.push({ resumeSessionId: input.resumeSessionId, route: input.route, text: input.text, mode: input.mode });
       const start: HarnessEvent[] =
         input.resumeSessionId === undefined
           ? [{ type: "session.started", sessionId: `fake-session-${++sessions}`, harnessVersion: "fake" }]
@@ -84,6 +84,15 @@ export const makeFakeHarness = () => {
           (r) => (r.decision === "answer" ? `you picked ${r.answers[question]}` : "no answer"),
         );
         return Stream.concat(Stream.fromIterable(start), ask);
+      }
+      if (input.text === "plan") {
+        const plan = request(
+          input.route.model,
+          (requestId) => ({ type: "plan.requested", requestId, plan: "1. Edit a.txt" }),
+          (r) =>
+            r.decision === "allow" ? "built the plan" : `kept planning${r.decision === "deny" && r.feedback ? `: ${r.feedback}` : ""}`,
+        );
+        return Stream.concat(Stream.fromIterable(start), plan);
       }
       if (input.text === "steer") {
         const answer = input.steers.pipe(

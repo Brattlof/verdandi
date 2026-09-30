@@ -67,4 +67,10 @@ const requests = Effect.gen(function* () {
   yield* sql`create index requests_pending on requests (thread_id) where resolution is null`;
 });
 
-export const migrations = { "1_init": init, "2_requests": requests };
+/** Each turn's interaction mode; turns from before modes existed ran as build. */
+const turnModes = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table turns add column mode text not null default 'build'`;
+});
+
+export const migrations = { "1_init": init, "2_requests": requests, "3_turn_modes": turnModes };
