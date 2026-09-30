@@ -405,7 +405,7 @@ restrictions:
     forbid: [local]                   # never route billing code to local models
     minTier: L
 
-fallback: { prefer: [cc-sonnet], effort: medium, max: { prefer: [cc-opus] } }   # safe default below minConfidence
+fallback: { prefer: [cc-sonnet], effort: medium, max: { prefer: [cc-opus] }, maxCost: 5 }   # safe default below minConfidence; maxCost/maxTurns apply to classes that set none (§8.9)
 ```
 
 A class's route is its Balanced route. `thrifty` and `max` change only the keys they set for those modes, and `plan` does the same for tasks started in plan mode. Layers merge key by key, except `restrictions`, which add up, so a project can't lift a profile's restriction. Unknown keys are errors that name the file and the key. `effortBand`, `subagents`, `quota` and `escalation` are rejected until the features behind them land (§8.7, §8.9, M2 subagent routing).
@@ -470,9 +470,9 @@ These outcomes are used at three levels:
 
 ### 8.9 Budgets
 
-- **Metered:** real dollars. Daily and monthly caps per profile, and per project.
+- **Metered:** real dollars. Daily and monthly caps per profile, and per project, in the profile's `spend-caps.yaml` (`daily`, `monthly`, and the same under `projects` keyed by folder). They count metered usage since the local day or month began, including subscription turns on extra usage, and never subscription usage. While one is reached, a new turn is rejected with a message naming the cap, the spend and how to raise it. Raising a cap adds its configured amount for the rest of the period in one click (or `verdandi chat --raise-cap`), recorded as the user's override. The web composer and `verdandi chat` show how close the thread's project and profile are to their caps.
 - **Subscription:** quota tracking from Claude Code's rate-limit events and usage request (ADR 0005), quota-based pricing, and moving work to other targets when quota runs low (§8.3). When the plan window is used up and the account's extra usage is on, Claude Code keeps working on paid credits without an error; Verdandi prices those turns as metered and shows the switch.
-- **Per task:** `maxTurns` and `maxCost` (Claude Code: `maxBudgetUsd`).
+- **Per task:** `maxTurns` and `maxCost` per class in the routing policy, with `fallback`'s as the default (Claude Code: `maxBudgetUsd` and `maxTurns`). A task a guard stops ends its turn with status `limit`, kept on its outcome, and the thread's next turn starts a new task.
 - **The spend dashboard** shows real spend, quota use, and savings vs. always-Opus. The savings figure is labelled as an estimate.
 
 ### 8.10 Evaluation

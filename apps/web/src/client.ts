@@ -8,6 +8,8 @@ import {
   type InteractionMode,
   type RouteDecision,
   RoutingUnavailable,
+  type SpendCap,
+  SpendCapsUnavailable,
   type TaskId,
   type ThreadId,
   type TurnId,
@@ -117,6 +119,16 @@ export const connect = (token: string) => {
   const simulate = async (threadId: ThreadId, text: string, mode: InteractionMode) =>
     routed(await run((rpc) => rpc.RoutingSimulate({ threadId, text, mode })));
 
+  /** The spend caps over the thread's project and profile, and what each has spent this period. */
+  const spendCaps = async (
+    threadId: ThreadId,
+  ): Promise<{ readonly ok: true; readonly caps: readonly SpendCap[] } | { readonly ok: false; readonly message: string }> => {
+    const exit = await run((rpc) => rpc.SpendCapsGet({ threadId }));
+    if (Exit.isSuccess(exit)) return { ok: true, caps: exit.value };
+    const unavailable = failure(exit.cause, SpendCapsUnavailable);
+    return unavailable ? { ok: false, message: unavailable.message } : disconnected;
+  };
+
   /**
    * Follows a feed until the returned function is called. It never stops the stream itself: it asks
    * the server to end it (ADR 0008), once the first message shows the server has registered it.
@@ -158,6 +170,6 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, explain, simulate, follow, harnesses, lost };
+  return { dispatch, diff, explain, simulate, spendCaps, follow, harnesses, lost };
 };
 export type Connection = ReturnType<typeof connect>;

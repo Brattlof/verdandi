@@ -15,9 +15,11 @@ import {
 import { correctingQuestion, type Decide } from "@verdandi/decisions";
 import { Context, Effect, Layer, PubSub, Result, Stream } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
+import type { SpendCaps } from "../config/spend-caps.ts";
 import { type RoutingContext, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { decide } from "./decider.ts";
 import { loadDeciderState, loadProjects, loadQuotas, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
+import { loadSpendState } from "./spend.ts";
 
 type FeedMessage = { readonly threadId: ThreadId; readonly feed: ThreadFeed };
 type ThreadChange = Extract<ProjectsFeed, { kind: "thread" }>;
@@ -58,6 +60,8 @@ export type EngineOptions = {
   readonly routing?: (projectPath: string) => Effect.Effect<RoutingContext>;
   /** The decision layer that classifies new tasks and judges follow-ups. Defaults to `rules`. */
   readonly decide?: Decide["Service"];
+  /** Reads the profile's spend caps. Without it no turn is capped. */
+  readonly spendCaps?: Effect.Effect<Result.Result<SpendCaps, string>>;
 };
 
 export const EngineLive = (options: EngineOptions = {}) =>
@@ -95,7 +99,12 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 stored: [] as StoredEvent[],
                 published: [] as ProjectsChange[],
               };
-            const state = yield* loadDeciderState(command.threadId);
+            const loaded = yield* loadDeciderState(command.threadId);
+            // Caps are read on each turn and raise, so an edit to the caps file applies to the next one.
+            const capped = (command.type === "turn.send" || command.type === "spend.cap.raise") && loaded.thread && options.spendCaps;
+            const state = capped
+              ? { ...loaded, spend: yield* loadSpendState(capped, loaded.thread?.projectPath ?? "", new Date()) }
+              : loaded;
             const current = state.thread;
             const send = command.type === "turn.send" && current?.runningTurnId === null ? command : undefined;
             // A routed task started in plan mode routes its build when it proposes its plan.

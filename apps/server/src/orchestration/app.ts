@@ -1,5 +1,6 @@
 import type { HarnessAdapter, HarnessId } from "@verdandi/contracts";
 import { Layer } from "effect";
+import { loadSpendCaps } from "../config/spend-caps.ts";
 import { SqlLive } from "../persistence/db.ts";
 import { routingFor } from "../routing/routing.ts";
 import { EngineLive, type Projector } from "./engine.ts";
@@ -12,7 +13,7 @@ export const AppLayer = (
   options: { readonly project?: Projector } = {},
 ) =>
   ReactorLive.pipe(
-    Layer.provideMerge(EngineLive({ ...options, routing: routingFor(harnesses) })),
+    Layer.provideMerge(EngineLive({ ...options, routing: routingFor(harnesses), spendCaps: loadSpendCaps(home) })),
     Layer.provideMerge(Layer.succeed(HarnessRegistry, harnesses)),
     Layer.provideMerge(SqlLive(home)),
   );

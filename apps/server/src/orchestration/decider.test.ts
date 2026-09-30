@@ -266,3 +266,45 @@ describe("decide", () => {
     expect(projectIdFor("C:\\A b")).not.toBe(projectIdFor("C:\\A c"));
   });
 });
+
+describe("spend caps", () => {
+  const cap = { scope: "project", period: "day", periodKey: "2026-09-30", baseUsd: 5, limitUsd: 5 } as const;
+  const withCaps = (spentUsd: number): DeciderState => ({
+    ...idle,
+    spend: Result.succeed({ file: "C:/home/spend-caps.yaml", caps: [{ ...cap, spentUsd }] }),
+  });
+  const raise: Command = { type: "spend.cap.raise", commandId, threadId, scope: "project", period: "day" };
+  const message = (r: ReturnType<typeof decide>) => (Result.isFailure(r) ? r.failure.message : "");
+
+  test("a reached cap rejects the turn, naming the cap, what it spent and how to raise it", () => {
+    expect(reason(decide(withCaps(4.99), send))).toBe("accepted");
+    const rejected = decide(withCaps(5.2), send);
+    expect(reason(rejected)).toBe("SpendCapReached");
+    expect(message(rejected)).toBe(
+      "The project's daily cap of metered spend is reached: $5.20 of $5.00 spent today. Raise it for the rest of today with Raise in the web UI or `verdandi chat --raise-cap`, or change daily under projects in C:/home/spend-caps.yaml.",
+    );
+  });
+
+  test("raising a cap adds its configured amount for the rest of the period", () => {
+    expect(events(decide(withCaps(5.2), raise))).toEqual([
+      {
+        type: "spend.cap.raised",
+        v: 1,
+        threadId,
+        scope: "project",
+        projectId: projectIdFor("C:/r"),
+        period: "day",
+        periodKey: "2026-09-30",
+        fromUsd: 5,
+        toUsd: 10,
+      },
+    ]);
+  });
+
+  test("a cap that isn't set can't be raised, and a broken caps file rejects turns", () => {
+    expect(message(decide(withCaps(0), { ...raise, scope: "profile" }))).toBe(
+      "The profile has no daily spend cap to raise. Set daily in C:/home/spend-caps.yaml to add one.",
+    );
+    expect(reason(decide({ ...idle, spend: Result.fail("spend-caps.yaml: bad") }, send))).toBe("InvalidSpendCaps");
+  });
+});

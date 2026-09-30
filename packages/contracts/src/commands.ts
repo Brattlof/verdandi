@@ -4,6 +4,7 @@ import { CommandId, ThreadId, TurnId } from "./ids.ts";
 import { Resolution } from "./requests.ts";
 import { InteractionMode, Route } from "./route.ts";
 import { BudgetMode } from "./routing.ts";
+import { CapPeriod, CapScope } from "./spend.ts";
 
 export const ThreadCreate = Schema.Struct({
   type: Schema.Literal("thread.create"),
@@ -70,6 +71,18 @@ export const ThreadBudgetSet = Schema.Struct({
   mode: Schema.NullOr(BudgetMode),
 });
 
+/**
+ * Raises the thread's profile or project spend cap for the rest of its period by the configured amount,
+ * so a cap of $5 a day allows $10 today. Recorded as the user's override.
+ */
+export const SpendCapRaise = Schema.Struct({
+  type: Schema.Literal("spend.cap.raise"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  scope: CapScope,
+  period: CapPeriod,
+});
+
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
   type: Schema.Literal("harness.report"),
@@ -95,6 +108,7 @@ export const ClientCommand = Schema.Union([
   ThreadRouteSet,
   ThreadRouteUnpin,
   ThreadBudgetSet,
+  SpendCapRaise,
   ApprovalRespond,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
@@ -107,6 +121,7 @@ export const Command = Schema.Union([
   ThreadRouteSet,
   ThreadRouteUnpin,
   ThreadBudgetSet,
+  SpendCapRaise,
   ApprovalRespond,
   HarnessReport,
   TurnRecover,

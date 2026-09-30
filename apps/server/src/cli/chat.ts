@@ -3,8 +3,10 @@ import { join } from "node:path";
 import {
   type ClientCommand,
   type CommandId,
+  capReached,
   type DiffView,
   describeRouteChange,
+  describeSpendCap,
   type InteractionMode,
   type ProjectsFeed,
   type Resolution,
@@ -259,6 +261,24 @@ export const chat = async (argv: readonly string[]) => {
     void dispatch({ type: "turn.interrupt", commandId: uuid<CommandId>(), threadId, turnId: running });
   });
 
+  /** How close the thread's project and profile are to their spend caps; `raise` first raises each reached one for the rest of its period. */
+  const showSpendCaps = async (raise: boolean) => {
+    const get = () =>
+      runtime.runPromise(client.SpendCapsGet({ threadId }).pipe(Effect.catchTag("SpendCapsUnavailable", (e) => Effect.succeed(e.message))));
+    const caps = await get();
+    if (typeof caps === "string") return process.stdout.write(`${caps}\n`);
+    const reached = raise ? caps.filter(capReached) : [];
+    for (const cap of reached) {
+      await dispatch({ type: "spend.cap.raise", commandId: uuid<CommandId>(), threadId, scope: cap.scope, period: cap.period });
+    }
+    if (raise && reached.length === 0) process.stdout.write("No spend cap is reached, so none was raised.\n");
+    const shown = reached.length > 0 ? await get() : caps;
+    for (const cap of typeof shown === "string" ? [] : shown) {
+      const hint = capReached(cap) ? " (reached: --raise-cap raises it for the rest of the period)" : "";
+      process.stdout.write(`Spend: ${describeSpendCap(cap)}${hint}\n`);
+    }
+  };
+
   const noSnapshot = new Error("The thread feed ended before its snapshot arrived. Restart verdandid and try again.");
   feed.then(() => snapshot.reject(noSnapshot), snapshot.reject);
   const thread = await snapshot.promise;
@@ -290,6 +310,7 @@ export const chat = async (argv: readonly string[]) => {
       `Budget mode: ${which}, ${pinnedNow ? "once the router picks again (--auto)" : "from the next turn, which starts a new task"}.\n`,
     );
   }
+  await showSpendCaps(argv.includes("--raise-cap"));
   if (running) process.stdout.write("A turn is running; lines you type steer it.\n");
   else prompt();
   showRequest();

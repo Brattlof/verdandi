@@ -5,6 +5,7 @@ import type { CommandId, ProjectsFeed, TaskId, ThreadFeed, ThreadId, TurnId } fr
 import { makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { spendCapsFile } from "../config/spend-caps.ts";
 import { Reactor } from "../orchestration/reactor.ts";
 import { connect } from "./client.ts";
 import { ServerInfo, ServerLayer } from "./server.ts";
@@ -364,6 +365,34 @@ describe("rpc server", () => {
     await drain();
     const costs = await withClient(info.port, info.token, (c) => c.TaskCostsList());
     expect(costs).toEqual([{ route, tasks: 1, completed: 1, costUsd: 0.01, costPerCompletedUsd: 0.01 }]);
+  });
+
+  test("SpendCapsGet shows how close the thread's caps are, and after a raise the limit in force", async () => {
+    const { info, drain, home } = await startServer();
+    writeFileSync(spendCapsFile(home), "daily: 0.005\nmonthly: 10\n");
+    const threadId = uuid<ThreadId>();
+    const turn = {
+      type: "turn.send",
+      commandId: uuid<CommandId>(),
+      threadId,
+      turnId: uuid<TurnId>(),
+      text: "overage",
+      mode: "build",
+    } as const;
+    await withClient(info.port, info.token, (c) => Effect.andThen(createThread(c, threadId), c.CommandDispatch(turn)));
+    await drain();
+    const { before, after } = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        const before = yield* c.SpendCapsGet({ threadId });
+        yield* c.CommandDispatch({ type: "spend.cap.raise", commandId: uuid<CommandId>(), threadId, scope: "profile", period: "day" });
+        return { before, after: yield* c.SpendCapsGet({ threadId }) };
+      }),
+    );
+    expect(before.map((c) => [c.period, c.limitUsd, c.spentUsd])).toEqual([
+      ["day", 0.005, 0.01],
+      ["month", 10, 0.01],
+    ]);
+    expect(after[0]).toMatchObject({ period: "day", baseUsd: 0.005, limitUsd: 0.01 });
   });
 
   test("RoutingSimulate previews a draft without storing it, and RoutingExplain returns a task's decision", async () => {

@@ -14,7 +14,7 @@ import {
 
 type TurnStatus = Extract<Event, { type: "turn.completed" }>["status"];
 
-const taskStatus: Record<TurnStatus, TaskStatus> = { success: "completed", error: "failed", interrupted: "abandoned" };
+const taskStatus: Record<TurnStatus, TaskStatus> = { success: "completed", error: "failed", interrupted: "abandoned", limit: "limit" };
 
 type Draft = {
   readonly taskId: TaskId;

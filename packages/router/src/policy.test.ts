@@ -22,6 +22,7 @@ test.each([
   ["routes:\n  review: { effort: extreme }\n", /\.verdandi\/routing\.yaml: [\s\S]*\["routes"\]\["review"\]\["effort"\]/],
   ["routes:\n  code.magic: { effort: low }\n", /\.verdandi\/routing\.yaml: [\s\S]*\["routes"\]\["code\.magic"\]/],
   ["modes: thrifty\n", /\.verdandi\/routing\.yaml: [\s\S]*\["modes"\]/],
+  ["fallback: { maxCost: 0 }\n", /\.verdandi\/routing\.yaml: [\s\S]*\["fallback"\]\["maxCost"\]/],
   [
     "routes:\n  review: { prefer: [cc-gpt] }\n",
     '.verdandi/routing.yaml: routes.review.prefer: unknown target "cc-gpt"; define it under targets.',

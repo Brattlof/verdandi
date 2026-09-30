@@ -18,6 +18,7 @@ import {
   Question,
   type Resolution,
   type Route,
+  type TaskId,
   type ThreadId,
 } from "@verdandi/contracts";
 import { Effect, Exit, Option, Schema, Stream } from "effect";
@@ -62,6 +63,8 @@ type Session = {
   transcriptPath: string | undefined;
   /** Whether the CLI reports `session_state_changed`. Older ones don't, and their turns end at the last result. */
   reportsState: boolean;
+  /** The task whose budget guards the process was started with; undefined when it has none. */
+  readonly limitedTask: TaskId | undefined;
 };
 
 const decodeQuestions = Schema.decodeUnknownOption(Schema.Struct({ questions: Schema.Array(Question) }));
@@ -145,6 +148,11 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
       effort: input.route.effort,
       ...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),
       ...(input.mode === "build" ? {} : { permissionMode: "plan" as const }),
+      // Spawn-time only, and counted over the process's life: `run` opens a process per task with limits.
+      // A process opened mid-task (after an interrupt or restart) gets what the task has left.
+      // ponytail: `maxTurns` starts over in such a process; upgrade by passing what's left once turns are counted per task.
+      ...(input.limits?.maxCost === undefined ? {} : { maxBudgetUsd: Math.max(input.limits.maxCost - input.limits.spentUsd, 0.01) }),
+      ...(input.limits?.maxTurns === undefined ? {} : { maxTurns: input.limits.maxTurns }),
       includePartialMessages: true,
       // Subagents' text too, not only their tool calls, so their steps reach the trajectory whole.
       forwardSubagentText: true,
@@ -194,6 +202,7 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
     sessionId: undefined,
     transcriptPath: undefined,
     reportsState: false,
+    limitedTask: input.limits?.taskId,
   };
   return session;
 };
@@ -318,7 +327,7 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
       yield* events;
       if (finished) {
         // After an error result the SDK throws on the next read (spike 005), so start a fresh process next turn.
-        if (finished.status === "error") end(input.threadId);
+        if (finished.status !== "success") end(input.threadId);
         return;
       }
     }
@@ -334,9 +343,12 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
               message: `Project folder not found: ${input.cwd}. Check that the path exists and is reachable.`,
             });
           }
-          // A live session is only reused while it is the thread's session; a harness switch unbinds it.
+          // A live session is only reused while it is the thread's session; a harness switch unbinds it. A task
+          // with budget guards gets a process of its own, resuming the session, since they're set at spawn.
           const live = sessions.get(input.threadId);
-          if (live && live.sessionId !== input.resumeSessionId) end(input.threadId);
+          const guarded = input.limits?.taskId ?? live?.limitedTask;
+          if (live && (live.sessionId !== input.resumeSessionId || (guarded && live.limitedTask !== input.limits?.taskId)))
+            end(input.threadId);
           const session = sessions.get(input.threadId) ?? openSession(options.query ?? query, options.claudePath, input);
           sessions.set(input.threadId, session);
           yield* Effect.tryPromise({

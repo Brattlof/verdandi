@@ -100,10 +100,19 @@ describe("normalize", () => {
   });
 
   test("error results finish the turn with the SDK's error text", () => {
-    expect(events(result(turn1Usage, "error_max_turns", ["Reached maximum number of turns (1)"])).at(-1)).toEqual({
+    expect(events(result(turn1Usage, "error_during_execution", ["API overloaded"])).at(-1)).toEqual({
       type: "turn.finished",
       status: "error",
-      error: "Reached maximum number of turns (1)",
+      error: "API overloaded",
     });
+  });
+
+  test("a budget guard's result finishes the turn at its limit, saying which guard", () => {
+    expect(events(result(turn1Usage, "error_max_turns", ["Reached maximum number of turns (1)"])).at(-1)).toEqual({
+      type: "turn.finished",
+      status: "limit",
+      error: "Stopped at the task's turn limit (maxTurns in the routing policy).",
+    });
+    expect(events(result(turn1Usage, "error_max_budget_usd")).at(-1)).toMatchObject({ status: "limit" });
   });
 });

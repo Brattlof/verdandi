@@ -1,5 +1,16 @@
 import { randomUUID } from "node:crypto";
-import type { CommandId, HarnessAdapter, HarnessEvent, HarnessId, InteractionMode, Route, ThreadId, TurnId } from "@verdandi/contracts";
+import type {
+  CommandId,
+  HarnessAdapter,
+  HarnessEvent,
+  HarnessId,
+  InteractionMode,
+  Route,
+  TaskId,
+  TaskLimits,
+  ThreadId,
+  TurnId,
+} from "@verdandi/contracts";
 import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Engine } from "./engine.ts";
@@ -65,15 +76,42 @@ export const ReactorLive = Layer.effect(
       let finished = false;
       const fail = (error: string) => report(threadId, turnId, { type: "turn.finished", status: "error", error });
       return Effect.gen(function* () {
-        const [thread] = yield* sql<{ route: string; session_id: string | null; path: string }>`
-          select t.route, t.session_id, p.path from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+        // The task's budget guards, and what its turns before this one cost.
+        const [thread] = yield* sql<{
+          route: string;
+          session_id: string | null;
+          path: string;
+          task_id: TaskId | null;
+          limits: string | null;
+          spent_usd: number;
+        }>`
+          select t.route, t.session_id, p.path, t.task_id, json_extract(d.payload, '$.limits') as limits,
+            (select total(u.cost_usd) from usage_ledger u join turns n on n.id = u.turn_id
+              where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId}) as spent_usd
+          from threads t join projects p on p.id = t.project_id
+            left join tasks k on k.id = t.task_id left join route_decisions d on d.task_id = t.task_id
+          where t.id = ${threadId}`;
         if (!thread) return yield* fail(`Thread ${threadId} disappeared before its turn ran.`);
         const route = JSON.parse(thread.route) as Route;
         const adapter = registry[route.harness];
         if (!adapter) return yield* fail(`The ${route.harness} harness is not available in this verdandid. Pick another route.`);
         live.set(threadId, adapter);
+        const limits =
+          thread.limits && thread.task_id
+            ? { ...(JSON.parse(thread.limits) as TaskLimits), taskId: thread.task_id, spentUsd: thread.spent_usd }
+            : undefined;
         yield* adapter
-          .run({ threadId, cwd: thread.path, route, resumeSessionId: thread.session_id ?? undefined, turnId, text, mode, steers })
+          .run({
+            threadId,
+            cwd: thread.path,
+            route,
+            resumeSessionId: thread.session_id ?? undefined,
+            turnId,
+            text,
+            mode,
+            steers,
+            ...(limits && { limits }),
+          })
           .pipe(
             Stream.runForEach((event) => {
               if (event.type === "text.delta") return engine.publishDelta(threadId, turnId, event.text);

@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
 import {
+  type CapPeriod,
+  type CapScope,
   type Command,
   CommandRejected,
+  capName,
+  capPeriodNow,
+  capReached,
   type DecisionAnswer,
   type DecisionQuestion,
   defaultRoute,
   type Event,
+  formatUsd,
   type HarnessEvent,
   type ProjectId,
   type Resolution,
@@ -16,6 +22,7 @@ import {
 } from "@verdandi/contracts";
 import { Result } from "effect";
 import { decideExecuteRoute, decideRoute, type RoutingContext, type RoutingThread, routeOf } from "../routing/routing.ts";
+import type { SpendState } from "./spend.ts";
 
 export type PendingRequest = {
   readonly requestId: string;
@@ -48,6 +55,8 @@ export type DeciderState = {
   readonly routing?: RoutingContext;
   /** The decision layer's answers about a `turn.send`'s text, asked by the engine: recorded, and routing reads them. */
   readonly decisions?: { readonly questions: readonly DecisionQuestion[]; readonly answers: readonly DecisionAnswer[] };
+  /** The spend caps over the thread, loaded for `turn.send` and `spend.cap.raise`. Without it nothing is capped. */
+  readonly spend?: SpendState;
 };
 
 type Decision = Result.Result<Event[], CommandRejected>;
@@ -71,6 +80,27 @@ const fits: Record<PendingRequest["kind"], readonly Resolution["decision"][]> = 
   approval: ["allow", "deny"],
   "user-input": ["answer", "deny"],
   plan: ["allow", "deny"],
+};
+
+const configKey: Record<CapScope, Record<CapPeriod, string>> = {
+  profile: { day: "daily", month: "monthly" },
+  project: { day: "daily under projects", month: "monthly under projects" },
+};
+
+/** Why a turn can't start: the caps file is broken, or a cap over the thread is reached. */
+const capped = (spend: SpendState | undefined): Decision | undefined => {
+  if (!spend) return undefined;
+  if (Result.isFailure(spend)) return reject("InvalidSpendCaps", spend.failure);
+  const cap = spend.success.caps.find(capReached);
+  if (!cap) return undefined;
+  const now = capPeriodNow(cap.period);
+  return reject(
+    "SpendCapReached",
+    // ponytail: blocks every turn while a cap is reached, even one that would run inside a subscription window.
+    // Upgrade: block only turns whose target spends metered dollars, once the quota window's state is trusted here (§8.3).
+    `The ${capName(cap)} of metered spend is reached: ${formatUsd(cap.spentUsd)} of ${formatUsd(cap.limitUsd)} spent ${now}. ` +
+      `Raise it for the rest of ${now} with Raise in the web UI or \`verdandi chat --raise-cap\`, or change ${configKey[cap.scope][cap.period]} in ${spend.success.file}.`,
+  );
 };
 
 type Handler<T extends Command["type"]> = (state: DeciderState, command: Extract<Command, { type: T }>) => Decision;
@@ -133,6 +163,8 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
   "turn.send": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     if (state.thread.runningTurnId) return reject("ThreadBusy", "A turn is already running in this thread. Wait for it to finish.");
+    const stop = capped(state.spend);
+    if (stop) return stop;
     const turn: Event = { type: "turn.started", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text, mode: c.mode };
     // First: the reactor starts the turn on turn.started, and a later event of this commit could reach feeds after the turn ends.
     const recorded: Event[] = state.decisions
@@ -166,6 +198,26 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
   "thread.route.unpin": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     return state.thread.pinned ? accept({ type: "thread.route.unpinned", v: 1, threadId: c.threadId }) : accept();
+  },
+  "spend.cap.raise": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
+    if (state.spend && Result.isFailure(state.spend)) return reject("InvalidSpendCaps", state.spend.failure);
+    const cap = state.spend?.success.caps.find((k) => k.scope === c.scope && k.period === c.period);
+    if (!cap) {
+      const where = state.spend ? ` Set ${configKey[c.scope][c.period]} in ${state.spend.success.file} to add one.` : "";
+      return reject("SpendCapNotSet", `The ${c.scope} has no ${c.period === "day" ? "daily" : "monthly"} spend cap to raise.${where}`);
+    }
+    return accept({
+      type: "spend.cap.raised",
+      v: 1,
+      threadId: c.threadId,
+      scope: c.scope,
+      ...(c.scope === "project" ? { projectId: projectIdFor(state.thread.projectPath) } : {}),
+      period: c.period,
+      periodKey: cap.periodKey,
+      fromUsd: cap.limitUsd,
+      toUsd: cap.limitUsd + cap.baseUsd,
+    });
   },
   "approval.respond": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);

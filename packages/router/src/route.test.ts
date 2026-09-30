@@ -153,3 +153,23 @@ describe("candidates and fallbacks", () => {
     expect(scarce).toBeGreaterThan(plenty * 3);
   });
 });
+
+describe("budget guards", () => {
+  const guarded = loadPolicy([
+    { source: "test", data: { routes: { "debug.investigate": { maxCost: 5, maxTurns: 40 } }, fallback: { maxCost: 1 } } },
+  ]);
+
+  test("a task takes its class's limits, and the fallback's where its class sets none", () => {
+    expect(route({ text: DEBUG, mode: "build" }, guarded, rules).limits).toEqual({ maxCost: 5, maxTurns: 40 });
+    expect(route({ text: SEARCH, mode: "build" }, guarded, rules).limits).toEqual({ maxCost: 1 });
+  });
+
+  test("a pinned task keeps its class's limits: the pin picks the route, not the budget", () => {
+    const d = route({ text: DEBUG, mode: "build", pin: { target: cc("haiku"), effort: "low" } }, guarded, rules);
+    expect(d.limits).toEqual({ maxCost: 5, maxTurns: 40 });
+  });
+
+  test("without limits in the policy a task has none", () => {
+    expect(route({ text: DEBUG, mode: "build" }, policy, rules).limits).toBeUndefined();
+  });
+});

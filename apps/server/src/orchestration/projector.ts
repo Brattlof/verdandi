@@ -144,12 +144,20 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         { discard: true },
       ),
     ),
+  // A turn a budget guard stopped ends its task, so the next turn starts a new one.
   "turn.completed": (e, at) =>
     withSql((sql) =>
       Effect.andThen(
         sql`update turns set status = ${e.status}, error = ${e.error ?? null}, completed_at = ${at} where id = ${e.turnId}`,
-        sql`update threads set running_turn_id = null where id = ${e.threadId} and running_turn_id = ${e.turnId}`,
+        sql`update threads set running_turn_id = null, task_id = case when ${e.status} = 'limit' then null else task_id end
+            where id = ${e.threadId} and running_turn_id = ${e.turnId}`,
       ),
+    ),
+  "spend.cap.raised": (e, at, seq) =>
+    withSql(
+      (sql) =>
+        sql`insert into spend_cap_raises (seq, scope, project_id, period, period_key, limit_usd, at)
+            values (${seq}, ${e.scope}, ${e.projectId ?? null}, ${e.period}, ${e.periodKey}, ${e.toUsd}, ${at})`,
     ),
 };
 

@@ -5,6 +5,7 @@ import { Item, Quota, UsageFields } from "./items.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, RouteDecision } from "./routing.ts";
+import { CapPeriod, CapScope } from "./spend.ts";
 
 // Events are append-only and must stay readable forever. To change one, add a v2 schema
 // next to v1 and upgrade v1 to v2 when it is read; never edit or delete a published version.
@@ -186,7 +187,23 @@ export const DecisionRecorded = Schema.Struct({
   /** One per question, in the same order. */
   answers: Schema.Array(DecisionAnswer),
 });
-export const TurnStatus = Schema.Literals(["success", "error", "interrupted"]);
+/**
+ * The user raised a spend cap from `fromUsd` to `toUsd` for the rest of the period `periodKey` (DESIGN §8.9),
+ * from thread `threadId`. `projectId` names the project a project cap covers.
+ */
+export const SpendCapRaised = Schema.Struct({
+  type: Schema.Literal("spend.cap.raised"),
+  v: v1,
+  threadId: ThreadId,
+  scope: CapScope,
+  projectId: Schema.optionalKey(ProjectId),
+  period: CapPeriod,
+  periodKey: Schema.String,
+  fromUsd: Schema.Number,
+  toUsd: Schema.Number,
+});
+/** `limit`: a budget guard of the task (its `maxCost` or `maxTurns`) stopped the turn, which ends the task. */
+export const TurnStatus = Schema.Literals(["success", "error", "interrupted", "limit"]);
 export const TurnCompleted = Schema.Struct({
   type: Schema.Literal("turn.completed"),
   v: v1,
@@ -215,6 +232,7 @@ export const Event = Schema.Union([
   ApprovalResolved,
   TurnCompleted,
   DecisionRecorded,
+  SpendCapRaised,
 ]);
 export type Event = typeof Event.Type;
 
@@ -248,6 +266,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "approval.resolved@1": ApprovalResolved,
   "turn.completed@1": TurnCompleted,
   "decision.recorded@1": DecisionRecorded,
+  "spend.cap.raised@1": SpendCapRaised,
 };
 
 /** The row shape an event is stored as. */

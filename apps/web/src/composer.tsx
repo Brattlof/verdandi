@@ -2,6 +2,7 @@ import type { BudgetMode, CommandId, InteractionMode, Question, Resolution, Thre
 import { type FormEvent, type KeyboardEvent, useEffect, useId, useState } from "react";
 import { type Connection, type Routed, uuid } from "./client.ts";
 import { RouteChip } from "./route.tsx";
+import { SpendCaps } from "./spend.tsx";
 import type { LiveThread } from "./state.ts";
 
 const modes: { value: InteractionMode; label: string; hint: string }[] = [
@@ -27,6 +28,8 @@ export const Composer = ({
 }) => {
   const [text, setText] = useState("");
   const [error, setError] = useState<string>();
+  /** Sends a spend cap rejected, so the caps shown catch up with spend in other threads. */
+  const [capRejections, setCapRejections] = useState(0);
   const running = thread.turns.findLast((t) => t.status === "running");
   const { threadId } = thread;
 
@@ -62,6 +65,7 @@ export const Composer = ({
       mode,
     });
     if (!sent.ok) fail(sent.message, body);
+    if (!sent.ok && sent.reason === "SpendCapReached") setCapRejections((n) => n + 1);
   };
   const stop = async () => {
     if (!running) return;
@@ -83,6 +87,7 @@ export const Composer = ({
   const preview = !running && !thread.pinned && thread.task === null;
   return (
     <div className="mx-auto w-full max-w-[860px] px-4 pt-2 pb-3">
+      <SpendCaps connection={connection} thread={thread} rejected={capRejections} />
       <RouteChip connection={connection} thread={thread} />
       <form onSubmit={onSubmit}>
         <fieldset className="mb-1 flex items-center gap-3">

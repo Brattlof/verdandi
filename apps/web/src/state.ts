@@ -96,7 +96,10 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
       ...(e.error === undefined ? {} : { error: e.error }),
     })),
     busy: false,
+    // A budget guard's stop ends the task.
+    ...(e.status === "limit" ? { task: null } : {}),
   }),
+  "spend.cap.raised": (thread) => thread, // the caps are fetched with SpendCapsGet
 };
 
 /** Folds one thread-feed message into the thread. Before the snapshot arrives there is nothing to fold into. */
