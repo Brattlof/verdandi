@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type {
   ClientCommand,
   CommandId,
+  DiffView,
   InteractionMode,
   ProjectsFeed,
   Resolution,
@@ -62,6 +63,14 @@ const list = async (runtime: ManagedRuntime.ManagedRuntime<Client, never>, clien
   process.stdout.write(threadList(projects, threads));
 };
 
+/** Prints a `DiffGet` result, marking what was cut to keep the payload small. */
+const diffText = (view: DiffView, projectPath: string) => {
+  const cut = `[truncated: run git diff in ${projectPath} for the rest]\n`;
+  const files = view.files.map((f) => `${f.diff}${f.diff.endsWith("\n") ? "" : "\n"}${f.truncated ? cut : ""}`);
+  const omitted = view.omittedFiles ? `[${view.omittedFiles} more changed files not shown: run git diff in ${projectPath}]\n` : "";
+  return files.length || omitted ? files.join("") + omitted : "[no changes]\n";
+};
+
 /** `verdandi chat`: a simple terminal chat with the thread for the current folder, or the one `--thread` names. */
 export const chat = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
@@ -105,6 +114,8 @@ export const chat = async (argv: readonly string[]) => {
   let answered: string[] = [];
   /** The turn a typed line steers; undefined while the thread is idle. */
   let running: TurnId | undefined;
+  /** The thread's latest turn, which `/diff` shows. */
+  let lastTurn: TurnId | undefined;
   /** The mode the next turn is sent in. */
   let mode: InteractionMode = "build";
   const snapshot = Promise.withResolvers<ThreadView>();
@@ -143,13 +154,14 @@ export const chat = async (argv: readonly string[]) => {
         Effect.sync(() => {
           if (f.kind === "snapshot") {
             running = f.thread.turns.find((t) => t.status === "running")?.turnId;
+            lastTurn = f.thread.turns.at(-1)?.turnId;
             requests.push(...f.thread.pendingRequests);
             snapshot.resolve(f.thread);
           }
           if (f.kind === "delta") process.stdout.write(f.text);
           if (f.kind !== "event") return;
           const e = f.stored.event;
-          if (e.type === "turn.started") running = e.turnId;
+          if (e.type === "turn.started") running = lastTurn = e.turnId;
           if (e.type === "approval.requested" || e.type === "user-input.requested" || e.type === "plan.requested") addRequest(e);
           if (e.type === "approval.resolved") removeRequest(e.requestId);
           if (e.type === "turn.usage.recorded") usage.push(e);
@@ -210,6 +222,18 @@ export const chat = async (argv: readonly string[]) => {
       ),
     );
 
+  /** `/diff` shows what the last turn edited; `/diff all` everything that differs from HEAD in the project. */
+  const showDiff = async (all: boolean, projectPath: string) => {
+    if (!all && !lastTurn) return process.stdout.write("[no turns yet: /diff all shows the project's changes]\n");
+    const text = await runtime.runPromise(
+      client.DiffGet(all || !lastTurn ? { threadId } : { threadId, turnId: lastTurn }).pipe(
+        Effect.map((view) => diffText(view, projectPath)),
+        Effect.catchTag("DiffUnavailable", (e) => Effect.succeed(`${e.message}\n`)),
+      ),
+    );
+    process.stdout.write(text);
+  };
+
   // Ctrl+C interrupts the running turn. A second Ctrl+C before it ends, or one at the prompt, quits.
   let interrupting: TurnId | undefined;
   process.on("SIGINT", () => {
@@ -229,7 +253,7 @@ export const chat = async (argv: readonly string[]) => {
   const changed = change !== "" && (await dispatch({ type: "thread.route.set", commandId: uuid<CommandId>(), threadId, route: wanted }));
   const { harness, model, effort } = changed ? wanted : thread.route;
   process.stdout.write(
-    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${harness} ${model} ${effort}, ${mode} mode. /ask, /plan and /build switch modes; Ctrl+C stops a turn; /exit quits.\n`,
+    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${harness} ${model} ${effort}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; Ctrl+C stops a turn; /exit quits.\n`,
   );
   if (changed) process.stdout.write(`Route changed: ${change}\n`);
   if (running) process.stdout.write("A turn is running; lines you type steer it.\n");
@@ -242,7 +266,10 @@ export const chat = async (argv: readonly string[]) => {
     const switchTo = modeCommands.get(text);
     if (request) await answer(request, text);
     else if (text === "/exit") break;
-    else if (switchTo) {
+    else if (text === "/diff" || text === "/diff all") {
+      await showDiff(text === "/diff all", thread.projectPath);
+      if (!running) prompt();
+    } else if (switchTo) {
       mode = switchTo;
       process.stdout.write(`[${modeHelp[mode]}${running ? "; applies from the next turn" : ""}]\n`);
       if (!running) prompt();
