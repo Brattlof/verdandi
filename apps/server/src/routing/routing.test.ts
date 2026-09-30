@@ -1,0 +1,216 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  type Command,
+  type CommandId,
+  type CommandRejected,
+  describeRouteChange,
+  type Route,
+  type TaskId,
+  type TaskOutcome,
+  type ThreadId,
+  type TurnId,
+} from "@verdandi/contracts";
+import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
+import { Effect, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/unstable/sql";
+import { AppLayer } from "../orchestration/app.ts";
+import { Engine } from "../orchestration/engine.ts";
+import { loadThreadView } from "../orchestration/projector.ts";
+import { Reactor } from "../orchestration/reactor.ts";
+
+const dirs: string[] = [];
+const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];
+afterEach(async () => {
+  for (const r of runtimes.splice(0)) await r.dispose();
+  for (const d of dirs.splice(0)) removeTempHome(d);
+});
+
+const tempDir = () => {
+  const d = makeTempHome();
+  dirs.push(d);
+  return d;
+};
+
+/** Routes search to the small fake model and debugging to the large one; the built-in Claude Code targets aren't running. */
+const policy = `
+targets:
+  small: { harness: fake, provider: fake, model: fake-small }
+  large: { harness: fake, provider: fake, model: fake-large }
+routes:
+  ask.search: { prefer: [small], effort: low }
+  debug.investigate: { prefer: [large], effort: high }
+`;
+const SEARCH = "Where is the auth middleware?";
+const DEBUG = "Why does the upload keep failing? Investigate the root cause.";
+
+/** A project folder with `routing` as its `.verdandi/routing.yaml`, and verdandid running only the fake harness. */
+const setup = (routing = policy) => {
+  const projectPath = tempDir();
+  mkdirSync(join(projectPath, ".verdandi"));
+  writeFileSync(join(projectPath, ".verdandi", "routing.yaml"), routing);
+  const fake = makeFakeHarness();
+  const runtime = ManagedRuntime.make(AppLayer(tempDir(), { fake }));
+  runtimes.push(runtime as never);
+  return {
+    projectPath,
+    fake,
+    run: <A, E>(effect: Effect.Effect<A, E, Engine | Reactor | SqlClient.SqlClient>) => runtime.runPromise(effect),
+  };
+};
+
+let n = 0;
+const id = <T>() => `id-${++n}` as T;
+const threadId = "thread-1" as ThreadId;
+const pinned: Route = { harness: "fake", model: "fake", effort: "medium" };
+
+const dispatch = (c: Command) =>
+  Effect.gen(function* () {
+    return yield* (yield* Engine).dispatch(c);
+  });
+const drain = Effect.gen(function* () {
+  yield* (yield* Reactor).drain;
+});
+const create = (projectPath: string, route?: Route): Command => ({
+  type: "thread.create",
+  commandId: id<CommandId>(),
+  threadId,
+  projectPath,
+  ...(route ? { route } : {}),
+});
+const send = (text: string, turnId = id<TurnId>()): Command => ({
+  type: "turn.send",
+  commandId: id<CommandId>(),
+  threadId,
+  turnId,
+  text,
+  mode: "build",
+});
+const view = loadThreadView(threadId);
+
+describe("routing each new task", () => {
+  test("a task without a pin is routed, runs on the routed route, and says why", async () => {
+    const { projectPath, fake, run } = setup();
+    const turnId = id<TurnId>();
+    const v = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath));
+        yield* dispatch(send(SEARCH, turnId));
+        yield* drain;
+        const [trajectory] = yield* (yield* SqlClient.SqlClient)<{ payload: string }>`select payload from trajectories`;
+        expect(JSON.parse(trajectory?.payload ?? "{}").route).toEqual({ harness: "fake", model: "fake-small", effort: "low" });
+        return yield* view;
+      }),
+    );
+    expect(v?.route).toEqual({ harness: "fake", model: "fake-small", effort: "low" });
+    expect(v?.pinned).toBe(false);
+    expect(v?.task).toEqual({
+      taskId: turnId as string as TaskId,
+      source: "policy",
+      reason: "Looks like ask.search, so it runs on fake-small at low effort.",
+    });
+    expect(fake.calls.map((c) => c.route.model)).toEqual(["fake-small"]);
+  });
+
+  test("a pin skips the router", async () => {
+    const { projectPath, fake, run } = setup();
+    const v = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath, pinned));
+        yield* dispatch(send(DEBUG));
+        yield* drain;
+        return yield* view;
+      }),
+    );
+    expect(v?.route).toEqual(pinned);
+    expect(v?.task).toMatchObject({ source: "pin", reason: "You pinned fake at medium effort." });
+    expect(fake.calls.map((c) => c.route)).toEqual([pinned]);
+  });
+
+  test("the user's pick is an override on the routed task's outcome, and pins the thread", async () => {
+    const { projectPath, fake, run } = setup();
+    const picked: Route = { harness: "fake", model: "fake-large", effort: "high" };
+    const { outcome, v } = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath));
+        yield* dispatch(send(SEARCH));
+        yield* drain;
+        yield* dispatch({ type: "thread.route.set", commandId: id<CommandId>(), threadId, route: picked });
+        yield* drain;
+        const sql = yield* SqlClient.SqlClient;
+        const [row] = yield* sql<{ payload: string }>`select payload from task_outcomes`;
+        yield* dispatch(send(SEARCH));
+        yield* drain;
+        return { outcome: JSON.parse(row?.payload ?? "{}") as TaskOutcome, v: yield* view };
+      }),
+    );
+    expect(outcome.userOverride).toEqual({ from: { harness: "fake", model: "fake-small", effort: "low" }, to: picked });
+    expect(v?.pinned).toBe(true);
+    expect(v?.task?.source).toBe("pin");
+    expect(fake.calls.map((c) => c.route.model)).toEqual(["fake-small", "fake-large"]);
+  });
+
+  test("picking the routed route pins it without counting as an override", async () => {
+    const { projectPath, run } = setup();
+    const { v, outcome } = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath));
+        yield* dispatch(send(SEARCH));
+        yield* drain;
+        const routed = (yield* view)?.route;
+        if (!routed) throw new Error("no thread");
+        yield* dispatch({ type: "thread.route.set", commandId: id<CommandId>(), threadId, route: routed });
+        yield* drain;
+        const [row] = yield* (yield* SqlClient.SqlClient)<{ payload: string }>`select payload from task_outcomes`;
+        return { v: yield* view, outcome: JSON.parse(row?.payload ?? "{}") as TaskOutcome };
+      }),
+    );
+    expect(v?.pinned).toBe(true);
+    expect(v?.routeChanges.map((c) => describeRouteChange(c.from, c.to))).toEqual([""]);
+    expect(outcome.userOverride).toBeUndefined();
+  });
+
+  test("unpinning lets the router pick the next task's route", async () => {
+    const { projectPath, fake, run } = setup();
+    const v = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath, pinned));
+        yield* dispatch(send(SEARCH));
+        yield* drain;
+        yield* dispatch({ type: "thread.route.unpin", commandId: id<CommandId>(), threadId });
+        const unpinned = yield* view;
+        expect(unpinned?.pinned).toBe(false);
+        expect(unpinned?.task).toBeNull();
+        yield* dispatch(send(DEBUG));
+        yield* drain;
+        return yield* view;
+      }),
+    );
+    expect(v?.task?.source).toBe("policy");
+    expect(fake.calls.map((c) => c.route)).toEqual([pinned, { harness: "fake", model: "fake-large", effort: "high" }]);
+  });
+
+  test("a broken project policy rejects a routed task, naming the file and key, but not a pinned one", async () => {
+    const { projectPath, run } = setup("routes:\n  review: { effort: extreme }\n");
+    const rejected = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath));
+        return yield* Effect.flip(dispatch(send(SEARCH)));
+      }),
+    );
+    expect((rejected as CommandRejected).reason).toBe("InvalidPolicy");
+    expect(rejected.message).toContain(join(projectPath, ".verdandi", "routing.yaml"));
+    expect(rejected.message).toContain(`["routes"]["review"]["effort"]`);
+
+    const v = await run(
+      Effect.gen(function* () {
+        yield* dispatch({ type: "thread.route.set", commandId: id<CommandId>(), threadId, route: pinned });
+        yield* dispatch(send(SEARCH));
+        yield* drain;
+        return yield* view;
+      }),
+    );
+    expect(v?.task?.source).toBe("pin");
+  });
+});

@@ -1,5 +1,16 @@
 import { expect, test } from "bun:test";
-import type { Event, ProjectId, ProjectsFeed, QuotaView, ThreadFeed, ThreadId, ThreadSummary, TurnId } from "@verdandi/contracts";
+import type {
+  Event,
+  ProjectId,
+  ProjectsFeed,
+  QuotaView,
+  Route,
+  TaskId,
+  ThreadFeed,
+  ThreadId,
+  ThreadSummary,
+  TurnId,
+} from "@verdandi/contracts";
 import { applyDiffPanel, applyProjectsFeed, applyThreadFeed, closedPanel, type DiffPanelAction, type LiveThread } from "./state.ts";
 
 const threadId = "thread-1" as ThreadId;
@@ -13,6 +24,8 @@ const snapshot: ThreadFeed = {
     threadId,
     projectPath: "C:/Users/a b/repo",
     route,
+    pinned: true,
+    task: null,
     sessionId: null,
     busy: false,
     turns: [],
@@ -184,4 +197,31 @@ test("the diff panel shows the latest fetch's result, drops stale ones, and clos
       { type: "result", request: "r4", result: { ok: true, view } },
     ]),
   ).toEqual(closedPanel);
+});
+
+test("a routed task moves the thread to its route with its reason; a pick pins it, and unpinning hands it back", () => {
+  const taskId = turnId as string as TaskId;
+  const routed: Route = { harness: "fake", model: "fake-small", effort: "low" };
+  const auto = { ...snapshot, thread: { ...snapshot.thread, pinned: false, sessionId: "s1" } };
+  const decision = {
+    source: "policy",
+    taskClass: "ask.search",
+    difficulty: 0.1,
+    confidence: 0.7,
+    target: { harness: "fake", provider: "fake", model: "fake-small", access: "local" },
+    effort: "low",
+    reason: "Looks like ask.search, so it runs on fake-small at low effort.",
+    trace: [],
+  } as const;
+  const started = fold([auto, event(2, { type: "task.started", v: 1, threadId, taskId, route: routed, decision })]);
+  expect(started).toMatchObject({
+    route: routed,
+    pinned: false,
+    sessionId: "s1",
+    task: { taskId, source: "policy", reason: decision.reason },
+  });
+
+  const picked = applyThreadFeed(started, event(3, { type: "thread.route.changed", v: 1, threadId, from: routed, to: routed, by: "user" }));
+  expect(picked).toMatchObject({ pinned: true, task: null });
+  expect(applyThreadFeed(picked, event(4, { type: "thread.route.unpinned", v: 1, threadId }))).toMatchObject({ pinned: false, task: null });
 });

@@ -13,6 +13,9 @@
     },
     {
       "path": "../../packages/trajectories"
+    },
+    {
+      "path": "../../packages/router"
     }
   ]
 }

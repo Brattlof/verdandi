@@ -6,6 +6,7 @@ import type {
   Quota,
   QuotaView,
   Route,
+  RouteDecision,
   StoredEvent,
   TaskId,
   ThreadId,
@@ -48,7 +49,8 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     withSql((sql) =>
       Effect.andThen(
         sql`insert into projects (id, path) values (${e.projectId}, ${e.projectPath}) on conflict (id) do nothing`,
-        sql`insert into threads (id, project_id, route, created_at) values (${e.threadId}, ${e.projectId}, ${JSON.stringify(e.route)}, ${at})`,
+        sql`insert into threads (id, project_id, route, pinned, created_at)
+            values (${e.threadId}, ${e.projectId}, ${JSON.stringify(e.route)}, ${e.pinned === false ? 0 : 1}, ${at})`,
       ),
     ),
   // A session belongs to one harness, so switching harness starts a fresh one on the next turn. Either way the next turn starts a task.
@@ -56,8 +58,8 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     withSql((sql) =>
       Effect.andThen(
         e.from.harness === e.to.harness
-          ? sql`update threads set route = ${JSON.stringify(e.to)}, task_id = null where id = ${e.threadId}`
-          : sql`update threads set route = ${JSON.stringify(e.to)}, session_id = null, task_id = null where id = ${e.threadId}`,
+          ? sql`update threads set route = ${JSON.stringify(e.to)}, pinned = 1, task_id = null where id = ${e.threadId}`
+          : sql`update threads set route = ${JSON.stringify(e.to)}, pinned = 1, session_id = null, task_id = null where id = ${e.threadId}`,
         sql`insert into route_changes (seq, thread_id, from_route, to_route, by, after_turns, at)
             values (${seq}, ${e.threadId}, ${JSON.stringify(e.from)}, ${JSON.stringify(e.to)}, ${e.by},
               (select count(*) from turns where thread_id = ${e.threadId}), ${at})`,
@@ -65,11 +67,18 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     ),
   "task.started": (e, at, seq) =>
     withSql((sql) =>
-      Effect.andThen(
-        sql`insert into tasks (id, thread_id, route, seq, started_at) values (${e.taskId}, ${e.threadId}, ${JSON.stringify(e.route)}, ${seq}, ${at})`,
-        sql`update threads set task_id = ${e.taskId} where id = ${e.threadId}`,
-      ),
+      Effect.gen(function* () {
+        yield* sql`insert into tasks (id, thread_id, route, seq, started_at) values (${e.taskId}, ${e.threadId}, ${JSON.stringify(e.route)}, ${seq}, ${at})`;
+        // The router may move the thread to another harness, whose session starts fresh. SET reads the old route.
+        yield* sql`update threads set task_id = ${e.taskId}, route = ${JSON.stringify(e.route)},
+            session_id = case when json_extract(route, '$.harness') = ${e.route.harness} then session_id end
+          where id = ${e.threadId}`;
+        if (e.decision)
+          yield* sql`insert into route_decisions (task_id, source, task_class, reason, payload, decided_at)
+            values (${e.taskId}, ${e.decision.source}, ${e.decision.taskClass}, ${e.decision.reason}, ${JSON.stringify(e.decision)}, ${at})`;
+      }),
     ),
+  "thread.route.unpinned": (e) => withSql((sql) => sql`update threads set pinned = 0, task_id = null where id = ${e.threadId}`),
   "turn.started": (e, at) =>
     withSql((sql) =>
       Effect.andThen(
@@ -128,8 +137,15 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         running_turn_id: string | null;
         session_id: string | null;
         task_id: TaskId | null;
+        pinned: number;
+        cached_tokens: number;
       }>`
-        select p.path, t.route, t.running_turn_id, t.session_id, t.task_id from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+        select p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned,
+          -- ponytail: the context a warm session has cached, read as every token the thread wrote to cache. Harnesses
+          -- report usage summed over a turn's model calls, not the context size; upgrade once one reports that.
+          (select coalesce(sum(u.cache_write_tokens), 0) from usage_ledger u join turns n on n.id = u.turn_id where n.thread_id = t.id)
+            as cached_tokens
+        from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
       if (!row) return { thread: undefined };
       const pending = yield* sql<{ id: string; turn_id: string; kind: PendingRequest["kind"] }>`
         select id, turn_id, kind from requests where thread_id = ${threadId} and resolution is null`;
@@ -140,6 +156,8 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           runningTurnId: row.running_turn_id,
           sessionId: row.session_id,
           taskId: row.task_id,
+          pinned: row.pinned === 1,
+          cachedTokens: row.cached_tokens,
           pendingRequests: pending.map((r) => ({ requestId: r.id, turnId: r.turn_id as TurnId, kind: r.kind })),
         },
       };
@@ -149,8 +167,19 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
 export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | null, SqlError.SqlError, SqlClient.SqlClient> =>
   withSql((sql) =>
     Effect.gen(function* () {
-      const [thread] = yield* sql<{ path: string; route: string; session_id: string | null; running_turn_id: string | null }>`
-        select p.path, t.route, t.session_id, t.running_turn_id from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+      const [thread] = yield* sql<{
+        path: string;
+        route: string;
+        session_id: string | null;
+        running_turn_id: string | null;
+        pinned: number;
+        task_id: TaskId | null;
+        source: RouteDecision["source"] | null;
+        reason: string | null;
+      }>`
+        select p.path, t.route, t.session_id, t.running_turn_id, t.pinned, t.task_id, d.source, d.reason
+        from threads t join projects p on p.id = t.project_id left join route_decisions d on d.task_id = t.task_id
+        where t.id = ${threadId}`;
       if (!thread) return null;
       const turns = yield* sql<{ id: string; text: string; mode: TurnView["mode"]; status: TurnView["status"]; error: string | null }>`
         select id, text, mode, status, error from turns where thread_id = ${threadId} order by started_at, rowid`;
@@ -177,6 +206,15 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         threadId,
         projectPath: thread.path,
         route: JSON.parse(thread.route) as Route,
+        pinned: thread.pinned === 1,
+        task:
+          thread.task_id === null
+            ? null
+            : {
+                taskId: thread.task_id,
+                ...(thread.source === null ? {} : { source: thread.source }),
+                ...(thread.reason === null ? {} : { reason: thread.reason }),
+              },
         sessionId: thread.session_id,
         busy: thread.running_turn_id !== null,
         turns: turns.map(

@@ -20,6 +20,7 @@
         "@effect/sql-sqlite-bun": "4.0.0-rc.115",
         "@verdandi/contracts": "workspace:*",
         "@verdandi/harness-claude-code": "workspace:*",
+        "@verdandi/router": "workspace:*",
         "@verdandi/testkit": "workspace:*",
         "@verdandi/trajectories": "workspace:*",
         "@verdandi/web": "workspace:*",

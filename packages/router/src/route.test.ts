@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { RouteTarget } from "@verdandi/contracts";
-import { loadPolicy } from "./policy.ts";
+import { builtInCatalog, loadPolicy } from "./policy.ts";
 import { RouterError, route } from "./route.ts";
 import { rules } from "./rules.ts";
 
@@ -97,6 +97,37 @@ describe("candidates and fallbacks", () => {
     expect(d.target.model).toBe("sonnet");
     expect(d.reason).toBe(
       "Looks like ask.search, but haiku is unavailable, so it runs on sonnet at low effort, the cheapest capable target left.",
+    );
+  });
+
+  test("targets on a harness verdandid doesn't run are dropped", () => {
+    const fake = {
+      harness: "fake",
+      provider: "fake",
+      model: "fake",
+      access: "local",
+      tier: "M",
+      context: 1_000_000,
+      price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    } as const;
+    const withFake = loadPolicy(
+      [
+        {
+          source: "test",
+          data: {
+            targets: { "fake-m": { harness: "fake", provider: "fake", model: "fake" } },
+            routes: { "ask.search": { prefer: ["cc-haiku", "fake-m"] } },
+          },
+        },
+      ],
+      [...builtInCatalog, fake],
+    );
+    const d = route({ text: SEARCH, mode: "build", harnesses: ["fake"] }, withFake, rules);
+    expect(d.target).toEqual({ harness: "fake", provider: "fake", model: "fake", access: "local" });
+    expect(d.trace[0]?.note).toContain("cc-haiku: the claude-code harness isn't running");
+    expect(d.reason).toBe("Looks like ask.search, so it runs on fake at low effort.");
+    expect(() => route({ text: SEARCH, mode: "build", harnesses: ["fake"] }, policy, rules)).toThrow(
+      "cc-sonnet: the claude-code harness isn't running",
     );
   });
 

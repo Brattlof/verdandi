@@ -39,10 +39,20 @@ type Apply<T extends Event["type"]> = (thread: LiveThread, event: Extract<Event,
 // Mirrors the server's projector, so a live thread matches the snapshot a reload would fetch.
 const apply: { [T in Event["type"]]: Apply<T> } = {
   "thread.created": (thread) => thread,
-  "task.started": (thread) => thread,
+  // The router may move the thread to another harness, whose session starts fresh.
+  "task.started": (thread, e) => ({
+    ...thread,
+    route: e.route,
+    sessionId: thread.route.harness === e.route.harness ? thread.sessionId : null,
+    task: { taskId: e.taskId, ...(e.decision ? { source: e.decision.source, reason: e.decision.reason } : {}) },
+  }),
+  // A pick pins the route and ends the task; unpinning ends it too, so the next turn starts a routed one.
+  "thread.route.unpinned": (thread) => ({ ...thread, pinned: false, task: null }),
   "thread.route.changed": (thread, e, at) => ({
     ...thread,
     route: e.to,
+    pinned: true,
+    task: null,
     // A session belongs to one harness: a new harness starts a fresh one.
     sessionId: e.from.harness === e.to.harness ? thread.sessionId : null,
     routeChanges: [...thread.routeChanges, { from: e.from, to: e.to, by: e.by, at, afterTurns: thread.turns.length }],

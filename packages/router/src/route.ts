@@ -2,6 +2,7 @@ import type {
   BudgetMode,
   CatalogEntry,
   Effort,
+  HarnessId,
   InteractionMode,
   RouteDecision,
   RouteRule,
@@ -28,6 +29,8 @@ export type RouteInput = {
   readonly paths?: readonly string[];
   /** Provider health and the share of quota left (0..1), by provider id (DESIGN §9.5). */
   readonly providers?: Readonly<Record<string, { readonly healthy?: boolean; readonly remaining?: number }>>;
+  /** The harnesses verdandid runs; targets on any other are dropped. Absent, every harness counts. */
+  readonly harnesses?: readonly HarnessId[];
 };
 
 /** No target is available at all. The message says why each one dropped out. */
@@ -106,6 +109,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const restrictions = policy.restrictions.filter((r) => paths.some((p) => new Bun.Glob(r.match).match(p)));
   const cachedTokens = input.current?.cachedTokens ?? 0;
   const unavailable = (t: CatalogEntry) => {
+    if (input.harnesses && !input.harnesses.includes(t.harness)) return `the ${t.harness} harness isn't running`;
     const provider = input.providers?.[t.provider];
     if (provider?.healthy === false) return `${t.provider} is unhealthy`;
     if (provider?.remaining !== undefined && provider.remaining <= 0) return `${t.provider} is out of quota`;

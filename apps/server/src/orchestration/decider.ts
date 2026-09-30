@@ -2,32 +2,33 @@ import { createHash } from "node:crypto";
 import {
   type Command,
   CommandRejected,
+  defaultRoute,
   type Event,
   type HarnessEvent,
   type ProjectId,
   type Resolution,
-  type Route,
   type TaskId,
   type ThreadId,
   type TurnId,
 } from "@verdandi/contracts";
 import { Result } from "effect";
+import { decideRoute, type RoutingContext, type RoutingThread, routeOf } from "../routing/routing.ts";
 
 export type PendingRequest = { readonly requestId: string; readonly turnId: TurnId; readonly kind: "approval" | "user-input" | "plan" };
 
 /** What the decider needs to know about the command's thread; `undefined` when it doesn't exist. */
 export type DeciderState = {
   readonly thread:
-    | {
+    | (RoutingThread & {
         readonly projectPath: string;
-        readonly route: Route;
         readonly runningTurnId: string | null;
-        readonly sessionId: string | null;
         /** The task the next turn continues; null before the first turn and after a route change. */
         readonly taskId: TaskId | null;
         readonly pendingRequests: readonly PendingRequest[];
-      }
+      })
     | undefined;
+  /** Loaded only when a `turn.send` starts a task. Without it the task keeps the thread's route, unexplained. */
+  readonly routing?: RoutingContext;
 };
 
 type Decision = Result.Result<Event[], CommandRejected>;
@@ -100,27 +101,35 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
           threadId: c.threadId,
           projectId: projectIdFor(c.projectPath),
           projectPath: c.projectPath,
-          route: c.route,
+          route: c.route ?? defaultRoute,
+          pinned: c.route !== undefined,
         }),
   "turn.send": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     if (state.thread.runningTurnId) return reject("ThreadBusy", "A turn is already running in this thread. Wait for it to finish.");
     const turn: Event = { type: "turn.started", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text, mode: c.mode };
     if (state.thread.taskId) return accept(turn);
-    return accept(
-      { type: "task.started", v: 1, threadId: c.threadId, taskId: c.turnId as string as TaskId, route: state.thread.route },
-      turn,
-    );
+    const task = { type: "task.started", v: 1, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
+    if (!state.routing) return accept({ ...task, route: state.thread.route }, turn);
+    const decided = decideRoute(state.thread, state.routing, c.text, c.mode);
+    if (Result.isFailure(decided)) return reject(decided.failure.reason, decided.failure.message);
+    return accept({ ...task, route: routeOf(decided.success), decision: decided.success }, turn);
   },
   "thread.route.set": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     const from = state.thread.route;
-    if (from.harness === c.route.harness && from.model === c.route.model && from.effort === c.route.effort) return accept();
+    // Picking the route the router chose still pins it; picking the pinned route again changes nothing.
+    const same = from.harness === c.route.harness && from.model === c.route.model && from.effort === c.route.effort;
+    if (same && state.thread.pinned) return accept();
     // A model or effort change waits for the next turn; a harness change would split the running turn's session.
     if (from.harness !== c.route.harness && state.thread.runningTurnId) {
       return reject("ThreadBusy", "A turn is running in this thread. Change the harness when it finishes.");
     }
     return accept({ type: "thread.route.changed", v: 1, threadId: c.threadId, from, to: c.route, by: "user" });
+  },
+  "thread.route.unpin": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
+    return state.thread.pinned ? accept({ type: "thread.route.unpinned", v: 1, threadId: c.threadId }) : accept();
   },
   "approval.respond": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);

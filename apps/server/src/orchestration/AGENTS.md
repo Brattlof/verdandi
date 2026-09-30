@@ -6,9 +6,9 @@ The event-sourced core of verdandid (DESIGN.md §10). Read the root `AGENTS.md` 
 
 | File | Role | May do |
 |---|---|---|
-| `decider.ts` | `decide(state, command)` returns the events a command causes, or a `CommandRejected`. | Nothing but compute. No I/O, no clock, no random IDs, no Effect services. |
+| `decider.ts` | `decide(state, command)` returns the events a command causes, or a `CommandRejected`. A new task's route comes from the pure router (`../routing/routing.ts`). | Nothing but compute. No I/O, no clock, no random IDs, no Effect services. |
 | `projector.ts` | One projection per event type, applied to the read models (`projects`, `threads`, `tasks`, `turns`, `items`, `requests`, `usage_ledger`, `quota`). Also loads `DeciderState`, `ThreadView` and the projects feed's thread summaries and quotas. | SQL writes to read models, inside the engine's transaction only. |
-| `engine.ts` | `dispatch`: one transaction that checks the receipt, decides, appends each event and projects it, and writes the receipt. After the commit it publishes to feeds, then runs reactions. | Own the transaction and the feed PubSub. |
+| `engine.ts` | `dispatch`: one transaction that checks the receipt, decides, appends each event and projects it, and writes the receipt. When a `turn.send` may start a task, it first loads the routing context (the project's policy file) into the decider's state. After the commit it publishes to feeds, then runs reactions. | Own the transaction and the feed PubSub. |
 | `reactor.ts` | Side effects, triggered by committed events. Today: run a harness turn on `turn.started`, feed it `turn.steered` messages, pass `approval.resolved` answers to the harness running that thread, interrupt the fiber of a turn the user interrupted, record each completed turn's trajectory (`trajectory.ts`) and its thread's task outcomes (`task-outcome.ts`), and recover turns left `running` by a previous process. | Anything with side effects, but it only changes state by dispatching commands. |
 | `app.ts` | Wires database, engine, harness registry and reactor into one layer. | |
 
