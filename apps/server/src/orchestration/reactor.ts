@@ -24,7 +24,10 @@ const errorMessage = (cause: Cause.Cause<unknown>) => {
   return `Verdandi hit an internal error while running this turn. Details: ${Cause.pretty(cause)}`;
 };
 
-/** Runs harness turns as side effects of `turn.started`, and recovers turns a previous run left behind. */
+/**
+ * Runs harness turns as side effects of `turn.started`, passes `approval.resolved` answers back to the
+ * harness, and recovers turns a previous run left behind.
+ */
 export const ReactorLive = Layer.effect(
   Reactor,
   Effect.gen(function* () {
@@ -32,6 +35,8 @@ export const ReactorLive = Layer.effect(
     const registry = yield* HarnessRegistry;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
+    /** The adapter running each thread's current turn: where answers to its requests go. */
+    const live = new Map<ThreadId, HarnessAdapter>();
 
     const report = (threadId: ThreadId, turnId: TurnId, event: HarnessEvent) =>
       engine.dispatch({ type: "harness.report", commandId: randomUUID() as CommandId, threadId, turnId, event });
@@ -46,6 +51,7 @@ export const ReactorLive = Layer.effect(
         const route = JSON.parse(thread.route) as Route;
         const adapter = registry[route.harness];
         if (!adapter) return yield* fail(`The ${route.harness} harness is not available in this verdandid. Pick another route.`);
+        live.set(threadId, adapter);
         yield* adapter.run({ threadId, cwd: thread.path, route, resumeSessionId: thread.session_id ?? undefined, turnId, text }).pipe(
           Stream.runForEach((event) => {
             if (event.type === "text.delta") return engine.publishDelta(threadId, turnId, event.text);
@@ -56,6 +62,7 @@ export const ReactorLive = Layer.effect(
         if (!finished) yield* fail("The harness stopped without finishing the turn.");
       }).pipe(
         Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) || finished ? Effect.failCause(cause) : fail(errorMessage(cause)))),
+        Effect.ensuring(Effect.sync(() => live.delete(threadId))),
         Effect.ignore,
       );
     };
@@ -73,11 +80,12 @@ export const ReactorLive = Layer.effect(
       { discard: true },
     );
 
-    yield* engine.react((stored) =>
-      stored.event.type === "turn.started"
-        ? FiberSet.run(turns, runTurn(stored.event.threadId, stored.event.turnId, stored.event.text)).pipe(Effect.asVoid)
-        : Effect.void,
-    );
+    yield* engine.react((stored) => {
+      const e = stored.event;
+      if (e.type === "turn.started") return FiberSet.run(turns, runTurn(e.threadId, e.turnId, e.text)).pipe(Effect.asVoid);
+      if (e.type === "approval.resolved") return live.get(e.threadId)?.respond(e.threadId, e.requestId, e.resolution) ?? Effect.void;
+      return Effect.void;
+    });
 
     return Reactor.of({ drain: FiberSet.awaitEmpty(turns) });
   }),

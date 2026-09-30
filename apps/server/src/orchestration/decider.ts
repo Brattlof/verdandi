@@ -5,14 +5,24 @@ import {
   type Event,
   type HarnessEvent,
   type ProjectId,
+  type Resolution,
   type ThreadId,
   type TurnId,
 } from "@verdandi/contracts";
 import { Result } from "effect";
 
+export type PendingRequest = { readonly requestId: string; readonly turnId: TurnId; readonly kind: "approval" | "user-input" };
+
 /** What the decider needs to know about the command's thread; `undefined` when it doesn't exist. */
 export type DeciderState = {
-  readonly thread: { readonly projectPath: string; readonly runningTurnId: string | null; readonly sessionId: string | null } | undefined;
+  readonly thread:
+    | {
+        readonly projectPath: string;
+        readonly runningTurnId: string | null;
+        readonly sessionId: string | null;
+        readonly pendingRequests: readonly PendingRequest[];
+      }
+    | undefined;
 };
 
 type Decision = Result.Result<Event[], CommandRejected>;
@@ -25,6 +35,17 @@ export const projectIdFor = (path: string): ProjectId => {
 
 const reject = (reason: CommandRejected["reason"], message: string): Decision => Result.fail(new CommandRejected({ reason, message }));
 const accept = (...events: Event[]): Decision => Result.succeed(events);
+
+/** A turn that ends can no longer use an answer, so its open requests are denied, with the reason recorded. */
+const denyPending = (state: DeciderState, threadId: ThreadId, turnId: TurnId, reason: string): Event[] =>
+  (state.thread?.pendingRequests ?? [])
+    .filter((r) => r.turnId === turnId)
+    .map((r) => ({ type: "approval.resolved", v: 1, threadId, turnId, requestId: r.requestId, resolution: { decision: "deny" }, reason }));
+
+const fits: Record<PendingRequest["kind"], readonly Resolution["decision"][]> = {
+  approval: ["allow", "deny"],
+  "user-input": ["answer", "deny"],
+};
 
 type Handler<T extends Command["type"]> = (state: DeciderState, command: Extract<Command, { type: T }>) => Decision;
 
@@ -42,8 +63,12 @@ const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, ev
       const { type: _, ...usage } = event;
       return accept({ type: "turn.usage.recorded", v: 1, threadId, turnId, ...usage });
     }
+    case "approval.requested":
+      return accept({ ...event, v: 1, threadId, turnId });
+    case "user-input.requested":
+      return accept({ ...event, v: 1, threadId, turnId });
     case "turn.finished":
-      return accept({
+      return accept(...denyPending(state, threadId, turnId, "The turn ended before this was answered."), {
         type: "turn.completed",
         v: 1,
         threadId,
@@ -71,10 +96,33 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (state.thread.runningTurnId) return reject("ThreadBusy", "A turn is already running in this thread. Wait for it to finish.");
     return accept({ type: "turn.started", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text });
   },
+  "approval.respond": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    const request = state.thread.pendingRequests.find((r) => r.requestId === c.requestId);
+    if (!request)
+      return reject(
+        "RequestNotPending",
+        `Request ${c.requestId} is not waiting for an answer: it was answered already, or its turn ended.`,
+      );
+    if (!fits[request.kind].includes(c.resolution.decision)) {
+      return reject(
+        "InvalidResolution",
+        `A ${request.kind} request takes ${fits[request.kind].join(" or ")}, not ${c.resolution.decision}.`,
+      );
+    }
+    return accept({
+      type: "approval.resolved",
+      v: 1,
+      threadId: c.threadId,
+      turnId: request.turnId,
+      requestId: c.requestId,
+      resolution: c.resolution,
+    });
+  },
   "harness.report": (state, c) => fromHarness(state, c.threadId, c.turnId, c.event),
   "turn.recover": (state, c) =>
     state.thread?.runningTurnId === c.turnId
-      ? accept({
+      ? accept(...denyPending(state, c.threadId, c.turnId, "verdandid stopped while this was waiting for an answer."), {
           type: "turn.completed",
           v: 1,
           threadId: c.threadId,

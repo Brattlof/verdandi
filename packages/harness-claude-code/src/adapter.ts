@@ -1,7 +1,16 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { type HarnessAdapter, HarnessError, type HarnessEvent, type HarnessRunInput, type ThreadId } from "@verdandi/contracts";
-import { Effect, Stream } from "effect";
+import { type CanUseTool, type PermissionResult, query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import {
+  type HarnessAdapter,
+  HarnessError,
+  type HarnessEvent,
+  type HarnessRunInput,
+  Question,
+  type Resolution,
+  type ThreadId,
+} from "@verdandi/contracts";
+import { Effect, Option, Schema, Stream } from "effect";
 import { initialContext, type NormalizeContext, normalize } from "./normalize.ts";
 
 export type QueryFn = typeof query;
@@ -17,7 +26,27 @@ type Session = {
   readonly push: (message: SDKUserMessage) => void;
   readonly next: () => Promise<IteratorResult<SDKMessage>>;
   readonly close: () => void;
+  /** Requests `canUseTool` raised that the running turn hasn't reported yet. */
+  readonly raised: HarnessEvent[];
+  /** Resolves when `canUseTool` raises a request. */
+  readonly nextRaise: () => Promise<void>;
+  /** `canUseTool` calls waiting for an answer, by request id. */
+  readonly waiting: Map<string, (resolution: Resolution) => void>;
   context: NormalizeContext;
+};
+
+const decodeQuestions = Schema.decodeUnknownOption(Schema.Struct({ questions: Schema.Array(Question) }));
+
+/** The SDK answer for a resolution. Deny messages stay neutral: they reach the model as tool output (ADR 0003). */
+const toPermission = (input: Record<string, unknown>, resolution: Resolution): PermissionResult => {
+  switch (resolution.decision) {
+    case "allow":
+      return { behavior: "allow", updatedInput: input };
+    case "answer":
+      return { behavior: "allow", updatedInput: { ...input, answers: resolution.answers } };
+    case "deny":
+      return { behavior: "deny", message: "The user denied this." };
+  }
 };
 
 const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInput): Session => {
@@ -33,6 +62,32 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
       }
     },
   };
+  const raised: HarnessEvent[] = [];
+  const waiting = new Map<string, (resolution: Resolution) => void>();
+  let onRaise: (() => void) | undefined;
+  const raise = (event: HarnessEvent) => {
+    raised.push(event);
+    onRaise?.();
+  };
+
+  // Every tool the user's own settings don't allow lands here; AskUserQuestion becomes a user-input request.
+  const canUseTool: CanUseTool = (toolName, toolInput, { signal }) =>
+    new Promise((resolve) => {
+      const requestId = randomUUID();
+      const answer = (resolution: Resolution) => {
+        waiting.delete(requestId);
+        resolve(toPermission(toolInput, resolution));
+      };
+      waiting.set(requestId, answer);
+      signal.addEventListener("abort", () => answer({ decision: "deny" }), { once: true });
+      const asked = toolName === "AskUserQuestion" ? decodeQuestions(toolInput) : Option.none();
+      raise(
+        Option.isSome(asked)
+          ? { type: "user-input.requested", requestId, questions: asked.value.questions }
+          : { type: "approval.requested", requestId, toolName, input: toolInput },
+      );
+    });
+
   const q = queryFn({
     prompt,
     options: {
@@ -44,7 +99,7 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
       includePartialMessages: true,
       // Connectors attach nondeterministically and would change the tool list between turns (ADR 0001).
       settings: { disableClaudeAiConnectors: true },
-      canUseTool: async () => ({ behavior: "deny", message: "Approvals arrive in a later Verdandi build." }),
+      canUseTool,
     },
   });
   // One iterator for the session's lifetime: leaving a for-await early would close the CLI (ADR 0003).
@@ -59,6 +114,9 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
       closed = true;
       wake?.();
     },
+    raised,
+    nextRaise: () => (raised.length > 0 ? Promise.resolve() : new Promise((resolve) => (onRaise = resolve))),
+    waiting,
     context: initialContext(),
   };
 };
@@ -72,8 +130,15 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
 
   async function* turn(session: Session, input: HarnessRunInput): AsyncGenerator<HarnessEvent> {
     session.push({ type: "user", message: { role: "user", content: input.text }, parent_tool_use_id: null, uuid: input.turnId as UUID });
+    // Read lazily: a read left pending when the turn finishes would swallow the next turn's first message.
+    let pending: Promise<IteratorResult<SDKMessage>> | undefined;
     while (true) {
-      const step = await session.next();
+      pending ??= session.next();
+      // While canUseTool waits for an answer the SDK sends nothing, so requests are raced against the next message.
+      const step = await Promise.race([pending, session.nextRaise().then(() => undefined)]);
+      yield* session.raised.splice(0);
+      if (step === undefined) continue;
+      pending = undefined;
       if (step.done) {
         sessions.delete(input.threadId);
         throw new HarnessError({
@@ -110,5 +175,6 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
           });
         }),
       ),
+    respond: (threadId, requestId, resolution) => Effect.sync(() => sessions.get(threadId)?.waiting.get(requestId)?.(resolution)),
   };
 };

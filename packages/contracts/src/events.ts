@@ -1,6 +1,7 @@
 import { Data, Effect, Schema } from "effect";
 import { ProjectId, ThreadId, TurnId } from "./ids.ts";
 import { Item, UsageFields } from "./items.ts";
+import { Question, Resolution } from "./requests.ts";
 import { Route } from "./route.ts";
 
 // Events are append-only and must stay readable forever. To change one, add a v2 schema
@@ -44,6 +45,35 @@ export const TurnUsageRecorded = Schema.Struct({
   turnId: TurnId,
   ...UsageFields,
 });
+/** The harness waits for the user to allow or deny a tool call. */
+export const ApprovalRequested = Schema.Struct({
+  type: Schema.Literal("approval.requested"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  requestId: Schema.String,
+  toolName: Schema.String,
+  input: Schema.Unknown,
+});
+/** The harness waits for the user to answer questions. Answered or denied with `approval.resolved`. */
+export const UserInputRequested = Schema.Struct({
+  type: Schema.Literal("user-input.requested"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  requestId: Schema.String,
+  questions: Schema.Array(Question),
+});
+export const ApprovalResolved = Schema.Struct({
+  type: Schema.Literal("approval.resolved"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  requestId: Schema.String,
+  resolution: Resolution,
+  /** Set when Verdandi denied the request itself, because its turn ended first; says why. */
+  reason: Schema.optionalKey(Schema.String),
+});
 export const TurnStatus = Schema.Literals(["success", "error", "interrupted"]);
 export const TurnCompleted = Schema.Struct({
   type: Schema.Literal("turn.completed"),
@@ -54,7 +84,17 @@ export const TurnCompleted = Schema.Struct({
   error: Schema.optionalKey(Schema.String),
 });
 
-export const Event = Schema.Union([ThreadCreated, TurnStarted, HarnessSessionBound, TurnItemAdded, TurnUsageRecorded, TurnCompleted]);
+export const Event = Schema.Union([
+  ThreadCreated,
+  TurnStarted,
+  HarnessSessionBound,
+  TurnItemAdded,
+  TurnUsageRecorded,
+  ApprovalRequested,
+  UserInputRequested,
+  ApprovalResolved,
+  TurnCompleted,
+]);
 export type Event = typeof Event.Type;
 
 export const StoredEvent = Schema.Struct({
@@ -74,6 +114,9 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "harness.session.bound@1": HarnessSessionBound,
   "turn.item.added@1": TurnItemAdded,
   "turn.usage.recorded@1": TurnUsageRecorded,
+  "approval.requested@1": ApprovalRequested,
+  "user-input.requested@1": UserInputRequested,
+  "approval.resolved@1": ApprovalResolved,
   "turn.completed@1": TurnCompleted,
 };
 

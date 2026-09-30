@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { HarnessEvent } from "./harness.ts";
 import { CommandId, ThreadId, TurnId } from "./ids.ts";
+import { Resolution } from "./requests.ts";
 import { Route } from "./route.ts";
 
 export const ThreadCreate = Schema.Struct({
@@ -16,6 +17,14 @@ export const TurnSend = Schema.Struct({
   threadId: ThreadId,
   turnId: TurnId,
   text: Schema.String,
+});
+/** Answers a pending approval or user-input request. */
+export const ApprovalRespond = Schema.Struct({
+  type: Schema.Literal("approval.respond"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: Schema.String,
+  resolution: Resolution,
 });
 
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
@@ -35,8 +44,8 @@ export const TurnRecover = Schema.Struct({
 });
 
 /** What clients may send over RPC. */
-export const ClientCommand = Schema.Union([ThreadCreate, TurnSend]);
+export const ClientCommand = Schema.Union([ThreadCreate, TurnSend, ApprovalRespond]);
 export type ClientCommand = typeof ClientCommand.Type;
 
-export const Command = Schema.Union([ThreadCreate, TurnSend, HarnessReport, TurnRecover]);
+export const Command = Schema.Union([ThreadCreate, TurnSend, ApprovalRespond, HarnessReport, TurnRecover]);
 export type Command = typeof Command.Type;

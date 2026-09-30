@@ -668,7 +668,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
   | Group | Tables |
   |---|---|
   | Log and receipts | `events`, `command_receipts` |
-  | Projections | `projects`, `threads`, `tasks`, `turns`, `items`, `checkpoints` |
+  | Projections | `projects`, `threads`, `tasks`, `turns`, `items`, `requests` (approvals and questions), `checkpoints` |
   | Routing | `route_decisions`, `task_outcomes`, `routing_memory` |
   | Usage and providers | `usage_ledger`, `provider_health` |
   | Learning | `memories` (+ FTS5), `session_index` (FTS5, including a trigram index for Chinese, Japanese and Korean text and for substring search), `skills`, `skill_runs`, `trajectories` |
