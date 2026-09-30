@@ -1,4 +1,13 @@
-import { Api, type ClientCommand, CommandRejected, DiffUnavailable, type DiffView, type ThreadId, type TurnId } from "@verdandi/contracts";
+import {
+  Api,
+  type ClientCommand,
+  CommandRejected,
+  DiffUnavailable,
+  type DiffView,
+  type HarnessId,
+  type ThreadId,
+  type TurnId,
+} from "@verdandi/contracts";
 import { Cause, Context, Effect, Exit, Layer, ManagedRuntime, Stream } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import { Socket } from "effect/unstable/socket";
@@ -122,6 +131,15 @@ export const connect = (token: string) => {
     };
   };
 
-  return { dispatch, diff, follow, lost };
+  /** The harnesses verdandid runs. Asked once: they are fixed while it runs. */
+  let harnessList: Promise<readonly HarnessId[]> | undefined;
+  const harnesses = () =>
+    (harnessList ??= run((rpc) => rpc.HarnessesList()).then((exit) => {
+      if (Exit.isSuccess(exit)) return exit.value;
+      lost.set(true); // it has no errors of its own
+      return [];
+    }));
+
+  return { dispatch, diff, follow, harnesses, lost };
 };
 export type Connection = ReturnType<typeof connect>;

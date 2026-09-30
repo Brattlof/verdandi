@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { Route } from "@verdandi/contracts";
-import { describeRouteChange, routeFromFlags } from "./route-flags.ts";
+import { describeRouteChange, type Route } from "@verdandi/contracts";
+import { routeFromFlags } from "./route-flags.ts";
 
 const opusHigh: Route = { harness: "claude-code", model: "opus", effort: "high" };
 

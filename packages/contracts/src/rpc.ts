@@ -4,7 +4,7 @@ import { ClientCommand } from "./commands.ts";
 import { ApprovalRequested, PlanRequested, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
 import { CommandId, ProjectId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Usage } from "./items.ts";
-import { InteractionMode, Route } from "./route.ts";
+import { HarnessId, InteractionMode, Route } from "./route.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
   reason: Schema.Literals([
@@ -51,6 +51,16 @@ export const TurnView = Schema.Struct({
 });
 export type TurnView = typeof TurnView.Type;
 
+/** A route change between turns: `afterTurns` turns had started when it was made, at `at` (ISO). */
+export const RouteChange = Schema.Struct({
+  from: Route,
+  to: Route,
+  by: Schema.Literal("user"),
+  at: Schema.String,
+  afterTurns: Schema.Number,
+});
+export type RouteChange = typeof RouteChange.Type;
+
 export const ThreadView = Schema.Struct({
   threadId: ThreadId,
   projectPath: Schema.String,
@@ -58,6 +68,8 @@ export const ThreadView = Schema.Struct({
   sessionId: Schema.NullOr(Schema.String),
   busy: Schema.Boolean,
   turns: Schema.Array(TurnView),
+  /** Oldest first, so a client can show each between the turns it came between. */
+  routeChanges: Schema.Array(RouteChange),
   /** Requests still waiting for an answer, oldest first, so a client that reconnects can answer them. */
   pendingRequests: Schema.Array(Schema.Union([ApprovalRequested, UserInputRequested, PlanRequested])),
 });
@@ -116,6 +128,8 @@ export class Api extends RpcGroup.make(
   Rpc.make("ProjectsSubscribe", { payload: { subscriptionId: Schema.String }, success: ProjectsFeed, stream: true }),
   /** Ends the feed started with `subscriptionId`, whichever kind it is. */
   Rpc.make("Unsubscribe", { payload: { subscriptionId: Schema.String } }),
+  /** The harnesses this verdandid runs, so clients offer only those. */
+  Rpc.make("HarnessesList", { success: Schema.Array(HarnessId) }),
   /** The thread's project diff; with `turnId`, only the files that turn's file tools touched. */
   Rpc.make("DiffGet", {
     payload: { threadId: ThreadId, turnId: Schema.optionalKey(TurnId) },

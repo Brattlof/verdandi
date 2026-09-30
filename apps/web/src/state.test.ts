@@ -9,7 +9,16 @@ const route = { harness: "fake", model: "fake", effort: "low" } as const;
 const snapshot: ThreadFeed = {
   kind: "snapshot",
   seq: 1,
-  thread: { threadId, projectPath: "C:/Users/a b/repo", route, sessionId: null, busy: false, turns: [], pendingRequests: [] },
+  thread: {
+    threadId,
+    projectPath: "C:/Users/a b/repo",
+    route,
+    sessionId: null,
+    busy: false,
+    turns: [],
+    routeChanges: [],
+    pendingRequests: [],
+  },
 };
 const event = (seq: number, e: Event): ThreadFeed => ({
   kind: "event",
@@ -55,6 +64,28 @@ test("a streamed turn: deltas show until the stored message replaces them, and c
     items: [{ kind: "assistant.message", text: "echo: hi" }],
     usage: [{ model: "fake", inputTokens: 10, outputTokens: 5, costUsd: 0.01 }],
   });
+});
+
+test("a route change lands after the turns so far, and a new harness drops the session", () => {
+  const at = "2026-09-30T10:00:00.000Z";
+  const to = { ...route, harness: "claude-code", model: "sonnet" } as const;
+  const thread = fold([
+    { ...snapshot, thread: { ...snapshot.thread, sessionId: "s1" } },
+    event(2, { type: "turn.started", v: 1, threadId, turnId, text: "hi" }),
+    {
+      kind: "event",
+      stored: {
+        seq: 3,
+        eventId: "e3",
+        commandId: "c3",
+        at,
+        event: { type: "thread.route.changed", v: 1, threadId, from: route, to, by: "user" },
+      },
+    },
+  ]);
+  expect(thread?.route).toEqual(to);
+  expect(thread?.sessionId).toBeNull();
+  expect(thread?.routeChanges).toEqual([{ from: route, to, by: "user", at, afterTurns: 1 }]);
 });
 
 test("events the snapshot already includes are skipped", () => {

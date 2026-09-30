@@ -19,3 +19,10 @@ export type Route = typeof Route.Type;
 
 /** A new thread's route when nothing else picks one. */
 export const defaultRoute: Route = { harness: "claude-code", model: "sonnet", effort: "medium" };
+
+/** What differs between two routes, e.g. `model sonnet → opus, effort medium → high`; empty when nothing does. */
+export const describeRouteChange = (from: Route, to: Route) =>
+  (["harness", "model", "effort"] as const)
+    .filter((k) => from[k] !== to[k])
+    .map((k) => `${k} ${from[k]} → ${to[k]}`)
+    .join(", ");

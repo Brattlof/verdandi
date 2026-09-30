@@ -1,6 +1,7 @@
 import type { CommandId, InteractionMode, Question, Resolution, ThreadId, ThreadView, TurnId } from "@verdandi/contracts";
 import { type FormEvent, type KeyboardEvent, useId, useState } from "react";
 import { type Connection, uuid } from "./client.ts";
+import { RouteChip } from "./route.tsx";
 import type { LiveThread } from "./state.ts";
 
 const modes: { value: InteractionMode; label: string; hint: string }[] = [
@@ -79,47 +80,50 @@ export const Composer = ({
   };
   const hint = modes.find((m) => m.value === mode)?.hint;
   return (
-    <form className="composer" onSubmit={onSubmit}>
-      <fieldset className="modes">
-        <legend className="sr-only">Mode for the next turn</legend>
-        {modes.map((m) => (
-          <label key={m.value}>
-            <input type="radio" name="mode" value={m.value} checked={mode === m.value} onChange={() => onMode(m.value)} />
-            {m.label}
-          </label>
-        ))}
-        <span className="muted">
-          {hint}
-          {running ? "; applies from the next turn" : ""}
-        </span>
-      </fieldset>
-      <label className="sr-only" htmlFor="message">
-        {running ? "Steer the running turn" : "Message"}
-      </label>
-      <textarea
-        id="message"
-        rows={3}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder={running ? "Steer the agent: it reads this at its next step" : "Message the agent"}
-      />
-      <div className="actions">
-        {error && (
-          <span role="alert" className="error">
-            {error}
+    <div className="composer">
+      <RouteChip connection={connection} thread={thread} />
+      <form onSubmit={onSubmit}>
+        <fieldset className="modes">
+          <legend className="sr-only">Mode for the next turn</legend>
+          {modes.map((m) => (
+            <label key={m.value}>
+              <input type="radio" name="mode" value={m.value} checked={mode === m.value} onChange={() => onMode(m.value)} />
+              {m.label}
+            </label>
+          ))}
+          <span className="muted">
+            {hint}
+            {running ? "; applies from the next turn" : ""}
           </span>
-        )}
-        {running && (
-          <button type="button" onClick={stop}>
-            Stop
+        </fieldset>
+        <label className="sr-only" htmlFor="message">
+          {running ? "Steer the running turn" : "Message"}
+        </label>
+        <textarea
+          id="message"
+          rows={3}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder={running ? "Steer the agent: it reads this at its next step" : "Message the agent"}
+        />
+        <div className="actions">
+          {error && (
+            <span role="alert" className="error">
+              {error}
+            </span>
+          )}
+          {running && (
+            <button type="button" onClick={stop}>
+              Stop
+            </button>
+          )}
+          <button type="submit" disabled={!text.trim()}>
+            {running ? "Steer" : "Send"}
           </button>
-        )}
-        <button type="submit" disabled={!text.trim()}>
-          {running ? "Steer" : "Send"}
-        </button>
-      </div>
-    </form>
+        </div>
+      </form>
+    </div>
   );
 };
 
