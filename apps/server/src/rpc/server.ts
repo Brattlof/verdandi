@@ -11,7 +11,7 @@ import { Engine } from "../orchestration/engine.ts";
 import { loadDeciderState } from "../orchestration/projector.ts";
 import { HarnessRegistry } from "../orchestration/reactor.ts";
 import { loadTaskCosts } from "../orchestration/task-outcome.ts";
-import { decideRoute, routingFor } from "../routing/routing.ts";
+import { decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { threadDiff } from "../workspace/diff.ts";
 import { resolveProjectPath } from "../workspace/project.ts";
 
@@ -78,7 +78,9 @@ const Handlers = Api.toLayer(
             Effect.catchTag("SqlError", Effect.die),
           );
           if (!thread) return yield* new RoutingUnavailable({ reason: "ThreadNotFound", message: `Thread ${threadId} does not exist.` });
-          const decided = decideRoute(thread, yield* routing(thread.projectPath), text, mode);
+          const context = yield* routing(thread.projectPath);
+          const { answers } = yield* rulesDecide.decide({ state: text, questions: taskQuestions(context) });
+          const decided = decideRoute(thread, context, text, mode, answers);
           if (Result.isFailure(decided)) return yield* new RoutingUnavailable(decided.failure);
           return decided.success;
         }),

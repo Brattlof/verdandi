@@ -76,6 +76,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
       usage: [...t.usage, { model, accessMode, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsd }],
     })),
   "harness.quota.reported": (thread) => thread, // shown in the sidebar, from the projects feed
+  "decision.recorded": (thread) => thread, // logged for the lab; the route shows through task.started
   "approval.requested": addRequest,
   "user-input.requested": addRequest,
   "plan.requested": (thread, e) =>

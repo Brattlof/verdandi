@@ -163,6 +163,30 @@ const budgetMode = Effect.gen(function* () {
   yield* sql`alter table threads add column budget_mode text`;
 });
 
+/**
+ * Every answer the decision layer gave (DESIGN §9.8), one row per question, for the lab to measure other
+ * backends against. The state is the text of `turn_id`'s turn, kept only there; the decision is recorded
+ * right before that turn starts, so `turn_id` has no foreign key.
+ */
+const decisions = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table decisions (
+    seq integer not null,
+    idx integer not null,
+    thread_id text not null references threads (id),
+    turn_id text not null,
+    kind text not null,
+    question text not null,
+    answer text not null,
+    confidence real not null,
+    low_confidence integer not null,
+    backend text not null,
+    decided_at text not null,
+    primary key (seq, idx)
+  )`;
+  yield* sql`create index decisions_kind on decisions (kind, backend)`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -173,4 +197,5 @@ export const migrations = {
   "7_tasks": tasks,
   "8_route_decisions": routeDecisions,
   "9_budget_mode": budgetMode,
+  "10_decisions": decisions,
 };

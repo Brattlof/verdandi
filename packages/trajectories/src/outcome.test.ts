@@ -80,3 +80,41 @@ test("a task counts the user's interrupt as a correction, and has no outcome whi
   expect(second?.userOverride).toBeUndefined();
   expect(buildTaskOutcomes(events.slice(0, -1)).map((o) => o.taskId)).toEqual([u1 as string as TaskId]);
 });
+
+test("a follow-up the decision layer calls a correction counts against the task that answered before it", () => {
+  const correcting = (turnId: TurnId, probability: number, lowConfidence = false) =>
+    ({
+      type: "decision.recorded",
+      v: 1,
+      threadId,
+      turnId,
+      questions: [{ type: "noul", kind: "follow-up.correcting", question: "Correcting?", minConfidence: 0.6 }],
+      answers: [
+        { type: "noul", kind: "follow-up.correcting", probability, confidence: lowConfidence ? 0.4 : 0.8, lowConfidence, backend: "rules" },
+      ],
+    }) as const;
+  const task = (taskId: TurnId) => ({ type: "task.started", v: 1, threadId, taskId: taskId as string as TaskId, route: sonnet }) as const;
+  const outcomes = buildTaskOutcomes(
+    stored([
+      [0, task(u1)],
+      [0, started(u1)],
+      [1, completed(u1, "success")],
+      // Corrects u1's answer, in the same task.
+      [2, correcting(u2, 0.85)],
+      [2, started(u2)],
+      [3, completed(u2, "success")],
+      // Too unsure to count, then a new task whose first turn corrects the previous task's last answer.
+      [4, correcting(u3, 0.6, true)],
+      [4, started(u3)],
+      [5, completed(u3, "success")],
+      [6, correcting(u4, 0.85)],
+      [6, task(u4)],
+      [6, started(u4)],
+      [7, completed(u4, "success")],
+    ]),
+  );
+  expect(outcomes.map((o) => [o.taskId as string, o.implicitSatisfaction])).toEqual([
+    [u1, -1],
+    [u4, 1],
+  ]);
+});

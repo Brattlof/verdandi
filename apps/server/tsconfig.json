@@ -16,6 +16,9 @@
     },
     {
       "path": "../../packages/router"
+    },
+    {
+      "path": "../../packages/decisions"
     }
   ]
 }

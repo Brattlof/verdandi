@@ -1,4 +1,5 @@
 import { Data, Effect, Schema } from "effect";
+import { DecisionAnswer, DecisionQuestion } from "./decisions.ts";
 import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields } from "./items.ts";
 import { Question, Resolution } from "./requests.ts";
@@ -150,6 +151,20 @@ export const ApprovalResolved = Schema.Struct({
   /** Set when Verdandi denied the request itself, because its turn ended first; says why. */
   reason: Schema.optionalKey(Schema.String),
 });
+/**
+ * The decision layer answered questions about turn `turnId` (DESIGN §9.8), committed right before that turn's
+ * `task.started` or `turn.started`. The turn's text is the state, kept only in its `turn.started`. Logged for
+ * the lab, to measure other backends against the one that answered.
+ */
+export const DecisionRecorded = Schema.Struct({
+  type: Schema.Literal("decision.recorded"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  questions: Schema.Array(DecisionQuestion),
+  /** One per question, in the same order. */
+  answers: Schema.Array(DecisionAnswer),
+});
 export const TurnStatus = Schema.Literals(["success", "error", "interrupted"]);
 export const TurnCompleted = Schema.Struct({
   type: Schema.Literal("turn.completed"),
@@ -177,6 +192,7 @@ export const Event = Schema.Union([
   PlanRequested,
   ApprovalResolved,
   TurnCompleted,
+  DecisionRecorded,
 ]);
 export type Event = typeof Event.Type;
 
@@ -208,6 +224,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "plan.requested@1": PlanRequested,
   "approval.resolved@1": ApprovalResolved,
   "turn.completed@1": TurnCompleted,
+  "decision.recorded@1": DecisionRecorded,
 };
 
 /** The row shape an event is stored as. */
