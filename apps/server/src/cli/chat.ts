@@ -58,10 +58,10 @@ const list = async (runtime: ManagedRuntime.ManagedRuntime<Client, never>, clien
   );
   const noSnapshot = new Error("The projects feed ended before its snapshot arrived. Restart verdandid and try again.");
   feed.then(() => snapshot.reject(noSnapshot), snapshot.reject);
-  const { projects, threads } = await snapshot.promise;
+  const { projects, threads, quotas } = await snapshot.promise;
   await runtime.runPromise(client.Unsubscribe({ subscriptionId }));
   await feed;
-  process.stdout.write(threadList(projects, threads));
+  process.stdout.write(threadList(projects, threads, quotas));
 };
 
 /** Prints a `DiffGet` result, marking what was cut to keep the payload small. */

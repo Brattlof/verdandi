@@ -64,6 +64,11 @@ const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, ev
       const { type: _, ...usage } = event;
       return accept({ type: "turn.usage.recorded", v: 1, threadId, turnId, ...usage });
     }
+    case "quota":
+      // A running turn's thread exists, and its harness can't change until the turn ends.
+      return state.thread
+        ? accept({ type: "harness.quota.reported", v: 1, threadId, turnId, harness: state.thread.route.harness, quota: event.quota })
+        : accept();
     case "approval.requested":
       return accept({ ...event, v: 1, threadId, turnId });
     case "user-input.requested":

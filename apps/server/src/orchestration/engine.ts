@@ -15,10 +15,11 @@ import {
 import { Context, Effect, Layer, PubSub, Result, Stream } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { decide } from "./decider.ts";
-import { loadDeciderState, loadProjects, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
+import { loadDeciderState, loadProjects, loadQuotas, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
 
 type FeedMessage = { readonly threadId: ThreadId; readonly feed: ThreadFeed };
 type ThreadChange = Extract<ProjectsFeed, { kind: "thread" }>;
+type ProjectsChange = Exclude<ProjectsFeed, { kind: "snapshot" }>;
 
 /** Events that change a thread's summary in the projects feed. */
 const summaryEvents: ReadonlySet<Event["type"]> = new Set(["thread.created", "thread.route.changed", "turn.started", "turn.completed"]);
@@ -49,7 +50,7 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const pubsub = yield* PubSub.unbounded<FeedMessage>();
-      const changes = yield* PubSub.unbounded<ThreadChange>();
+      const changes = yield* PubSub.unbounded<ProjectsChange>();
       const reactions: Reaction[] = [];
       const projectOne = options.project ?? project;
 
@@ -71,7 +72,12 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
         sql.withTransaction(
           Effect.gen(function* () {
             const [existing] = yield* sql<{ seq: number }>`select seq from command_receipts where command_id = ${command.commandId}`;
-            if (existing) return { receipt: { commandId: command.commandId, seq: existing.seq }, stored: [] as StoredEvent[] };
+            if (existing)
+              return {
+                receipt: { commandId: command.commandId, seq: existing.seq },
+                stored: [] as StoredEvent[],
+                published: [] as ProjectsChange[],
+              };
             const decision = decide(yield* loadDeciderState(command.threadId), command);
             if (Result.isFailure(decision)) return yield* Effect.fail(decision.failure);
             const stored = yield* Effect.forEach(decision.success, (event) => append(command, event));
@@ -87,7 +93,16 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
               seq,
               ...(created?.type === "thread.created" ? { project: { projectId: created.projectId, path: created.projectPath } } : {}),
             };
-            return { receipt: { commandId: command.commandId as CommandId, seq }, stored, change };
+            const quotas = stored.flatMap((s): ProjectsChange[] =>
+              s.event.type === "harness.quota.reported"
+                ? [{ kind: "quota", quota: { harness: s.event.harness, quota: s.event.quota, at: s.at }, seq: s.seq }]
+                : [],
+            );
+            return {
+              receipt: { commandId: command.commandId as CommandId, seq },
+              stored,
+              published: change ? [change, ...quotas] : quotas,
+            };
           }),
         );
 
@@ -95,7 +110,7 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
       // would otherwise leave a committed turn.started with no harness run, and the thread busy.
       const dispatch = (command: Command) =>
         commit(command).pipe(
-          Effect.tap(({ change }) => (change ? PubSub.publish(changes, change) : Effect.void)),
+          Effect.tap(({ published }) => PubSub.publishAll(changes, published)),
           Effect.tap(({ stored }) =>
             Effect.forEach(
               stored,
@@ -141,15 +156,17 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
             Effect.all({
               projects: loadProjects,
               threads: loadThreadSummaries(),
+              quotas: loadQuotas,
               seq: sql<{ seq: number }>`select coalesce(max(seq), 0) as seq from events`.pipe(Effect.map(([r]) => r?.seq ?? 0)),
             }),
           );
-          // Commits can publish out of order, so drop a summary older than the one the client already has.
-          const latest = new Map<ThreadId, number>();
+          // Commits can publish out of order, so drop a thread summary or quota older than the one the client already has.
+          const latest = new Map<string, number>();
           const live = Stream.fromSubscription(subscription).pipe(
             Stream.filter((c) => {
-              const newer = c.seq > (latest.get(c.thread.threadId) ?? snapshot.seq);
-              if (newer) latest.set(c.thread.threadId, c.seq);
+              const key = c.kind === "thread" ? c.thread.threadId : `quota:${c.quota.harness}`;
+              const newer = c.seq > (latest.get(key) ?? snapshot.seq);
+              if (newer) latest.set(key, c.seq);
               return newer;
             }),
           );

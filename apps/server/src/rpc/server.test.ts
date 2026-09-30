@@ -167,6 +167,7 @@ describe("rpc server", () => {
         const feed = yield* c.ProjectsSubscribe({ subscriptionId }).pipe(
           Stream.runForEach((f: ProjectsFeed) => {
             if (f.kind === "snapshot") return Deferred.succeed(snapshot, f);
+            if (f.kind !== "thread") return Effect.void;
             changes.push(f);
             return changes.some((x) => x.thread.busy) && !f.thread.busy ? Deferred.succeed(idle, undefined) : Effect.void;
           }),
@@ -193,6 +194,55 @@ describe("rpc server", () => {
     expect(changes[0]?.project?.path).toBe(realpathSync.native(folder));
     expect(changes[1]?.project).toBeUndefined();
     expect(changes.map((c) => c.seq)).toEqual(changes.map((c) => c.seq).sort((a, b) => a - b));
+    expect(changes.at(-1)?.thread.cost).toEqual({ meteredUsd: 0, subscriptionUsd: 0.01 });
+  });
+
+  test("a reported quota and the thread's metered cost reach the feed live and after a reload", async () => {
+    const { info } = await startServer();
+    const threadId = uuid<ThreadId>();
+    /** Subscribes, runs `during`, and collects feed messages until `done` says so. */
+    const watch = (
+      c: Effect.Success<ReturnType<typeof connect>>,
+      during: Effect.Effect<unknown, unknown>,
+      done: (f: ProjectsFeed) => boolean,
+    ) =>
+      Effect.gen(function* () {
+        const subscriptionId = crypto.randomUUID();
+        const seen: ProjectsFeed[] = [];
+        const finished = yield* Deferred.make<void>();
+        const feed = yield* c.ProjectsSubscribe({ subscriptionId }).pipe(
+          Stream.runForEach((f: ProjectsFeed) => {
+            seen.push(f);
+            return done(f) ? Deferred.succeed(finished, undefined) : Effect.void;
+          }),
+          Effect.forkChild,
+        );
+        yield* step("during", during);
+        yield* step("done", Deferred.await(finished));
+        yield* step("unsubscribe", c.Unsubscribe({ subscriptionId }));
+        yield* step("feed end", Fiber.join(feed));
+        return seen;
+      });
+    const [live, reloaded] = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        const send = { type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), mode: "build" } as const;
+        const run = Effect.andThen(createThread(c, threadId), c.CommandDispatch({ ...send, text: "overage" }));
+        const live = yield* watch(c, run, (f) => f.kind === "thread" && f.thread.cost.meteredUsd > 0);
+        const reloaded = yield* watch(c, Effect.void, (f) => f.kind === "snapshot");
+        return [live, reloaded] as const;
+      }),
+    );
+    const quota = {
+      status: "rejected",
+      window: "five_hour",
+      utilization: 1,
+      resetsAt: "2026-10-01T00:00:00.000Z",
+      usingOverage: true,
+    } as const;
+    expect(live.flatMap((f) => (f.kind === "quota" ? [f.quota.quota] : []))).toEqual([quota]);
+    const [snapshot] = reloaded;
+    expect(snapshot?.kind === "snapshot" && snapshot.quotas.map((q) => [q.harness, q.quota])).toEqual([["fake", quota]]);
+    expect(snapshot?.kind === "snapshot" && snapshot.threads.map((t) => t.cost)).toEqual([{ meteredUsd: 0.01, subscriptionUsd: 0 }]);
   });
 
   test("turn survives client disconnect", async () => {

@@ -107,10 +107,18 @@ const routeChanges = Effect.gen(function* () {
     from events e where e.type = 'thread.route.changed'`;
 });
 
+/** Each harness's latest subscription window (ADR 0005), and an index so a thread's cost totals read only its own usage. */
+const quota = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table quota (harness text primary key, payload text not null, at text not null)`;
+  yield* sql`create index usage_ledger_turn on usage_ledger (turn_id)`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
   "3_turn_modes": turnModes,
   "4_trajectories": trajectories,
   "5_route_changes": routeChanges,
+  "6_quota": quota,
 };

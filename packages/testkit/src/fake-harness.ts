@@ -1,10 +1,19 @@
 import { appendFileSync } from "node:fs";
-import type { HarnessAdapter, HarnessEvent, HarnessRunInput, InteractionMode, Item, Resolution, Route } from "@verdandi/contracts";
+import type {
+  AccessMode,
+  HarnessAdapter,
+  HarnessEvent,
+  HarnessRunInput,
+  InteractionMode,
+  Item,
+  Resolution,
+  Route,
+} from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
 
 /**
  * A scripted harness for tests. Text "fail" fails the turn, "hang" runs until interrupted, "gate" waits for
- * `release()`, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan, each
+ * `release()`, "overage" reports a used-up subscription window and answers on metered usage, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan, each
  * finishing once `respond` answers, "steer" waits for the first steer and answers it, "edit <path>"
  * appends a line to that file through an Edit tool call, "subagent" delegates a read to a subagent whose
  * steps carry `parentToolUseId`; anything else is echoed back with fixed usage on the route's model.
@@ -18,18 +27,18 @@ export const makeFakeHarness = () => {
   let release = () => {};
   const gate = new Promise<void>((resolve) => (release = resolve));
 
-  const reply = (model: string, text: string) =>
+  const reply = (model: string, text: string, accessMode: AccessMode = "subscription") =>
     Stream.fromIterable<HarnessEvent>([
       { type: "item", item: { kind: "assistant.message", text } },
       {
         type: "usage",
         model,
-        accessMode: "subscription",
+        accessMode,
         inputTokens: 10,
         outputTokens: 5,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-        costUsd: 0,
+        costUsd: 0.01,
       },
       { type: "turn.finished", status: "success" },
     ]);
@@ -57,6 +66,13 @@ export const makeFakeHarness = () => {
           : [];
       if (input.text === "hang") return Stream.concat(Stream.fromIterable(start), Stream.never);
       if (input.text === "fail") return Stream.fromIterable([...start, { type: "turn.finished", status: "error", error: "fake failure" }]);
+      if (input.text === "overage") {
+        const quota: HarnessEvent = {
+          type: "quota",
+          quota: { status: "rejected", window: "five_hour", utilization: 1, resetsAt: "2026-10-01T00:00:00.000Z", usingOverage: true },
+        };
+        return Stream.concat(Stream.fromIterable([...start, quota]), reply(input.route.model, "on extra usage", "metered"));
+      }
       if (input.text === "approve") {
         const edit = request(
           input.route.model,

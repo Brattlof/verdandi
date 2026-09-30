@@ -1,5 +1,5 @@
 import type { ModelUsage, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { HarnessEvent, Item } from "@verdandi/contracts";
+import type { HarnessEvent, Item, Quota } from "@verdandi/contracts";
 
 /** What normalizing carries from one message to the next within a session. */
 export type NormalizeContext = {
@@ -7,9 +7,11 @@ export type NormalizeContext = {
   readonly prevModelUsage: Readonly<Record<string, ModelUsage>>;
   /** Set by rate_limit_event: the plan window is used up and extra usage is paying (ADR 0005). */
   readonly overage: boolean;
+  /** The last quota reported, so an unchanged window isn't reported again. */
+  readonly quota: Quota | undefined;
 };
 
-export const initialContext = (): NormalizeContext => ({ prevModelUsage: {}, overage: false });
+export const initialContext = (): NormalizeContext => ({ prevModelUsage: {}, overage: false, quota: undefined });
 
 type Block = { readonly type: string; readonly [k: string]: unknown };
 
@@ -75,7 +77,19 @@ export const normalize = (msg: SDKMessage, context: NormalizeContext): { events:
     }
     case "rate_limit_event": {
       const info = msg.rate_limit_info;
-      return { events: [], context: { ...context, overage: info.isUsingOverage === true || info.status === "rejected" } };
+      const quota: Quota = {
+        status: info.status,
+        ...(info.rateLimitType === undefined ? {} : { window: info.rateLimitType }),
+        // Whole percent: finer changes aren't worth an event each.
+        ...(info.utilization === undefined ? {} : { utilization: Math.round(info.utilization * 100) / 100 }),
+        ...(info.resetsAt === undefined ? {} : { resetsAt: new Date(info.resetsAt * 1000).toISOString() }), // epoch seconds
+        usingOverage: info.isUsingOverage === true,
+      };
+      const changed = JSON.stringify(quota) !== JSON.stringify(context.quota);
+      return {
+        events: changed ? [{ type: "quota", quota }] : [],
+        context: { ...context, overage: info.isUsingOverage === true || info.status === "rejected", quota },
+      };
     }
     case "result": {
       const finished: HarnessEvent =
