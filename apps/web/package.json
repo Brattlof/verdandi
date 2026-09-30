@@ -7,6 +7,8 @@
   },
   "dependencies": {
     "@base-ui/react": "1.8.0",
+    "@fontsource-variable/ibm-plex-sans": "5.3.0",
+    "@fontsource-variable/jetbrains-mono": "5.3.0",
     "@tanstack/react-virtual": "3.14.13",
     "@verdandi/contracts": "workspace:*",
     "effect": "4.0.0-rc.115",

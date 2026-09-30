@@ -42,16 +42,20 @@ export const RouteChip = ({ connection, thread }: { connection: Connection; thre
   const auto = !thread.pinned && thread.task === null;
   const reason = thread.task?.reason;
   return (
-    <details className="mb-1.5 text-xs" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary ref={summary} className="inline-block cursor-pointer rounded-[10px] border border-line px-2">
+    <details className="text-xs" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary
+        ref={summary}
+        className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-card px-2.5 py-0.5 hover:bg-hover [&::-webkit-details-marker]:hidden"
+      >
+        <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${thread.pinned ? "bg-muted" : "bg-accent"}`} />
         <span className="sr-only">Route: </span>
-        {auto ? "Auto" : `${harness} · ${model} · ${effort}`}
-        <span className="ml-[0.3em] inline-block max-w-[60ch] truncate align-bottom text-muted">
-          · {thread.pinned ? "pinned by you" : auto ? "the router picks when you send" : (reason ?? "routed")}
+        <span className="shrink-0 font-mono font-medium">{auto ? "Auto" : `${harness} · ${model} · ${effort}`}</span>
+        <span className="min-w-0 truncate text-muted">
+          {thread.pinned ? "pinned by you" : auto ? "the router picks when you send" : (reason ?? "routed")}
         </span>
       </summary>
       {open && (
-        <div>
+        <div className="mt-1.5 rounded-lg border border-line bg-card p-3">
           {thread.task && thread.task.source !== "pin" && reason && (
             <Why connection={connection} taskId={thread.task.taskId} reason={reason} />
           )}
@@ -73,19 +77,19 @@ const Why = ({ connection, taskId, reason }: { connection: Connection; taskId: T
     setLoading(false);
   };
   return (
-    <div className="mt-1.5">
-      <p className="mb-1">{reason}</p>
+    <div className="mb-3">
+      <p className="mb-1.5">{reason}</p>
       {!trace && (
-        <button type="button" onClick={show} disabled={loading}>
+        <button type="button" className="text-xs" onClick={show} disabled={loading}>
           Show routing trace
         </button>
       )}
       {trace?.ok === true && (
-        <ol className="mt-1 list-decimal pl-5" aria-label="Routing trace">
+        <ol className="mt-1.5 flex list-decimal flex-col gap-0.5 pl-5 marker:text-muted" aria-label="Routing trace">
           {trace.decision.trace.map((t, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: a stored trace never changes.
             <li key={i}>
-              <strong>{t.stage}</strong> {t.note}
+              <strong className="font-mono font-semibold">{t.stage}</strong> {t.note}
             </li>
           ))}
         </ol>
@@ -141,10 +145,15 @@ const RouteForm = ({ connection, thread, close }: { connection: Connection; thre
     else setError(result.message);
   };
   return (
-    <form className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-line p-2" onSubmit={onSubmit}>
-      <label>
+    <form className="flex flex-wrap items-end gap-x-3 gap-y-2" onSubmit={onSubmit}>
+      <label className="flex flex-col gap-1 font-medium text-muted">
         Harness{" "}
-        <select value={draft.harness} disabled={thread.busy} onChange={(e) => setDraft({ ...draft, harness: e.target.value as HarnessId })}>
+        <select
+          className="text-fg"
+          value={draft.harness}
+          disabled={thread.busy}
+          onChange={(e) => setDraft({ ...draft, harness: e.target.value as HarnessId })}
+        >
           {[...new Set([thread.route.harness, ...harnesses])].map((h) => (
             <option key={h} value={h}>
               {h}
@@ -152,17 +161,28 @@ const RouteForm = ({ connection, thread, close }: { connection: Connection; thre
           ))}
         </select>
       </label>
-      <label>
-        Model <input required list={`${id}-models`} value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} />
+      <label className="flex flex-col gap-1 font-medium text-muted">
+        Model{" "}
+        <input
+          required
+          className="font-mono text-fg"
+          list={`${id}-models`}
+          value={draft.model}
+          onChange={(e) => setDraft({ ...draft, model: e.target.value })}
+        />
         <datalist id={`${id}-models`}>
           {[...models].map((m) => (
             <option key={m} value={m} />
           ))}
         </datalist>
       </label>
-      <label>
+      <label className="flex flex-col gap-1 font-medium text-muted">
         Effort{" "}
-        <select value={draft.effort} onChange={(e) => setDraft({ ...draft, effort: e.target.value as Route["effort"] })}>
+        <select
+          className="text-fg"
+          value={draft.effort}
+          onChange={(e) => setDraft({ ...draft, effort: e.target.value as Route["effort"] })}
+        >
           {Effort.literals.map((level) => (
             <option key={level} value={level}>
               {level}
@@ -170,7 +190,7 @@ const RouteForm = ({ connection, thread, close }: { connection: Connection; thre
           ))}
         </select>
       </label>
-      <p className="basis-full text-muted">
+      <p className="basis-full leading-relaxed text-muted">
         {thread.busy ? "Applies from the next turn. Change the harness when this one finishes." : "Applies from the next turn."}{" "}
         {thread.pinned ? "The router won't pick until you let it again." : "Picking a route pins it: the router stops picking."}
       </p>
@@ -214,9 +234,9 @@ const ForgetMemory = ({ connection, thread }: { connection: Connection; thread: 
     setSending(false);
   };
   return (
-    <p className="mt-1.5 flex flex-wrap items-center gap-2 text-muted">
+    <p className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3 text-muted">
       How this project's earlier tasks went can move the router's pick.
-      <button type="button" onClick={forget} disabled={sending}>
+      <button type="button" className="text-xs" onClick={forget} disabled={sending}>
         Clear routing memory
       </button>
       {result?.ok === true && <span role="status">Cleared: the next routed tasks go by the policy alone.</span>}
@@ -229,14 +249,20 @@ const ForgetMemory = ({ connection, thread }: { connection: Connection; thread: 
   );
 };
 
+/** A line across the conversation with the note in its middle. */
+const marker =
+  "mx-auto flex max-w-[860px] items-center gap-3 px-4 py-2 text-xs text-muted before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line";
+
 /** Where a thread's route changed, shown between the turns it came between. */
 export const RouteMarkers = ({ changes }: { changes: readonly RouteChange[] | undefined }) =>
   changes?.map((c, i) => (
     // biome-ignore lint/suspicious/noArrayIndexKey: route changes only ever append, so the index is stable.
-    <p key={i} className="mx-auto max-w-[860px] px-4 py-1 text-center text-xs text-muted">
-      {describeRouteChange(c.from, c.to)
-        ? `Route changed by you: ${describeRouteChange(c.from, c.to)}`
-        : `Route pinned by you: ${c.to.model} · ${c.to.effort}`}{" "}
-      · <time dateTime={c.at}>{new Date(c.at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</time>
+    <p key={i} className={marker}>
+      <span className="max-w-[80%] text-center">
+        {describeRouteChange(c.from, c.to)
+          ? `Route changed by you: ${describeRouteChange(c.from, c.to)}`
+          : `Route pinned by you: ${c.to.model} · ${c.to.effort}`}{" "}
+        · <time dateTime={c.at}>{new Date(c.at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</time>
+      </span>
     </p>
   ));

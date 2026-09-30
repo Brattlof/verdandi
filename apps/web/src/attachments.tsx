@@ -1,6 +1,7 @@
 import { type AttachmentRef, type AttachmentUpload, attachmentLimits, formatBytes, imageMediaTypes } from "@verdandi/contracts";
 import { useEffect, useState } from "react";
 import { type Connection, uuid } from "./client.ts";
+import { CloseIcon, FileIcon } from "./icons.tsx";
 
 /** An attachment waiting to go with the next turn. `preview` is an object URL for an image's thumbnail. */
 export type Pending = AttachmentUpload & { readonly key: string; readonly size: number; readonly preview: string | undefined };
@@ -49,19 +50,19 @@ export const addFiles = async (
 /** The attachments waiting for the next turn, each removable. */
 export const PendingList = ({ items, onRemove }: { items: readonly Pending[]; onRemove: (key: string) => void }) =>
   items.length === 0 ? null : (
-    <ul aria-label="Attachments for the next turn" className="m-0 mb-1 flex list-none flex-wrap gap-2 p-0">
+    <ul aria-label="Attachments for the next turn" className="m-0 flex list-none flex-wrap gap-2 px-3 pt-2.5 pb-0">
       {items.map((p) => (
-        <li key={p.key} className="flex items-center gap-1.5 rounded border border-line bg-panel py-0.5 pr-1 pl-1 text-xs">
-          {p.preview ? <img src={p.preview} alt="" className="size-8 rounded object-cover" /> : <span aria-hidden>📎</span>}
+        <li key={p.key} className="flex items-center gap-1.5 rounded-lg border border-line bg-bg py-1 pr-1 pl-1 text-xs">
+          {p.preview ? <img src={p.preview} alt="" className="size-8 rounded object-cover" /> : <FileIcon className="mx-1 text-muted" />}
           <span className="max-w-48 truncate">{p.name}</span>
-          <span className="text-muted">{formatBytes(p.size)}</span>
+          <span className="text-muted tabular-nums">{formatBytes(p.size)}</span>
           <button
             type="button"
-            className="border-0 bg-transparent px-1 py-0"
+            className="border-0 bg-transparent px-1 text-muted hover:text-fg"
             aria-label={`Remove ${p.name}`}
             onClick={() => onRemove(p.key)}
           >
-            ×
+            <CloseIcon className="size-3.5" />
           </button>
         </li>
       ))}
@@ -77,8 +78,8 @@ export const TurnAttachments = ({ connection, attachments }: { connection: Conne
           {a.kind === "image" ? (
             <Thumbnail connection={connection} attachment={a} />
           ) : (
-            <span className="inline-flex items-center gap-1 rounded border border-line bg-bg px-1.5 py-0.5 text-xs">
-              <span aria-hidden>📎</span>
+            <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-bg px-2 py-1 text-xs">
+              <FileIcon className="size-3.5 text-muted" />
               {a.name} <span className="text-muted">{formatBytes(a.size)}</span>
             </span>
           )}
@@ -96,11 +97,12 @@ const Thumbnail = ({ connection, attachment }: { connection: Connection; attachm
       current = false;
     };
   }, [connection, attachment.id]);
-  if (src === null) return <span role="img" className="inline-block h-24 w-32 rounded border border-line" aria-label={attachment.name} />;
+  if (src === null)
+    return <span role="img" className="inline-block h-24 w-32 rounded-md border border-line bg-bg" aria-label={attachment.name} />;
   if (src === undefined) return <span className="text-xs text-error">{attachment.name} couldn't be loaded</span>;
   return (
     <a href={src} target="_blank" rel="noreferrer" title={`${attachment.name}, ${formatBytes(attachment.size)}`}>
-      <img src={src} alt={attachment.name} className="max-h-24 max-w-48 rounded border border-line object-contain" />
+      <img src={src} alt={attachment.name} className="max-h-24 max-w-48 rounded-md border border-line object-contain" />
     </a>
   );
 };

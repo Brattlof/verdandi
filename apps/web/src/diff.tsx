@@ -2,6 +2,7 @@ import { Tabs } from "@base-ui/react/tabs";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { DiffView, TurnId } from "@verdandi/contracts";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { ChevronIcon, CloseIcon } from "./icons.tsx";
 import type { DiffPanel } from "./state.ts";
 
 type LineKind = "add" | "del" | "hunk" | "context" | "meta";
@@ -54,11 +55,11 @@ const signs: Partial<Record<LineKind, string>> = { add: "added: ", del: "removed
 const rowClass: Record<LineKind | "file" | "note", string> = {
   add: "bg-added",
   del: "bg-removed",
-  hunk: "text-muted",
+  hunk: "bg-panel text-accent",
   meta: "text-muted",
   context: "",
-  file: "pt-2",
-  note: "font-sans italic text-muted",
+  file: "pt-3",
+  note: "py-1 font-sans italic text-muted",
 };
 
 /**
@@ -91,36 +92,59 @@ export const SidePanel = ({
       return next;
     });
   return (
-    <aside ref={aside} aria-label="Side panel" tabIndex={-1} className="flex w-[min(50%,760px)] min-w-0 border-l border-line">
+    <aside
+      ref={aside}
+      onKeyDown={(e) => e.key === "Escape" && onClose()}
+      aria-label="Side panel"
+      tabIndex={-1}
+      className="fixed inset-0 z-40 flex min-w-0 bg-bg outline-none md:static md:z-auto md:w-[min(50%,760px)] md:border-l md:border-line"
+    >
       <Tabs.Root defaultValue="diff" className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between border-b border-line px-2 py-1">
+        <div className="flex min-h-12 items-center justify-between border-b border-line px-3">
           <Tabs.List aria-label="Panel">
-            <Tabs.Tab value="diff" className="px-2 py-0 text-xs data-active:border-accent">
+            <Tabs.Tab
+              value="diff"
+              className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-1 text-xs text-muted hover:bg-transparent hover:text-fg data-active:border-accent data-active:text-fg"
+            >
               Diff
             </Tabs.Tab>
           </Tabs.List>
-          <button type="button" className="px-2 py-0 text-xs" onClick={onClose}>
+          <button type="button" className="px-2 text-xs" onClick={onClose}>
+            <CloseIcon className="size-3.5" />
             Close
           </button>
         </div>
         <Tabs.Panel value="diff" className="flex min-h-0 flex-1 flex-col">
-          <div className="flex items-center justify-between px-2 pt-1.5">
-            <fieldset className="mb-1 flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pt-2">
+            <fieldset className="flex rounded-lg border border-line bg-panel p-0.5">
               <legend className="sr-only">Show</legend>
-              <label>
-                <input type="radio" name={`${id}-scope`} checked={!panel.all} disabled={!turnId} onChange={() => onFetch(turnId, false)} />
+              <label className="inline-flex min-h-6 items-center rounded-md px-2.5 text-xs font-medium text-muted hover:text-fg has-checked:bg-card has-checked:text-fg has-checked:shadow-[inset_0_0_0_1px_var(--color-line-strong)] has-focus-visible:outline-2 has-focus-visible:outline-accent has-disabled:opacity-45 pointer-coarse:min-h-10">
+                <input
+                  type="radio"
+                  className="sr-only"
+                  name={`${id}-scope`}
+                  checked={!panel.all}
+                  disabled={!turnId}
+                  onChange={() => onFetch(turnId, false)}
+                />
                 {turnLabel ?? "Last turn"}
               </label>
-              <label>
-                <input type="radio" name={`${id}-scope`} checked={panel.all} onChange={() => onFetch(panel.turnId, true)} />
+              <label className="inline-flex min-h-6 items-center rounded-md px-2.5 text-xs font-medium text-muted hover:text-fg has-checked:bg-card has-checked:text-fg has-checked:shadow-[inset_0_0_0_1px_var(--color-line-strong)] has-focus-visible:outline-2 has-focus-visible:outline-accent has-disabled:opacity-45 pointer-coarse:min-h-10">
+                <input
+                  type="radio"
+                  className="sr-only"
+                  name={`${id}-scope`}
+                  checked={panel.all}
+                  onChange={() => onFetch(panel.turnId, true)}
+                />
                 All changes
               </label>
             </fieldset>
-            <button type="button" onClick={() => onFetch(panel.turnId, panel.all)}>
+            <button type="button" className="text-xs" onClick={() => onFetch(panel.turnId, panel.all)}>
               Refresh
             </button>
           </div>
-          <p role="status" className={`mx-2 my-1 text-xs ${result?.ok === false ? "text-error" : "text-muted"}`}>
+          <p role="status" className={`mx-3 my-2 text-xs ${result?.ok === false ? "text-error" : "text-muted"}`}>
             {statusText(panel)}
           </p>
           {rows && <DiffList rows={rows} onToggle={toggle} />}
@@ -164,17 +188,18 @@ const DiffList = ({ rows, onToggle }: { rows: readonly DiffRow[]; onToggle: (pat
               key={item.key}
               data-index={item.index}
               ref={virtualizer.measureElement}
-              className={`absolute top-0 left-0 w-full px-2 ${rowClass[row.kind === "line" ? row.line : row.kind]}`}
+              className={`absolute top-0 left-0 w-full px-3 ${rowClass[row.kind === "line" ? row.line : row.kind]}`}
               style={{ transform: `translateY(${item.start}px)` }}
             >
               {row.kind === "file" ? (
                 <button
                   type="button"
-                  className="w-full text-left font-semibold"
+                  className="w-full justify-start rounded-md border-line bg-panel px-2 text-left font-semibold [overflow-wrap:anywhere]"
                   aria-expanded={row.expanded}
                   onClick={() => onToggle(row.path)}
                 >
-                  <span aria-hidden="true">{row.expanded ? "▾" : "▸"}</span> {row.path}
+                  <ChevronIcon className={`size-3.5 text-muted ${row.expanded ? "rotate-90" : ""}`} />
+                  {row.path}
                 </button>
               ) : row.kind === "note" ? (
                 row.text

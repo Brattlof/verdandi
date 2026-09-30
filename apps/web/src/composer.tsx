@@ -2,6 +2,7 @@ import type { BudgetMode, CommandId, InteractionMode, Question, Resolution, Thre
 import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, useEffect, useId, useState } from "react";
 import { addFiles, type Pending, PendingList } from "./attachments.tsx";
 import { type Connection, type Routed, uuid } from "./client.ts";
+import { PaperclipIcon, SendIcon, StopIcon } from "./icons.tsx";
 import { RouteChip } from "./route.tsx";
 import { SpendCaps } from "./spend.tsx";
 import type { LiveThread } from "./state.ts";
@@ -118,28 +119,22 @@ export const Composer = ({
   // Only a message that starts a routed task gets a preview: one that continues a task keeps its route.
   const preview = !running && !thread.pinned && thread.task === null;
   return (
-    <div className="mx-auto w-full max-w-[860px] px-4 pt-2 pb-3">
-      <SpendCaps connection={connection} thread={thread} rejected={capRejections} />
-      <RouteChip connection={connection} thread={thread} />
-      <form onSubmit={onSubmit} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
-        <fieldset className="mb-1 flex items-center gap-3">
-          <legend className="sr-only">Mode for the next turn</legend>
-          {modes.map((m) => (
-            <label key={m.value}>
-              <input type="radio" name="mode" value={m.value} checked={mode === m.value} onChange={() => onMode(m.value)} />
-              {m.label}
-            </label>
-          ))}
-          <span className="text-xs text-muted">
-            {hint}
-            {running ? "; applies from the next turn" : ""}
-          </span>
-          <BudgetSwitch connection={connection} thread={thread} running={running !== undefined} onError={setError} />
-        </fieldset>
+    <div className="mx-auto w-full max-w-[860px] px-3 pt-2 pb-3 sm:px-4">
+      <div className="mb-1.5 flex flex-col gap-1">
+        <SpendCaps connection={connection} thread={thread} rejected={capRejections} />
+        <RouteChip connection={connection} thread={thread} />
+      </div>
+      <form
+        onSubmit={onSubmit}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={onDrop}
+        className="rounded-xl border border-line-strong bg-card focus-within:border-accent focus-within:shadow-[0_0_0_1px_var(--color-accent)]"
+      >
         <PendingList items={pending} onRemove={detach} />
         <label className="sr-only" htmlFor="message">
           {running ? "Steer the running turn" : "Message"}
         </label>
+        {/* The form's border shows focus, so the field itself needs no ring. */}
         <textarea
           id="message"
           rows={3}
@@ -147,7 +142,7 @@ export const Composer = ({
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          className="w-full resize-y"
+          className="block max-h-[40vh] w-full resize-y rounded-xl border-0 bg-transparent px-3 pt-2.5 outline-none focus-visible:outline-none"
           placeholder={running ? "Steer the agent: it reads this at its next step" : "Message the agent"}
           aria-describedby={preview ? "route-preview" : undefined}
         />
@@ -160,15 +155,14 @@ export const Composer = ({
             images={pending.filter((p) => p.preview !== undefined).length}
           />
         )}
-        <div className="mt-1.5 flex items-center justify-end gap-2">
-          {error && (
-            <span role="alert" className="mr-auto text-error">
-              {error}
-            </span>
-          )}
+        <div className="flex flex-wrap items-center gap-2 px-2 pt-1 pb-2">
           {!running && (
-            <label className="cursor-pointer rounded border border-line bg-panel px-3 py-1 has-focus-visible:outline-2">
-              Attach
+            <label
+              className="inline-flex min-h-7 items-center rounded-md px-2 text-muted hover:bg-hover hover:text-fg has-focus-visible:outline-2 has-focus-visible:outline-accent pointer-coarse:min-h-11"
+              title="Attach images or files, or paste or drop them here"
+            >
+              <PaperclipIcon />
+              <span className="sr-only">Attach files</span>
               <input
                 type="file"
                 multiple
@@ -180,16 +174,49 @@ export const Composer = ({
               />
             </label>
           )}
-          {running && (
-            <button type="button" onClick={stop}>
-              Stop
+          <fieldset className="flex rounded-lg border border-line bg-bg p-0.5" aria-describedby="mode-hint">
+            <legend className="sr-only">Mode for the next turn</legend>
+            {modes.map((m) => (
+              <label
+                key={m.value}
+                className="inline-flex min-h-6 items-center rounded-md px-2.5 text-xs font-medium text-muted hover:text-fg has-checked:bg-card has-checked:text-fg has-checked:shadow-[inset_0_0_0_1px_var(--color-line-strong)] has-focus-visible:outline-2 has-focus-visible:outline-accent pointer-coarse:min-h-10"
+              >
+                <input
+                  type="radio"
+                  name="mode"
+                  value={m.value}
+                  checked={mode === m.value}
+                  onChange={() => onMode(m.value)}
+                  className="sr-only"
+                />
+                {m.label}
+              </label>
+            ))}
+          </fieldset>
+          <span id="mode-hint" className="hidden text-xs text-muted sm:inline">
+            {hint}
+            {running ? "; applies from the next turn" : ""}
+          </span>
+          <span className="ml-auto flex items-center gap-2">
+            <BudgetSwitch connection={connection} thread={thread} running={running !== undefined} onError={setError} />
+            {running && (
+              <button type="button" onClick={stop}>
+                <StopIcon className="size-3.5" />
+                Stop
+              </button>
+            )}
+            <button type="submit" disabled={!text.trim() && (running !== undefined || pending.length === 0)}>
+              <SendIcon className="size-3.5" />
+              {running ? "Steer" : "Send"}
             </button>
-          )}
-          <button type="submit" disabled={!text.trim() && (running !== undefined || pending.length === 0)}>
-            {running ? "Steer" : "Send"}
-          </button>
+          </span>
         </div>
       </form>
+      {error && (
+        <p role="alert" className="mt-1.5 px-1 text-xs text-error">
+          {error}
+        </p>
+      )}
     </div>
   );
 };
@@ -230,9 +257,10 @@ const BudgetSwitch = ({
       ? "Applies from the next turn, which starts a new task."
       : "Policy uses the routing policy's mode.";
   return (
-    <label className="ml-auto text-xs" title={note}>
+    <label className="flex items-center gap-1.5 text-xs text-muted" title={note}>
       Budget{" "}
       <select
+        className="text-xs text-fg"
         value={thread.budgetMode ?? ""}
         disabled={thread.pinned || sending}
         aria-describedby={`${id}-note`}
@@ -283,7 +311,7 @@ const RoutePreview = ({
   }, [connection, threadId, draft, mode, images, budgetMode]);
   const decision = routed?.ok ? routed.decision : undefined;
   return (
-    <p id="route-preview" className="mt-1 text-xs text-muted" aria-live="polite">
+    <p id="route-preview" className="px-3 text-xs text-muted" aria-live="polite">
       {!draft || !routed
         ? "The router picks a route when you send."
         : decision
@@ -308,7 +336,7 @@ export const Requests = ({
   onPlanApproved: () => void;
 }) =>
   requests.length === 0 ? null : (
-    <section className="max-h-[45vh] overflow-y-auto border-t border-line" aria-label="Waiting for your answer">
+    <section className="max-h-[45vh] shrink-0 overflow-y-auto border-t border-line bg-panel py-2" aria-label="Waiting for your answer">
       {requests.map((r) => (
         <RequestCard key={r.requestId} connection={connection} threadId={threadId} request={r} onPlanApproved={onPlanApproved} />
       ))}
@@ -343,15 +371,21 @@ const RequestCard = ({
     else if (request.type === "plan.requested" && resolution.decision === "allow") onPlanApproved();
   };
   return (
-    <div className="mx-auto max-w-[860px] px-4 py-2">
-      {request.type === "approval.requested" && <Approval request={request} sending={sending} respond={respond} />}
-      {request.type === "user-input.requested" && <Questions request={request} sending={sending} respond={respond} />}
-      {request.type === "plan.requested" && <PlanApproval request={request} sending={sending} respond={respond} />}
-      {error && (
-        <p role="alert" className="text-error">
-          {error}
+    <div className="mx-auto max-w-[860px] px-3 py-1 sm:px-4">
+      <div className="rounded-xl border border-line border-l-2 border-l-warn bg-card px-4 py-3">
+        <p className="mb-1 flex items-center gap-1.5 font-mono text-[11px] font-semibold tracking-wider text-warn uppercase">
+          <span aria-hidden className="size-1.5 rounded-full bg-warn" />
+          Waiting for you
         </p>
-      )}
+        {request.type === "approval.requested" && <Approval request={request} sending={sending} respond={respond} />}
+        {request.type === "user-input.requested" && <Questions request={request} sending={sending} respond={respond} />}
+        {request.type === "plan.requested" && <PlanApproval request={request} sending={sending} respond={respond} />}
+        {error && (
+          <p role="alert" className="mt-2 text-error">
+            {error}
+          </p>
+        )}
+      </div>
     </div>
   );
 };
@@ -364,13 +398,20 @@ type CardProps<T extends Request["type"]> = {
 
 const Approval = ({ request, sending, respond }: CardProps<"approval.requested">) => (
   <>
-    <h3 className="my-1 font-bold">Allow {request.toolName}?</h3>
+    <h3 className="font-semibold">
+      Allow <span className="font-mono">{request.toolName}</span>?
+    </h3>
     <pre>{JSON.stringify(request.input, null, 2)}</pre>
-    <div className="mt-1.5 flex items-center justify-end gap-2">
+    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
       <button type="button" disabled={sending} onClick={() => respond({ decision: "deny" })}>
         Deny
       </button>
-      <button type="button" disabled={sending} onClick={() => respond({ decision: "allow" })}>
+      <button
+        type="button"
+        className="border-go bg-go text-on-go hover:bg-go-hover"
+        disabled={sending}
+        onClick={() => respond({ decision: "allow" })}
+      >
         Allow
       </button>
     </div>
@@ -382,16 +423,18 @@ const PlanApproval = ({ request, sending, respond }: CardProps<"plan.requested">
   const id = useId();
   return (
     <>
-      <h3 className="my-1 font-bold">Approve the plan above and build it?</h3>
-      {request.filePath && <p className="text-muted">{request.filePath}</p>}
+      <h3 className="font-semibold">Approve the plan above and build it?</h3>
+      {request.filePath && <p className="font-mono text-xs text-muted">{request.filePath}</p>}
       {request.execute && (
-        <p className="text-accent">
+        <p className="mt-1 text-accent">
           Approving moves the build to {request.execute.target.model} · {request.execute.effort}: {request.execute.reason}
         </p>
       )}
-      <label htmlFor={id}>Feedback if you keep planning (optional)</label>
+      <label htmlFor={id} className="mt-2 mb-1 block text-xs font-medium text-muted">
+        Feedback if you keep planning (optional)
+      </label>
       <textarea id={id} rows={2} className="w-full" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
-      <div className="mt-1.5 flex items-center justify-end gap-2">
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
         <button
           type="button"
           disabled={sending}
@@ -399,7 +442,12 @@ const PlanApproval = ({ request, sending, respond }: CardProps<"plan.requested">
         >
           Keep planning
         </button>
-        <button type="button" disabled={sending} onClick={() => respond({ decision: "allow" })}>
+        <button
+          type="button"
+          className="border-go bg-go text-on-go hover:bg-go-hover"
+          disabled={sending}
+          onClick={() => respond({ decision: "allow" })}
+        >
           Approve and build
         </button>
       </div>
@@ -427,12 +475,12 @@ const Questions = ({ request, sending, respond }: CardProps<"user-input.requeste
   return (
     <form onSubmit={onSubmit}>
       {request.questions.map((q) => (
-        <fieldset key={q.question} className="my-1 rounded border border-line px-3 pt-1 pb-2">
+        <fieldset key={q.question} className="my-2 rounded-lg border border-line px-3 pt-1 pb-2">
           <legend>
             <strong>{q.header}</strong> {q.question}
           </legend>
           {q.options.map((o) => (
-            <label key={o.label} className="my-0.5 block">
+            <label key={o.label} className="-mx-1.5 block rounded-md px-1.5 py-1 hover:bg-hover has-checked:bg-hover">
               <input
                 type={q.multiSelect ? "checkbox" : "radio"}
                 name={q.question}
@@ -442,8 +490,8 @@ const Questions = ({ request, sending, respond }: CardProps<"user-input.requeste
               {o.label} <span className="text-muted">{o.description}</span>
             </label>
           ))}
-          <label className="my-0.5 block">
-            Or your own answer{" "}
+          <label className="mt-1 flex flex-wrap items-center gap-2 text-muted">
+            Or your own answer
             <input
               type="text"
               value={typed[q.question] ?? ""}
@@ -452,7 +500,7 @@ const Questions = ({ request, sending, respond }: CardProps<"user-input.requeste
           </label>
         </fieldset>
       ))}
-      <div className="mt-1.5 flex items-center justify-end gap-2">
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
         <button type="button" disabled={sending} onClick={() => respond({ decision: "deny" })}>
           Skip
         </button>
