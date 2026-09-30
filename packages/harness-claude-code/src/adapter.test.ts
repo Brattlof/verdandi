@@ -4,14 +4,17 @@ import type { HarnessRunInput, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Stream } from "effect";
 import { makeClaudeCodeAdapter, type QueryFn } from "./adapter.ts";
-import { init, result, textDelta, turn1Usage } from "./fixtures.ts";
+import { assistant, init, result, textDelta, turn1Usage, turn2Usage } from "./fixtures.ts";
 
 const U1 = "00000000-0000-4000-8000-000000000001";
 const U2 = "00000000-0000-4000-8000-000000000002";
 
 /** A fake SDK `query`: answers each prompt with a delta and a result; records what it was given. */
 const stubQuery = (
-  script: (prompt: string, options: Options) => SDKMessage[] | AsyncIterable<SDKMessage> = () => [textDelta("ok"), result(turn1Usage)],
+  script: (prompt: string, options: Options, message: SDKUserMessage) => SDKMessage[] | AsyncIterable<SDKMessage> = () => [
+    textDelta("ok"),
+    result(turn1Usage),
+  ],
 ) => {
   const spawns: { options: Options; prompts: SDKUserMessage[] }[] = [];
   const query = ((params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
@@ -21,7 +24,7 @@ const stubQuery = (
       yield init;
       for await (const m of params.prompt) {
         record.prompts.push(m);
-        yield* script(String(m.message.content), params.options);
+        yield* script(String(m.message.content), params.options, m);
       }
     })();
   }) as unknown as QueryFn;
@@ -30,13 +33,20 @@ const stubQuery = (
 
 const threadId = "thread-1" as ThreadId;
 
-const input = (cwd: string, text: string, turnId: string, resumeSessionId?: string): HarnessRunInput => ({
+const input = (
+  cwd: string,
+  text: string,
+  turnId: string,
+  resumeSessionId?: string,
+  steers: Stream.Stream<string> = Stream.empty,
+): HarnessRunInput => ({
   threadId,
   cwd,
   route: { harness: "claude-code", model: "haiku", effort: "low" },
   resumeSessionId,
   turnId: turnId as TurnId,
   text,
+  steers,
 });
 
 describe("Claude Code adapter", () => {
@@ -133,6 +143,33 @@ describe("Claude Code adapter", () => {
       await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "good", U2, "sess-1"))));
       expect(spawns).toHaveLength(2);
       expect(spawns[1]?.options.resume).toBe("sess-1");
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("a steer that misses the last tool boundary is answered inside the same turn", async () => {
+    const home = makeTempHome();
+    try {
+      // The steer arrives after the model's last tool call, so Claude Code queues it: the first result
+      // reports it pending, and a second result reports it consumed.
+      const { query, spawns } = stubQuery((prompt, _options, m) =>
+        prompt === "work"
+          ? [assistant([{ type: "text", text: "working" }]), { ...result(turn1Usage), queued_turn_count: 1 } as SDKMessage]
+          : [assistant([{ type: "text", text: `ok, ${prompt}` }]), { ...result(turn2Usage), user_message_uuids: [m.uuid] } as SDKMessage],
+      );
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const events = Array.from(
+        await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "work", U1, undefined, Stream.make("go left"))))),
+      );
+      expect(events.filter((e) => e.type === "item").map((e) => e.item)).toEqual([
+        { kind: "assistant.message", text: "working" },
+        { kind: "assistant.message", text: "ok, go left" },
+      ]);
+      expect(events.filter((e) => e.type === "turn.finished")).toEqual([{ type: "turn.finished", status: "success" }]);
+      const steer = spawns[0]?.prompts[1];
+      expect(steer?.message.content).toBe("go left");
+      expect(steer?.priority).toBeUndefined();
     } finally {
       removeTempHome(home);
     }

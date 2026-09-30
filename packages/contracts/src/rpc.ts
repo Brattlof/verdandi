@@ -7,7 +7,7 @@ import { Item } from "./items.ts";
 import { Route } from "./route.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
-  reason: Schema.Literals(["ThreadNotFound", "ThreadExists", "ThreadBusy", "RequestNotPending", "InvalidResolution"]),
+  reason: Schema.Literals(["ThreadNotFound", "ThreadExists", "ThreadBusy", "TurnNotRunning", "RequestNotPending", "InvalidResolution"]),
   message: Schema.String,
 }) {}
 

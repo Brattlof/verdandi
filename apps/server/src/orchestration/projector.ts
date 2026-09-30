@@ -19,6 +19,13 @@ const insertRequest = (e: Extract<Event, { type: keyof typeof requestKind }>, at
           values (${e.requestId}, ${e.threadId}, ${e.turnId}, ${requestKind[e.type]}, ${JSON.stringify(e)}, ${at})`,
   );
 
+const addItem = (turnId: TurnId, item: Item) =>
+  withSql(
+    (sql) =>
+      sql`insert into items (turn_id, idx, payload)
+          values (${turnId}, (select count(*) from items where turn_id = ${turnId}), ${JSON.stringify(item)})`,
+  );
+
 const projections: { [T in Event["type"]]: Projection<T> } = {
   "thread.created": (e, at) =>
     withSql((sql) =>
@@ -35,12 +42,8 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       ),
     ),
   "harness.session.bound": (e) => withSql((sql) => sql`update threads set session_id = ${e.sessionId} where id = ${e.threadId}`),
-  "turn.item.added": (e) =>
-    withSql(
-      (sql) =>
-        sql`insert into items (turn_id, idx, payload)
-            values (${e.turnId}, (select count(*) from items where turn_id = ${e.turnId}), ${JSON.stringify(e.item)})`,
-    ),
+  "turn.item.added": (e) => addItem(e.turnId, e.item),
+  "turn.steered": (e) => addItem(e.turnId, { kind: "user.steer", text: e.text }),
   "turn.usage.recorded": (e, at) =>
     withSql(
       (sql) =>

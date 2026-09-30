@@ -4,7 +4,8 @@ import { Effect, Stream } from "effect";
 /**
  * A scripted harness for tests. Text "fail" fails the turn, "hang" never finishes, "gate" waits for
  * `release()`, "approve" asks to edit a file and "ask" asks a question, each finishing once `respond`
- * answers; anything else is echoed back with fixed usage. `calls` records every run.
+ * answers, "steer" waits for the first steer and answers it; anything else is echoed back with fixed
+ * usage. `calls` records every run.
  */
 export const makeFakeHarness = () => {
   const calls: { resumeSessionId: string | undefined; text: string }[] = [];
@@ -81,6 +82,13 @@ export const makeFakeHarness = () => {
           (r) => (r.decision === "answer" ? `you picked ${r.answers[question]}` : "no answer"),
         );
         return Stream.concat(Stream.fromIterable(start), ask);
+      }
+      if (input.text === "steer") {
+        const answer = input.steers.pipe(
+          Stream.take(1),
+          Stream.flatMap((steer) => reply(`steered: ${steer}`)),
+        );
+        return Stream.concat(Stream.fromIterable(start), answer);
       }
       const echo = Stream.concat(
         Stream.fromIterable<HarnessEvent>([

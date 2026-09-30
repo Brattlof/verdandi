@@ -32,11 +32,19 @@ export type HarnessRunInput = {
   readonly resumeSessionId: string | undefined;
   readonly turnId: TurnId;
   readonly text: string;
+  /**
+   * Steer messages for this turn, as the user sends them. Deliver each at the next safe point
+   * (Claude Code: the next tool boundary, ADR 0003) and keep the turn open until the agent has
+   * answered every one delivered. It ends when the turn does. Every harness today steers
+   * (Claude Code, fake); one that can't must be listed here, and the decider must reject
+   * `turn.steer` on its threads rather than record a steer nobody reads.
+   */
+  readonly steers: Stream.Stream<string>;
 };
 
 /**
  * Slice-1 subset of the harness contract (DESIGN §9.2): one `run` per turn. The adapter keeps its
- * live session per thread and resumes by id after a restart. Steer and interrupt come later.
+ * live session per thread and resumes by id after a restart. Interrupt comes later.
  */
 export interface HarnessAdapter {
   readonly id: HarnessId;

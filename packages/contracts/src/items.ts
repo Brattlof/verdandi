@@ -5,6 +5,8 @@ export const Item = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("assistant.message"), text: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("tool.call"), toolUseId: Schema.String, name: Schema.String, input: Schema.Unknown }),
   Schema.Struct({ kind: Schema.Literal("tool.result"), toolUseId: Schema.String, isError: Schema.Boolean, content: Schema.String }),
+  /** A message the user sent while the turn ran, recorded when Verdandi accepted it. */
+  Schema.Struct({ kind: Schema.Literal("user.steer"), text: Schema.String }),
 ]);
 export type Item = typeof Item.Type;
 

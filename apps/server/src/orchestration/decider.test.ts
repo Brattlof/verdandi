@@ -62,6 +62,14 @@ describe("decide", () => {
     expect(reason(decide(running, send))).toBe("ThreadBusy");
   });
 
+  test("steers only the running turn", () => {
+    const steer = (turnId: TurnId): Command => ({ type: "turn.steer", commandId, threadId, turnId, text: "go left" });
+    expect(events(decide(running, steer(turnId)))).toEqual([{ type: "turn.steered", v: 1, threadId, turnId, text: "go left" }]);
+    expect(reason(decide(idle, steer(turnId)))).toBe("TurnNotRunning");
+    expect(reason(decide(running, steer("turn-0" as TurnId)))).toBe("TurnNotRunning");
+    expect(reason(decide(none, steer(turnId)))).toBe("ThreadNotFound");
+  });
+
   test("maps a finished harness turn to turn.completed", () => {
     expect(events(decide(running, report({ type: "turn.finished", status: "error", error: "x" })))).toEqual([
       { type: "turn.completed", v: 1, threadId, turnId, status: "error", error: "x" },

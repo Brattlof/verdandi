@@ -119,6 +119,13 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       resolution: c.resolution,
     });
   },
+  "turn.steer": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
+    if (state.thread.runningTurnId !== c.turnId) {
+      return reject("TurnNotRunning", `Turn ${c.turnId} is not running, so it can't be steered. Send the message as a new turn instead.`);
+    }
+    return accept({ type: "turn.steered", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text });
+  },
   "harness.report": (state, c) => fromHarness(state, c.threadId, c.turnId, c.event),
   "turn.recover": (state, c) =>
     state.thread?.runningTurnId === c.turnId

@@ -20,6 +20,7 @@ const samples: Event[] = [
     item: { kind: "tool.call", toolUseId: "t1", name: "Read", input: { file_path: "x" } },
   },
   { type: "turn.item.added", v: 1, threadId, turnId, item: { kind: "tool.result", toolUseId: "t1", isError: false, content: "ok" } },
+  { type: "turn.steered", v: 1, threadId, turnId, text: "go left" },
   {
     type: "turn.usage.recorded",
     v: 1,

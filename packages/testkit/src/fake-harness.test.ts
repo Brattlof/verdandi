@@ -7,6 +7,7 @@ const base = {
   threadId: "t" as ThreadId,
   cwd: "C:/Users/a b/repo",
   route: { harness: "fake", model: "fake", effort: "low" } as const,
+  steers: Stream.empty,
 };
 
 const collect = (s: Stream.Stream<HarnessEvent, unknown>) => Effect.runPromise(Stream.runCollect(s)).then((c) => Array.from(c));
@@ -51,6 +52,17 @@ test("a gated turn waits until released", async () => {
   expect(done).toBe(false);
   fake.release();
   expect((await running).at(-1)).toEqual({ type: "turn.finished", status: "success" });
+});
+
+test("a steer turn answers the first steer", async () => {
+  const fake = makeFakeHarness();
+  const events = await collect(
+    fake.run({ ...base, resumeSessionId: undefined, turnId: "u1" as TurnId, text: "steer", steers: Stream.make("go left", "ignored") }),
+  );
+  expect(events.filter((e) => e.type === "item")).toEqual([
+    { type: "item", item: { kind: "assistant.message", text: "steered: go left" } },
+  ]);
+  expect(events.at(-1)).toEqual({ type: "turn.finished", status: "success" });
 });
 
 test("reports a scripted failure as a failed turn", async () => {

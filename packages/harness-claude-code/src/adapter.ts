@@ -33,6 +33,10 @@ type Session = {
   /** `canUseTool` calls waiting for an answer, by request id. */
   readonly waiting: Map<string, (resolution: Resolution) => void>;
   context: NormalizeContext;
+  /** False once the running turn's last result is read: a steer pushed after that would start a turn nobody reads. */
+  live: boolean;
+  /** Uuids of this turn's steers that no result has reported consuming yet. */
+  readonly unanswered: Set<string>;
 };
 
 const decodeQuestions = Schema.decodeUnknownOption(Schema.Struct({ questions: Schema.Array(Question) }));
@@ -118,7 +122,28 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
     nextRaise: () => (raised.length > 0 ? Promise.resolve() : new Promise((resolve) => (onRaise = resolve))),
     waiting,
     context: initialContext(),
+    live: false,
+    unanswered: new Set(),
   };
+};
+
+/** Steers go in without `priority`, so they land at the next tool boundary of the running turn (ADR 0003). */
+const steer = (session: Session, text: string) => {
+  if (!session.live) return;
+  const uuid = randomUUID();
+  session.unanswered.add(uuid);
+  session.push({ type: "user", message: { role: "user", content: text }, parent_tool_use_id: null, uuid });
+};
+
+/**
+ * Whether Claude Code has more of this turn to send after a result. A steer that missed the last
+ * tool boundary runs as a follow-up turn with its own result, which belongs to this Verdandi turn.
+ */
+const continues = (session: Session, msg: SDKMessage) => {
+  if (msg.type !== "result" || msg.subtype !== "success" || msg.is_error) return false;
+  for (const uuid of msg.user_message_uuids ?? []) session.unanswered.delete(uuid);
+  // Older CLIs don't list consumed uuids; then only the queue count tells.
+  return (msg.queued_turn_count ?? 0) > 0 || (msg.user_message_uuids !== undefined && session.unanswered.size > 0);
 };
 
 export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; readonly query?: QueryFn }): HarnessAdapter => {
@@ -128,8 +153,8 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
     sessions.delete(threadId);
   };
 
+  /** Reads the turn `run` opened until its last result. */
   async function* turn(session: Session, input: HarnessRunInput): AsyncGenerator<HarnessEvent> {
-    session.push({ type: "user", message: { role: "user", content: input.text }, parent_tool_use_id: null, uuid: input.turnId as UUID });
     // Read lazily: a read left pending when the turn finishes would swallow the next turn's first message.
     let pending: Promise<IteratorResult<SDKMessage>> | undefined;
     while (true) {
@@ -147,8 +172,13 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
       }
       const { events, context } = normalize(step.value, session.context);
       session.context = context;
-      yield* events;
+      if (continues(session, step.value)) {
+        yield* events.filter((e) => e.type !== "turn.finished");
+        continue;
+      }
       const finished = events.find((e) => e.type === "turn.finished");
+      if (finished) session.live = false;
+      yield* events;
       if (finished) {
         // After an error result the SDK throws on the next read (spike 005), so start a fresh process next turn.
         if (finished.status === "error") end(input.threadId);
@@ -169,10 +199,19 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
           }
           const session = sessions.get(input.threadId) ?? openSession(options.query ?? query, options.claudePath, input);
           sessions.set(input.threadId, session);
+          // Opened before the stream starts, so no steer can overtake the turn's own prompt.
+          session.live = true;
+          session.unanswered.clear();
+          session.push({
+            type: "user",
+            message: { role: "user", content: input.text },
+            parent_tool_use_id: null,
+            uuid: input.turnId as UUID,
+          });
           return Stream.fromAsyncIterable(turn(session, input), (error) => {
             end(input.threadId);
             return error instanceof HarnessError ? error : new HarnessError({ message: `Claude Code failed: ${String(error)}` });
-          });
+          }).pipe(Stream.drainFork(input.steers.pipe(Stream.tap((text) => Effect.sync(() => steer(session, text))))));
         }),
       ),
     respond: (threadId, requestId, resolution) => Effect.sync(() => sessions.get(threadId)?.waiting.get(requestId)?.(resolution)),

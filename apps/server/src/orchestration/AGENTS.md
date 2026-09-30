@@ -9,7 +9,7 @@ The event-sourced core of verdandid (DESIGN.md §10). Read the root `AGENTS.md` 
 | `decider.ts` | `decide(state, command)` returns the events a command causes, or a `CommandRejected`. | Nothing but compute. No I/O, no clock, no random IDs, no Effect services. |
 | `projector.ts` | One projection per event type, applied to the read models (`projects`, `threads`, `turns`, `items`, `requests`, `usage_ledger`). Also loads `DeciderState` and `ThreadView`. | SQL writes to read models, inside the engine's transaction only. |
 | `engine.ts` | `dispatch`: one transaction that checks the receipt, decides, appends each event and projects it, and writes the receipt. After the commit it publishes to feeds, then runs reactions. | Own the transaction and the feed PubSub. |
-| `reactor.ts` | Side effects, triggered by committed events. Today: run a harness turn on `turn.started`, pass `approval.resolved` answers to the harness running that thread, and recover turns left `running` by a previous process. | Anything with side effects, but it only changes state by dispatching commands. |
+| `reactor.ts` | Side effects, triggered by committed events. Today: run a harness turn on `turn.started`, feed it `turn.steered` messages, pass `approval.resolved` answers to the harness running that thread, and recover turns left `running` by a previous process. | Anything with side effects, but it only changes state by dispatching commands. |
 | `app.ts` | Wires database, engine, harness registry and reactor into one layer. | |
 
 ## Rules
