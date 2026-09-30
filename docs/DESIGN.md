@@ -534,7 +534,7 @@ interface HarnessAdapter {
   - effort per task through the `effort` option; a mid-task change through `applyFlagSettings({ effortLevel })` (ADR 0002);
   - subagents via `agents`, each with its own `model`.
 - **Approvals:** `canUseTool` becomes an approval event. `AskUserQuestion` becomes a user-input request.
-- **Sessions:** resume, fork, and resuming at a given message. Transcripts stay where Claude Code keeps them; Verdandi stores pointers and a normalized copy for trajectories.
+- **Sessions:** resume, fork, and resuming at a given message. Transcripts stay where Claude Code keeps them; Verdandi stores pointers (the session id, and the file its `UserPromptSubmit` hook reports) and a normalized copy for trajectories. Subagents' messages are forwarded whole (`forwardSubagentText`) and recorded as items tagged with the tool call that started the subagent.
 - **Verdandi tools reach Claude Code over MCP**, through an MCP server running inside verdandid (§9.6). This gives Claude Code sessions Verdandi's memory, session search, scheduling, messaging and escalation.
 - **Hooks:**
   - `PostToolUse` checks verifier results.
@@ -992,7 +992,7 @@ verdandi/
 │  └─ desktop/                   # Electron: main, preload, server manager, tray, updater
 ├─ packages/
 │  ├─ contracts/                 # schemas: ids, commands, events, harness events,
-│  │                             #   routing, catalog, rpc
+│  │                             #   routing, catalog, rpc, trajectories
 │  ├─ router/                    # PURE routing engine (server + browser)
 │  ├─ harness-claude-code/       # Agent SDK adapter
 │  ├─ harness-native/            # Verdandi agent loop, prompt assembly, context engine
@@ -1003,7 +1003,7 @@ verdandi/
 │  ├─ skills/                    # skill store, skill_manage, curator, hub client
 │  ├─ decisions/                 # decision layer: Decide service + backends
 │  │                             #   (rules, laya, ollaya, jev, llm)
-│  ├─ trajectories/              # recording format, exporters, batch runner core
+│  ├─ trajectories/              # trajectory builder, redaction, exporters, batch runner core
 │  ├─ exec/                      # execution backends: local, docker, ssh
 │  ├─ client/                    # shared client runtime (web + desktop)
 │  └─ testkit/                   # FAKE harness + fake provider, fixtures, helpers

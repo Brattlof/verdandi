@@ -21,6 +21,7 @@
         "@verdandi/contracts": "workspace:*",
         "@verdandi/harness-claude-code": "workspace:*",
         "@verdandi/testkit": "workspace:*",
+        "@verdandi/trajectories": "workspace:*",
         "effect": "4.0.0-rc.115",
       },
     },
@@ -46,6 +47,12 @@
       "dependencies": {
         "@verdandi/contracts": "workspace:*",
         "effect": "4.0.0-rc.115",
+      },
+    },
+    "packages/trajectories": {
+      "name": "@verdandi/trajectories",
+      "dependencies": {
+        "@verdandi/contracts": "workspace:*",
       },
     },
   },
@@ -159,6 +166,8 @@
     "@verdandi/server": ["@verdandi/server@workspace:apps/server"],
 
     "@verdandi/testkit": ["@verdandi/testkit@workspace:packages/testkit"],
+
+    "@verdandi/trajectories": ["@verdandi/trajectories@workspace:packages/trajectories"],
 
     "accepts": ["accepts@2.0.0", "", { "dependencies": { "mime-types": "^3.0.0", "negotiator": "^1.0.0" } }, "sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng=="],
 

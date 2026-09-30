@@ -41,6 +41,8 @@ export const HarnessSessionBound = Schema.Struct({
   threadId: ThreadId,
   sessionId: Schema.String,
   harnessVersion: Schema.String,
+  /** The harness's own transcript file. Absent when it keeps none, and on sessions bound before it was recorded. */
+  transcriptPath: Schema.optionalKey(Schema.String),
 });
 export const TurnItemAdded = Schema.Struct({
   type: Schema.Literal("turn.item.added"),

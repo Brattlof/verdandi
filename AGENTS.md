@@ -164,7 +164,7 @@ The most common defect is a change that works on the path you tested and is miss
 What runs today (M1, in progress):
 
 - **Commands and events:** clients send typed RPC (`packages/contracts/src/rpc.ts`) over a WebSocket on `127.0.0.1`, authenticated with the token in the profile's `server.json`. `CommandDispatch` hands a command to the engine, a pure *decider* turns it into *events*, and *projectors* update the read models in the same SQLite transaction. The receipt returns once that transaction commits.
-- **Side effects:** after a commit, *reactors* run the side effects. Today they run a harness turn on `turn.started` and report what the harness does back as `harness.report` commands, pass the turn the user's `turn.steered` messages, pass `approval.resolved` answers back to the harness, and stop a turn the user interrupted.
+- **Side effects:** after a commit, *reactors* run the side effects. Today they run a harness turn on `turn.started` and report what the harness does back as `harness.report` commands, pass the turn the user's `turn.steered` messages, pass `approval.resolved` answers back to the harness, stop a turn the user interrupted, and record each completed turn's trajectory.
 - **Approvals:** a harness that needs the user raises `approval.requested` or `user-input.requested`. It shows in `ThreadView.pendingRequests` until a client answers with `approval.respond`. A turn that ends first, including one cut off by a restart, denies its open requests and records why.
 - **Steering:** `turn.steer` on the running turn records a `user.steer` item and reaches the agent at its next step (Claude Code: the next tool boundary, ADR 0003). The turn stays open until the agent has answered it.
 - **Modes:** `turn.send` carries an interaction mode, `ask`, `plan` or `build`. It is recorded on the turn, and the harness applies it before the turn's prompt, so the cache survives (Claude Code: `setPermissionMode`; ask and plan both run in its read-only plan mode, build in the user's own default mode). A plan the agent proposes is a `plan.requested`: a `plan` item plus a pending request. Allowing it lets the turn go on building; denying it with `feedback` keeps the agent planning with that feedback (ADR 0003).
@@ -181,6 +181,7 @@ Not built yet: the web UI, the router and decision layer, checkpoints, worktrees
   - `apps/server`: verdandid and the `verdandi` CLI (`start`, `chat`). `src/orchestration` holds the decider, projector, engine and reactor; `src/rpc` the WebSocket API; `src/persistence` SQLite and migrations; `src/config` the Verdandi home and flags;
   - `packages/contracts`: every schema sent over the wire or persisted (commands, events, RPC, harness contract, routes);
   - `packages/harness-claude-code`: the Claude Code adapter and event normalization. `src/smoke.ts` is a manual live check, never run in tests;
+  - `packages/trajectories`: builds a turn's trajectory from its events and redacts secrets; the reactor saves it to the `trajectories` table (DESIGN §14.6);
   - `packages/testkit`: the fake harness and temporary Verdandi homes for tests;
   - `docs/`: design and decisions;
   - `.agents/`: agent configuration and skills;
@@ -188,6 +189,6 @@ Not built yet: the web UI, the router and decision layer, checkpoints, worktrees
 - **Planned (DESIGN.md §20):**
   - `apps/web`, `apps/desktop`;
   - `packages/router` (pure);
-  - more `packages/harness-*`, `packages/models`, `packages/decisions`, `packages/tools`, `packages/memory`, `packages/skills`, `packages/trajectories`;
+  - more `packages/harness-*`, `packages/models`, `packages/decisions`, `packages/tools`, `packages/memory`, `packages/skills`;
   - `plugins/`;
   - `lab/` (Python, offline).

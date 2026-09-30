@@ -8,3 +8,4 @@ export * from "./items.ts";
 export * from "./requests.ts";
 export * from "./route.ts";
 export * from "./rpc.ts";
+export * from "./trajectory.ts";

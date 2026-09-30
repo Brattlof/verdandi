@@ -73,4 +73,16 @@ const turnModes = Effect.gen(function* () {
   yield* sql`alter table turns add column mode text not null default 'build'`;
 });
 
-export const migrations = { "1_init": init, "2_requests": requests, "3_turn_modes": turnModes };
+/** One redacted trajectory per completed turn, written by the reactor (DESIGN §14.6). `provider` is for the terms check (§14.8). */
+const trajectories = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table trajectories (
+    turn_id text primary key references turns (id),
+    thread_id text not null references threads (id),
+    provider text not null,
+    payload text not null,
+    recorded_at text not null
+  )`;
+});
+
+export const migrations = { "1_init": init, "2_requests": requests, "3_turn_modes": turnModes, "4_trajectories": trajectories };

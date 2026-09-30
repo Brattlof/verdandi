@@ -55,9 +55,7 @@ type Handler<T extends Command["type"]> = (state: DeciderState, command: Extract
 const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, event: HarnessEvent): Decision => {
   switch (event.type) {
     case "session.started":
-      return event.sessionId === state.thread?.sessionId
-        ? accept()
-        : accept({ type: "harness.session.bound", v: 1, threadId, sessionId: event.sessionId, harnessVersion: event.harnessVersion });
+      return event.sessionId === state.thread?.sessionId ? accept() : accept({ ...event, type: "harness.session.bound", v: 1, threadId });
     case "text.delta":
       return accept(); // broadcast by the reactor, never persisted
     case "item":

@@ -22,10 +22,10 @@ export const textDelta = (text: string, parent: string | null = null) =>
 export const assistant = (content: object[], parent: string | null = null) =>
   sdk({ type: "assistant", parent_tool_use_id: parent, message: { role: "assistant", content } });
 
-export const toolResult = (tool_use_id: string, content: unknown, is_error = false) =>
+export const toolResult = (tool_use_id: string, content: unknown, is_error = false, parent: string | null = null) =>
   sdk({
     type: "user",
-    parent_tool_use_id: null,
+    parent_tool_use_id: parent,
     message: { role: "user", content: [{ type: "tool_result", tool_use_id, content, is_error }] },
   });
 

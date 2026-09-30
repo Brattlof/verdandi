@@ -10,6 +10,9 @@
     },
     {
       "path": "../../packages/harness-claude-code"
+    },
+    {
+      "path": "../../packages/trajectories"
     }
   ]
 }

@@ -56,6 +56,8 @@ type Session = {
   buildMode: PermissionMode | undefined;
   /** Claude Code's session id, once its init message arrives. */
   sessionId: string | undefined;
+  /** The session's transcript file, as Claude Code's hooks report it. */
+  transcriptPath: string | undefined;
 };
 
 const decodeQuestions = Schema.decodeUnknownOption(Schema.Struct({ questions: Schema.Array(Question) }));
@@ -138,6 +140,21 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
       ...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),
       ...(input.mode === "build" ? {} : { permissionMode: "plan" as const }),
       includePartialMessages: true,
+      // Subagents' text too, not only their tool calls, so their steps reach the trajectory whole.
+      forwardSubagentText: true,
+      // Fires before the init message on every prompt; SessionStart never reaches SDK callbacks.
+      hooks: {
+        UserPromptSubmit: [
+          {
+            hooks: [
+              async (hook) => {
+                session.transcriptPath = hook.transcript_path;
+                return {};
+              },
+            ],
+          },
+        ],
+      },
       // Connectors attach nondeterministically and would change the tool list between turns (ADR 0001).
       settings: { disableClaudeAiConnectors: true },
       canUseTool,
@@ -166,6 +183,7 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
     planning: input.mode !== "build",
     buildMode: undefined,
     sessionId: undefined,
+    transcriptPath: undefined,
   };
   return session;
 };
@@ -257,9 +275,13 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
       }
       const msg = step.value;
       if (msg.type === "system" && msg.subtype === "init" && msg.permissionMode !== "plan") session.buildMode = msg.permissionMode;
-      const { events, context } = normalize(msg, session.context);
-      session.context = context;
-      for (const e of events) if (e.type === "session.started") session.sessionId = e.sessionId;
+      const normalized = normalize(msg, session.context);
+      session.context = normalized.context;
+      const events = normalized.events.map((e): HarnessEvent => {
+        if (e.type !== "session.started") return e;
+        session.sessionId = e.sessionId;
+        return session.transcriptPath ? { ...e, transcriptPath: session.transcriptPath } : e;
+      });
       if (continues(session, msg)) {
         yield* events.filter((e) => e.type !== "turn.finished");
         continue;

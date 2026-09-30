@@ -6,7 +6,13 @@ import type { HarnessId, InteractionMode, Route } from "./route.ts";
 
 /** What every harness adapter reports, normalized. */
 export const HarnessEvent = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("session.started"), sessionId: Schema.String, harnessVersion: Schema.String }),
+  Schema.Struct({
+    type: Schema.Literal("session.started"),
+    sessionId: Schema.String,
+    harnessVersion: Schema.String,
+    /** Where the harness keeps the session's own transcript, when it keeps one in a file. */
+    transcriptPath: Schema.optionalKey(Schema.String),
+  }),
   Schema.Struct({ type: Schema.Literal("text.delta"), text: Schema.String }),
   Schema.Struct({ type: Schema.Literal("item"), item: Item }),
   Schema.Struct({ type: Schema.Literal("usage"), ...UsageFields }),
