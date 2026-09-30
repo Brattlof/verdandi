@@ -211,9 +211,11 @@ export const ServerLayer = (
         disablePreemptiveShutdown: true,
         // A turn's attachments arrive base64-encoded in one message: at most 10 MB of bytes (contracts' attachmentLimits).
         websocket: { maxPayloadLength: 20 * 1024 * 1024 },
-        // The web UI: Bun bundles it from source on the first request and serves it from memory.
+        // The web UI, bundled by Bun from source. Run from source it rebuilds on every change to apps/web and
+        // reloads open pages; a release build sets NODE_ENV=production and gets one minified bundle, built on
+        // the first request and served from memory.
         routes: { "/": web },
-        development: false,
+        development: Bun.env.NODE_ENV === "production" ? false : { hmr: true },
       }),
     ),
   );
