@@ -151,7 +151,7 @@ const statusText: Record<LiveTurn["status"], string> = {
   success: "Done",
   error: "Failed",
   interrupted: "Stopped",
-  limit: "Stopped at the task's limit",
+  limit: "Limit reached",
 };
 const statusColor: Record<LiveTurn["status"], string> = {
   running: "text-accent",
