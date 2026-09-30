@@ -17,6 +17,15 @@ export const ThreadCreated = Schema.Struct({
   projectPath: Schema.String,
   route: Route,
 });
+/** `by` records who changed the route, so overrides can be counted (DESIGN §8.8). */
+export const ThreadRouteChanged = Schema.Struct({
+  type: Schema.Literal("thread.route.changed"),
+  v: v1,
+  threadId: ThreadId,
+  from: Route,
+  to: Route,
+  by: Schema.Literal("user"),
+});
 export const TurnStarted = Schema.Struct({
   type: Schema.Literal("turn.started"),
   v: v1,
@@ -94,6 +103,7 @@ export const TurnCompleted = Schema.Struct({
 
 export const Event = Schema.Union([
   ThreadCreated,
+  ThreadRouteChanged,
   TurnStarted,
   HarnessSessionBound,
   TurnItemAdded,
@@ -119,6 +129,7 @@ export class EventDecodeError extends Data.TaggedError("EventDecodeError")<{ rea
 
 const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.created@1": ThreadCreated,
+  "thread.route.changed@1": ThreadRouteChanged,
   "turn.started@1": TurnStarted,
   "harness.session.bound@1": HarnessSessionBound,
   "turn.item.added@1": TurnItemAdded,

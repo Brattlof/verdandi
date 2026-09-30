@@ -6,6 +6,7 @@ import {
   type HarnessEvent,
   type ProjectId,
   type Resolution,
+  type Route,
   type ThreadId,
   type TurnId,
 } from "@verdandi/contracts";
@@ -18,6 +19,7 @@ export type DeciderState = {
   readonly thread:
     | {
         readonly projectPath: string;
+        readonly route: Route;
         readonly runningTurnId: string | null;
         readonly sessionId: string | null;
         readonly pendingRequests: readonly PendingRequest[];
@@ -95,6 +97,16 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     if (state.thread.runningTurnId) return reject("ThreadBusy", "A turn is already running in this thread. Wait for it to finish.");
     return accept({ type: "turn.started", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text });
+  },
+  "thread.route.set": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
+    const from = state.thread.route;
+    if (from.harness === c.route.harness && from.model === c.route.model && from.effort === c.route.effort) return accept();
+    // A model or effort change waits for the next turn; a harness change would split the running turn's session.
+    if (from.harness !== c.route.harness && state.thread.runningTurnId) {
+      return reject("ThreadBusy", "A turn is running in this thread. Change the harness when it finishes.");
+    }
+    return accept({ type: "thread.route.changed", v: 1, threadId: c.threadId, from, to: c.route, by: "user" });
   },
   "approval.respond": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);

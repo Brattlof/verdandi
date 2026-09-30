@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { type CanUseTool, type PermissionResult, query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import {
+  type CanUseTool,
+  type PermissionResult,
+  type Query,
+  query,
+  type SDKMessage,
+  type SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import {
   type HarnessAdapter,
   HarnessError,
@@ -8,6 +15,7 @@ import {
   type HarnessRunInput,
   Question,
   type Resolution,
+  type Route,
   type ThreadId,
 } from "@verdandi/contracts";
 import { Effect, Option, Schema, Stream } from "effect";
@@ -23,6 +31,7 @@ export const findClaude = () => Bun.which("claude") ?? undefined;
 
 /** One long-lived Claude Code process per thread, fed through a single prompt stream. */
 type Session = {
+  readonly query: Query;
   readonly push: (message: SDKUserMessage) => void;
   readonly next: () => Promise<IteratorResult<SDKMessage>>;
   readonly close: () => void;
@@ -37,6 +46,10 @@ type Session = {
   live: boolean;
   /** Uuids of this turn's steers that no result has reported consuming yet. */
   readonly unanswered: Set<string>;
+  /** The route the process is running on now. */
+  route: Route;
+  /** Claude Code's session id, once its init message arrives. */
+  sessionId: string | undefined;
 };
 
 const decodeQuestions = Schema.decodeUnknownOption(Schema.Struct({ questions: Schema.Array(Question) }));
@@ -109,6 +122,7 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
   // One iterator for the session's lifetime: leaving a for-await early would close the CLI (ADR 0003).
   const iterator = q[Symbol.asyncIterator]();
   return {
+    query: q,
     push: (message) => {
       queue.push(message);
       wake?.();
@@ -124,7 +138,16 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
     context: initialContext(),
     live: false,
     unanswered: new Set(),
+    route: input.route,
+    sessionId: undefined,
   };
+};
+
+/** Moves a live session onto the turn's route, between turns (ADR 0002). Each change breaks the message cache once. */
+const applyRoute = async (session: Session, route: Route) => {
+  if (session.route.model !== route.model) await session.query.setModel(route.model);
+  if (session.route.effort !== route.effort) await session.query.applyFlagSettings({ effortLevel: route.effort });
+  session.route = route;
 };
 
 /** Steers go in without `priority`, so they land at the next tool boundary of the running turn (ADR 0003). */
@@ -172,6 +195,7 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
       }
       const { events, context } = normalize(step.value, session.context);
       session.context = context;
+      for (const e of events) if (e.type === "session.started") session.sessionId = e.sessionId;
       if (continues(session, step.value)) {
         yield* events.filter((e) => e.type !== "turn.finished");
         continue;
@@ -197,8 +221,20 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
               message: `Project folder not found: ${input.cwd}. Check that the path exists and is reachable.`,
             });
           }
+          // A live session is only reused while it is the thread's session; a harness switch unbinds it.
+          const live = sessions.get(input.threadId);
+          if (live && live.sessionId !== input.resumeSessionId) end(input.threadId);
           const session = sessions.get(input.threadId) ?? openSession(options.query ?? query, options.claudePath, input);
           sessions.set(input.threadId, session);
+          yield* Effect.tryPromise({
+            try: () => applyRoute(session, input.route),
+            catch: (error) => {
+              end(input.threadId);
+              return new HarnessError({
+                message: `Claude Code could not switch to ${input.route.model} at ${input.route.effort} effort: ${String(error)}`,
+              });
+            },
+          });
           // Opened before the stream starts, so no steer can overtake the turn's own prompt.
           session.live = true;
           session.unanswered.clear();

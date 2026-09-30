@@ -1,26 +1,26 @@
-import type { HarnessAdapter, HarnessEvent, HarnessRunInput, Resolution } from "@verdandi/contracts";
+import type { HarnessAdapter, HarnessEvent, HarnessRunInput, Resolution, Route } from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
 
 /**
  * A scripted harness for tests. Text "fail" fails the turn, "hang" never finishes, "gate" waits for
  * `release()`, "approve" asks to edit a file and "ask" asks a question, each finishing once `respond`
  * answers, "steer" waits for the first steer and answers it; anything else is echoed back with fixed
- * usage. `calls` records every run.
+ * usage on the route's model. `calls` records every run.
  */
 export const makeFakeHarness = () => {
-  const calls: { resumeSessionId: string | undefined; text: string }[] = [];
+  const calls: { resumeSessionId: string | undefined; route: Route; text: string }[] = [];
   const waiting = new Map<string, (resolution: Resolution) => void>();
   let sessions = 0;
   let requests = 0;
   let release = () => {};
   const gate = new Promise<void>((resolve) => (release = resolve));
 
-  const reply = (text: string) =>
+  const reply = (model: string, text: string) =>
     Stream.fromIterable<HarnessEvent>([
       { type: "item", item: { kind: "assistant.message", text } },
       {
         type: "usage",
-        model: "fake",
+        model,
         accessMode: "subscription",
         inputTokens: 10,
         outputTokens: 5,
@@ -32,13 +32,13 @@ export const makeFakeHarness = () => {
     ]);
 
   /** Reports the request, then replies with what `answer` makes of the resolution. */
-  const request = (event: (requestId: string) => HarnessEvent, answer: (r: Resolution) => string) => {
+  const request = (model: string, event: (requestId: string) => HarnessEvent, answer: (r: Resolution) => string) => {
     const requestId = `fake-request-${++requests}`;
     // Registered before the request is reported, so an answer can never arrive first.
     const answered = new Promise<Resolution>((resolve) => waiting.set(requestId, resolve));
     return Stream.concat(
       Stream.succeed(event(requestId)),
-      Stream.unwrap(Effect.promise(() => answered).pipe(Effect.map((r) => reply(answer(r))))),
+      Stream.unwrap(Effect.promise(() => answered).pipe(Effect.map((r) => reply(model, answer(r))))),
     );
   };
 
@@ -47,7 +47,7 @@ export const makeFakeHarness = () => {
     calls,
     release: () => release(),
     run(input: HarnessRunInput) {
-      calls.push({ resumeSessionId: input.resumeSessionId, text: input.text });
+      calls.push({ resumeSessionId: input.resumeSessionId, route: input.route, text: input.text });
       const start: HarnessEvent[] =
         input.resumeSessionId === undefined
           ? [{ type: "session.started", sessionId: `fake-session-${++sessions}`, harnessVersion: "fake" }]
@@ -56,6 +56,7 @@ export const makeFakeHarness = () => {
       if (input.text === "fail") return Stream.fromIterable([...start, { type: "turn.finished", status: "error", error: "fake failure" }]);
       if (input.text === "approve") {
         const edit = request(
+          input.route.model,
           (requestId) => ({ type: "approval.requested", requestId, toolName: "Edit", input: { file_path: "a.txt" } }),
           (r) => (r.decision === "allow" ? "edited a.txt" : "left a.txt alone"),
         );
@@ -64,6 +65,7 @@ export const makeFakeHarness = () => {
       if (input.text === "ask") {
         const question = "Which color?";
         const ask = request(
+          input.route.model,
           (requestId) => ({
             type: "user-input.requested",
             requestId,
@@ -86,7 +88,7 @@ export const makeFakeHarness = () => {
       if (input.text === "steer") {
         const answer = input.steers.pipe(
           Stream.take(1),
-          Stream.flatMap((steer) => reply(`steered: ${steer}`)),
+          Stream.flatMap((steer) => reply(input.route.model, `steered: ${steer}`)),
         );
         return Stream.concat(Stream.fromIterable(start), answer);
       }
@@ -95,7 +97,7 @@ export const makeFakeHarness = () => {
           { type: "text.delta", text: "echo: " },
           { type: "text.delta", text: input.text },
         ]),
-        reply(`echo: ${input.text}`),
+        reply(input.route.model, `echo: ${input.text}`),
       );
       const waitForGate = input.text === "gate" ? Stream.unwrap(Effect.promise(() => gate).pipe(Effect.as(echo))) : echo;
       return Stream.concat(Stream.fromIterable(start), waitForGate);

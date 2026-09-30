@@ -168,7 +168,7 @@ What runs today (M1, in progress):
 - **Approvals:** a harness that needs the user raises `approval.requested` or `user-input.requested`. It shows in `ThreadView.pendingRequests` until a client answers with `approval.respond`. A turn that ends first, including one cut off by a restart, denies its open requests and records why.
 - **Steering:** `turn.steer` on the running turn records a `user.steer` item and reaches the agent at its next step (Claude Code: the next tool boundary, ADR 0003). The turn stays open until the agent has answered it.
 - **Feeds:** `ThreadSubscribe` streams a snapshot of the thread, then its events and unstored text deltas. Clients end it with `ThreadUnsubscribe` (ADR 0008).
-- **Harnesses:** Claude Code runs through the Agent SDK behind the `HarnessAdapter` contract. The route (harness, model, effort) is set when a thread is created; there is no router yet.
+- **Harnesses:** Claude Code runs through the Agent SDK behind the `HarnessAdapter` contract. The route (harness, model, effort) is set when a thread is created and changed with `thread.route.set`, which applies from the next turn; there is no router yet.
 
 Not built yet: the web UI, the router and decision layer, checkpoints, worktrees, memory, skills and everything later in DESIGN.md §21. For how those will fit in, see DESIGN.md §6–§10.
 
