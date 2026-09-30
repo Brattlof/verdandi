@@ -91,6 +91,25 @@ describe("decide", () => {
     expect(events(decide(idle, { type: "turn.recover", commandId, threadId, turnId }))).toEqual([]);
   });
 
+  test("interrupting the running turn denies its requests and ends it as interrupted", () => {
+    const interrupt = (turnId: TurnId): Command => ({ type: "turn.interrupt", commandId, threadId, turnId });
+    expect(events(decide(waiting, interrupt(turnId))).map((e) => (e.type === "approval.resolved" ? e.reason : e))).toEqual([
+      "The user interrupted the turn.",
+      "The user interrupted the turn.",
+      { type: "turn.completed", v: 1, threadId, turnId, status: "interrupted" },
+    ]);
+    expect(reason(decide(idle, interrupt(turnId)))).toBe("TurnNotRunning");
+    expect(reason(decide(running, interrupt("turn-0" as TurnId)))).toBe("TurnNotRunning");
+    expect(reason(decide(none, interrupt(turnId)))).toBe("ThreadNotFound");
+  });
+
+  test("drops reports from a turn that has ended, except its session binding", () => {
+    expect(events(decide(idle, report({ type: "item", item: { kind: "assistant.message", text: "late" } })))).toEqual([]);
+    expect(events(decide(idle, report({ type: "turn.finished", status: "success" })))).toEqual([]);
+    const started = report({ type: "session.started", sessionId: "s2", harnessVersion: "1" });
+    expect(events(decide(idle, started)).map((e) => e.type)).toEqual(["harness.session.bound"]);
+  });
+
   test("answers a pending request", () => {
     expect(events(decide(waiting, respond("r1", { decision: "allow" })))).toEqual([
       { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r1", resolution: { decision: "allow" } },

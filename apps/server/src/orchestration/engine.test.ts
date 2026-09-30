@@ -54,6 +54,14 @@ const nextRequest = Effect.gen(function* () {
   return raised;
 });
 
+/** Completes once the harness session is bound to the thread. */
+const sessionBound = Effect.gen(function* () {
+  const bound = yield* Deferred.make<void>();
+  yield* (yield* Engine).react((s) => (s.event.type === "harness.session.bound" ? Deferred.succeed(bound, undefined) : Effect.void));
+  return bound;
+});
+const interrupt = (turnId: TurnId): Command => ({ type: "turn.interrupt", commandId: id<CommandId>(), threadId, turnId });
+
 /** Sends `text`, answers the request it raises with `resolution`, and returns the view while pending and after. */
 const answerTurn = (text: string, resolution: Resolution) =>
   Effect.gen(function* () {
@@ -247,6 +255,47 @@ describe("engine", () => {
       }),
     );
     expect(v?.turns.map((t) => t.status)).toEqual(["interrupted", "success"]);
+  });
+
+  test("an interrupted turn ends as interrupted and the next turn continues its session", async () => {
+    const { runtime, fake } = start(newHome());
+    const turnId = id<TurnId>();
+    const v = await runtime.runPromise(
+      Effect.gen(function* () {
+        yield* dispatch(create);
+        const bound = yield* sessionBound;
+        yield* dispatch(send("hang", turnId));
+        yield* Deferred.await(bound);
+        yield* dispatch(interrupt(turnId));
+        yield* drain; // returns only once the hanging turn's fiber is interrupted
+        yield* dispatch(send("after"));
+        yield* drain;
+        return yield* view;
+      }),
+    );
+    expect(v?.turns.map((t) => t.status)).toEqual(["interrupted", "success"]);
+    expect(fake.calls.map((c) => c.resumeSessionId)).toEqual([undefined, "fake-session-1"]);
+  });
+
+  test("interrupting a turn denies its pending requests", async () => {
+    const { runtime } = start(newHome());
+    const turnId = id<TurnId>();
+    const [v, resolved] = await runtime.runPromise(
+      Effect.gen(function* () {
+        yield* dispatch(create);
+        const raised = yield* nextRequest;
+        yield* dispatch(send("approve", turnId));
+        yield* Deferred.await(raised);
+        yield* dispatch(interrupt(turnId));
+        yield* drain;
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sql<{ payload: string }>`select payload from events where type = 'approval.resolved'`;
+        return [yield* view, rows.map((r) => JSON.parse(r.payload))] as const;
+      }),
+    );
+    expect(v?.pendingRequests).toEqual([]);
+    expect(v?.turns.map((t) => [t.status, t.items])).toEqual([["interrupted", []]]);
+    expect(resolved).toMatchObject([{ resolution: { decision: "deny" }, reason: "The user interrupted the turn." }]);
   });
 
   test("an allowed request lets the turn go on", async () => {

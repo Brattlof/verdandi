@@ -18,7 +18,7 @@ import {
   type Route,
   type ThreadId,
 } from "@verdandi/contracts";
-import { Effect, Option, Schema, Stream } from "effect";
+import { Effect, Exit, Option, Schema, Stream } from "effect";
 import { initialContext, type NormalizeContext, normalize } from "./normalize.ts";
 
 export type QueryFn = typeof query;
@@ -169,12 +169,36 @@ const continues = (session: Session, msg: SDKMessage) => {
   return (msg.queued_turn_count ?? 0) > 0 || (msg.user_message_uuids !== undefined && session.unanswered.size > 0);
 };
 
+/** How long Claude Code gets to record an interrupted turn before its process is closed anyway. */
+const stopGrace = "5 seconds";
+
 export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; readonly query?: QueryFn }): HarnessAdapter => {
   const sessions = new Map<ThreadId, Session>();
   const end = (threadId: ThreadId) => {
     sessions.get(threadId)?.close();
     sessions.delete(threadId);
   };
+
+  /**
+   * Stops the running turn. Claude Code gets to finish it (an error result, spike 003) so the session
+   * records the stop; then the process closes, and the thread's next turn resumes the session in a fresh one.
+   */
+  const stop = (threadId: ThreadId, session: Session, events: AsyncGenerator<HarnessEvent>) =>
+    Effect.tryPromise(async () => {
+      await session.query.interrupt();
+      for await (const _ of events);
+    }).pipe(
+      // ponytail: a fixed grace for a wedged CLI. Upgrade: make it configurable if slow machines hit it.
+      Effect.timeoutOption(stopGrace),
+      Effect.ignore,
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (sessions.get(threadId) === session) sessions.delete(threadId);
+          session.close();
+          session.query.close();
+        }),
+      ),
+    );
 
   /** Reads the turn `run` opened until its last result. */
   async function* turn(session: Session, input: HarnessRunInput): AsyncGenerator<HarnessEvent> {
@@ -244,10 +268,16 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
             parent_tool_use_id: null,
             uuid: input.turnId as UUID,
           });
-          return Stream.fromAsyncIterable(turn(session, input), (error) => {
+          const events = turn(session, input);
+          // Without `return`: Effect awaits it on interrupt, and a generator parked on the SDK would never settle it.
+          const reader = { [Symbol.asyncIterator]: () => ({ next: () => events.next() }) };
+          return Stream.fromAsyncIterable(reader, (error) => {
             end(input.threadId);
             return error instanceof HarnessError ? error : new HarnessError({ message: `Claude Code failed: ${String(error)}` });
-          }).pipe(Stream.drainFork(input.steers.pipe(Stream.tap((text) => Effect.sync(() => steer(session, text))))));
+          }).pipe(
+            Stream.drainFork(input.steers.pipe(Stream.tap((text) => Effect.sync(() => steer(session, text))))),
+            Stream.onExit((exit) => (Exit.hasInterrupts(exit) ? stop(input.threadId, session, events) : Effect.void)),
+          );
         }),
       ),
     respond: (threadId, requestId, resolution) => Effect.sync(() => sessions.get(threadId)?.waiting.get(requestId)?.(resolution)),

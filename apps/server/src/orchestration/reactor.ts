@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { CommandId, HarnessAdapter, HarnessEvent, HarnessId, Route, ThreadId, TurnId } from "@verdandi/contracts";
-import { Cause, Context, Effect, FiberSet, Layer, Queue, Stream } from "effect";
+import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Engine } from "./engine.ts";
 
@@ -26,7 +26,8 @@ const errorMessage = (cause: Cause.Cause<unknown>) => {
 
 /**
  * Runs harness turns as side effects of `turn.started`, feeds them `turn.steered` messages, passes
- * `approval.resolved` answers back to the harness, and recovers turns a previous run left behind.
+ * `approval.resolved` answers back to the harness, stops turns the user interrupted, and recovers
+ * turns a previous run left behind.
  */
 export const ReactorLive = Layer.effect(
   Reactor,
@@ -40,6 +41,8 @@ export const ReactorLive = Layer.effect(
     // ponytail: a steer accepted in the moment between the harness finishing and turn.completed
     // committing is recorded but never delivered, since its turn is over. Upgrade: have the harness report delivery.
     const steerQueues = new Map<TurnId, Queue.Queue<string>>();
+    /** Each thread's latest turn fiber: an interrupt stops it, and the thread's next turn waits for it to wind down. */
+    const latest = new Map<ThreadId, { readonly turnId: TurnId; readonly fiber: Fiber.Fiber<void> }>();
 
     const report = (threadId: ThreadId, turnId: TurnId, event: HarnessEvent) =>
       engine.dispatch({ type: "harness.report", commandId: randomUUID() as CommandId, threadId, turnId, event });
@@ -94,7 +97,15 @@ export const ReactorLive = Layer.effect(
           Effect.sync(() => steerQueues.delete(turnId)),
           Queue.shutdown(queue),
         );
-        yield* FiberSet.run(turns, runTurn(threadId, turnId, text, Stream.fromQueue(queue)).pipe(Effect.ensuring(done)));
+        const previous = latest.get(threadId)?.fiber;
+        const fiber = yield* FiberSet.run(
+          turns,
+          Effect.andThen(previous ? Fiber.await(previous) : Effect.void, runTurn(threadId, turnId, text, Stream.fromQueue(queue))).pipe(
+            Effect.ensuring(done),
+            Effect.ensuring(Effect.sync(() => latest.get(threadId)?.turnId === turnId && latest.delete(threadId))),
+          ),
+        );
+        latest.set(threadId, { turnId, fiber });
       });
 
     yield* engine.react((stored) => {
@@ -105,6 +116,11 @@ export const ReactorLive = Layer.effect(
         return queue ? Queue.offer(queue, e.text).pipe(Effect.asVoid) : Effect.void;
       }
       if (e.type === "approval.resolved") return live.get(e.threadId)?.respond(e.threadId, e.requestId, e.resolution) ?? Effect.void;
+      if (e.type === "turn.completed" && e.status === "interrupted") {
+        const turn = latest.get(e.threadId);
+        // Forked into `turns`, so the dispatch doesn't wait for the harness to stop and `drain` does.
+        return turn?.turnId === e.turnId ? FiberSet.run(turns, Fiber.interrupt(turn.fiber)).pipe(Effect.asVoid) : Effect.void;
+      }
       return Effect.void;
     });
 

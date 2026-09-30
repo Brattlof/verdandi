@@ -34,6 +34,13 @@ export const TurnSteer = Schema.Struct({
   turnId: TurnId,
   text: Schema.String,
 });
+/** Stops the running turn `turnId`. It ends as `interrupted`, and the thread's next turn continues the same session. */
+export const TurnInterrupt = Schema.Struct({
+  type: Schema.Literal("turn.interrupt"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+});
 /** The user changing a thread's route. It applies from the next turn, never mid-turn. */
 export const ThreadRouteSet = Schema.Struct({
   type: Schema.Literal("thread.route.set"),
@@ -59,8 +66,17 @@ export const TurnRecover = Schema.Struct({
 });
 
 /** What clients may send over RPC. */
-export const ClientCommand = Schema.Union([ThreadCreate, TurnSend, TurnSteer, ThreadRouteSet, ApprovalRespond]);
+export const ClientCommand = Schema.Union([ThreadCreate, TurnSend, TurnSteer, TurnInterrupt, ThreadRouteSet, ApprovalRespond]);
 export type ClientCommand = typeof ClientCommand.Type;
 
-export const Command = Schema.Union([ThreadCreate, TurnSend, TurnSteer, ThreadRouteSet, ApprovalRespond, HarnessReport, TurnRecover]);
+export const Command = Schema.Union([
+  ThreadCreate,
+  TurnSend,
+  TurnSteer,
+  TurnInterrupt,
+  ThreadRouteSet,
+  ApprovalRespond,
+  HarnessReport,
+  TurnRecover,
+]);
 export type Command = typeof Command.Type;

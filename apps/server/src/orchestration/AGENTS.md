@@ -9,7 +9,7 @@ The event-sourced core of verdandid (DESIGN.md §10). Read the root `AGENTS.md` 
 | `decider.ts` | `decide(state, command)` returns the events a command causes, or a `CommandRejected`. | Nothing but compute. No I/O, no clock, no random IDs, no Effect services. |
 | `projector.ts` | One projection per event type, applied to the read models (`projects`, `threads`, `turns`, `items`, `requests`, `usage_ledger`). Also loads `DeciderState` and `ThreadView`. | SQL writes to read models, inside the engine's transaction only. |
 | `engine.ts` | `dispatch`: one transaction that checks the receipt, decides, appends each event and projects it, and writes the receipt. After the commit it publishes to feeds, then runs reactions. | Own the transaction and the feed PubSub. |
-| `reactor.ts` | Side effects, triggered by committed events. Today: run a harness turn on `turn.started`, feed it `turn.steered` messages, pass `approval.resolved` answers to the harness running that thread, and recover turns left `running` by a previous process. | Anything with side effects, but it only changes state by dispatching commands. |
+| `reactor.ts` | Side effects, triggered by committed events. Today: run a harness turn on `turn.started`, feed it `turn.steered` messages, pass `approval.resolved` answers to the harness running that thread, interrupt the fiber of a turn the user interrupted, and recover turns left `running` by a previous process. | Anything with side effects, but it only changes state by dispatching commands. |
 | `app.ts` | Wires database, engine, harness registry and reactor into one layer. | |
 
 ## Rules
@@ -19,9 +19,10 @@ The event-sourced core of verdandid (DESIGN.md §10). Read the root `AGENTS.md` 
 - **Commands are idempotent by `commandId`.** A retry returns the first receipt and emits nothing. Generate a fresh `commandId` for each intent, never reuse one across intents.
 - **Accepting with no events is fine.** Duplicate session bindings, text deltas and stale recoveries all decide to `[]`.
 - **Text deltas are never stored.** The reactor publishes them with `engine.publishDelta`; they reach live feeds only. Anything a client needs after a reconnect must be an event.
+- **A thread's turns never overlap in its harness.** A new turn's fiber waits for the thread's previous one to finish, finalizers included, so an interrupted harness has wound down before the next turn reaches it.
 - **Reactions must not block.** A `Reaction` runs inside `dispatch`, after the commit. Fork long work (the reactor uses a `FiberSet`) and return.
 - **Dispatch is uninterruptible.** Once a command commits, its reactions run even if the caller disconnects. Keep what runs inside it short.
-- **Harness failures become events.** Any way a turn can end (error, the harness stopping early, a missing adapter) must end in `turn.completed`, or the thread stays busy forever. Interrupts are the exception: on restart, `turn.recover` marks them `interrupted`. Either way the decider denies the turn's pending requests first, so nothing waits on a turn that is over.
+- **Harness failures become events.** Any way a turn can end (error, the harness stopping early, a missing adapter) must end in `turn.completed`, or the thread stays busy forever. Interrupts are the exception: `turn.interrupt` ends the turn before its harness stops, and on restart `turn.recover` marks turns a stopped verdandid left running. The decider drops reports from a turn that has already ended, except its session binding. Either way the decider denies the turn's pending requests first, so nothing waits on a turn that is over.
 - **Tests wait on receipts and `Reactor.drain`,** never on sleeps. Use the fake harness from `@verdandi/testkit`.
 
 ## Feeds (ADR 0008)
