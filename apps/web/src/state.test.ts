@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Event, ProjectId, ThreadFeed, ThreadId, ThreadSummary, TurnId } from "@verdandi/contracts";
+import type { Event, ProjectId, ProjectsFeed, QuotaView, ThreadFeed, ThreadId, ThreadSummary, TurnId } from "@verdandi/contracts";
 import { applyDiffPanel, applyProjectsFeed, applyThreadFeed, closedPanel, type DiffPanelAction, type LiveThread } from "./state.ts";
 
 const threadId = "thread-1" as ThreadId;
@@ -117,11 +117,13 @@ test("the projects feed adds new threads on top and moves a changed thread up", 
     busy,
     lastActivityAt,
     route,
+    cost: { meteredUsd: 0, subscriptionUsd: 0 },
   });
   let sidebar = applyProjectsFeed(undefined, {
     kind: "snapshot",
     projects: [{ projectId, path: "/repo" }],
     threads: [summary("b", "2026-09-30T10:00:00.000Z"), summary("a", "2026-09-30T09:00:00.000Z")],
+    quotas: [],
     seq: 5,
   });
   sidebar = applyProjectsFeed(sidebar, { kind: "thread", thread: summary("a", "2026-09-30T11:00:00.000Z", true), seq: 6 });
@@ -138,6 +140,18 @@ test("the projects feed adds new threads on top and moves a changed thread up", 
   });
   expect(sidebar?.threads.map((t) => t.threadId as string)).toEqual(["c", "a", "b"]);
   expect(sidebar?.projects.map((p) => p.path)).toEqual(["/repo", "/other"]);
+});
+
+test("a harness's new quota replaces its old one and keeps the threads", () => {
+  const quota = (status: QuotaView["quota"]["status"], usingOverage: boolean, seq: number): ProjectsFeed => ({
+    kind: "quota",
+    quota: { harness: "claude-code", quota: { status, usingOverage }, at: "2026-09-30T12:00:00.000Z" },
+    seq,
+  });
+  let sidebar = applyProjectsFeed(undefined, { kind: "snapshot", projects: [], threads: [], quotas: [], seq: 1 });
+  sidebar = applyProjectsFeed(sidebar, quota("allowed_warning", false, 2));
+  sidebar = applyProjectsFeed(sidebar, quota("rejected", true, 3));
+  expect(sidebar?.quotas.map((q) => [q.harness, q.quota.status, q.quota.usingOverage])).toEqual([["claude-code", "rejected", true]]);
 });
 
 test("the diff panel shows the latest fetch's result, drops stale ones, and closes", () => {

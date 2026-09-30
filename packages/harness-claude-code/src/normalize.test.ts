@@ -79,6 +79,26 @@ describe("normalize", () => {
     expect(usage?.type === "usage" && usage.accessMode).toBe("metered");
   });
 
+  test("reports the subscription window once per change", () => {
+    const warning = rateLimit({ status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8123, resetsAt: 1790780400 });
+    const first = normalize(warning, initialContext());
+    expect(first.events).toEqual([
+      {
+        type: "quota",
+        quota: {
+          status: "allowed_warning",
+          window: "five_hour",
+          utilization: 0.81,
+          resetsAt: "2026-09-30T15:00:00.000Z",
+          usingOverage: false,
+        },
+      },
+    ]);
+    expect(normalize(warning, first.context).events).toEqual([]);
+    const overage = normalize(rateLimit({ status: "rejected", isUsingOverage: true }), first.context).events;
+    expect(overage).toEqual([{ type: "quota", quota: { status: "rejected", usingOverage: true } }]);
+  });
+
   test("error results finish the turn with the SDK's error text", () => {
     expect(events(result(turn1Usage, "error_max_turns", ["Reached maximum number of turns (1)"])).at(-1)).toEqual({
       type: "turn.finished",

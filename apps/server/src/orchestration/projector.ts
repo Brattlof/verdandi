@@ -3,6 +3,8 @@ import type {
   Item,
   ProjectId,
   ProjectSummary,
+  Quota,
+  QuotaView,
   Route,
   StoredEvent,
   ThreadId,
@@ -76,6 +78,12 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       (sql) =>
         sql`insert into usage_ledger (turn_id, model, access_mode, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, at)
             values (${e.turnId}, ${e.model}, ${e.accessMode}, ${e.inputTokens}, ${e.outputTokens}, ${e.cacheReadTokens}, ${e.cacheWriteTokens}, ${e.costUsd}, ${at})`,
+    ),
+  "harness.quota.reported": (e, at) =>
+    withSql(
+      (sql) =>
+        sql`insert into quota (harness, payload, at) values (${e.harness}, ${JSON.stringify(e.quota)}, ${at})
+            on conflict (harness) do update set payload = excluded.payload, at = excluded.at`,
     ),
   "approval.requested": insertRequest,
   "user-input.requested": insertRequest,
@@ -199,6 +207,13 @@ export const loadProjects: Effect.Effect<ProjectSummary[], SqlError.SqlError, Sq
   ),
 );
 
+/** Each harness's latest subscription window. */
+export const loadQuotas: Effect.Effect<QuotaView[], SqlError.SqlError, SqlClient.SqlClient> = withSql((sql) =>
+  sql<{ harness: QuotaView["harness"]; payload: string; at: string }>`select harness, payload, at from quota order by harness`.pipe(
+    Effect.map((rows) => rows.map((r) => ({ harness: r.harness, quota: JSON.parse(r.payload) as Quota, at: r.at }))),
+  ),
+);
+
 /** Summaries of every thread, most recently active first, or of just `threadId`. */
 export const loadThreadSummaries = (threadId?: ThreadId): Effect.Effect<ThreadSummary[], SqlError.SqlError, SqlClient.SqlClient> =>
   withSql((sql) =>
@@ -209,9 +224,15 @@ export const loadThreadSummaries = (threadId?: ThreadId): Effect.Effect<ThreadSu
       running_turn_id: string | null;
       first_text: string | null;
       last_activity_at: string;
+      metered_usd: number;
+      subscription_usd: number;
     }>`
       select t.id, t.project_id, t.route, t.running_turn_id,
         (select text from turns where thread_id = t.id order by started_at, rowid limit 1) as first_text,
+        (select total(u.cost_usd) from turns tu join usage_ledger u on u.turn_id = tu.id
+          where tu.thread_id = t.id and u.access_mode = 'metered') as metered_usd,
+        (select total(u.cost_usd) from turns tu join usage_ledger u on u.turn_id = tu.id
+          where tu.thread_id = t.id and u.access_mode = 'subscription') as subscription_usd,
         coalesce((select max(coalesce(completed_at, started_at)) from turns where thread_id = t.id), t.created_at) as last_activity_at
       from threads t
       where ${threadId ?? null} is null or t.id = ${threadId ?? null}
@@ -224,6 +245,7 @@ export const loadThreadSummaries = (threadId?: ThreadId): Effect.Effect<ThreadSu
           busy: r.running_turn_id !== null,
           lastActivityAt: r.last_activity_at,
           route: JSON.parse(r.route) as Route,
+          cost: { meteredUsd: r.metered_usd, subscriptionUsd: r.subscription_usd },
         })),
       ),
     ),

@@ -26,7 +26,7 @@ test("echoes the text and reports usage", async () => {
       outputTokens: 5,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
-      costUsd: 0,
+      costUsd: 0.01,
     },
     { type: "turn.finished", status: "success" },
   ]);

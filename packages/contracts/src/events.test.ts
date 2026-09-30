@@ -37,6 +37,15 @@ const samples: Event[] = [
     cacheWriteTokens: 4,
     costUsd: 0.01,
   },
+  {
+    type: "harness.quota.reported",
+    v: 1,
+    threadId,
+    turnId,
+    harness: "claude-code",
+    quota: { status: "rejected", window: "five_hour", utilization: 1, resetsAt: "2026-09-30T15:00:00.000Z", usingOverage: true },
+  },
+  { type: "harness.quota.reported", v: 1, threadId, turnId, harness: "claude-code", quota: { status: "allowed", usingOverage: false } },
   { type: "approval.requested", v: 1, threadId, turnId, requestId: "r1", toolName: "Edit", input: { file_path: "C:/a b/x.ts" } },
   {
     type: "user-input.requested",

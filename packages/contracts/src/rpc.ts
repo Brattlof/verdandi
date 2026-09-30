@@ -3,7 +3,7 @@ import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { ClientCommand } from "./commands.ts";
 import { ApprovalRequested, PlanRequested, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
 import { CommandId, ProjectId, ThreadId, TurnId } from "./ids.ts";
-import { Item, Usage } from "./items.ts";
+import { Item, Quota, Usage } from "./items.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
@@ -96,8 +96,17 @@ export const ThreadSummary = Schema.Struct({
   /** When the thread was created or a turn last started or ended, as an ISO timestamp. */
   lastActivityAt: Schema.String,
   route: Route,
+  /**
+   * The thread's usage in USD, kept apart by access mode and never summed: metered is what was paid,
+   * subscription is what the plan covered, valued at API prices by the harness.
+   */
+  cost: Schema.Struct({ meteredUsd: Schema.Number, subscriptionUsd: Schema.Number }),
 });
 export type ThreadSummary = typeof ThreadSummary.Type;
+
+/** A harness's subscription window as it last reported it, at `at` (ISO). */
+export const QuotaView = Schema.Struct({ harness: HarnessId, quota: Quota, at: Schema.String });
+export type QuotaView = typeof QuotaView.Type;
 
 export const ProjectsFeed = Schema.Union([
   /** Threads most recently active first. `seq` is the last event the snapshot includes. */
@@ -105,10 +114,14 @@ export const ProjectsFeed = Schema.Union([
     kind: Schema.Literal("snapshot"),
     projects: Schema.Array(ProjectSummary),
     threads: Schema.Array(ThreadSummary),
+    /** One per harness that has reported a subscription window. */
+    quotas: Schema.Array(QuotaView),
     seq: Schema.Number,
   }),
   /** A thread was created or changed; it replaces the client's copy. `project` comes with a new thread. */
   Schema.Struct({ kind: Schema.Literal("thread"), thread: ThreadSummary, project: Schema.optionalKey(ProjectSummary), seq: Schema.Number }),
+  /** A harness reported a changed subscription window; it replaces the client's copy for that harness. */
+  Schema.Struct({ kind: Schema.Literal("quota"), quota: QuotaView, seq: Schema.Number }),
 ]);
 export type ProjectsFeed = typeof ProjectsFeed.Type;
 

@@ -42,3 +42,19 @@ export const UsageFields = {
 };
 export const Usage = Schema.Struct(UsageFields);
 export type Usage = typeof Usage.Type;
+
+/**
+ * A subscription window as the harness last reported it (Claude Code: `rate_limit_event`, ADR 0005).
+ * `usingOverage`: the window is used up and turns run on the account's extra usage, priced as metered.
+ */
+export const Quota = Schema.Struct({
+  status: Schema.Literals(["allowed", "allowed_warning", "rejected"]),
+  /** Which window, as the harness names it, e.g. Claude Code's `five_hour` or `seven_day`. */
+  window: Schema.optionalKey(Schema.String),
+  /** How much of the window is used, from 0 to 1. */
+  utilization: Schema.optionalKey(Schema.Number),
+  /** When the window resets, as an ISO timestamp. */
+  resetsAt: Schema.optionalKey(Schema.String),
+  usingOverage: Schema.Boolean,
+});
+export type Quota = typeof Quota.Type;

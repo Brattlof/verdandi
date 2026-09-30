@@ -1,4 +1,14 @@
-import { type CommandId, defaultRoute, type ProjectSummary, type Route, type ThreadId, type ThreadSummary } from "@verdandi/contracts";
+import {
+  type CommandId,
+  defaultRoute,
+  describeCost,
+  describeQuota,
+  type ProjectSummary,
+  type QuotaView,
+  type Route,
+  type ThreadId,
+  type ThreadSummary,
+} from "@verdandi/contracts";
 import { type FormEvent, useEffect, useState, useSyncExternalStore } from "react";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
 import { applyProjectsFeed, type Sidebar as SidebarData } from "./state.ts";
@@ -61,6 +71,7 @@ const Sidebar = ({ connection, data, current }: { connection: Connection; data: 
   );
   return (
     <nav aria-label="Projects and threads" className="sidebar">
+      <Quotas quotas={data.quotas} />
       <OpenFolder connection={connection} route={data.threads[0]?.route ?? defaultRoute} />
       {projects.length === 0 && (
         <p className="muted">
@@ -79,6 +90,19 @@ const Sidebar = ({ connection, data, current }: { connection: Connection; data: 
     </nav>
   );
 };
+
+const resetTime = (iso: string) => new Date(iso).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+
+/** Each harness's subscription window, as it last reported it. A live region, so a switch to extra usage is announced. */
+const Quotas = ({ quotas }: { quotas: readonly QuotaView[] }) => (
+  <div role="status" className="quotas">
+    {quotas.map((q) => (
+      <p key={q.harness} className={q.quota.usingOverage || q.quota.status !== "allowed" ? "quota warn" : "quota"}>
+        {describeQuota(q, resetTime)}
+      </p>
+    ))}
+  </div>
+);
 
 /** Starts a thread in any folder; verdandid checks the path and resolves it, so a known folder gets a new thread, not a new project. */
 const OpenFolder = ({ connection, route }: { connection: Connection; route: Route }) => {
@@ -166,6 +190,14 @@ const Project = ({
             <a href={`#thread=${t.threadId}`} aria-current={t.threadId === current ? "page" : undefined}>
               <span className="title">{t.title || "New thread"}</span>
               {t.busy && <span className="busy">working</span>}
+              {describeCost(t.cost) && (
+                <span
+                  className="thread-cost"
+                  title="Paid: metered usage. On plan: subscription usage valued at API prices, covered by your plan."
+                >
+                  {describeCost(t.cost)}
+                </span>
+              )}
             </a>
           </li>
         ))}

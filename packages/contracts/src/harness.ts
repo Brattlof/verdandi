@@ -1,6 +1,6 @@
 import { Data, type Effect, Schema, type Stream } from "effect";
 import type { ThreadId, TurnId } from "./ids.ts";
-import { Item, UsageFields } from "./items.ts";
+import { Item, Quota, UsageFields } from "./items.ts";
 import { Question, type Resolution } from "./requests.ts";
 import type { HarnessId, InteractionMode, Route } from "./route.ts";
 
@@ -16,6 +16,8 @@ export const HarnessEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text.delta"), text: Schema.String }),
   Schema.Struct({ type: Schema.Literal("item"), item: Item }),
   Schema.Struct({ type: Schema.Literal("usage"), ...UsageFields }),
+  /** The subscription window changed. Report it only when it differs from the last one reported. */
+  Schema.Struct({ type: Schema.Literal("quota"), quota: Quota }),
   /** The harness blocks until `respond` answers `requestId`. */
   Schema.Struct({ type: Schema.Literal("approval.requested"), requestId: Schema.String, toolName: Schema.String, input: Schema.Unknown }),
   Schema.Struct({ type: Schema.Literal("user-input.requested"), requestId: Schema.String, questions: Schema.Array(Question) }),

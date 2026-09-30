@@ -1,8 +1,8 @@
 import { Data, Effect, Schema } from "effect";
 import { ProjectId, ThreadId, TurnId } from "./ids.ts";
-import { Item, UsageFields } from "./items.ts";
+import { Item, Quota, UsageFields } from "./items.ts";
 import { Question, Resolution } from "./requests.ts";
-import { InteractionMode, Route } from "./route.ts";
+import { HarnessId, InteractionMode, Route } from "./route.ts";
 
 // Events are append-only and must stay readable forever. To change one, add a v2 schema
 // next to v1 and upgrade v1 to v2 when it is read; never edit or delete a published version.
@@ -66,6 +66,15 @@ export const TurnUsageRecorded = Schema.Struct({
   turnId: TurnId,
   ...UsageFields,
 });
+/** The harness's subscription window changed. The projection keeps only each harness's latest. */
+export const HarnessQuotaReported = Schema.Struct({
+  type: Schema.Literal("harness.quota.reported"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  harness: HarnessId,
+  quota: Quota,
+});
 /** The harness waits for the user to allow or deny a tool call. */
 export const ApprovalRequested = Schema.Struct({
   type: Schema.Literal("approval.requested"),
@@ -123,6 +132,7 @@ export const Event = Schema.Union([
   TurnItemAdded,
   TurnSteered,
   TurnUsageRecorded,
+  HarnessQuotaReported,
   ApprovalRequested,
   UserInputRequested,
   PlanRequested,
@@ -150,6 +160,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "turn.item.added@1": TurnItemAdded,
   "turn.steered@1": TurnSteered,
   "turn.usage.recorded@1": TurnUsageRecorded,
+  "harness.quota.reported@1": HarnessQuotaReported,
   "approval.requested@1": ApprovalRequested,
   "user-input.requested@1": UserInputRequested,
   "plan.requested@1": PlanRequested,

@@ -4,6 +4,7 @@ import type {
   Item,
   ProjectSummary,
   ProjectsFeed,
+  QuotaView,
   ThreadFeed,
   ThreadSummary,
   ThreadView,
@@ -61,6 +62,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
       ...t,
       usage: [...t.usage, { model, accessMode, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsd }],
     })),
+  "harness.quota.reported": (thread) => thread, // shown in the sidebar, from the projects feed
   "approval.requested": addRequest,
   "user-input.requested": addRequest,
   "plan.requested": (thread, e) =>
@@ -87,12 +89,17 @@ export const applyThreadFeed = (thread: LiveThread | undefined, feed: ThreadFeed
   return { ...(apply[event.type] as Apply<Event["type"]>)(thread, event, at), seq };
 };
 
-/** The sidebar's data: threads most recently active first. */
-export type Sidebar = { readonly projects: readonly ProjectSummary[]; readonly threads: readonly ThreadSummary[] };
+/** The sidebar's data: threads most recently active first, and each harness's subscription window. */
+export type Sidebar = {
+  readonly projects: readonly ProjectSummary[];
+  readonly threads: readonly ThreadSummary[];
+  readonly quotas: readonly QuotaView[];
+};
 
 export const applyProjectsFeed = (sidebar: Sidebar | undefined, feed: ProjectsFeed): Sidebar | undefined => {
-  if (feed.kind === "snapshot") return { projects: feed.projects, threads: feed.threads };
+  if (feed.kind === "snapshot") return { projects: feed.projects, threads: feed.threads, quotas: feed.quotas };
   if (!sidebar) return sidebar;
+  if (feed.kind === "quota") return { ...sidebar, quotas: [...sidebar.quotas.filter((q) => q.harness !== feed.quota.harness), feed.quota] };
   const { project, thread } = feed;
   const projects =
     project && !sidebar.projects.some((p) => p.projectId === project.projectId) ? [...sidebar.projects, project] : sidebar.projects;
@@ -100,7 +107,7 @@ export const applyProjectsFeed = (sidebar: Sidebar | undefined, feed: ProjectsFe
   const threads = [thread, ...sidebar.threads.filter((t) => t.threadId !== thread.threadId)].sort(
     (a, b) => Number(b.lastActivityAt > a.lastActivityAt) - Number(b.lastActivityAt < a.lastActivityAt),
   );
-  return { projects, threads };
+  return { ...sidebar, projects, threads };
 };
 
 /**
