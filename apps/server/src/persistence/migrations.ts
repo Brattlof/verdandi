@@ -114,6 +114,32 @@ const quota = Effect.gen(function* () {
   yield* sql`create index usage_ledger_turn on usage_ledger (turn_id)`;
 });
 
+/**
+ * Tasks (DESIGN §7) and their outcomes (§8.8). `threads.task_id` is the task the next turn continues.
+ * Turns from before tasks existed belong to none; a thread's next turn starts its first.
+ * `task_outcomes` is written by the reactor; `seq` is the last thread event the outcome was built from.
+ */
+const tasks = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table tasks (
+    id text primary key,
+    thread_id text not null references threads (id),
+    route text not null,
+    seq integer not null,
+    started_at text not null
+  )`;
+  yield* sql`create index tasks_thread on tasks (thread_id, seq)`;
+  yield* sql`alter table threads add column task_id text`;
+  yield* sql`create table task_outcomes (
+    task_id text primary key references tasks (id),
+    status text not null,
+    cost_usd real not null,
+    payload text not null,
+    seq integer not null,
+    recorded_at text not null
+  )`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -121,4 +147,5 @@ export const migrations = {
   "4_trajectories": trajectories,
   "5_route_changes": routeChanges,
   "6_quota": quota,
+  "7_tasks": tasks,
 };

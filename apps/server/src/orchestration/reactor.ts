@@ -3,6 +3,7 @@ import type { CommandId, HarnessAdapter, HarnessEvent, HarnessId, InteractionMod
 import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Engine } from "./engine.ts";
+import { recordTaskOutcomes, staleOutcomeThreads } from "./task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "./trajectory.ts";
 
 export class HarnessRegistry extends Context.Service<HarnessRegistry, Partial<Record<HarnessId, HarnessAdapter>>>()(
@@ -28,7 +29,7 @@ const errorMessage = (cause: Cause.Cause<unknown>) => {
 /**
  * Runs harness turns as side effects of `turn.started`, feeds them `turn.steered` messages, passes
  * `approval.resolved` answers back to the harness, stops turns the user interrupted, records each
- * completed turn's trajectory, and recovers turns a previous run left behind.
+ * completed turn's trajectory and its task's outcome, and recovers turns a previous run left behind.
  */
 export const ReactorLive = Layer.effect(
   Reactor,
@@ -52,6 +53,11 @@ export const ReactorLive = Layer.effect(
     const record = (threadId: ThreadId, turnId: TurnId) =>
       recordTrajectory(threadId, turnId).pipe(
         Effect.catchCause((cause) => Effect.logWarning(`Could not record the trajectory of turn ${turnId}.`, cause)),
+        Effect.provideService(SqlClient.SqlClient, sql),
+      );
+    const recordOutcomes = (threadId: ThreadId) =>
+      recordTaskOutcomes(threadId).pipe(
+        Effect.catchCause((cause) => Effect.logWarning(`Could not record the task outcomes of thread ${threadId}.`, cause)),
         Effect.provideService(SqlClient.SqlClient, sql),
       );
 
@@ -132,19 +138,22 @@ export const ReactorLive = Layer.effect(
         // Forked into `turns`, so the dispatch doesn't wait for the harness to stop or the trajectory to be written, and `drain` does.
         const stop =
           e.status === "interrupted" && turn?.turnId === e.turnId ? FiberSet.run(turns, Fiber.interrupt(turn.fiber)) : Effect.void;
-        return Effect.andThen(stop, FiberSet.run(turns, record(e.threadId, e.turnId))).pipe(Effect.asVoid);
+        return Effect.andThen(stop, FiberSet.run(turns, Effect.andThen(record(e.threadId, e.turnId), recordOutcomes(e.threadId)))).pipe(
+          Effect.asVoid,
+        );
       }
+      // A route change is an override of the running task, and ends it.
+      if (e.type === "thread.route.changed") return FiberSet.run(turns, recordOutcomes(e.threadId)).pipe(Effect.asVoid);
       return Effect.void;
     });
 
     // Turns that completed while nothing was listening: before a crash, in the recovery above, or before trajectories existed.
     yield* FiberSet.run(
       turns,
-      unrecordedTurns.pipe(
-        Effect.flatMap((missing) => Effect.forEach(missing, (t) => record(t.thread_id, t.id), { discard: true })),
-        Effect.provideService(SqlClient.SqlClient, sql),
-        Effect.ignore,
-      ),
+      Effect.all([
+        unrecordedTurns.pipe(Effect.flatMap((missing) => Effect.forEach(missing, (t) => record(t.thread_id, t.id), { discard: true }))),
+        staleOutcomeThreads.pipe(Effect.flatMap((stale) => Effect.forEach(stale, (t) => recordOutcomes(t.thread_id), { discard: true }))),
+      ]).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.ignore),
     );
 
     return Reactor.of({ drain: FiberSet.awaitEmpty(turns) });

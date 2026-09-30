@@ -13,3 +13,7 @@ export type TurnId = typeof TurnId.Type;
 /** Client-generated; retrying a command with the same id returns the same receipt. */
 export const CommandId = Schema.String.pipe(Schema.brand("CommandId"));
 export type CommandId = typeof CommandId.Type;
+
+/** A task's id is the id of the turn that started it, so the decider can name it without generating one. */
+export const TaskId = Schema.String.pipe(Schema.brand("TaskId"));
+export type TaskId = typeof TaskId.Type;

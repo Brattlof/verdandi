@@ -138,7 +138,7 @@ describe("engine", () => {
       }),
     );
     expect(b).toEqual(a);
-    expect(count).toBe(1);
+    expect(count).toBe(2); // the first turn's task.started and turn.started, once
   });
 
   test("a failed projection leaves no events", async () => {

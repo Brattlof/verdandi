@@ -353,6 +353,16 @@ describe("rpc server", () => {
     expect(error.message).toContain("git init");
   });
 
+  test("TaskCostsList reports cost per completed task by route", async () => {
+    const { info, drain } = await startServer();
+    const threadId = uuid<ThreadId>();
+    const turn = { type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), text: "hi", mode: "build" } as const;
+    await withClient(info.port, info.token, (c) => Effect.andThen(createThread(c, threadId), c.CommandDispatch(turn)));
+    await drain();
+    const costs = await withClient(info.port, info.token, (c) => c.TaskCostsList());
+    expect(costs).toEqual([{ route, tasks: 1, completed: 1, costUsd: 0.01, costPerCompletedUsd: 0.01 }]);
+  });
+
   test("thread.create resolves the folder, so two spellings of one folder are one project", async () => {
     const { info, runtime } = await startServer();
     const other = makeTempHome();

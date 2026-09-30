@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { TurnStatus } from "./events.ts";
-import { ProjectId, ThreadId, TurnId } from "./ids.ts";
+import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { AccessMode, Item, UsageFields } from "./items.ts";
 import { InteractionMode, Route } from "./route.ts";
 
@@ -15,6 +15,8 @@ export const Trajectory = Schema.Struct({
   v: Schema.Literal(1),
   threadId: ThreadId,
   turnId: TurnId,
+  /** The task the turn belongs to, which its `TaskOutcome` shares. Absent on turns from before tasks existed. */
+  taskId: Schema.optionalKey(TaskId),
   projectId: ProjectId,
   text: Schema.String,
   mode: InteractionMode,

@@ -1,4 +1,4 @@
-import type { HarnessId, Item, Provider, StoredEvent, Trajectory, TurnId } from "@verdandi/contracts";
+import type { HarnessId, Item, Provider, StoredEvent, TaskId, Trajectory, TurnId } from "@verdandi/contracts";
 
 // ponytail: each harness talks to one provider today. The native harness (M4) routes to many, and will
 // report the provider per turn instead.
@@ -6,13 +6,14 @@ const providerOf: Record<HarnessId, Provider> = { "claude-code": "anthropic", fa
 
 /**
  * Pure: the trajectory of `turnId` from its thread's events in `seq` order, or undefined until the turn
- * has completed. Thread-level events (creation, route changes, session bindings) set the context; only
- * the turn's own events add to it.
+ * has completed. Thread-level events (creation, task starts, route changes, session bindings) set the context; only
+ * the turn's own events add to it. The turn belongs to the last task started before it.
  */
 export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId): Trajectory | undefined => {
   let thread: Pick<Trajectory, "threadId" | "projectId" | "route"> | undefined;
   let session: { readonly sessionId: string; readonly harnessVersion: string; readonly transcriptPath?: string } | undefined;
   let turn: Pick<Trajectory, "text" | "mode" | "startedAt"> | undefined;
+  let taskId: TaskId | undefined;
   const items: Item[] = [];
   const usage: Trajectory["usage"][number][] = [];
 
@@ -25,6 +26,10 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
       // Once the turn has started, a route change applies to the next turn. A new harness means a new session.
       if (thread && !turn) thread = { ...thread, route: e.to };
       if (!turn && e.from.harness !== e.to.harness) session = undefined;
+      continue;
+    }
+    if (e.type === "task.started") {
+      if (!turn) taskId = e.taskId;
       continue;
     }
     if (e.type === "harness.session.bound") {
@@ -57,6 +62,7 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
           v: 1,
           ...thread,
           turnId,
+          ...(taskId ? { taskId } : {}),
           ...turn,
           provenance: {
             provider: providerOf[thread.route.harness],
