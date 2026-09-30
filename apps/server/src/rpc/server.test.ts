@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { appendFileSync } from "node:fs";
-import { join } from "node:path";
+import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { appendFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { join, sep } from "node:path";
 import type { CommandId, ProjectsFeed, ThreadFeed, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, Fiber, ManagedRuntime, Stream } from "effect";
+import { SqlClient } from "effect/unstable/sql";
 import { Reactor } from "../orchestration/reactor.ts";
 import { connect } from "./client.ts";
 import { ServerInfo, ServerLayer } from "./server.ts";
@@ -12,6 +13,9 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c();
 });
+/** A project folder that isn't a git repo. */
+const folder = makeTempHome();
+afterAll(() => removeTempHome(folder));
 
 const route = { harness: "fake", model: "fake", effort: "low" } as const;
 const uuid = <T>() => crypto.randomUUID() as T;
@@ -33,7 +37,7 @@ const startServer = async () => {
         yield* (yield* Reactor).drain;
       }),
     );
-  return { info, fake, drain, home };
+  return { info, fake, drain, home, runtime };
 };
 
 /** Runs `f` with a connected client in its own scope; the socket closes when `f` returns. */
@@ -45,7 +49,7 @@ const step = <A, E>(label: string, e: Effect.Effect<A, E>) =>
   e.pipe(Effect.timeoutOrElse({ duration: "2 seconds", orElse: () => Effect.die(`step timed out: ${label}`) }));
 
 const createThread = (client: Effect.Success<ReturnType<typeof connect>>, threadId: ThreadId) =>
-  client.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: "C:/Users/a b/repo", route });
+  client.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: folder, route });
 
 describe("rpc server", () => {
   test("shuts down while a client is still connected", async () => {
@@ -180,13 +184,13 @@ describe("rpc server", () => {
       }),
     );
     expect(snapshot.threads.map((t) => t.threadId)).toEqual([before]);
-    expect(snapshot.projects.map((p) => p.path)).toEqual(["C:/Users/a b/repo"]);
+    expect(snapshot.projects.map((p) => p.path)).toEqual([realpathSync.native(folder)]);
     expect(changes.map((c) => [c.thread.threadId, c.thread.busy, c.thread.title])).toEqual([
       [threadId, false, ""],
       [threadId, true, "gate"],
       [threadId, false, "gate"],
     ]);
-    expect(changes[0]?.project?.path).toBe("C:/Users/a b/repo");
+    expect(changes[0]?.project?.path).toBe(realpathSync.native(folder));
     expect(changes[1]?.project).toBeUndefined();
     expect(changes.map((c) => c.seq)).toEqual(changes.map((c) => c.seq).sort((a, b) => a - b));
   });
@@ -296,6 +300,37 @@ describe("rpc server", () => {
       }),
     );
     expect(error.reason).toBe("NotAGitRepo");
-    expect(error.message).toContain("does not exist");
+    expect(error.message).toContain("git init");
+  });
+
+  test("thread.create resolves the folder, so two spellings of one folder are one project", async () => {
+    const { info, runtime } = await startServer();
+    const other = makeTempHome();
+    cleanups.push(async () => removeTempHome(other));
+    const link = join(other, "link to project");
+    symlinkSync(folder, link, "junction"); // junctions need no admin rights on Windows; ignored elsewhere
+    const file = join(other, "notes.txt");
+    writeFileSync(file, "");
+    const create = (c: Effect.Success<ReturnType<typeof connect>>, projectPath: string) =>
+      c.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId: uuid<ThreadId>(), projectPath, route });
+    const rejected = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        yield* create(c, `${folder}${sep}`);
+        yield* create(c, link);
+        return yield* Effect.forEach([join(other, "missing"), file, "relative"], (p) => Effect.flip(create(c, p)));
+      }),
+    );
+    const projects = await runtime.runPromise(
+      Effect.gen(function* () {
+        return yield* (yield* SqlClient.SqlClient)<{ path: string }>`select path from projects`;
+      }),
+    );
+    expect(projects.map((p) => p.path)).toEqual([realpathSync.native(folder)]);
+    expect(rejected.map((e) => e.reason)).toEqual(["InvalidProjectPath", "InvalidProjectPath", "InvalidProjectPath"]);
+    expect(rejected.map((e) => e.message)).toEqual([
+      expect.stringContaining("does not exist"),
+      expect.stringContaining("is a file"),
+      expect.stringContaining("not an absolute path"),
+    ]);
   });
 });

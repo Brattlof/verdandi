@@ -16,3 +16,6 @@ export type HarnessId = typeof HarnessId.Type;
 /** The fixed route a thread runs on. The router (M2) will produce these. */
 export const Route = Schema.Struct({ harness: HarnessId, model: Schema.String, effort: Effort });
 export type Route = typeof Route.Type;
+
+/** A new thread's route when nothing else picks one. */
+export const defaultRoute: Route = { harness: "claude-code", model: "sonnet", effort: "medium" };

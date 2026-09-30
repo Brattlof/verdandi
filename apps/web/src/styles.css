@@ -106,6 +106,24 @@ input[type="text"] {
   background: var(--panel);
   border-right: 1px solid var(--border);
 }
+.open-folder label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 4px 4px;
+}
+.open-folder div {
+  display: flex;
+  gap: 4px;
+}
+.open-folder input {
+  flex: 1;
+  min-width: 0;
+}
+.open-folder .error {
+  margin: 4px;
+  overflow-wrap: anywhere;
+}
 .project {
   display: flex;
   align-items: center;
