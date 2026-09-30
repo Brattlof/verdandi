@@ -1,6 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { describeRouteChange, type InteractionMode, type Item, type ThreadId, type TurnId, type TurnView } from "@verdandi/contracts";
 import { memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { ArchiveButton } from "./archive.tsx";
 import { type Connection, createStore, useStore } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
 import { SidePanel } from "./diff.tsx";
@@ -11,6 +12,7 @@ import { applyDiffPanel, applyThreadFeed, closedPanel, type LiveThread, type Liv
 export const ThreadPane = ({ connection, threadId }: { connection: Connection; threadId: ThreadId }) => {
   const [store] = useState(() => createStore<LiveThread | undefined>(undefined));
   const [error, setError] = useState<string>();
+  const [archiveError, setArchiveError] = useState<string>();
   useEffect(
     () =>
       connection.follow(
@@ -47,6 +49,9 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
             {thread.projectPath}
           </span>
           <span className="flex items-center gap-2">
+            {!thread.busy && (
+              <ArchiveButton connection={connection} threadId={threadId} archived={thread.archived} onError={setArchiveError} />
+            )}
             <button
               type="button"
               className="px-2 py-0 text-xs"
@@ -57,6 +62,11 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
             </button>
           </span>
         </header>
+        {(thread.archived || archiveError) && (
+          <p role="status" className={`border-b border-line px-4 py-1 text-xs ${archiveError ? "text-error" : "text-muted"}`}>
+            {archiveError ?? "This thread is archived: it's hidden from the thread list and takes no turns until you unarchive it."}
+          </p>
+        )}
         <Conversation turns={thread.turns} routeChanges={thread.routeChanges} onChanges={showTurnDiff} />
         <Requests connection={connection} threadId={threadId} requests={thread.pendingRequests} onPlanApproved={() => setMode("build")} />
         <Composer connection={connection} thread={thread} mode={mode ?? last?.mode ?? "build"} onMode={setMode} />

@@ -41,7 +41,9 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
       e.type === "thread.route.unpinned" ||
       e.type === "thread.budget.changed" ||
       e.type === "spend.cap.raised" ||
-      e.type === "routing.memory.cleared"
+      e.type === "routing.memory.cleared" ||
+      e.type === "thread.archived" ||
+      e.type === "thread.unarchived"
     )
       continue;
     if (e.type === "harness.session.bound") {

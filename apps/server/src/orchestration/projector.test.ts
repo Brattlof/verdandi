@@ -72,6 +72,7 @@ test("projects a full turn into the thread view", async () => {
     projectPath: "C:/Users/a b/repo",
     route: { harness: "fake", model: "fake", effort: "low" },
     pinned: true,
+    archived: false,
     budgetMode: null,
     task: null,
     sessionId: "s1",

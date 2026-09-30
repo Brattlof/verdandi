@@ -49,6 +49,8 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   // A pick pins the route and ends the task; unpinning ends it too, so the next turn starts a routed one.
   "thread.route.unpinned": (thread) => ({ ...thread, pinned: false, task: null }),
   "routing.memory.cleared": (thread) => thread, // applies to the project's next routed task
+  "thread.archived": (thread) => ({ ...thread, archived: true }),
+  "thread.unarchived": (thread) => ({ ...thread, archived: false }),
   // Ends a routed thread's task, so the next turn is routed under the new mode.
   "thread.budget.changed": (thread, e) => ({ ...thread, budgetMode: e.mode, task: thread.pinned ? thread.task : null }),
   "thread.route.changed": (thread, e, at) => ({
@@ -120,7 +122,8 @@ export type Sidebar = {
   readonly quotas: readonly QuotaView[];
 };
 
-export const applyProjectsFeed = (sidebar: Sidebar | undefined, feed: ProjectsFeed): Sidebar | undefined => {
+/** `archived`: whether the sidebar shows archived threads; when it doesn't, a thread that gets archived leaves it. */
+export const applyProjectsFeed = (sidebar: Sidebar | undefined, feed: ProjectsFeed, archived = false): Sidebar | undefined => {
   if (feed.kind === "snapshot") return { projects: feed.projects, threads: feed.threads, quotas: feed.quotas };
   if (!sidebar) return sidebar;
   if (feed.kind === "quota") return { ...sidebar, quotas: [...sidebar.quotas.filter((q) => q.harness !== feed.quota.harness), feed.quota] };
@@ -128,7 +131,8 @@ export const applyProjectsFeed = (sidebar: Sidebar | undefined, feed: ProjectsFe
   const projects =
     project && !sidebar.projects.some((p) => p.projectId === project.projectId) ? [...sidebar.projects, project] : sidebar.projects;
   // ISO timestamps sort as strings. The sort is stable, so the changed thread leads its ties.
-  const threads = [thread, ...sidebar.threads.filter((t) => t.threadId !== thread.threadId)].sort(
+  const others = sidebar.threads.filter((t) => t.threadId !== thread.threadId);
+  const threads = (thread.archived && !archived ? others : [thread, ...others]).sort(
     (a, b) => Number(b.lastActivityAt > a.lastActivityAt) - Number(b.lastActivityAt < a.lastActivityAt),
   );
   return { ...sidebar, projects, threads };

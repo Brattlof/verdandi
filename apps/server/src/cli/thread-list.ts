@@ -4,7 +4,7 @@ const resetTime = (iso: string) => new Date(iso).toLocaleString([], { weekday: "
 
 /**
  * `verdandi chat --list`: each harness's subscription window, then threads under their project, the folder
- * with the most recent activity first.
+ * with the most recent activity first. Archived threads come only from `--list --archived`, marked as such.
  */
 export const threadList = (
   projects: readonly ProjectSummary[],
@@ -20,7 +20,7 @@ export const threadList = (
     .map(([projectId, ts]) => {
       const lines = ts.map((t) => {
         const cost = describeCost(t.cost);
-        return `  ${t.threadId}  ${t.busy ? "busy" : "idle"}  ${t.lastActivityAt.slice(0, 16).replace("T", " ")}  ${t.title || "(no turns yet)"}${cost ? `  [${cost}]` : ""}`;
+        return `  ${t.threadId}  ${t.busy ? "busy" : t.archived ? "archived" : "idle"}  ${t.lastActivityAt.slice(0, 16).replace("T", " ")}  ${t.title || "(no turns yet)"}${cost ? `  [${cost}]` : ""}`;
       });
       return `${paths.get(projectId) ?? projectId}\n${lines.join("\n")}\n`;
     })

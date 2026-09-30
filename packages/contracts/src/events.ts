@@ -71,6 +71,18 @@ export const RoutingMemoryCleared = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
 });
+/** The user put the thread away: thread lists leave it out, and it takes no turns until unarchived. Nothing is deleted. */
+export const ThreadArchived = Schema.Struct({
+  type: Schema.Literal("thread.archived"),
+  v: v1,
+  threadId: ThreadId,
+});
+/** The user brought an archived thread back. */
+export const ThreadUnarchived = Schema.Struct({
+  type: Schema.Literal("thread.unarchived"),
+  v: v1,
+  threadId: ThreadId,
+});
 export const TurnStarted = Schema.Struct({
   type: Schema.Literal("turn.started"),
   v: v1,
@@ -226,6 +238,8 @@ export const Event = Schema.Union([
   ThreadRouteUnpinned,
   ThreadBudgetChanged,
   RoutingMemoryCleared,
+  ThreadArchived,
+  ThreadUnarchived,
   TaskStarted,
   TurnStarted,
   HarnessSessionBound,
@@ -261,6 +275,8 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.route.unpinned@1": ThreadRouteUnpinned,
   "thread.budget.changed@1": ThreadBudgetChanged,
   "routing.memory.cleared@1": RoutingMemoryCleared,
+  "thread.archived@1": ThreadArchived,
+  "thread.unarchived@1": ThreadUnarchived,
   "task.started@1": TaskStarted,
   "turn.started@1": TurnStarted,
   "harness.session.bound@1": HarnessSessionBound,

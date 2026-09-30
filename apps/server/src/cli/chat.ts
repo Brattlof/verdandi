@@ -49,13 +49,13 @@ const modeHelp: Record<InteractionMode, string> = {
   build: "build mode: the agent does the work",
 };
 
-/** Prints every thread from the projects feed's snapshot, then ends the feed (ADR 0008). */
-const list = async (runtime: ManagedRuntime.ManagedRuntime<Client, never>, client: Client["Service"]) => {
+/** Prints every thread from the projects feed's snapshot, archived ones only with `archived`, then ends the feed (ADR 0008). */
+const list = async (runtime: ManagedRuntime.ManagedRuntime<Client, never>, client: Client["Service"], archived: boolean) => {
   const subscriptionId = crypto.randomUUID();
   const snapshot = Promise.withResolvers<Extract<ProjectsFeed, { kind: "snapshot" }>>();
   const feed = runtime.runPromise(
     client
-      .ProjectsSubscribe({ subscriptionId })
+      .ProjectsSubscribe({ subscriptionId, archived })
       .pipe(Stream.runForEach((f: ProjectsFeed) => Effect.sync(() => f.kind === "snapshot" && snapshot.resolve(f)))),
   );
   const noSnapshot = new Error("The projects feed ended before its snapshot arrived. Restart verdandid and try again.");
@@ -92,7 +92,26 @@ export const chat = async (argv: readonly string[]) => {
     }),
   );
   if (argv.includes("--list")) {
-    await list(runtime, client);
+    await list(runtime, client, argv.includes("--archived"));
+    return runtime.dispose();
+  }
+  // Archiving hides a thread from the lists without deleting anything; unarchiving brings it back.
+  const archive = flag(argv, "--archive") as ThreadId | undefined;
+  const unarchive = flag(argv, "--unarchive") as ThreadId | undefined;
+  const put = archive ?? unarchive;
+  if (put) {
+    const type = archive ? "thread.archive" : "thread.unarchive";
+    const done = archive
+      ? `Archived thread ${put}. \`verdandi chat --unarchive ${put}\` brings it back; \`verdandi chat --list --archived\` lists it.\n`
+      : `Unarchived thread ${put}: it takes turns again.\n`;
+    process.stdout.write(
+      await runtime.runPromise(
+        client.CommandDispatch({ type, commandId: uuid<CommandId>(), threadId: put }).pipe(
+          Effect.as(done),
+          Effect.catchTag("CommandRejected", (e) => Effect.succeed(`${e.message}\n`)),
+        ),
+      ),
+    );
     return runtime.dispose();
   }
   const cwd = process.cwd();
@@ -300,6 +319,9 @@ export const chat = async (argv: readonly string[]) => {
   process.stdout.write(
     `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /forget-routing clears what the router learned from this project's tasks; Ctrl+C stops a turn; /exit quits.\n`,
   );
+  if (thread.archived) {
+    process.stdout.write(`This thread is archived, so turns are rejected. Unarchive it with: verdandi chat --unarchive ${threadId}\n`);
+  }
   if (changed) process.stdout.write(change ? `Route changed: ${change}\n` : `Route pinned: ${harness} ${model} ${effort}\n`);
   if (unpinned) process.stdout.write("Route unpinned: the router picks the next task's route.\n");
   if (budget !== undefined && budget !== thread.budgetMode) {

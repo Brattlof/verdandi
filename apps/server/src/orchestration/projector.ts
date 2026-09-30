@@ -86,6 +86,8 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         sql`insert into routing_memory (project_id, cleared_seq, cleared_at) values (${e.projectId}, ${seq}, ${at})
             on conflict (project_id) do update set cleared_seq = excluded.cleared_seq, cleared_at = excluded.cleared_at`,
     ),
+  "thread.archived": (e, at) => withSql((sql) => sql`update threads set archived_at = ${at} where id = ${e.threadId}`),
+  "thread.unarchived": (e) => withSql((sql) => sql`update threads set archived_at = null where id = ${e.threadId}`),
   "thread.route.unpinned": (e) => withSql((sql) => sql`update threads set pinned = 0, task_id = null where id = ${e.threadId}`),
   // A routed thread's task ends, so the next turn is routed under the new mode; a pinned thread's task keeps its pin.
   "thread.budget.changed": (e) =>
@@ -183,6 +185,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         session_id: string | null;
         task_id: TaskId | null;
         pinned: number;
+        archived: number;
         budget_mode: BudgetMode | null;
         turns: number;
         task_decision: string | null;
@@ -190,6 +193,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         cached_tokens: number;
       }>`
         select t.project_id, p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned, t.budget_mode,
+          t.archived_at is not null as archived,
           (select count(*) from turns n where n.thread_id = t.id) as turns,
           (select payload from route_decisions where task_id = t.task_id) as task_decision,
           (select mode from turns where id = t.task_id) as task_mode,
@@ -212,6 +216,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           taskId: row.task_id,
           turns: row.turns,
           pinned: row.pinned === 1,
+          archived: row.archived === 1,
           budgetMode: row.budget_mode,
           taskDecision: row.task_decision === null ? null : (JSON.parse(row.task_decision) as RouteDecision),
           taskPlanned: row.task_mode === "plan",
@@ -236,12 +241,14 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         session_id: string | null;
         running_turn_id: string | null;
         pinned: number;
+        archived: number;
         budget_mode: BudgetMode | null;
         task_id: TaskId | null;
         source: RouteDecision["source"] | null;
         reason: string | null;
       }>`
-        select p.path, t.route, t.session_id, t.running_turn_id, t.pinned, t.budget_mode, t.task_id, d.source, d.reason
+        select p.path, t.route, t.session_id, t.running_turn_id, t.pinned, t.archived_at is not null as archived, t.budget_mode,
+          t.task_id, d.source, d.reason
         from threads t join projects p on p.id = t.project_id left join route_decisions d on d.task_id = t.task_id
         where t.id = ${threadId}`;
       if (!thread) return null;
@@ -271,6 +278,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         projectPath: thread.path,
         route: JSON.parse(thread.route) as Route,
         pinned: thread.pinned === 1,
+        archived: thread.archived === 1,
         budgetMode: thread.budget_mode,
         task:
           thread.task_id === null
@@ -332,20 +340,24 @@ export const loadQuotas: Effect.Effect<QuotaView[], SqlError.SqlError, SqlClient
   ),
 );
 
-/** Summaries of every thread, most recently active first, or of just `threadId`. */
-export const loadThreadSummaries = (threadId?: ThreadId): Effect.Effect<ThreadSummary[], SqlError.SqlError, SqlClient.SqlClient> =>
+/** Summaries of every thread, most recently active first, or of just `threadId`. Archived threads only with `archived`. */
+export const loadThreadSummaries = (
+  threadId?: ThreadId,
+  archived = true,
+): Effect.Effect<ThreadSummary[], SqlError.SqlError, SqlClient.SqlClient> =>
   withSql((sql) =>
     sql<{
       id: string;
       project_id: string;
       route: string;
       running_turn_id: string | null;
+      archived: number;
       first_text: string | null;
       last_activity_at: string;
       metered_usd: number;
       subscription_usd: number;
     }>`
-      select t.id, t.project_id, t.route, t.running_turn_id,
+      select t.id, t.project_id, t.route, t.running_turn_id, t.archived_at is not null as archived,
         (select text from turns where thread_id = t.id order by started_at, rowid limit 1) as first_text,
         (select total(u.cost_usd) from turns tu join usage_ledger u on u.turn_id = tu.id
           where tu.thread_id = t.id and u.access_mode = 'metered') as metered_usd,
@@ -353,7 +365,7 @@ export const loadThreadSummaries = (threadId?: ThreadId): Effect.Effect<ThreadSu
           where tu.thread_id = t.id and u.access_mode = 'subscription') as subscription_usd,
         coalesce((select max(coalesce(completed_at, started_at)) from turns where thread_id = t.id), t.created_at) as last_activity_at
       from threads t
-      where ${threadId ?? null} is null or t.id = ${threadId ?? null}
+      where (${threadId ?? null} is null or t.id = ${threadId ?? null}) and (${archived ? 1 : 0} = 1 or t.archived_at is null)
       order by last_activity_at desc, t.rowid desc`.pipe(
       Effect.map((rows) =>
         rows.map((r) => ({
@@ -361,6 +373,7 @@ export const loadThreadSummaries = (threadId?: ThreadId): Effect.Effect<ThreadSu
           projectId: r.project_id as ProjectId,
           title: titleFrom(r.first_text ?? ""),
           busy: r.running_turn_id !== null,
+          archived: r.archived === 1,
           lastActivityAt: r.last_activity_at,
           route: JSON.parse(r.route) as Route,
           cost: { meteredUsd: r.metered_usd, subscriptionUsd: r.subscription_usd },

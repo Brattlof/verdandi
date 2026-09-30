@@ -23,6 +23,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "InvalidSpendCaps",
     "SpendCapReached",
     "SpendCapNotSet",
+    "ThreadArchived",
   ]),
   message: Schema.String,
 }) {}
@@ -87,6 +88,8 @@ export const ThreadView = Schema.Struct({
   route: Route,
   /** True when the user picked the route; false when the router picks each new task's. */
   pinned: Schema.Boolean,
+  /** Put away by the user: it takes no turns until unarchived. */
+  archived: Schema.Boolean,
   /** The budget mode the user set for this thread's tasks; null when the policy's applies. */
   budgetMode: Schema.NullOr(BudgetMode),
   /**
@@ -128,6 +131,8 @@ export const ThreadSummary = Schema.Struct({
   /** The first turn's text, cut to one short line; empty until the first turn. */
   title: Schema.String,
   busy: Schema.Boolean,
+  /** Put away by the user. The projects feed leaves archived threads out unless asked for them. */
+  archived: Schema.Boolean,
   /** When the thread was created or a turn last started or ended, as an ISO timestamp. */
   lastActivityAt: Schema.String,
   route: Route,
@@ -173,7 +178,15 @@ export class Api extends RpcGroup.make(
     error: CommandRejected,
     stream: true,
   }),
-  Rpc.make("ProjectsSubscribe", { payload: { subscriptionId: Schema.String }, success: ProjectsFeed, stream: true }),
+  /**
+   * Every project and thread summary. Archived threads are left out of the snapshot unless `archived` is true;
+   * a thread archived later still arrives, marked, so a client can drop it.
+   */
+  Rpc.make("ProjectsSubscribe", {
+    payload: { subscriptionId: Schema.String, archived: Schema.optionalKey(Schema.Boolean) },
+    success: ProjectsFeed,
+    stream: true,
+  }),
   /** Ends the feed started with `subscriptionId`, whichever kind it is. */
   Rpc.make("Unsubscribe", { payload: { subscriptionId: Schema.String } }),
   /** The harnesses this verdandid runs, so clients offer only those. */

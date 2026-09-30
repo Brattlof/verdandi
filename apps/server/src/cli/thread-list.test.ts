@@ -7,6 +7,7 @@ const summary = (threadId: string, projectId: string, title: string, busy = fals
   projectId: projectId as ProjectId,
   title,
   busy,
+  archived: false,
   lastActivityAt: "2026-09-30T09:15:42.000Z",
   route: { harness: "fake", model: "fake", effort: "low" },
   cost: { meteredUsd, subscriptionUsd: 0 },
@@ -29,4 +30,9 @@ test("groups threads under their project in feed order", () => {
       "",
     ].join("\n"),
   );
+});
+
+test("marks an archived thread", () => {
+  const out = threadList([{ projectId: "a" as ProjectId, path: "/repo" }], [{ ...summary("t1", "a", "old work"), archived: true }]);
+  expect(out).toContain("  t1  archived  2026-09-30 09:15  old work");
 });

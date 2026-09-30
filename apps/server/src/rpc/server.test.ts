@@ -201,6 +201,69 @@ describe("rpc server", () => {
     expect(changes.at(-1)?.thread.cost).toEqual({ meteredUsd: 0, subscriptionUsd: 0.01 });
   });
 
+  test("archiving hides a thread from the projects feed until it's unarchived, and leaves costs alone", async () => {
+    const { info, drain } = await startServer();
+    const [kept, archived] = [uuid<ThreadId>(), uuid<ThreadId>()];
+    type Client = Effect.Success<ReturnType<typeof connect>>;
+    /** The snapshot a new projects feed starts with; its feed is ended right after. */
+    const snapshotOf = (c: Client, withArchived?: boolean) =>
+      Effect.gen(function* () {
+        const subscriptionId = crypto.randomUUID();
+        const snapshot = yield* Deferred.make<Extract<ProjectsFeed, { kind: "snapshot" }>>();
+        const feed = yield* c
+          .ProjectsSubscribe(withArchived === undefined ? { subscriptionId } : { subscriptionId, archived: withArchived })
+          .pipe(
+            Stream.runForEach((f: ProjectsFeed) => (f.kind === "snapshot" ? Deferred.succeed(snapshot, f) : Effect.void)),
+            Effect.forkChild,
+          );
+        const first = yield* step("snapshot", Deferred.await(snapshot));
+        yield* step("unsubscribe", c.Unsubscribe({ subscriptionId }));
+        yield* step("feed end", Fiber.join(feed));
+        return first.threads.map((t) => [t.threadId, t.archived]);
+      });
+    const send = (c: Client, threadId: ThreadId) =>
+      c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), text: "hi", mode: "build" });
+    const archive = (c: Client, type: "thread.archive" | "thread.unarchive") =>
+      c.CommandDispatch({ type, commandId: uuid<CommandId>(), threadId: archived });
+    await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        yield* step("create kept", createThread(c, kept));
+        yield* step("create archived", createThread(c, archived));
+        yield* step("send", send(c, archived));
+      }),
+    );
+    await drain();
+    const result = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        const costsBefore = yield* c.TaskCostsList();
+        yield* step("archive", archive(c, "thread.archive"));
+        const hidden = yield* snapshotOf(c);
+        const shown = yield* snapshotOf(c, true);
+        const rejected = yield* Effect.flip(send(c, archived));
+        const costsAfter = yield* c.TaskCostsList();
+        yield* step("unarchive", archive(c, "thread.unarchive"));
+        return { costsBefore, hidden, shown, rejected, costsAfter, restored: yield* snapshotOf(c) };
+      }),
+    );
+    expect(result.hidden).toEqual([[kept, false]]);
+    expect(result.shown.toSorted()).toEqual(
+      [
+        [archived, true],
+        [kept, false],
+      ].toSorted(),
+    );
+    expect(result.rejected.reason).toBe("ThreadArchived");
+    expect(result.rejected.message).toContain("Unarchive");
+    expect(result.costsAfter).toEqual(result.costsBefore);
+    expect(result.costsAfter[0]?.tasks).toBe(1);
+    expect(result.restored.toSorted()).toEqual(
+      [
+        [archived, false],
+        [kept, false],
+      ].toSorted(),
+    );
+  });
+
   test("a reported quota and the thread's metered cost reach the feed live and after a reload", async () => {
     const { info } = await startServer();
     const threadId = uuid<ThreadId>();

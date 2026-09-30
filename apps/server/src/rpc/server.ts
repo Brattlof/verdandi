@@ -59,7 +59,7 @@ const Handlers = (home: string) =>
             : Effect.succeed(command)
           ).pipe(Effect.flatMap(engine.dispatch), Effect.catchTag("SqlError", Effect.die)),
         ThreadSubscribe: ({ threadId, subscriptionId }) => untilUnsubscribed(subscriptionId, engine.feed(threadId)),
-        ProjectsSubscribe: ({ subscriptionId }) => untilUnsubscribed(subscriptionId, engine.projectsFeed),
+        ProjectsSubscribe: ({ subscriptionId, archived }) => untilUnsubscribed(subscriptionId, engine.projectsFeed(archived ?? false)),
         Unsubscribe: ({ subscriptionId }) => {
           const stop = subscriptions.get(subscriptionId);
           return stop ? Deferred.succeed(stop, undefined).pipe(Effect.asVoid) : Effect.void;

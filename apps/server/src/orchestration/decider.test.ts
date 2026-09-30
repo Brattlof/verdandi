@@ -16,6 +16,7 @@ const idle: DeciderState = {
     projectPath: "C:/r",
     route,
     pinned: true,
+    archived: false,
     budgetMode: null,
     taskDecision: null,
     taskPlanned: false,
@@ -33,6 +34,7 @@ const running: DeciderState = {
     projectPath: "C:/r",
     route,
     pinned: true,
+    archived: false,
     budgetMode: null,
     taskDecision: null,
     taskPlanned: false,
@@ -50,6 +52,7 @@ const waiting: DeciderState = {
     projectPath: "C:/r",
     route,
     pinned: true,
+    archived: false,
     budgetMode: null,
     taskDecision: null,
     taskPlanned: false,
@@ -107,6 +110,23 @@ describe("decide", () => {
 
   test("rejects a second turn while one is running", () => {
     expect(reason(decide(running, send))).toBe("ThreadBusy");
+  });
+
+  test("archives only an idle thread, takes no turns while archived, and unarchives", () => {
+    const archive: Command = { type: "thread.archive", commandId, threadId };
+    const unarchive: Command = { type: "thread.unarchive", commandId, threadId };
+    const archived = { thread: { ...(idle.thread as NonNullable<DeciderState["thread"]>), archived: true } };
+    expect(events(decide(idle, archive))).toEqual([{ type: "thread.archived", v: 1, threadId }]);
+    expect(events(decide(archived, archive))).toEqual([]);
+    const busy = decide(running, archive);
+    expect(reason(busy)).toBe("ThreadBusy");
+    expect(Result.isFailure(busy) && busy.failure.message).toContain("Interrupt it first");
+    const blocked = decide(archived, send);
+    expect(reason(blocked)).toBe("ThreadArchived");
+    expect(Result.isFailure(blocked) && blocked.failure.message).toContain(`verdandi chat --unarchive ${threadId}`);
+    expect(events(decide(archived, unarchive))).toEqual([{ type: "thread.unarchived", v: 1, threadId }]);
+    expect(events(decide(idle, unarchive))).toEqual([]);
+    expect(reason(decide(none, archive))).toBe("ThreadNotFound");
   });
 
   test("steers only the running turn", () => {
@@ -181,6 +201,7 @@ describe("decide", () => {
         projectPath: "C:/r",
         route,
         pinned: true,
+        archived: false,
         budgetMode: null,
         taskDecision: null,
         taskPlanned: false,
