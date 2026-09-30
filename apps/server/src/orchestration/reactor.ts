@@ -3,6 +3,7 @@ import type { CommandId, HarnessAdapter, HarnessEvent, HarnessId, InteractionMod
 import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Engine } from "./engine.ts";
+import { recordTrajectory, unrecordedTurns } from "./trajectory.ts";
 
 export class HarnessRegistry extends Context.Service<HarnessRegistry, Partial<Record<HarnessId, HarnessAdapter>>>()(
   "verdandi/HarnessRegistry",
@@ -26,8 +27,8 @@ const errorMessage = (cause: Cause.Cause<unknown>) => {
 
 /**
  * Runs harness turns as side effects of `turn.started`, feeds them `turn.steered` messages, passes
- * `approval.resolved` answers back to the harness, stops turns the user interrupted, and recovers
- * turns a previous run left behind.
+ * `approval.resolved` answers back to the harness, stops turns the user interrupted, records each
+ * completed turn's trajectory, and recovers turns a previous run left behind.
  */
 export const ReactorLive = Layer.effect(
   Reactor,
@@ -46,6 +47,13 @@ export const ReactorLive = Layer.effect(
 
     const report = (threadId: ThreadId, turnId: TurnId, event: HarnessEvent) =>
       engine.dispatch({ type: "harness.report", commandId: randomUUID() as CommandId, threadId, turnId, event });
+
+    // A failed write is retried by the sweep below when verdandid next starts.
+    const record = (threadId: ThreadId, turnId: TurnId) =>
+      recordTrajectory(threadId, turnId).pipe(
+        Effect.catchCause((cause) => Effect.logWarning(`Could not record the trajectory of turn ${turnId}.`, cause)),
+        Effect.provideService(SqlClient.SqlClient, sql),
+      );
 
     const runTurn = (threadId: ThreadId, turnId: TurnId, text: string, mode: InteractionMode, steers: Stream.Stream<string>) => {
       let finished = false;
@@ -119,13 +127,25 @@ export const ReactorLive = Layer.effect(
         return queue ? Queue.offer(queue, e.text).pipe(Effect.asVoid) : Effect.void;
       }
       if (e.type === "approval.resolved") return live.get(e.threadId)?.respond(e.threadId, e.requestId, e.resolution) ?? Effect.void;
-      if (e.type === "turn.completed" && e.status === "interrupted") {
+      if (e.type === "turn.completed") {
         const turn = latest.get(e.threadId);
-        // Forked into `turns`, so the dispatch doesn't wait for the harness to stop and `drain` does.
-        return turn?.turnId === e.turnId ? FiberSet.run(turns, Fiber.interrupt(turn.fiber)).pipe(Effect.asVoid) : Effect.void;
+        // Forked into `turns`, so the dispatch doesn't wait for the harness to stop or the trajectory to be written, and `drain` does.
+        const stop =
+          e.status === "interrupted" && turn?.turnId === e.turnId ? FiberSet.run(turns, Fiber.interrupt(turn.fiber)) : Effect.void;
+        return Effect.andThen(stop, FiberSet.run(turns, record(e.threadId, e.turnId))).pipe(Effect.asVoid);
       }
       return Effect.void;
     });
+
+    // Turns that completed while nothing was listening: before a crash, in the recovery above, or before trajectories existed.
+    yield* FiberSet.run(
+      turns,
+      unrecordedTurns.pipe(
+        Effect.flatMap((missing) => Effect.forEach(missing, (t) => record(t.thread_id, t.id), { discard: true })),
+        Effect.provideService(SqlClient.SqlClient, sql),
+        Effect.ignore,
+      ),
+    );
 
     return Reactor.of({ drain: FiberSet.awaitEmpty(turns) });
   }),

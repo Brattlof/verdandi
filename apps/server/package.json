@@ -8,7 +8,8 @@
     "@verdandi/contracts": "workspace:*",
     "effect": "4.0.0-rc.115",
     "@verdandi/harness-claude-code": "workspace:*",
-    "@verdandi/testkit": "workspace:*"
+    "@verdandi/testkit": "workspace:*",
+    "@verdandi/trajectories": "workspace:*"
   },
   "bin": {
     "verdandi": "./src/bin.ts"

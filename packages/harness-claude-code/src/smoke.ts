@@ -1,7 +1,8 @@
 // Manual live check, not a test: makes real Claude Code calls on your subscription.
 // Runs one Haiku turn, a resumed second turn, a steered third turn and a planned fourth turn in a temp
 // folder, printing the normalized events. The third turn should end with STEERED; the fourth should
-// propose two plans, the first rejected with feedback, and end with greeting.txt created.
+// propose two plans, the first rejected with feedback, and end with greeting.txt created. The fifth
+// delegates to a subagent, whose steps should carry parentToolUseId.
 //   bun packages/harness-claude-code/src/smoke.ts
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +17,8 @@ const cwd = mkdtempSync(join(tmpdir(), "verdandi smoke "));
 const route = { harness: "claude-code", model: "haiku", effort: "low" } as const;
 const threadId = crypto.randomUUID() as ThreadId;
 let sessionId: string | undefined;
+let transcriptPath: string | undefined;
+let subagentSteps = 0;
 
 // The first plan is rejected with feedback and later ones approved; tool approvals are allowed (it's a temp folder).
 let plans = 0;
@@ -35,7 +38,8 @@ const turn = (
   Effect.runPromise(
     adapter.run({ threadId, cwd, route, resumeSessionId: sessionId, turnId: crypto.randomUUID() as TurnId, text, mode, steers }).pipe(
       Stream.runForEach((e: HarnessEvent) => {
-        if (e.type === "session.started") sessionId = e.sessionId;
+        if (e.type === "session.started") ({ sessionId, transcriptPath } = e);
+        if (e.type === "item" && "parentToolUseId" in e.item) subagentSteps++;
         console.log(e.type === "text.delta" ? `  delta ${JSON.stringify(e.text)}` : `  ${JSON.stringify(e)}`);
         const resolution = answer(e);
         return resolution && "requestId" in e ? adapter.respond(threadId, e.requestId, resolution) : Effect.void;
@@ -62,3 +66,11 @@ await turn(
   "plan",
 );
 console.log(`plans proposed: ${plans}, greeting.txt created: ${existsSync(join(cwd, "greeting.txt"))}`);
+console.log("-- turn 5, a subagent");
+// In the foreground: a background subagent reports after the turn has ended.
+await turn(
+  "Use the Agent tool with run_in_background: false to have a general-purpose subagent run `echo hi` with Bash and wait for it. Then reply with exactly: DONE",
+);
+console.log(
+  `subagent steps: ${subagentSteps}, transcript: ${transcriptPath} (exists: ${transcriptPath ? existsSync(transcriptPath) : false})`,
+);

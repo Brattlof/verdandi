@@ -35,18 +35,21 @@ const usageEvents = (context: NormalizeContext, modelUsage: Record<string, Model
   });
 
 /**
- * Pure: one SDK message in, Verdandi harness events out. Only the main thread is reported;
- * subagent messages (non-null `parent_tool_use_id`) are skipped for now.
+ * Pure: one SDK message in, Verdandi harness events out. A subagent's messages (non-null
+ * `parent_tool_use_id`) become items tagged with that tool call; its text deltas aren't streamed.
  */
 export const normalize = (msg: SDKMessage, context: NormalizeContext): { events: HarnessEvent[]; context: NormalizeContext } => {
   const none = { events: [], context };
-  if ("parent_tool_use_id" in msg && msg.parent_tool_use_id !== null) return none;
+  const parent = "parent_tool_use_id" in msg && msg.parent_tool_use_id !== null ? { parentToolUseId: msg.parent_tool_use_id } : undefined;
+  const itemEvents = (items: Item[]): HarnessEvent[] =>
+    items.map((item) => ({ type: "item", item: parent ? { ...item, ...parent } : item }));
   switch (msg.type) {
     case "system":
       return msg.subtype === "init"
         ? { events: [{ type: "session.started", sessionId: msg.session_id, harnessVersion: msg.claude_code_version }], context }
         : none;
     case "stream_event": {
+      if (parent) return none;
       const e = msg.event as { type: string; delta?: { type: string; text?: string } };
       return e.type === "content_block_delta" && e.delta?.type === "text_delta" && e.delta.text
         ? { events: [{ type: "text.delta", text: e.delta.text }], context }
@@ -58,7 +61,7 @@ export const normalize = (msg: SDKMessage, context: NormalizeContext): { events:
         if (b.type === "tool_use") return [{ kind: "tool.call", toolUseId: String(b.id), name: String(b.name), input: b.input }];
         return [];
       });
-      return { events: items.map((item) => ({ type: "item", item })), context };
+      return { events: itemEvents(items), context };
     }
     case "user": {
       const content = msg.message.content;
@@ -68,7 +71,7 @@ export const normalize = (msg: SDKMessage, context: NormalizeContext): { events:
           ? [{ kind: "tool.result", toolUseId: String(b.tool_use_id), isError: b.is_error === true, content: textOf(b.content) }]
           : [],
       );
-      return { events: items.map((item) => ({ type: "item", item })), context };
+      return { events: itemEvents(items), context };
     }
     case "rate_limit_event": {
       const info = msg.rate_limit_info;

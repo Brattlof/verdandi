@@ -34,6 +34,22 @@ describe("normalize", () => {
     ]);
   });
 
+  test("a subagent's steps become items tagged with the tool call that started it", () => {
+    const call = assistant([{ type: "tool_use", id: "toolu_2", name: "Read", input: { file_path: "a.ts" } }], "toolu_1");
+    expect(events(call)).toEqual([
+      {
+        type: "item",
+        item: { kind: "tool.call", toolUseId: "toolu_2", name: "Read", input: { file_path: "a.ts" }, parentToolUseId: "toolu_1" },
+      },
+    ]);
+    expect(events(toolResult("toolu_2", "x", false, "toolu_1"))).toEqual([
+      { type: "item", item: { kind: "tool.result", toolUseId: "toolu_2", isError: false, content: "x", parentToolUseId: "toolu_1" } },
+    ]);
+    expect(events(assistant([{ type: "text", text: "Done." }], "toolu_1"))).toEqual([
+      { type: "item", item: { kind: "assistant.message", text: "Done.", parentToolUseId: "toolu_1" } },
+    ]);
+  });
+
   test("usage is per turn, including auxiliary models", () => {
     const first = normalize(result(turn1Usage), initialContext());
     const second = normalize(result(turn2Usage), first.context);
