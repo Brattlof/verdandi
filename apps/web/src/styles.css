@@ -267,6 +267,54 @@ button.link {
   padding: 6px 10px;
   margin: 8px 0;
 }
+.turn :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 1em;
+  margin: 12px 0 4px;
+}
+.turn h1 {
+  font-size: 1.3em;
+}
+.turn h2 {
+  font-size: 1.15em;
+}
+.turn ul,
+.turn ol {
+  margin: 4px 0;
+  padding-left: 24px;
+}
+.turn li > p {
+  margin: 0;
+}
+.turn blockquote {
+  margin: 4px 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.turn hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+.turn :not(pre) > code {
+  padding: 1px 4px;
+  background: var(--panel);
+  border-radius: 3px;
+}
+/* A wide table scrolls on its own instead of widening the turn. */
+.turn table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 4px 0;
+}
+.turn th,
+.turn td {
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+}
+.turn .image {
+  color: var(--muted);
+}
 .tool {
   margin: 4px 0;
 }
