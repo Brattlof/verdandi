@@ -45,7 +45,7 @@ export const start = async (argv: readonly string[]) => {
     }),
   );
   writeFileSync(file, JSON.stringify({ port: info.port, token: info.token, pid: process.pid } satisfies ServerFile), { mode: 0o600 });
-  console.log(`verdandid listening on 127.0.0.1:${info.port} (home: ${home})`);
+  console.log(`verdandid listening on 127.0.0.1:${info.port} (home: ${home}). Open the web UI with: verdandi open`);
   if (!claudePath) console.log("Claude Code CLI not found on PATH; claude-code turns will fail until it is installed.");
 
   const stop = async () => {

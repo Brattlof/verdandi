@@ -3,7 +3,7 @@ import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { ClientCommand } from "./commands.ts";
 import { ApprovalRequested, PlanRequested, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
 import { CommandId, ProjectId, ThreadId, TurnId } from "./ids.ts";
-import { Item } from "./items.ts";
+import { Item, Usage } from "./items.ts";
 import { InteractionMode, Route } from "./route.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
@@ -37,6 +37,8 @@ export const TurnView = Schema.Struct({
   mode: InteractionMode,
   status: Schema.Literals(["running", ...TurnStatus.literals]),
   items: Schema.Array(Item),
+  /** One entry per model the turn used, in the order they were recorded. */
+  usage: Schema.Array(Usage),
   error: Schema.optionalKey(Schema.String),
 });
 export type TurnView = typeof TurnView.Type;

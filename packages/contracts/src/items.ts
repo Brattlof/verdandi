@@ -40,3 +40,5 @@ export const UsageFields = {
   cacheWriteTokens: Schema.Number,
   costUsd: Schema.Number,
 };
+export const Usage = Schema.Struct(UsageFields);
+export type Usage = typeof Usage.Type;

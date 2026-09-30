@@ -10,6 +10,7 @@ import type {
   ThreadView,
   TurnId,
   TurnView,
+  Usage,
 } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
@@ -127,6 +128,18 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
       const items = yield* sql<{ turn_id: string; payload: string }>`
         select i.turn_id, i.payload from items i join turns t on t.id = i.turn_id where t.thread_id = ${threadId} order by i.turn_id, i.idx`;
       const itemsByTurn = Map.groupBy(items, (i) => i.turn_id);
+      const usage = yield* sql<{
+        turn_id: string;
+        model: string;
+        access_mode: Usage["accessMode"];
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_tokens: number;
+        cache_write_tokens: number;
+        cost_usd: number;
+      }>`
+        select u.* from usage_ledger u join turns t on t.id = u.turn_id where t.thread_id = ${threadId} order by u.rowid`;
+      const usageByTurn = Map.groupBy(usage, (u) => u.turn_id);
       const pending = yield* sql<{ payload: string }>`
         select payload from requests where thread_id = ${threadId} and resolution is null order by requested_at, rowid`;
       return {
@@ -142,6 +155,15 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
             mode: t.mode,
             status: t.status,
             items: (itemsByTurn.get(t.id) ?? []).map((i) => JSON.parse(i.payload) as Item),
+            usage: (usageByTurn.get(t.id) ?? []).map((u) => ({
+              model: u.model,
+              accessMode: u.access_mode,
+              inputTokens: u.input_tokens,
+              outputTokens: u.output_tokens,
+              cacheReadTokens: u.cache_read_tokens,
+              cacheWriteTokens: u.cache_write_tokens,
+              costUsd: u.cost_usd,
+            })),
             ...(t.error === null ? {} : { error: t.error }),
           }),
         ),

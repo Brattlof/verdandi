@@ -13,7 +13,7 @@ import type {
   TurnId,
 } from "@verdandi/contracts";
 import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { flag, resolveHome, type ServerFile, serverFile } from "../config/home.ts";
+import { flag, readServerFile, resolveHome } from "../config/home.ts";
 import { connect } from "../rpc/client.ts";
 import { approvalPrompt, type PendingRequest, parseAnswer, planPrompt, questionPrompt } from "./requests.ts";
 import { describeRouteChange, routeFromFlags } from "./route-flags.ts";
@@ -74,8 +74,7 @@ const diffText = (view: DiffView, projectPath: string) => {
 /** `verdandi chat`: a simple terminal chat with the thread for the current folder, or the one `--thread` names. */
 export const chat = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
-  if (!existsSync(serverFile(home))) throw new Error(`verdandid is not running for ${home}. Start it with: verdandi start`);
-  const server = JSON.parse(readFileSync(serverFile(home), "utf8")) as ServerFile;
+  const server = readServerFile(home);
   const route = routeFromFlags(argv); // also rejects bad flags before connecting
   const picked = flag(argv, "--thread") as ThreadId | undefined;
 

@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { BunHttpServer } from "@effect/platform-bun";
 import { Api, type HarnessAdapter, type HarnessId } from "@verdandi/contracts";
+import web from "@verdandi/web/index.html";
 import { Context, Deferred, Effect, Layer, Stream } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -72,7 +73,7 @@ const ProtocolWithToken = (token: string) =>
     }),
   );
 
-/** verdandid: the core plus a token-protected WebSocket API on 127.0.0.1. Port 0 picks a free port. */
+/** verdandid: the core, a token-protected WebSocket API and the web UI on 127.0.0.1. Port 0 picks a free port. */
 export const ServerLayer = (
   home: string,
   harnesses: Partial<Record<HarnessId, HarnessAdapter>>,
@@ -93,6 +94,9 @@ export const ServerLayer = (
         // RPC layer closes its client sockets, so a connected `verdandi chat` blocked shutdown. Without
         // it, the RPC layer closes the sockets first and the final stop() resolves.
         disablePreemptiveShutdown: true,
+        // The web UI: Bun bundles it from source on the first request and serves it from memory.
+        routes: { "/": web },
+        development: false,
       }),
     ),
   );

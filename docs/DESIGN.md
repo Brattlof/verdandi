@@ -956,14 +956,14 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
 | Git | The `git` command line, through a typed wrapper | Worktrees and low-level checkpoint commands |
 | Credentials | OS keychain through `Bun.secrets`, plus `keyCommand` | No plain-text keys, and no native addon |
 | Decision models | `rules` by default; Laya (ONNX through `onnxruntime-node`) in a worker process where it beats rules (ADR 0009); ollaya for larger local models; the Jev API if turned on | §9.8 |
-| Web UI | React 19 + React Compiler, Vite, TanStack Router + TanStack Virtual, Zustand | Type-safe routes, virtualized long threads |
+| Web UI | React 19 + TanStack Virtual, bundled by Bun from an HTML import and served by verdandid. A router, a state library or the React Compiler are added when a view needs them. | Virtualized long threads, no separate bundler or dev server |
 | UI kit | Tailwind 4, shadcn/ui, Streamdown, Shiki, `@pierre/diffs`, Tiptap | Each is built for its job |
 | Desktop | **Electron** + electron-builder, with auto-update. It runs the compiled verdandid binary as a separate process. | Same Chromium on every OS. VS Code, Cursor, T3 Code and Hermes all ship on it. The server runs independently of the window, which the scheduler and gateway need anyway. |
 | Gateway | Official or leading SDK for each platform, as plugins | — |
 | Local models | Ollama (and any OpenAI-compatible local server) | Free auxiliary and classifier work, and a local agent option |
 | Tests | `bun test` (with Effect's test services, e.g. TestClock), Playwright, golden tests for the router, install and update end-to-end tests on all three OSes | Covers everything from the router's rules to the installer |
 | Lint and format | Biome | One fast tool for both |
-| Release | `bun build --compile` (one `verdandi` binary per platform, via an install script and npm), Vite (web), electron-builder (desktop), Changesets | — |
+| Release | `bun build --compile` (one `verdandi` binary per platform, via an install script and npm), the web UI embedded in it through its HTML import, electron-builder (desktop), Changesets | — |
 | CI | GitHub Actions on Windows, macOS and Ubuntu, plus supply-chain jobs | — |
 | **lab/** | Python 3.13+, uv, ruff, ty, pytest; PyTorch, TRL and scikit-learn as needed; ONNX export | ML tooling lives here, outside the app |
 

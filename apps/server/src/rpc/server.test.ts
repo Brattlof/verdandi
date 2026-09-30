@@ -73,6 +73,19 @@ describe("rpc server", () => {
     await runtime.dispose(); // must not wait for the client to leave
   });
 
+  test("serves the web UI and its bundle without the token", async () => {
+    const { info } = await startServer();
+    const page = await fetch(`http://127.0.0.1:${info.port}/`);
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).not.toContain(info.token);
+    const script = html.match(/<script[^>]+src="([^"]+)"/)?.[1];
+    expect(script).toBeDefined();
+    const bundle = await fetch(new URL(script ?? "", `http://127.0.0.1:${info.port}/`));
+    expect(bundle.status).toBe(200);
+    expect(bundle.headers.get("content-type")).toContain("javascript");
+  });
+
   test("rejects a connection without the right token", async () => {
     const { info } = await startServer();
     const wrong = await Effect.runPromise(

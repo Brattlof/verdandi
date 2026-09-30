@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -27,3 +28,9 @@ export const resolveHome = (argv: readonly string[]): string => {
 /** Written by `verdandi start`, read by clients: where the server listens and its token. */
 export const serverFile = (home: string) => join(home, "server.json");
 export type ServerFile = { readonly port: number; readonly token: string; readonly pid: number };
+
+/** The running server's `server.json`, for clients. Fails with the fix when verdandid isn't running. */
+export const readServerFile = (home: string): ServerFile => {
+  if (!existsSync(serverFile(home))) throw new Error(`verdandid is not running for ${home}. Start it with: verdandi start`);
+  return JSON.parse(readFileSync(serverFile(home), "utf8")) as ServerFile;
+};

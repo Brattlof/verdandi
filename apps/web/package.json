@@ -1,0 +1,19 @@
+{
+  "name": "@verdandi/web",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./index.html": "./index.html"
+  },
+  "dependencies": {
+    "@tanstack/react-virtual": "3.14.13",
+    "@verdandi/contracts": "workspace:*",
+    "effect": "4.0.0-rc.115",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0"
+  }
+}
