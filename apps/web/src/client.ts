@@ -1,4 +1,4 @@
-import { Api, type ClientCommand, CommandRejected } from "@verdandi/contracts";
+import { Api, type ClientCommand, CommandRejected, DiffUnavailable, type DiffView, type ThreadId, type TurnId } from "@verdandi/contracts";
 import { Cause, Context, Effect, Exit, Layer, ManagedRuntime, Stream } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import { Socket } from "effect/unstable/socket";
@@ -64,10 +64,10 @@ export const connect = (token: string) => {
         return yield* f(yield* Client);
       }),
     );
-  /** The command's rejection, when verdandid refused it; a lost connection also sets `lost`. */
-  const failure = (cause: Cause.Cause<unknown>) => {
+  /** The error verdandid answered with, when it is one of `known`; anything else sets `lost`. */
+  const failure = <E>(cause: Cause.Cause<unknown>, known: abstract new (...args: never[]) => E) => {
     const error = Cause.squash(cause);
-    if (error instanceof CommandRejected) return error;
+    if (error instanceof known) return error;
     lost.set(true);
     return undefined;
   };
@@ -75,8 +75,19 @@ export const connect = (token: string) => {
   const dispatch = async (command: ClientCommand): Promise<Dispatched> => {
     const exit = await run((rpc) => rpc.CommandDispatch(command));
     if (Exit.isSuccess(exit)) return { ok: true };
-    const rejected = failure(exit.cause);
+    const rejected = failure(exit.cause, CommandRejected);
     return rejected ? { ok: false, reason: rejected.reason, message: rejected.message } : disconnected;
+  };
+
+  /** The thread's project diff, or only the files `turnId` touched. A `DiffUnavailable` message names the fix. */
+  const diff = async (
+    threadId: ThreadId,
+    turnId: TurnId | undefined,
+  ): Promise<{ readonly ok: true; readonly view: DiffView } | { readonly ok: false; readonly message: string }> => {
+    const exit = await run((rpc) => rpc.DiffGet(turnId === undefined ? { threadId } : { threadId, turnId }));
+    if (Exit.isSuccess(exit)) return { ok: true, view: exit.value };
+    const unavailable = failure(exit.cause, DiffUnavailable);
+    return unavailable ? { ok: false, message: unavailable.message } : disconnected;
   };
 
   /**
@@ -103,7 +114,7 @@ export const connect = (token: string) => {
     ).then((exit) => {
       ended = true;
       started.resolve();
-      const rejected = Exit.isFailure(exit) ? failure(exit.cause) : undefined;
+      const rejected = Exit.isFailure(exit) ? failure(exit.cause, CommandRejected) : undefined;
       if (rejected) onRejected(rejected.message);
     });
     return () => {
@@ -111,6 +122,6 @@ export const connect = (token: string) => {
     };
   };
 
-  return { dispatch, follow, lost };
+  return { dispatch, diff, follow, lost };
 };
 export type Connection = ReturnType<typeof connect>;
