@@ -4,6 +4,7 @@ import { memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useReduc
 import { type Connection, createStore, useStore } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
 import { SidePanel } from "./diff.tsx";
+import { Markdown } from "./markdown.tsx";
 import { applyDiffPanel, applyThreadFeed, closedPanel, type LiveThread, type LiveTurn } from "./state.ts";
 
 export const ThreadPane = ({ connection, threadId }: { connection: Connection; threadId: ThreadId }) => {
@@ -139,7 +140,11 @@ const Turn = memo(({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: Tu
       <p>{turn.text}</p>
     </div>
     <Items items={turn.items} />
-    {turn.streaming && <p className="assistant">{turn.streaming}</p>}
+    {turn.streaming && (
+      <div className="assistant">
+        <Markdown text={turn.streaming} />
+      </div>
+    )}
     <TurnStatus turn={turn} onChanges={onChanges} />
   </article>
 ));
@@ -202,7 +207,11 @@ const summarize = (input: unknown) => {
 };
 
 const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K }>; tree: Tree }) => ReactNode } = {
-  "assistant.message": ({ item }) => <p className="assistant">{item.text}</p>,
+  "assistant.message": ({ item }) => (
+    <div className="assistant">
+      <Markdown text={item.text} />
+    </div>
+  ),
   "user.steer": ({ item }) => (
     <div className="user steer">
       <span className="who">You, while it worked</span>
@@ -212,7 +221,7 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
   plan: ({ item }) => (
     <div className="plan">
       <span className="who">Plan{item.filePath ? ` · ${item.filePath}` : ""}</span>
-      <p>{item.text}</p>
+      <Markdown text={item.text} />
     </div>
   ),
   "tool.call": ({ item, tree }) => {
