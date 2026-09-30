@@ -18,12 +18,18 @@ import { Effect, Stream } from "effect";
  * finishing once `respond` answers on the model of the route `reroute` last moved the turn to, "steer" waits for the first steer and answers it, "edit <path>"
  * appends a line to that file through an Edit tool call, "subagent" delegates a read to a subagent whose
  * steps carry `parentToolUseId`, "background" does the same in a background subagent that reports after the main
- * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back with fixed usage on the route's model.
+ * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back, with its attachments' names, kinds and sizes, and fixed usage on the route's model.
  * Every reply costs $0.01. Like Claude Code, it checks the task's `maxCost` after the call: when the task's
  * spend then exceeds it, the turn ends with status `limit`. `calls` records every run.
  */
 export const makeFakeHarness = () => {
-  const calls: { resumeSessionId: string | undefined; route: Route; text: string; mode: InteractionMode }[] = [];
+  const calls: {
+    resumeSessionId: string | undefined;
+    route: Route;
+    text: string;
+    mode: InteractionMode;
+    attachments: HarnessRunInput["attachments"];
+  }[] = [];
   /** Every `reroute`, in order. A rerouted turn answers on its new route's model. */
   const reroutes: { threadId: ThreadId; route: Route }[] = [];
   const routes = new Map<ThreadId, Route>();
@@ -63,7 +69,13 @@ export const makeFakeHarness = () => {
   };
 
   const script = (input: HarnessRunInput): Stream.Stream<HarnessEvent> => {
-    calls.push({ resumeSessionId: input.resumeSessionId, route: input.route, text: input.text, mode: input.mode });
+    calls.push({
+      resumeSessionId: input.resumeSessionId,
+      route: input.route,
+      text: input.text,
+      mode: input.mode,
+      attachments: input.attachments,
+    });
     routes.set(input.threadId, input.route);
     const start: HarnessEvent[] =
       input.resumeSessionId === undefined
@@ -162,12 +174,15 @@ export const makeFakeHarness = () => {
       ).map((item): HarnessEvent => ({ type: "item", item }));
       return Stream.concat(Stream.fromIterable([...start, ...steps]), reply(input.route.model, "the background subagent read a.txt"));
     }
+    const attached = input.attachments?.length
+      ? ` [attached: ${input.attachments.map((a) => `${a.name} (${a.kind}, ${a.size} bytes)`).join(", ")}]`
+      : "";
     const echo = Stream.concat(
       Stream.fromIterable<HarnessEvent>([
         { type: "text.delta", text: "echo: " },
-        { type: "text.delta", text: input.text },
+        { type: "text.delta", text: input.text + attached },
       ]),
-      reply(input.route.model, `echo: ${input.text}`),
+      reply(input.route.model, `echo: ${input.text}${attached}`),
     );
     const waitForGate = input.text === "gate" ? Stream.unwrap(Effect.promise(() => gate).pipe(Effect.as(echo))) : echo;
     return Stream.concat(Stream.fromIterable(start), waitForGate);

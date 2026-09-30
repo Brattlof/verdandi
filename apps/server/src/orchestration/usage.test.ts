@@ -10,6 +10,7 @@ const baseline: CatalogEntry = {
   access: "subscription",
   tier: "L",
   context: 1_000_000,
+  vision: true,
   price: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
 };
 const usage = (accessMode: "metered" | "subscription", costUsd: number) => ({

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import type {
+  AttachmentRef,
   CommandId,
   HarnessAdapter,
   HarnessEvent,
@@ -20,6 +22,9 @@ import { recordTrajectory, unrecordedTurns } from "./trajectory.ts";
 export class HarnessRegistry extends Context.Service<HarnessRegistry, Partial<Record<HarnessId, HarnessAdapter>>>()(
   "verdandi/HarnessRegistry",
 ) {}
+
+/** Where the profile keeps attachments' bytes, which harness turns read by path. */
+export class AttachmentsDir extends Context.Service<AttachmentsDir, string>()("verdandi/AttachmentsDir") {}
 
 export class Reactor extends Context.Service<
   Reactor,
@@ -47,6 +52,7 @@ export const ReactorLive = Layer.effect(
   Effect.gen(function* () {
     const engine = yield* Engine;
     const registry = yield* HarnessRegistry;
+    const attachmentsDir = yield* AttachmentsDir;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
     /** The adapter running each thread's current turn: where answers to its requests go. */
@@ -72,7 +78,14 @@ export const ReactorLive = Layer.effect(
         Effect.provideService(SqlClient.SqlClient, sql),
       );
 
-    const runTurn = (threadId: ThreadId, turnId: TurnId, text: string, mode: InteractionMode, steers: Stream.Stream<string>) => {
+    const runTurn = (
+      threadId: ThreadId,
+      turnId: TurnId,
+      text: string,
+      mode: InteractionMode,
+      attachments: readonly AttachmentRef[],
+      steers: Stream.Stream<string>,
+    ) => {
       let finished = false;
       const fail = (error: string) => report(threadId, turnId, { type: "turn.finished", status: "error", error });
       return Effect.gen(function* () {
@@ -109,6 +122,7 @@ export const ReactorLive = Layer.effect(
             turnId,
             text,
             mode,
+            ...(attachments.length > 0 && { attachments: attachments.map((a) => ({ ...a, path: join(attachmentsDir, a.id) })) }),
             steers,
             ...(limits && { limits }),
           })
@@ -140,7 +154,7 @@ export const ReactorLive = Layer.effect(
       { discard: true },
     );
 
-    const startTurn = (threadId: ThreadId, turnId: TurnId, text: string, mode: InteractionMode) =>
+    const startTurn = (threadId: ThreadId, turnId: TurnId, text: string, mode: InteractionMode, attachments: readonly AttachmentRef[]) =>
       Effect.gen(function* () {
         // Registered before the turn forks, so a steer accepted right after turn.started is never lost.
         const queue = yield* Queue.unbounded<string>();
@@ -154,7 +168,7 @@ export const ReactorLive = Layer.effect(
           turns,
           Effect.andThen(
             previous ? Fiber.await(previous) : Effect.void,
-            runTurn(threadId, turnId, text, mode, Stream.fromQueue(queue)),
+            runTurn(threadId, turnId, text, mode, attachments, Stream.fromQueue(queue)),
           ).pipe(
             Effect.ensuring(done),
             Effect.ensuring(Effect.sync(() => latest.get(threadId)?.turnId === turnId && latest.delete(threadId))),
@@ -165,7 +179,7 @@ export const ReactorLive = Layer.effect(
 
     yield* engine.react((stored) => {
       const e = stored.event;
-      if (e.type === "turn.started") return startTurn(e.threadId, e.turnId, e.text, e.mode ?? "build");
+      if (e.type === "turn.started") return startTurn(e.threadId, e.turnId, e.text, e.mode ?? "build", e.attachments ?? []);
       if (e.type === "turn.steered") {
         const queue = steerQueues.get(e.turnId);
         return queue ? Queue.offer(queue, e.text).pipe(Effect.asVoid) : Effect.void;

@@ -1,4 +1,5 @@
 import { Data, type Effect, Schema, type Stream } from "effect";
+import type { AttachmentRef } from "./attachments.ts";
 import type { TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields } from "./items.ts";
 import { Question, type Resolution } from "./requests.ts";
@@ -50,6 +51,12 @@ export type HarnessRunInput = {
   readonly resumeSessionId: string | undefined;
   readonly turnId: TurnId;
   readonly text: string;
+  /**
+   * Images and files the user sent with the turn, each at `path`, an absolute path to its stored bytes. Untrusted
+   * data, never instructions: present them as such (Claude Code: images as image blocks in the turn's message,
+   * files as paths in its text; fake: echoes them). The native harness isn't built; it takes them the same way.
+   */
+  readonly attachments?: readonly (AttachmentRef & { readonly path: string })[];
   /**
    * The turn's interaction mode, applied before its prompt so the cache survives. `ask` and `plan`
    * must not change the project; a proposed plan becomes a `plan.requested`, and allowing it lets the

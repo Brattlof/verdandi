@@ -26,6 +26,8 @@ export type SavedTask = {
   readonly projectPath: string;
   readonly text: string;
   readonly mode: InteractionMode;
+  /** How many images its first turn had attached. */
+  readonly images: number;
   /** The route it started on, and its class then; the class is null for tasks from before routing. */
   readonly route: Route;
   readonly taskClass: TaskClass | null;
@@ -86,7 +88,7 @@ export const sameRoute = (a: Route, b: Route) => a.harness === b.harness && a.mo
 export const replayTask = (task: SavedTask, policy: Pick<RoutingContext, "policy" | "builtIn">): Result.Result<ReplayedTask, string> => {
   const { thread, routing } = replayed(task.inputs ?? assumedInputs(task), policy);
   const { answers } = Effect.runSync(rulesDecide.decide({ state: task.text, questions: taskQuestions(routing) }));
-  const decided = decideRoute(thread, routing, task.text, task.mode, answers);
+  const decided = decideRoute(thread, routing, task.text, task.mode, answers, task.images);
   if (Result.isFailure(decided)) return Result.fail(decided.failure.message);
   const to = routeOf(decided.success);
   return Result.succeed({
@@ -120,11 +122,13 @@ export const loadSavedTasks = (home: string, projectId?: ProjectId): SavedTask[]
           path: string;
           text: string | null;
           mode: InteractionMode | null;
+          images: number | null;
           outcome: string | null;
         },
         [string | null]
       >(
-        `select e.type, e.v, e.payload, p.path, t.text, t.mode, o.payload as outcome
+        `select e.type, e.v, e.payload, p.path, t.text, t.mode, o.payload as outcome,
+           (select count(*) from json_each(t.attachments) where json_extract(value, '$.kind') = 'image') as images
          from events e join threads h on h.id = e.thread_id join projects p on p.id = h.project_id
            left join turns t on t.id = json_extract(e.payload, '$.taskId')
            left join task_outcomes o on o.task_id = json_extract(e.payload, '$.taskId')
@@ -141,6 +145,7 @@ export const loadSavedTasks = (home: string, projectId?: ProjectId): SavedTask[]
           projectPath: row.path,
           text: row.text,
           mode: row.mode ?? "build",
+          images: row.images ?? 0,
           route: e.route,
           taskClass: e.decision?.taskClass ?? null,
           inputs: e.inputs ?? null,

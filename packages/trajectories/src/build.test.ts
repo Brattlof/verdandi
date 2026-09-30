@@ -26,7 +26,7 @@ test("keeps the route the turn started on, and counts a partly metered turn as m
   const events = stored([
     { type: "thread.created", v: 1, threadId, projectId: "p" as ProjectId, projectPath: "/repo", route: sonnet },
     { type: "harness.session.bound", v: 1, threadId, sessionId: "s1", harnessVersion: "2.1.284", transcriptPath: "/t/s1.jsonl" },
-    { type: "turn.started", v: 1, threadId, turnId, text: "go" },
+    { type: "turn.started", v: 2, threadId, turnId, text: "go" },
     { type: "thread.route.changed", v: 1, threadId, from: sonnet, to: { ...sonnet, model: "claude-opus-5-5" }, by: "user" },
     usage("subscription"),
     usage("metered"),

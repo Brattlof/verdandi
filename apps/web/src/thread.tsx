@@ -2,6 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { describeRouteChange, type InteractionMode, type Item, type ThreadId, type TurnId, type TurnView } from "@verdandi/contracts";
 import { memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ArchiveButton } from "./archive.tsx";
+import { TurnAttachments } from "./attachments.tsx";
 import { type Connection, createStore, useStore } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
 import { SidePanel } from "./diff.tsx";
@@ -67,7 +68,7 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
             {archiveError ?? "This thread is archived: it's hidden from the thread list and takes no turns until you unarchive it."}
           </p>
         )}
-        <Conversation turns={thread.turns} routeChanges={thread.routeChanges} onChanges={showTurnDiff} />
+        <Conversation connection={connection} turns={thread.turns} routeChanges={thread.routeChanges} onChanges={showTurnDiff} />
         <Requests connection={connection} threadId={threadId} requests={thread.pendingRequests} onPlanApproved={() => setMode("build")} />
         <Composer connection={connection} thread={thread} mode={mode ?? last?.mode ?? "build"} onMode={setMode} />
         <div role="status" className="sr-only">
@@ -95,10 +96,12 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
  * Route changes show above the turn that followed them, or after the last turn.
  */
 const Conversation = ({
+  connection,
   turns,
   routeChanges,
   onChanges,
 }: {
+  connection: Connection;
   turns: readonly LiveTurn[];
   routeChanges: LiveThread["routeChanges"];
   onChanges: (turnId: TurnId) => void;
@@ -145,7 +148,7 @@ const Conversation = ({
                 style={{ transform: `translateY(${row.start}px)` }}
               >
                 <RouteMarkers changes={changesBefore.get(row.index)} />
-                <Turn turn={turn} onChanges={onChanges} />
+                <Turn connection={connection} turn={turn} onChanges={onChanges} />
               </div>
             )
           );
@@ -171,11 +174,12 @@ const statusColor: Record<LiveTurn["status"], string> = {
   limit: "text-error",
 };
 
-const Turn = memo(({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => (
+const Turn = memo(({ connection, turn, onChanges }: { connection: Connection; turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => (
   <article className="turn mx-auto max-w-[860px] px-4 py-3">
     <div className="mb-2 rounded-md bg-user px-2.5 py-1.5">
       <span className="text-xs text-muted">You{turn.mode === "build" ? "" : ` · ${turn.mode}`}</span>
       <p>{turn.text}</p>
+      <TurnAttachments connection={connection} attachments={turn.attachments} />
     </div>
     <Items items={turn.items} />
     {turn.streaming && (

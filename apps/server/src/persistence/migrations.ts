@@ -218,6 +218,12 @@ const threadArchive = Effect.gen(function* () {
   yield* sql`alter table threads add column archived_at text`;
 });
 
+/** Each turn's attachments, as a JSON array of references to their stored bytes (DESIGN §12). */
+const turnAttachments = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table turns add column attachments text not null default '[]'`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -232,4 +238,5 @@ export const migrations = {
   "11_spend_cap_raises": spendCapRaises,
   "12_routing_memory": routingMemory,
   "13_thread_archive": threadArchive,
+  "14_turn_attachments": turnAttachments,
 };

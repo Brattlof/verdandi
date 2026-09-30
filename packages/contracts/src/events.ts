@@ -1,4 +1,5 @@
 import { Data, Effect, Schema } from "effect";
+import { AttachmentRef } from "./attachments.ts";
 import { DecisionAnswer, DecisionQuestion } from "./decisions.ts";
 import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields } from "./items.ts";
@@ -89,7 +90,8 @@ export const ThreadUnarchived = Schema.Struct({
   v: v1,
   threadId: ThreadId,
 });
-export const TurnStarted = Schema.Struct({
+/** v1 is read as v2 without attachments. */
+const TurnStartedV1 = Schema.Struct({
   type: Schema.Literal("turn.started"),
   v: v1,
   threadId: ThreadId,
@@ -97,6 +99,12 @@ export const TurnStarted = Schema.Struct({
   text: Schema.String,
   /** Absent on turns from before modes existed; those ran as `build`. */
   mode: Schema.optionalKey(InteractionMode),
+});
+export const TurnStarted = Schema.Struct({
+  ...TurnStartedV1.fields,
+  v: Schema.Literal(2),
+  /** Images and files sent with the turn, as references to their stored bytes. Absent when there are none. */
+  attachments: Schema.optionalKey(Schema.Array(AttachmentRef)),
 });
 export const HarnessSessionBound = Schema.Struct({
   type: Schema.Literal("harness.session.bound"),
@@ -279,6 +287,8 @@ export class EventDecodeError extends Data.TaggedError("EventDecodeError")<{ rea
 const upgrades: Record<string, (payload: string) => Effect.Effect<Event, Schema.SchemaError>> = {
   "task.started@1": (payload) =>
     Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TaskStartedV1))(payload), (e): Event => ({ ...e, v: 2 })),
+  "turn.started@1": (payload) =>
+    Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TurnStartedV1))(payload), (e): Event => ({ ...e, v: 2 })),
 };
 
 const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
@@ -290,7 +300,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.archived@1": ThreadArchived,
   "thread.unarchived@1": ThreadUnarchived,
   "task.started@2": TaskStarted,
-  "turn.started@1": TurnStarted,
+  "turn.started@2": TurnStarted,
   "harness.session.bound@1": HarnessSessionBound,
   "turn.item.added@1": TurnItemAdded,
   "turn.steered@1": TurnSteered,

@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AttachmentRef, AttachmentUpload } from "./attachments.ts";
 import { HarnessEvent } from "./harness.ts";
 import { CommandId, ThreadId, TurnId } from "./ids.ts";
 import { Resolution } from "./requests.ts";
@@ -14,6 +15,7 @@ export const ThreadCreate = Schema.Struct({
   /** The user's pick, which pins the thread to it. Left out, the router picks a route for each new task. */
   route: Schema.optionalKey(Route),
 });
+/** A turn as the engine takes it: attachments are references to stored bytes. */
 export const TurnSend = Schema.Struct({
   type: Schema.Literal("turn.send"),
   commandId: CommandId,
@@ -21,7 +23,13 @@ export const TurnSend = Schema.Struct({
   turnId: TurnId,
   text: Schema.String,
   mode: InteractionMode,
+  attachments: Schema.optionalKey(Schema.Array(AttachmentRef)),
 });
+/**
+ * A turn as a client sends it: attachments carry their bytes, which verdandid checks (type, size) and stores
+ * content-addressed at the RPC boundary before the engine sees the command. Absent from clients built before attachments.
+ */
+export const ClientTurnSend = Schema.Struct({ ...TurnSend.fields, attachments: Schema.optionalKey(Schema.Array(AttachmentUpload)) });
 /** Answers a pending approval or user-input request. */
 export const ApprovalRespond = Schema.Struct({
   type: Schema.Literal("approval.respond"),
@@ -126,7 +134,7 @@ export const TurnRecover = Schema.Struct({
 /** What clients may send over RPC. */
 export const ClientCommand = Schema.Union([
   ThreadCreate,
-  TurnSend,
+  ClientTurnSend,
   TurnSteer,
   TurnInterrupt,
   ThreadRouteSet,

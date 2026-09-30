@@ -298,6 +298,7 @@ flowchart TD
   - *Workspace:* repo size, languages, whether a verifier exists.
   - *Thread:* earlier classes and outcomes, the current target, **how much context is already cached**.
   - *Mode:* Ask / Plan / Build.
+  - *Attachments:* how many images are attached; any image drops the targets without vision in stage 1.
   - *Routing memory:* how similar tasks in this project went before (§8.8).
 - **Stage 3 · Classify.** The classifier is pluggable:
   - `rules`: free, deterministic, with golden tests. This is the default.

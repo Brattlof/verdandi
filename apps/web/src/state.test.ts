@@ -44,7 +44,7 @@ const fold = (feeds: ThreadFeed[]) => feeds.reduce<LiveThread | undefined>(apply
 test("a streamed turn: deltas show until the stored message replaces them, and completion ends it", () => {
   const started = fold([
     snapshot,
-    event(2, { type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "plan" }),
+    event(2, { type: "turn.started", v: 2, threadId, turnId, text: "hi", mode: "plan" }),
     { kind: "delta", turnId, text: "echo: " },
     { kind: "delta", turnId, text: "hi" },
   ]);
@@ -53,7 +53,7 @@ test("a streamed turn: deltas show until the stored message replaces them, and c
 
   const done = fold([
     snapshot,
-    event(2, { type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "plan" }),
+    event(2, { type: "turn.started", v: 2, threadId, turnId, text: "hi", mode: "plan" }),
     { kind: "delta", turnId, text: "echo: hi" },
     event(3, { type: "turn.item.added", v: 1, threadId, turnId, item: { kind: "assistant.message", text: "echo: hi" } }),
     event(4, {
@@ -86,7 +86,7 @@ test("a route change lands after the turns so far, and a new harness drops the s
   const to = { ...route, harness: "claude-code", model: "sonnet" } as const;
   const thread = fold([
     { ...snapshot, thread: { ...snapshot.thread, sessionId: "s1" } },
-    event(2, { type: "turn.started", v: 1, threadId, turnId, text: "hi" }),
+    event(2, { type: "turn.started", v: 2, threadId, turnId, text: "hi" }),
     {
       kind: "event",
       stored: {
@@ -104,14 +104,14 @@ test("a route change lands after the turns so far, and a new harness drops the s
 });
 
 test("events the snapshot already includes are skipped", () => {
-  const thread = fold([{ ...snapshot, seq: 3 }, event(3, { type: "turn.started", v: 1, threadId, turnId, text: "replayed" })]);
+  const thread = fold([{ ...snapshot, seq: 3 }, event(3, { type: "turn.started", v: 2, threadId, turnId, text: "replayed" })]);
   expect(thread?.turns).toEqual([]);
 });
 
 test("a plan waits as a pending request and leaves a plan item once answered", () => {
   const feeds = [
     snapshot,
-    event(2, { type: "turn.started", v: 1, threadId, turnId, text: "plan" }),
+    event(2, { type: "turn.started", v: 2, threadId, turnId, text: "plan" }),
     event(3, { type: "plan.requested", v: 1, threadId, turnId, requestId: "r1", plan: "1. Edit a.txt" }),
   ];
   expect(fold(feeds)?.pendingRequests.map((r) => r.requestId)).toEqual(["r1"]);

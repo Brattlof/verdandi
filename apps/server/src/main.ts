@@ -5,6 +5,7 @@ import { makeFakeHarness } from "@verdandi/testkit";
 import { Effect, ManagedRuntime, Stream } from "effect";
 import { alive, flag, resolveHome, type ServerFile, serverFile } from "./config/home.ts";
 import { ServerInfo, ServerLayer } from "./rpc/server.ts";
+import { attachmentsDir } from "./workspace/attachments.ts";
 
 const claudeMissing: HarnessAdapter = {
   id: "claude-code",
@@ -16,7 +17,7 @@ const claudeMissing: HarnessAdapter = {
 /** `verdandi start`: runs verdandid in the foreground until Ctrl+C. */
 export const start = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
-  mkdirSync(home, { recursive: true });
+  mkdirSync(attachmentsDir(home), { recursive: true });
   const file = serverFile(home);
   if (existsSync(file)) {
     const running = JSON.parse(readFileSync(file, "utf8")) as ServerFile;
@@ -25,7 +26,7 @@ export const start = async (argv: readonly string[]) => {
   }
   const claudePath = findClaude();
   const harnesses: Partial<Record<HarnessId, HarnessAdapter>> = {
-    "claude-code": claudePath ? makeClaudeCodeAdapter({ claudePath }) : claudeMissing,
+    "claude-code": claudePath ? makeClaudeCodeAdapter({ claudePath, additionalDirectories: [attachmentsDir(home)] }) : claudeMissing,
     // The fake harness answers without any model call: for trying the loop end to end.
     ...(argv.includes("--dev-fake-harness") ? { fake: makeFakeHarness() } : {}),
   };
