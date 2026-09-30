@@ -34,6 +34,13 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         sql`insert into threads (id, project_id, route, created_at) values (${e.threadId}, ${e.projectId}, ${JSON.stringify(e.route)}, ${at})`,
       ),
     ),
+  // A session belongs to one harness, so switching harness starts a fresh one on the next turn.
+  "thread.route.changed": (e) =>
+    withSql((sql) =>
+      e.from.harness === e.to.harness
+        ? sql`update threads set route = ${JSON.stringify(e.to)} where id = ${e.threadId}`
+        : sql`update threads set route = ${JSON.stringify(e.to)}, session_id = null where id = ${e.threadId}`,
+    ),
   "turn.started": (e, at) =>
     withSql((sql) =>
       Effect.andThen(
@@ -74,14 +81,15 @@ export const project = (stored: StoredEvent) =>
 export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState, SqlError.SqlError, SqlClient.SqlClient> =>
   withSql((sql) =>
     Effect.gen(function* () {
-      const [row] = yield* sql<{ path: string; running_turn_id: string | null; session_id: string | null }>`
-        select p.path, t.running_turn_id, t.session_id from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+      const [row] = yield* sql<{ path: string; route: string; running_turn_id: string | null; session_id: string | null }>`
+        select p.path, t.route, t.running_turn_id, t.session_id from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
       if (!row) return { thread: undefined };
       const pending = yield* sql<{ id: string; turn_id: string; kind: PendingRequest["kind"] }>`
         select id, turn_id, kind from requests where thread_id = ${threadId} and resolution is null`;
       return {
         thread: {
           projectPath: row.path,
+          route: JSON.parse(row.route) as Route,
           runningTurnId: row.running_turn_id,
           sessionId: row.session_id,
           pendingRequests: pending.map((r) => ({ requestId: r.id, turnId: r.turn_id as TurnId, kind: r.kind })),

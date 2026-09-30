@@ -160,6 +160,52 @@ describe("engine", () => {
     ]);
   });
 
+  test("a route change applies from the next turn and shows in its usage", async () => {
+    const { runtime, fake } = start(newHome());
+    const models = await runtime.runPromise(
+      Effect.gen(function* () {
+        yield* dispatch(create);
+        yield* dispatch(send("one"));
+        yield* drain;
+        yield* dispatch({
+          type: "thread.route.set",
+          commandId: id<CommandId>(),
+          threadId,
+          route: { ...route, model: "fake-2", effort: "high" },
+        });
+        yield* dispatch(send("two"));
+        yield* drain;
+        const sql = yield* SqlClient.SqlClient;
+        return yield* sql<{ model: string }>`select model from usage_ledger order by rowid`;
+      }),
+    );
+    expect(models.map((m) => m.model)).toEqual(["fake", "fake-2"]);
+    expect(fake.calls.map((c) => [c.route.model, c.route.effort, c.resumeSessionId])).toEqual([
+      ["fake", "low", undefined],
+      ["fake-2", "high", "fake-session-1"],
+    ]);
+  });
+
+  test("switching harness starts a fresh session on the new one", async () => {
+    const other = makeFakeHarness();
+    const runtime = ManagedRuntime.make(AppLayer(newHome(), { fake: makeFakeHarness(), "claude-code": other }));
+    runtimes.push(runtime as never);
+    const v = await runtime.runPromise(
+      Effect.gen(function* () {
+        yield* dispatch(create);
+        yield* dispatch(send("one"));
+        yield* drain;
+        yield* dispatch({ type: "thread.route.set", commandId: id<CommandId>(), threadId, route: { ...route, harness: "claude-code" } });
+        yield* dispatch(send("two"));
+        yield* drain;
+        return yield* view;
+      }),
+    );
+    expect(other.calls.map((c) => c.resumeSessionId)).toEqual([undefined]);
+    expect(v?.route.harness).toBe("claude-code");
+    expect(v?.turns.map((t) => t.status)).toEqual(["success", "success"]);
+  });
+
   test("resumes the harness session after restart", async () => {
     const home = newHome();
     const fake = makeFakeHarness();

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { HarnessRunInput, ThreadId, TurnId } from "@verdandi/contracts";
+import type { HarnessRunInput, Route, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Stream } from "effect";
 import { makeClaudeCodeAdapter, type QueryFn } from "./adapter.ts";
@@ -8,30 +8,37 @@ import { assistant, init, result, textDelta, turn1Usage, turn2Usage } from "./fi
 
 const U1 = "00000000-0000-4000-8000-000000000001";
 const U2 = "00000000-0000-4000-8000-000000000002";
+const U3 = "00000000-0000-4000-8000-000000000003";
 
-/** A fake SDK `query`: answers each prompt with a delta and a result; records what it was given. */
+/** A fake SDK `query`: answers each prompt with a delta and a result; records what it was given, in order. */
 const stubQuery = (
   script: (prompt: string, options: Options, message: SDKUserMessage) => SDKMessage[] | AsyncIterable<SDKMessage> = () => [
     textDelta("ok"),
     result(turn1Usage),
   ],
 ) => {
-  const spawns: { options: Options; prompts: SDKUserMessage[] }[] = [];
+  const spawns: { options: Options; prompts: SDKUserMessage[]; log: string[] }[] = [];
   const query = ((params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
-    const record = { options: params.options, prompts: [] as SDKUserMessage[] };
+    const record = { options: params.options, prompts: [] as SDKUserMessage[], log: [] as string[] };
     spawns.push(record);
-    return (async function* () {
+    const messages = (async function* () {
       yield init;
       for await (const m of params.prompt) {
         record.prompts.push(m);
+        record.log.push(`prompt ${m.message.content}`);
         yield* script(String(m.message.content), params.options, m);
       }
     })();
+    return Object.assign(messages, {
+      setModel: async (model: string) => void record.log.push(`setModel ${model}`),
+      applyFlagSettings: async (settings: object) => void record.log.push(`applyFlagSettings ${JSON.stringify(settings)}`),
+    });
   }) as unknown as QueryFn;
   return { query, spawns };
 };
 
 const threadId = "thread-1" as ThreadId;
+const haikuLow: Route = { harness: "claude-code", model: "haiku", effort: "low" };
 
 const input = (
   cwd: string,
@@ -39,10 +46,11 @@ const input = (
   turnId: string,
   resumeSessionId?: string,
   steers: Stream.Stream<string> = Stream.empty,
+  route = haikuLow,
 ): HarnessRunInput => ({
   threadId,
   cwd,
-  route: { harness: "claude-code", model: "haiku", effort: "low" },
+  route,
   resumeSessionId,
   turnId: turnId as TurnId,
   text,
@@ -66,7 +74,7 @@ describe("Claude Code adapter", () => {
       const { query, spawns } = stubQuery();
       const adapter = makeClaudeCodeAdapter({ claudePath: "C:\\bin\\claude.exe", query });
       const first = await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "one", U1))));
-      const second = await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "two", U2))));
+      const second = await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "two", U2, "sess-1"))));
       expect(Array.from(first).map((e) => e.type)).toEqual(["session.started", "text.delta", "usage", "usage", "turn.finished"]);
       expect(Array.from(second).map((e) => e.type)).toEqual(["text.delta", "turn.finished"]);
       expect(spawns).toHaveLength(1);
@@ -126,6 +134,42 @@ describe("Claude Code adapter", () => {
         { behavior: "deny", message: "The user denied this." },
         { behavior: "allow", updatedInput: { questions, answers: { "Which?": "B" } } },
       ]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("a route change reaches the live session before the next prompt", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery();
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "one", U1))));
+      const opusHigh: Route = { harness: "claude-code", model: "opus", effort: "high" };
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "two", U2, "sess-1", Stream.empty, opusHigh))));
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "three", U3, "sess-1", Stream.empty, opusHigh))));
+      expect(spawns).toHaveLength(1);
+      expect(spawns[0]?.log).toEqual([
+        "prompt one",
+        "setModel opus",
+        'applyFlagSettings {"effortLevel":"high"}',
+        "prompt two",
+        "prompt three",
+      ]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("a live session the thread is no longer bound to is replaced", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery();
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "one", U1))));
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "two", U2))));
+      expect(spawns).toHaveLength(2);
+      expect(spawns[1]?.options.resume).toBeUndefined();
     } finally {
       removeTempHome(home);
     }

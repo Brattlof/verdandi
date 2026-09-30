@@ -1,18 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  type ClientCommand,
-  type CommandId,
-  type Resolution,
-  Route,
-  type ThreadFeed,
-  type ThreadId,
-  type TurnId,
-} from "@verdandi/contracts";
-import { Context, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect";
-import { flag, resolveHome, type ServerFile, serverFile } from "../config/home.ts";
+import type { ClientCommand, CommandId, Resolution, ThreadFeed, ThreadId, ThreadView, TurnId } from "@verdandi/contracts";
+import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import { resolveHome, type ServerFile, serverFile } from "../config/home.ts";
 import { connect } from "../rpc/client.ts";
 import { approvalPrompt, type PendingRequest, parseAnswer, questionPrompt } from "./requests.ts";
+import { describeRouteChange, routeFromFlags } from "./route-flags.ts";
 
 class Client extends Context.Service<Client, Effect.Success<ReturnType<typeof connect>>>()("verdandi/cli/Client") {}
 
@@ -35,11 +28,7 @@ export const chat = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
   if (!existsSync(serverFile(home))) throw new Error(`verdandid is not running for ${home}. Start it with: verdandi start`);
   const server = JSON.parse(readFileSync(serverFile(home), "utf8")) as ServerFile;
-  const route = Schema.decodeUnknownSync(Route)({
-    harness: flag(argv, "--harness") ?? "claude-code",
-    model: flag(argv, "--model") ?? "sonnet",
-    effort: flag(argv, "--effort") ?? "medium",
-  });
+  const route = routeFromFlags(argv); // also rejects bad flags before connecting
 
   const runtime = ManagedRuntime.make(Layer.effect(Client)(connect(server)));
   const client = await runtime.runPromise(
@@ -71,6 +60,7 @@ export const chat = async (argv: readonly string[]) => {
   let answered: string[] = [];
   /** The turn a typed line steers; undefined while the thread is idle. */
   let running: TurnId | undefined;
+  const snapshot = Promise.withResolvers<ThreadView>();
   let usage: Usage[] = [];
   const prompt = () => process.stdout.write("> ");
   const showRequest = () => {
@@ -103,12 +93,9 @@ export const chat = async (argv: readonly string[]) => {
       Stream.runForEach((f: ThreadFeed) =>
         Effect.sync(() => {
           if (f.kind === "snapshot") {
-            const { threadId, projectPath, turns } = f.thread;
-            process.stdout.write(`Thread ${threadId} in ${projectPath} (${turns.length} earlier turns). /exit to quit.\n`);
-            running = turns.find((t) => t.status === "running")?.turnId;
-            if (running) process.stdout.write("A turn is running; lines you type steer it.\n");
-            else prompt();
-            for (const r of f.thread.pendingRequests) addRequest(r);
+            running = f.thread.turns.find((t) => t.status === "running")?.turnId;
+            requests.push(...f.thread.pendingRequests);
+            snapshot.resolve(f.thread);
           }
           if (f.kind === "delta") process.stdout.write(f.text);
           if (f.kind !== "event") return;
@@ -162,6 +149,22 @@ export const chat = async (argv: readonly string[]) => {
         ),
       ),
     );
+
+  const noSnapshot = new Error("The thread feed ended before its snapshot arrived. Restart verdandid and try again.");
+  feed.then(() => snapshot.reject(noSnapshot), snapshot.reject);
+  const thread = await snapshot.promise;
+  // Flags that differ from the thread's route change it, from the next turn on.
+  const wanted = routeFromFlags(argv, thread.route);
+  const change = describeRouteChange(thread.route, wanted);
+  const changed = change !== "" && (await dispatch({ type: "thread.route.set", commandId: uuid<CommandId>(), threadId, route: wanted }));
+  const { harness, model, effort } = changed ? wanted : thread.route;
+  process.stdout.write(
+    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${harness} ${model} ${effort}. /exit to quit.\n`,
+  );
+  if (changed) process.stdout.write(`Route changed: ${change}\n`);
+  if (running) process.stdout.write("A turn is running; lines you type steer it.\n");
+  else prompt();
+  showRequest();
 
   for await (const line of console) {
     const text = line.trim();

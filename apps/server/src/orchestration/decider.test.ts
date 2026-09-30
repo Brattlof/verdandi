@@ -9,11 +9,12 @@ const commandId = "cmd-1" as CommandId;
 const route = { harness: "fake", model: "fake", effort: "low" } as const;
 
 const none: DeciderState = { thread: undefined };
-const idle: DeciderState = { thread: { projectPath: "C:/r", runningTurnId: null, sessionId: null, pendingRequests: [] } };
-const running: DeciderState = { thread: { projectPath: "C:/r", runningTurnId: turnId, sessionId: "s1", pendingRequests: [] } };
+const idle: DeciderState = { thread: { projectPath: "C:/r", route, runningTurnId: null, sessionId: null, pendingRequests: [] } };
+const running: DeciderState = { thread: { projectPath: "C:/r", route, runningTurnId: turnId, sessionId: "s1", pendingRequests: [] } };
 const waiting: DeciderState = {
   thread: {
     projectPath: "C:/r",
+    route,
     runningTurnId: turnId,
     sessionId: "s1",
     pendingRequests: [
@@ -115,6 +116,22 @@ describe("decide", () => {
     const recovered = events(decide(waiting, { type: "turn.recover", commandId, threadId, turnId }));
     expect(recovered[0]).toMatchObject({ type: "approval.resolved", reason: "verdandid stopped while this was waiting for an answer." });
     expect(recovered.at(-1)?.type).toBe("turn.completed");
+  });
+
+  test("records a user's route change with what it replaced", () => {
+    const to = { ...route, model: "fake-2", effort: "high" } as const;
+    expect(events(decide(idle, { type: "thread.route.set", commandId, threadId, route: to }))).toEqual([
+      { type: "thread.route.changed", v: 1, threadId, from: route, to, by: "user" },
+    ]);
+    expect(events(decide(idle, { type: "thread.route.set", commandId, threadId, route }))).toEqual([]);
+    expect(reason(decide(none, { type: "thread.route.set", commandId, threadId, route: to }))).toBe("ThreadNotFound");
+  });
+
+  test("a running turn defers a model change but blocks a harness change", () => {
+    const model = { type: "thread.route.set", commandId, threadId, route: { ...route, model: "fake-2" } } as const;
+    expect(events(decide(running, model)).map((e) => e.type)).toEqual(["thread.route.changed"]);
+    const harness = { type: "thread.route.set", commandId, threadId, route: { ...route, harness: "claude-code" } } as const;
+    expect(reason(decide(running, harness))).toBe("ThreadBusy");
   });
 
   test("ignores text deltas", () => {

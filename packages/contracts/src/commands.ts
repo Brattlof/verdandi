@@ -34,6 +34,13 @@ export const TurnSteer = Schema.Struct({
   turnId: TurnId,
   text: Schema.String,
 });
+/** The user changing a thread's route. It applies from the next turn, never mid-turn. */
+export const ThreadRouteSet = Schema.Struct({
+  type: Schema.Literal("thread.route.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  route: Route,
+});
 
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
@@ -52,8 +59,8 @@ export const TurnRecover = Schema.Struct({
 });
 
 /** What clients may send over RPC. */
-export const ClientCommand = Schema.Union([ThreadCreate, TurnSend, TurnSteer, ApprovalRespond]);
+export const ClientCommand = Schema.Union([ThreadCreate, TurnSend, TurnSteer, ThreadRouteSet, ApprovalRespond]);
 export type ClientCommand = typeof ClientCommand.Type;
 
-export const Command = Schema.Union([ThreadCreate, TurnSend, TurnSteer, ApprovalRespond, HarnessReport, TurnRecover]);
+export const Command = Schema.Union([ThreadCreate, TurnSend, TurnSteer, ThreadRouteSet, ApprovalRespond, HarnessReport, TurnRecover]);
 export type Command = typeof Command.Type;

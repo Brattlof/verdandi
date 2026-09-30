@@ -9,6 +9,7 @@ const route = { harness: "fake", model: "fake", effort: "low" } as const;
 
 const samples: Event[] = [
   { type: "thread.created", v: 1, threadId, projectId: "p1" as never, projectPath: "C:/Users/a b/repo", route },
+  { type: "thread.route.changed", v: 1, threadId, from: route, to: { ...route, model: "fake-2" }, by: "user" },
   { type: "turn.started", v: 1, threadId, turnId, text: "hi" },
   { type: "harness.session.bound", v: 1, threadId, sessionId: "s1", harnessVersion: "2.1.284" },
   { type: "turn.item.added", v: 1, threadId, turnId, item: { kind: "assistant.message", text: "hello" } },

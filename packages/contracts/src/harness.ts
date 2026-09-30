@@ -27,8 +27,9 @@ export class HarnessError extends Data.TaggedError("HarnessError")<{ readonly me
 export type HarnessRunInput = {
   readonly threadId: ThreadId;
   readonly cwd: string;
+  /** The thread's route now. It can differ from the last turn's; the adapter applies it before this turn starts. */
   readonly route: Route;
-  /** The thread's stored harness session, when resuming after a restart. */
+  /** The session the thread is bound to, to reuse or resume; undefined starts a fresh one. */
   readonly resumeSessionId: string | undefined;
   readonly turnId: TurnId;
   readonly text: string;
