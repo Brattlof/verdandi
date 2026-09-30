@@ -39,9 +39,9 @@ test("the chart has a slot for every day of the period, empty on days without us
 
 test("shows paid and on-plan spend apart, never added up, and labels the savings an estimate", () => {
   const html = renderToStaticMarkup(<UsageView report={report} today={today} />);
-  expect(html).toContain('Paid</div><div class="text-xl">$1.50');
-  expect(html).toContain('On plan</div><div class="text-xl">$4.00');
-  expect(html).not.toContain("$5.50</div>"); // no tile shows the two summed
+  expect(html).toMatch(/Paid<\/dt><dd[^>]*>\$1\.50</);
+  expect(html).toMatch(/On plan<\/dt><dd[^>]*>\$4\.00</);
+  expect(html).not.toMatch(/>\$5\.50</); // no tile shows the two summed
   expect(html).toContain("Saved vs always-Opus (estimate)");
   expect(html).toContain("75% less than $22.00");
   expect(html).toContain("$0.75"); // paid per completed code.feature task

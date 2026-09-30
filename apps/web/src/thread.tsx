@@ -6,6 +6,7 @@ import { TurnAttachments } from "./attachments.tsx";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
 import { SidePanel } from "./diff.tsx";
+import { ChevronIcon, DiffIcon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { RouteMarkers } from "./route.tsx";
 import { applyDiffPanel, applyThreadFeed, closedPanel, type LiveThread, type LiveTurn } from "./state.ts";
@@ -37,7 +38,12 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
     [connection, threadId],
   );
   const showTurnDiff = useCallback((turnId: TurnId) => fetchDiff(turnId, false), [fetchDiff]);
-  if (error) return <p role="alert">{error}</p>;
+  if (error)
+    return (
+      <p role="alert" className="p-6 text-error">
+        {error}
+      </p>
+    );
   if (!thread) return null;
   const last = thread.turns.at(-1);
   const lastFinished = thread.turns.findLast((t) => t.status !== "running");
@@ -45,26 +51,28 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex justify-between gap-4 whitespace-nowrap border-b border-line px-4 py-2 text-muted">
-          <span title={thread.projectPath} className="truncate">
-            {thread.projectPath}
-          </span>
-          <span className="flex items-center gap-2">
-            {!thread.busy && (
-              <ArchiveButton connection={connection} threadId={threadId} archived={thread.archived} onError={setArchiveError} />
-            )}
-            <button
-              type="button"
-              className="px-2 py-0 text-xs"
-              aria-pressed={panel.open}
-              onClick={() => (panel.open ? setPanel({ type: "close" }) : fetchDiff(lastFinished?.turnId, true))}
-            >
-              Diff
-            </button>
-          </span>
+        <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-line px-4 py-1.5">
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate font-medium">{thread.turns[0]?.text.split("\n", 1)[0] || "New thread"}</h1>
+            <p title={thread.projectPath} className="truncate font-mono text-xs text-muted">
+              {thread.projectPath}
+            </p>
+          </div>
+          {!thread.busy && (
+            <ArchiveButton connection={connection} threadId={threadId} archived={thread.archived} onError={setArchiveError} />
+          )}
+          <button
+            type="button"
+            className="px-2 text-xs aria-pressed:border-accent aria-pressed:text-accent"
+            aria-pressed={panel.open}
+            onClick={() => (panel.open ? setPanel({ type: "close" }) : fetchDiff(lastFinished?.turnId, true))}
+          >
+            <DiffIcon className="size-3.5" />
+            Diff
+          </button>
         </header>
         {(thread.archived || archiveError) && (
-          <p role="status" className={`border-b border-line px-4 py-1 text-xs ${archiveError ? "text-error" : "text-muted"}`}>
+          <p role="status" className={`border-b border-line bg-panel px-4 py-1.5 text-xs ${archiveError ? "text-error" : "text-muted"}`}>
             {archiveError ?? "This thread is archived: it's hidden from the thread list and takes no turns until you unarchive it."}
           </p>
         )}
@@ -134,7 +142,14 @@ const Conversation = ({
         atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
       }}
     >
-      {turns.length === 0 && <p className="p-6 text-muted">No turns yet. Send a message below.</p>}
+      {turns.length === 0 && (
+        <div className="mx-auto max-w-[860px] px-4 pt-16 text-center">
+          <h2 className="font-mono text-sm font-semibold">Start the conversation</h2>
+          <p className="mt-1 text-muted">
+            Ask a question, plan a change or build it. Unless you pin a route, the router picks one when you send.
+          </p>
+        </div>
+      )}
       <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
         {virtualizer.getVirtualItems().map((row) => {
           const turn = turns[row.index];
@@ -166,21 +181,29 @@ const statusText: Record<LiveTurn["status"], string> = {
   interrupted: "Stopped",
   limit: "Limit reached",
 };
-const statusColor: Record<LiveTurn["status"], string> = {
-  running: "text-accent",
-  success: "",
-  error: "text-error",
-  interrupted: "text-error",
-  limit: "text-error",
+/** Text colour, then the dot beside it; the status is always spelled out too. */
+const statusColor: Record<LiveTurn["status"], readonly [string, string]> = {
+  running: ["text-accent", "bg-accent"],
+  success: ["text-ok", "bg-ok"],
+  error: ["text-error", "bg-error"],
+  interrupted: ["text-warn", "bg-warn"],
+  limit: ["text-warn", "bg-warn"],
 };
+
+/** The user's words sit on the right, the agent's work runs full width beneath. */
+const UserBubble = ({ label, children }: { label: string; children: ReactNode }) => (
+  <div className="my-2 ml-auto w-fit max-w-[85%] rounded-lg rounded-br-sm bg-user px-3 py-2">
+    <span className="block text-xs text-muted">{label}</span>
+    {children}
+  </div>
+);
 
 const Turn = memo(({ connection, turn, onChanges }: { connection: Connection; turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => (
   <article className="turn mx-auto max-w-[860px] px-4 py-3">
-    <div className="mb-2 rounded-md bg-user px-2.5 py-1.5">
-      <span className="text-xs text-muted">You{turn.mode === "build" ? "" : ` · ${turn.mode}`}</span>
-      <p>{turn.text}</p>
+    <UserBubble label={`You${turn.mode === "build" ? "" : ` · ${turn.mode}`}`}>
+      <p className="mt-0.5 mb-0">{turn.text}</p>
       <TurnAttachments connection={connection} attachments={turn.attachments} />
-    </div>
+    </UserBubble>
     <Items items={turn.items} />
     {turn.streaming && (
       <div>
@@ -191,22 +214,36 @@ const Turn = memo(({ connection, turn, onChanges }: { connection: Connection; tu
   </article>
 ));
 
-const TurnStatus = ({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => (
-  <footer className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
-    <span className={statusColor[turn.status]}>{statusText[turn.status]}</span>
-    {turn.status !== "running" && (
-      <button type="button" className="border-0 bg-transparent p-0 text-accent underline" onClick={() => onChanges(turn.turnId)}>
-        Changes
-      </button>
-    )}
-    {turn.error && <span className="text-error">{turn.error}</span>}
-    {turn.usage.map((u) => (
-      <span key={u.model} title={`cache read ${u.cacheReadTokens} · cache write ${u.cacheWriteTokens} tokens`}>
-        {u.model} · {u.inputTokens}→{u.outputTokens} tok · ${u.costUsd.toFixed(4)} · {u.accessMode}
+const TurnStatus = ({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => {
+  const [text, dot] = statusColor[turn.status];
+  return (
+    <footer className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-xs text-muted">
+      <span className={`flex items-center gap-1.5 font-medium ${text}`}>
+        <span aria-hidden className={`size-1.5 rounded-full ${dot}`} />
+        {statusText[turn.status]}
       </span>
-    ))}
-  </footer>
-);
+      {turn.status !== "running" && (
+        <button
+          type="button"
+          className="border-0 bg-transparent p-0 font-normal text-accent underline underline-offset-2 hover:bg-transparent"
+          onClick={() => onChanges(turn.turnId)}
+        >
+          Changes
+        </button>
+      )}
+      {turn.error && <span className="text-error">{turn.error}</span>}
+      {turn.usage.map((u) => (
+        <span
+          key={u.model}
+          className="font-mono tabular-nums"
+          title={`cache read ${u.cacheReadTokens} · cache write ${u.cacheWriteTokens} tokens`}
+        >
+          {u.model} · {u.inputTokens}→{u.outputTokens} tok · ${u.costUsd.toFixed(4)} · {u.accessMode}
+        </span>
+      ))}
+    </footer>
+  );
+};
 
 type ToolResult = Extract<Item, { kind: "tool.result" }>;
 /** Results sit under their call, and a subagent's steps under the call that started it. */
@@ -255,38 +292,45 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
     </div>
   ),
   "user.steer": ({ item }) => (
-    <div className="my-2 rounded-md bg-user px-2.5 py-1.5">
-      <span className="text-xs text-muted">You, while it worked</span>
-      <p>{item.text}</p>
-    </div>
+    <UserBubble label="You, while it worked">
+      <p className="mt-0.5 mb-0">{item.text}</p>
+    </UserBubble>
   ),
   plan: ({ item }) => (
-    <div className="my-2 rounded-md border border-accent px-2.5 py-1.5">
-      <span className="text-xs text-muted">Plan{item.filePath ? ` · ${item.filePath}` : ""}</span>
+    <div className="my-3 rounded-lg border border-line border-l-2 border-l-accent bg-card px-3 py-2">
+      <span className="font-mono text-[11px] font-semibold tracking-wider text-accent uppercase">
+        Plan{item.filePath ? <span className="font-normal tracking-normal text-muted normal-case"> · {item.filePath}</span> : ""}
+      </span>
       <Markdown text={item.text} />
     </div>
   ),
   "route.switch": ({ item }) => (
-    <p className="my-2 text-center text-xs text-muted">
-      Route changed by the router: {describeRouteChange(item.from, item.to)}. {item.reason}
+    <p className="my-3 flex items-center gap-3 text-xs text-muted before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">
+      <span className="max-w-[80%] text-center">
+        Route changed by the router: {describeRouteChange(item.from, item.to)}. {item.reason}
+      </span>
     </p>
   ),
   "tool.call": ({ item, tree }) => {
     const result = tree.results.get(item.toolUseId);
     const steps = tree.children.get(item.toolUseId);
     return (
-      <details className="my-1">
-        <summary className="cursor-pointer font-mono text-[13px]">
-          {item.name} <span className="text-muted">{summarize(item.input)}</span>
-          {result?.isError && <span className="text-error"> failed</span>}
+      <details className="my-1.5 rounded-md border border-line bg-panel">
+        <summary className="flex list-none items-center gap-2 rounded-md px-2 py-1 font-mono text-xs hover:bg-hover [&::-webkit-details-marker]:hidden">
+          <ChevronIcon className="size-3.5 text-muted [details[open]>summary>&]:rotate-90" />
+          <span className="font-semibold">{item.name}</span>
+          <span className="min-w-0 flex-1 truncate text-muted">{summarize(item.input)}</span>
+          {result?.isError && <span className="shrink-0 rounded bg-removed px-1.5 text-error">failed</span>}
         </summary>
-        <pre>{clip(JSON.stringify(item.input, null, 2) ?? "")}</pre>
-        {steps && (
-          <div className="my-1 border-l-2 border-line pl-3">
-            <ItemList items={steps} tree={tree} />
-          </div>
-        )}
-        {result && <pre className={result.isError ? "text-error" : undefined}>{clip(result.content)}</pre>}
+        <div className="border-t border-line px-2 py-1">
+          <pre>{clip(JSON.stringify(item.input, null, 2) ?? "")}</pre>
+          {steps && (
+            <div className="my-1 border-l-2 border-line pl-3">
+              <ItemList items={steps} tree={tree} />
+            </div>
+          )}
+          {result && <pre className={result.isError ? "text-error" : undefined}>{clip(result.content)}</pre>}
+        </div>
       </details>
     );
   },

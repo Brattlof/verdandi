@@ -25,7 +25,7 @@ export const SpendCaps = ({ connection, thread, rejected }: { connection: Connec
   if (!caps) return null;
   if (!caps.ok)
     return (
-      <p role="alert" className="mb-1 text-xs text-error">
+      <p role="alert" className="text-xs text-error">
         {caps.message}
       </p>
     );
@@ -44,12 +44,12 @@ export const SpendCaps = ({ connection, thread, rejected }: { connection: Connec
     if (result.ok) await refresh();
   };
   return (
-    <section aria-label="Spend caps" className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+    <section aria-label="Spend caps" className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted tabular-nums">
       {caps.caps.map((cap) => (
         <span key={`${cap.scope}-${cap.period}`} className={capReached(cap) ? "text-error" : undefined}>
           {describeSpendCap(cap)}
           {capReached(cap) && (
-            <button type="button" className="ml-2 px-2 py-0 text-xs" disabled={raising} onClick={() => raise(cap)}>
+            <button type="button" className="ml-2 px-2 text-xs" disabled={raising} onClick={() => raise(cap)}>
               Raise to {formatUsd(cap.limitUsd + cap.baseUsd)} for {capPeriodNow(cap.period)}
             </button>
           )}

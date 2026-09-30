@@ -37,7 +37,7 @@ export const ArchiveButton = ({
   return (
     <button
       type="button"
-      className={`px-2 py-0 text-xs ${className}`}
+      className={`px-2 text-xs ${className}`}
       disabled={sending}
       onClick={toggle}
       aria-label={title === undefined ? undefined : `${label} ${title}`}

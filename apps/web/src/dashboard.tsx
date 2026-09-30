@@ -7,7 +7,7 @@ import {
   type UsageFilter,
   type UsageReport,
 } from "@verdandi/contracts";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import type { Connection } from "./client.ts";
 
 const periods: { days: number | undefined; label: string }[] = [
@@ -61,12 +61,13 @@ export const Dashboard = ({ connection, projects }: { connection: Connection; pr
   }, [connection, filter, refreshes]);
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-[960px] px-4 py-3">
-        <header className="mb-3 flex flex-wrap items-center gap-3">
-          <h1 className="mr-auto text-base font-bold">Spend</h1>
-          <label className="text-xs text-muted">
-            Project{" "}
+      <div className="mx-auto max-w-[1040px] px-4 py-5 sm:px-6">
+        <header className="mb-5 flex flex-wrap items-center gap-3">
+          <h1 className="mr-auto font-mono text-lg font-semibold">Spend</h1>
+          <label className="flex items-center gap-1.5 text-xs text-muted">
+            Project
             <select
+              className="max-w-56 text-fg"
               value={filter.projectId ?? ""}
               onChange={(e) => {
                 const { projectId: _, ...rest } = filter;
@@ -81,9 +82,10 @@ export const Dashboard = ({ connection, projects }: { connection: Connection; pr
               ))}
             </select>
           </label>
-          <label className="text-xs text-muted">
-            Period{" "}
+          <label className="flex items-center gap-1.5 text-xs text-muted">
+            Period
             <select
+              className="text-fg"
               value={filter.days ?? ""}
               onChange={(e) => {
                 const { days: _, ...rest } = filter;
@@ -97,25 +99,44 @@ export const Dashboard = ({ connection, projects }: { connection: Connection; pr
               ))}
             </select>
           </label>
-          <button type="button" className="px-2 py-0 text-xs" onClick={() => setRefreshes((n) => n + 1)}>
+          <button type="button" className="text-xs" onClick={() => setRefreshes((n) => n + 1)}>
             Refresh
           </button>
           {report && (
             <span className="text-xs text-muted">as of {report.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
           )}
         </header>
-        {report ? <UsageView report={report.report} today={report.at} /> : <p className="text-muted">Loading…</p>}
+        {report ? (
+          <UsageView report={report.report} today={report.at} />
+        ) : (
+          <p role="status" className="text-muted">
+            Loading…
+          </p>
+        )}
       </div>
     </div>
   );
 };
 
 const Tile = ({ label, value, note }: { label: string; value: string; note: string }) => (
-  <div className="min-w-[160px] flex-1 rounded-md border border-line px-3 py-2">
-    <div className="text-xs text-muted">{label}</div>
-    <div className="text-xl">{value}</div>
-    <div className="text-xs text-muted">{note}</div>
+  <div className="flex flex-col rounded-xl border border-line bg-card px-4 py-3">
+    <dt className="font-mono text-[11px] font-semibold tracking-wider text-muted uppercase">{label}</dt>
+    <dd className="mt-1 text-2xl font-semibold tabular-nums">{value}</dd>
+    <dd className="mt-1 text-xs text-muted">{note}</dd>
   </div>
+);
+
+/** A titled card for one part of the report. */
+const Panel = ({ id, title, legend, children }: { id: string; title: string; legend?: ReactNode; children: ReactNode }) => (
+  <section aria-labelledby={id} className="mb-4 rounded-xl border border-line bg-card px-4 py-3">
+    <div className="mb-2 flex flex-wrap items-baseline gap-3">
+      <h2 id={id} className="mr-auto text-sm font-semibold">
+        {title}
+      </h2>
+      {legend}
+    </div>
+    {children}
+  </section>
 );
 
 /** The report itself, apart from fetching it. */
@@ -123,7 +144,7 @@ export const UsageView = ({ report, today }: { report: UsageReport; today: Date 
   const { spend, savings, rates } = report;
   return (
     <>
-      <section aria-label="Totals" className="mb-4 flex flex-wrap gap-2">
+      <dl aria-label="Totals" className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile label="Paid" value={formatUsd(spend.meteredUsd)} note="metered usage, in real dollars" />
         <Tile label="On plan" value={formatUsd(spend.subscriptionUsd)} note="subscription usage, valued at API prices" />
         <Tile
@@ -140,11 +161,14 @@ export const UsageView = ({ report, today }: { report: UsageReport; today: Date 
           value={percent(rates.overridden, rates.tasks)}
           note={`${rates.overridden} of ${rates.tasks} tasks; ${rates.escalated} escalated (${percent(rates.escalated, rates.tasks)})`}
         />
-      </section>
+      </dl>
       {report.quotas.length > 0 && (
-        <section aria-label="Subscription windows" className="mb-4 text-xs text-muted">
+        <section aria-label="Subscription windows" className="mb-4 flex flex-col gap-1 text-xs text-muted">
           {report.quotas.map((q) => (
-            <p key={q.harness}>{describeQuota(q, resetTime)}</p>
+            <p key={q.harness} className="flex items-center gap-2">
+              <span aria-hidden className="size-1.5 rounded-full bg-muted" />
+              {describeQuota(q, resetTime)}
+            </p>
           ))}
         </section>
       )}
@@ -166,29 +190,27 @@ const SpendChart = ({ days }: { days: readonly { day: string; meteredUsd: number
   const height = (usd: number) => (usd > 0 ? `max(2px, ${(usd / max) * 100}%)` : "0");
   const tick = Math.max(1, Math.ceil(days.length / 8));
   return (
-    <section aria-labelledby="spend-per-day" className="mb-5">
-      <div className="mb-1 flex flex-wrap items-baseline gap-3">
-        <h2 id="spend-per-day" className="mr-auto text-sm font-bold">
-          Spend per day
-        </h2>
-        {series.map((s) => (
-          <span key={s.key} className="flex items-center gap-1 text-xs text-muted">
-            <span aria-hidden className={`inline-block size-2.5 rounded-sm ${s.className}`} />
-            {s.label}
-          </span>
-        ))}
-      </div>
+    <Panel
+      id="spend-per-day"
+      title="Spend per day"
+      legend={series.map((s) => (
+        <span key={s.key} className="flex items-center gap-1.5 text-xs text-muted">
+          <span aria-hidden className={`inline-block size-2.5 rounded-sm ${s.className}`} />
+          {s.label}
+        </span>
+      ))}
+    >
       {days.length === 0 ? (
         <p className="text-xs text-muted">No usage in this period.</p>
       ) : (
         <>
-          <div className="text-xs text-muted">{formatUsd(max)}</div>
-          <div aria-hidden className="flex h-36 items-end gap-[2px] border-t border-b border-line border-t-line/50">
+          <div className="text-xs text-muted tabular-nums">{formatUsd(max)}</div>
+          <div aria-hidden className="flex h-40 items-end gap-[2px] border-y border-line border-b-line-strong [border-top-style:dashed]">
             {days.map((d) => (
               <div
                 key={d.day}
                 title={`${dayLabel(d.day)}: ${formatUsd(d.meteredUsd)} paid, ${formatUsd(d.subscriptionUsd)} on plan`}
-                className="flex h-full min-w-0 flex-1 items-end justify-center gap-[2px] hover:bg-line/40"
+                className="flex h-full min-w-0 flex-1 items-end justify-center gap-[2px] hover:bg-hover"
               >
                 {series.map((s) => (
                   <div key={s.key} className={`w-full max-w-3 rounded-t ${s.className}`} style={{ height: height(d[s.key]) }} />
@@ -196,21 +218,21 @@ const SpendChart = ({ days }: { days: readonly { day: string; meteredUsd: number
               </div>
             ))}
           </div>
-          <div aria-hidden className="flex gap-[2px] text-xs text-muted">
+          <div aria-hidden className="mt-1 flex gap-[2px] text-xs text-muted">
             {days.map((d, i) => (
               <div key={d.day} className="min-w-0 flex-1 overflow-visible whitespace-nowrap">
                 {i % tick === 0 ? dayLabel(d.day) : ""}
               </div>
             ))}
           </div>
-          <details className="mt-1 text-xs">
+          <details className="mt-2 text-xs">
             <summary className="cursor-pointer text-muted">Table</summary>
-            <table className="mt-1">
+            <table className="mt-1 tabular-nums">
               <thead>
                 <tr className="text-left text-muted">
                   <th className="pr-4 font-normal">Day</th>
                   <th className="pr-4 text-right font-normal">Paid</th>
-                  <th className="text-right font-normal">On plan</th>
+                  <th className="px-3 text-right font-medium whitespace-nowrap">On plan</th>
                 </tr>
               </thead>
               <tbody>
@@ -218,7 +240,7 @@ const SpendChart = ({ days }: { days: readonly { day: string; meteredUsd: number
                   <tr key={d.day}>
                     <td className="pr-4">{dayLabel(d.day)}</td>
                     <td className="pr-4 text-right">{formatUsd(d.meteredUsd)}</td>
-                    <td className="text-right">{formatUsd(d.subscriptionUsd)}</td>
+                    <td className="px-3 text-right">{formatUsd(d.subscriptionUsd)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -226,46 +248,45 @@ const SpendChart = ({ days }: { days: readonly { day: string; meteredUsd: number
           </details>
         </>
       )}
-    </section>
+    </Panel>
   );
 };
 
 const ClassTable = ({ rows }: { rows: UsageReport["byClass"] }) => (
-  <section aria-labelledby="per-class" className="mb-5">
-    <h2 id="per-class" className="mb-1 text-sm font-bold">
-      Cost per completed task, by task class
-    </h2>
+  <Panel id="per-class" title="Cost per completed task, by task class">
     {rows.length === 0 ? (
       <p className="text-xs text-muted">No tasks in this period.</p>
     ) : (
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="border-b border-line text-left text-muted">
-            <th className="py-1 font-normal">Class</th>
-            <th className="text-right font-normal">Tasks</th>
-            <th className="text-right font-normal">Completed</th>
-            <th className="text-right font-normal">Paid per completed</th>
-            <th className="text-right font-normal">On plan per completed</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.taskClass ?? ""} className="border-b border-line/50">
-              <td className="py-1">{r.taskClass ?? "before routing"}</td>
-              <td className="text-right">{r.tasks}</td>
-              <td className="text-right">{r.completed}</td>
-              <td className="text-right" title={`${formatUsd(r.cost.meteredUsd)} paid over all ${r.tasks} tasks`}>
-                {perCompleted(r.cost.meteredUsd, r.completed)}
-              </td>
-              <td className="text-right" title={`${formatUsd(r.cost.subscriptionUsd)} on plan over all ${r.tasks} tasks`}>
-                {perCompleted(r.cost.subscriptionUsd, r.completed)}
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs tabular-nums">
+          <thead>
+            <tr className="border-b border-line text-left text-muted">
+              <th className="py-1.5 pr-3 font-medium">Class</th>
+              <th className="px-3 text-right font-medium whitespace-nowrap">Tasks</th>
+              <th className="px-3 text-right font-medium whitespace-nowrap">Completed</th>
+              <th className="px-3 text-right font-medium whitespace-nowrap">Paid per completed</th>
+              <th className="px-3 text-right font-medium whitespace-nowrap">On plan per completed</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.taskClass ?? ""} className="border-b border-line last:border-0">
+                <td className="py-1.5 pr-3 font-mono">{r.taskClass ?? "before routing"}</td>
+                <td className="px-3 text-right">{r.tasks}</td>
+                <td className="px-3 text-right">{r.completed}</td>
+                <td className="px-3 text-right" title={`${formatUsd(r.cost.meteredUsd)} paid over all ${r.tasks} tasks`}>
+                  {perCompleted(r.cost.meteredUsd, r.completed)}
+                </td>
+                <td className="px-3 text-right" title={`${formatUsd(r.cost.subscriptionUsd)} on plan over all ${r.tasks} tasks`}>
+                  {perCompleted(r.cost.subscriptionUsd, r.completed)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     )}
-  </section>
+  </Panel>
 );
 
 const tokensOf = (t: UsageReport["byTarget"][number]) => t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens;
@@ -274,32 +295,32 @@ const tokensOf = (t: UsageReport["byTarget"][number]) => t.inputTokens + t.outpu
 const TargetBars = ({ rows }: { rows: UsageReport["byTarget"] }) => {
   const max = Math.max(1, ...rows.map(tokensOf));
   return (
-    <section aria-labelledby="per-target" className="mb-5">
-      <h2 id="per-target" className="mb-1 text-sm font-bold">
-        Usage by model
-      </h2>
+    <Panel id="per-target" title="Usage by model">
       {rows.length === 0 ? (
         <p className="text-xs text-muted">No usage in this period.</p>
       ) : (
         <ul className="text-xs">
           {rows.map((t) => (
-            <li key={`${t.model}-${t.accessMode}`} className="grid grid-cols-[160px_1fr_200px] items-center gap-2 py-0.5">
-              <span className="truncate">
+            <li
+              key={`${t.model}-${t.accessMode}`}
+              className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 py-1 sm:grid-cols-[180px_1fr_220px]"
+            >
+              <span className="truncate font-mono">
                 {t.model} · {t.accessMode === "metered" ? "paid" : "on plan"}
               </span>
-              <span className="h-3">
+              <span className="col-span-2 row-start-2 h-2.5 sm:col-span-1 sm:col-start-2 sm:row-start-1">
                 <span
                   className={`block h-full rounded-r ${t.accessMode === "metered" ? "bg-paid" : "bg-plan"}`}
                   style={{ width: `max(2px, ${(tokensOf(t) / max) * 100}%)` }}
                 />
               </span>
-              <span className="text-right text-muted">
+              <span className="col-start-2 row-start-1 text-right text-muted tabular-nums sm:col-start-3">
                 {tokensOf(t).toLocaleString()} tokens · {formatUsd(t.costUsd)}
               </span>
             </li>
           ))}
         </ul>
       )}
-    </section>
+    </Panel>
   );
 };

@@ -26,8 +26,13 @@ createRoot(root).render(
   token ? (
     <App connection={connect(token)} />
   ) : (
-    <p className="p-6 text-muted">
-      Open Verdandi with <code>verdandi open</code>: it passes this page the token it needs.
-    </p>
+    <div className="grid h-dvh place-items-center p-6">
+      <div className="max-w-sm rounded-xl border border-line bg-card px-5 py-4">
+        <h1 className="font-mono text-sm font-semibold">verdandi</h1>
+        <p className="mt-1 text-muted">
+          Open Verdandi with <code>verdandi open</code>: it passes this page the token it needs.
+        </p>
+      </div>
+    </div>
   ),
 );
