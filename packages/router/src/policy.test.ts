@@ -28,6 +28,14 @@ test.each([
     '.verdandi/routing.yaml: routes.review.prefer: unknown target "cc-gpt"; define it under targets.',
   ],
   [
+    "routes:\n  review: { subagents: { explorer: { prefer: [cc-mini] } } }\n",
+    '.verdandi/routing.yaml: routes.review.subagents.explorer.prefer: unknown target "cc-mini"; define it under targets.',
+  ],
+  [
+    "routes:\n  review: { subagents: { tester: { prefer: [cc-haiku] } } }\n",
+    /\.verdandi\/routing\.yaml: [\s\S]*\["subagents"\]\["tester"\]/,
+  ],
+  [
     "targets:\n  cc-mini: { harness: claude-code, provider: claude-subscription, model: mini }\n",
     ".verdandi/routing.yaml: targets.cc-mini: model mini from claude-subscription on claude-code isn't in the model catalog.",
   ],

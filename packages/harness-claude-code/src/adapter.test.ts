@@ -173,6 +173,28 @@ describe("Claude Code adapter", () => {
     }
   });
 
+  test("a session starts with its route's subagents, and keeps them while it lives (ADR 0014)", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery();
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const routed: Route = { ...haikuLow, subagents: { explorer: { model: "haiku", effort: "low" } } };
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "one", U1, undefined, Stream.empty, routed))));
+      const changed: Route = { ...haikuLow, subagents: { explorer: { model: "opus", effort: "high" } } };
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "two", U2, "sess-1", Stream.empty, changed))));
+      expect(spawns).toHaveLength(1);
+      expect(spawns[0]?.options.agents).toEqual({
+        Explore: expect.objectContaining({ model: "haiku", effort: "low", tools: ["Glob", "Grep", "Read"] }),
+      });
+      expect(spawns[0]?.log).toEqual(["prompt one", "prompt two"]);
+      // Without subagent routes Claude Code keeps its own agents.
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "three", U3))));
+      expect(spawns[1]?.options.agents).toBeUndefined();
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
   test("a mode change reaches the live session before the next prompt; build restores the user's own mode", async () => {
     const home = makeTempHome();
     try {

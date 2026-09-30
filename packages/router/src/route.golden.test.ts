@@ -128,3 +128,13 @@ for (const g of PLANNED) {
     });
   }
 }
+
+test("a feature routed with an explorer on Haiku keeps its main route in every mode", () => {
+  const subagents = { explorer: { prefer: ["cc-haiku"], effort: "low" } };
+  for (const mode of ["thrifty", "balanced", "max"] as const) {
+    const policy = loadPolicy([{ source: "test", data: { mode, routes: { "code.feature": { subagents } } } }]);
+    const d = route({ text: "Implement dark mode for the settings page", mode: "build" }, policy, rules);
+    expect(`${d.target.model} ${d.effort}`).toBe({ thrifty: "sonnet low", balanced: "sonnet medium", max: "sonnet high" }[mode]);
+    expect(d.subagents).toEqual({ explorer: { model: "haiku", effort: "low" } });
+  }
+});

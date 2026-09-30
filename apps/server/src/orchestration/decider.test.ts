@@ -254,6 +254,22 @@ describe("decide", () => {
     expect(reason(decide(none, set("max")))).toBe("ThreadNotFound");
   });
 
+  test("a pin keeps the session's subagents on its harness, ignores ones the client sent, and a new harness starts without", () => {
+    const subagents = { explorer: { model: "fake-small", effort: "low" } } as const;
+    const warm: DeciderState = { thread: idle.thread && { ...idle.thread, route: { ...route, subagents } } };
+    const pin = (to: Extract<Command, { type: "thread.route.set" }>["route"]) => {
+      const [e] = events(decide(warm, { type: "thread.route.set", commandId, threadId, route: to }));
+      return e?.type === "thread.route.changed" ? e.to : undefined;
+    };
+    const other = { explorer: { model: "fake-large", effort: "high" } } as const;
+    expect(pin({ ...route, model: "fake-2", subagents: other })).toEqual({ ...route, model: "fake-2", subagents });
+    expect(pin({ harness: "claude-code", model: "opus", effort: "high", subagents: other })).toEqual({
+      harness: "claude-code",
+      model: "opus",
+      effort: "high",
+    });
+  });
+
   test("a running turn defers a model change but blocks a harness change", () => {
     const model = { type: "thread.route.set", commandId, threadId, route: { ...route, model: "fake-2" } } as const;
     expect(events(decide(running, model)).map((e) => e.type)).toEqual(["thread.route.changed"]);

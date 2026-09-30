@@ -173,3 +173,55 @@ describe("budget guards", () => {
     expect(route({ text: DEBUG, mode: "build" }, policy, rules).limits).toBeUndefined();
   });
 });
+
+describe("subagents", () => {
+  const free = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const catalog = [
+    ...builtInCatalog,
+    { harness: "fake", provider: "fake", model: "fake-small", access: "local", tier: "S", context: 200_000, price: free } as const,
+  ];
+  const withSubagents = loadPolicy(
+    [
+      {
+        source: "test",
+        data: {
+          targets: { "fake-small": { harness: "fake", provider: "fake", model: "fake-small" } },
+          routes: {
+            "code.feature": {
+              subagents: { explorer: { prefer: ["cc-haiku"], effort: "low" }, reviewer: { prefer: ["fake-small"] } },
+            },
+          },
+        },
+      },
+    ],
+    catalog,
+  );
+  const FEATURE = "Implement dark mode for the settings page";
+
+  test("a fresh session takes the policy's on the main route's harness; one with no target there keeps the harness default", () => {
+    const d = route({ text: FEATURE, mode: "build" }, withSubagents, rules);
+    expect(`${d.target.model} ${d.effort}`).toBe("sonnet medium");
+    expect(d.subagents).toEqual({ explorer: { model: "haiku", effort: "low" } });
+    expect(d.trace.find((t) => t.stage === "subagents")?.note).toBe(
+      "explorer on haiku at low; reviewer: none of fake-small is available on claude-code, so it keeps the harness default",
+    );
+  });
+
+  test("a profile without an effort takes the task's", () => {
+    const p = loadPolicy([{ source: "test", data: { routes: { "code.feature": { subagents: { reviewer: { prefer: ["cc-opus"] } } } } } }]);
+    expect(route({ text: FEATURE, mode: "build" }, p, rules).subagents).toEqual({ reviewer: { model: "opus", effort: "medium" } });
+  });
+
+  test("a warm session keeps the subagents it started with, whatever the policy says now, and so does a pin on it", () => {
+    const started = { explorer: { model: "sonnet", effort: "high" } } as const;
+    const current = { target: cc("sonnet"), effort: "medium" as const, cachedTokens: 10_000, subagents: started };
+    const d = route({ text: FEATURE, mode: "build", current }, withSubagents, rules);
+    expect(d.subagents).toEqual(started);
+    expect(d.trace.find((t) => t.stage === "subagents")?.note).toBe(
+      "kept the warm session's: explorer on sonnet at high; a session's subagents are fixed",
+    );
+    const pin = { target: cc("opus"), effort: "high" as const };
+    expect(route({ text: FEATURE, mode: "build", current, pin }, withSubagents, rules).subagents).toEqual(started);
+    expect(route({ text: FEATURE, mode: "build", pin }, withSubagents, rules).subagents).toBeUndefined();
+  });
+});

@@ -10,6 +10,7 @@ import type {
   RouteStats,
   RouteTarget,
   RuleTrace,
+  SubagentRoutes,
   Tier,
 } from "@verdandi/contracts";
 import type { ResolvedPolicy } from "./policy.ts";
@@ -24,8 +25,8 @@ export type RouteInput = {
   readonly mode: InteractionMode;
   /** The user's choice (thread pin, picker or `@model`). It always wins. */
   readonly pin?: Pinned;
-  /** The thread's warm session, and how many tokens of context it has cached. */
-  readonly current?: Pinned & { readonly cachedTokens: number };
+  /** The thread's warm session, how many tokens of context it has cached, and the subagent routes it started with. */
+  readonly current?: Pinned & { readonly cachedTokens: number; readonly subagents?: SubagentRoutes };
   /** Files the task touches beyond those its text names, matched against policy restrictions. */
   readonly paths?: readonly string[];
   /** Provider health and the share of quota left (0..1), by provider id (DESIGN §9.5). */
@@ -72,6 +73,49 @@ const resolveSpec = (rule: RouteRule, mode: BudgetMode, planning: boolean): Rout
   return { ...(prefer && { prefer }), ...(effort && { effort }) };
 };
 
+const describeSubagents = (routes: SubagentRoutes | undefined) =>
+  Object.entries(routes ?? {})
+    .map(([profile, r]) => `${profile} on ${r?.model} at ${r?.effort}`)
+    .join(", ") || "none";
+
+/**
+ * After stage 5 (DESIGN §8.2 lever 1): the task's subagent routes, on the harness of its main `target`. A warm session on that harness
+ * keeps the ones it started with, since a harness fixes its agent list for the session (and Claude Code's
+ * sits in the cached prompt); a fresh one takes the rule's, each the cheapest available target it prefers.
+ */
+const routeSubagents = (
+  input: RouteInput,
+  rule: RouteRule,
+  target: RouteTarget,
+  effort: Effort,
+  candidates: ReadonlyMap<string, CatalogEntry>,
+  cost: (t: CatalogEntry) => number,
+): { readonly subagents?: SubagentRoutes; readonly trace?: RuleTrace } => {
+  const current = input.current;
+  if (current?.target.harness === target.harness) {
+    const kept = current.subagents;
+    return {
+      ...(kept && { subagents: kept }),
+      ...((kept || rule.subagents) && {
+        trace: { stage: "subagents", note: `kept the warm session's: ${describeSubagents(kept)}; a session's subagents are fixed` },
+      }),
+    };
+  }
+  const specs = Object.entries(rule.subagents ?? {});
+  if (specs.length === 0) return {};
+  const picked: Record<string, { model: string; effort: Effort }> = {};
+  const missing: string[] = [];
+  for (const [profile, spec] of specs) {
+    const options = (spec?.prefer ?? []).flatMap((n) => candidates.get(n) ?? []).filter((t) => t.harness === target.harness);
+    const best = options.length > 0 ? options.reduce((a, b) => (cost(b) < cost(a) ? b : a)) : undefined;
+    if (best) picked[profile] = { model: best.model, effort: spec?.effort ?? effort };
+    else missing.push(`${profile}: none of ${spec?.prefer?.join(", ") || "its targets"} is available on ${target.harness}`);
+  }
+  const subagents = picked as SubagentRoutes;
+  const note = `${describeSubagents(subagents)}${missing.length > 0 ? `; ${missing.join("; ")}, so it keeps the harness default` : ""}`;
+  return { ...(Object.keys(picked).length > 0 && { subagents }), trace: { stage: "subagents", note } };
+};
+
 const dollars = (n: number) => `$${n < 0.01 ? n.toPrecision(1) : n.toFixed(2)}`;
 const kTokens = (n: number) => `${Math.round(n / 1000)}K`;
 const describe = (t: RouteTarget, effort: Effort) => `${t.model} at ${effort} effort`;
@@ -106,14 +150,21 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   if (input.pin) {
     const { target, effort } = input.pin;
     const entry = policy.catalog.find((e) => same(e, target));
+    // The policy's subagents don't apply to a pin; a warm session still keeps its own.
+    const sub = routeSubagents(input, {}, target, effort, new Map(), () => 0);
     return {
       source: "pin",
       ...classified,
       target,
       effort,
+      ...(sub.subagents && { subagents: sub.subagents }),
       ...(entry && { estimate: { tokens, cost: effectiveCost(entry, tokens, input), switchCost: 0 } }),
       reason: `You pinned ${describe(target, effort)}.`,
-      trace: [{ stage: "pin", note: `pinned ${target.harness} · ${target.model} · ${effort}; routing skipped` }, ...signalNotes],
+      trace: [
+        { stage: "pin", note: `pinned ${target.harness} · ${target.model} · ${effort}; routing skipped` },
+        ...signalNotes,
+        ...(sub.trace ? [sub.trace] : []),
+      ],
       ...limits,
     };
   }
@@ -274,12 +325,15 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   }
 
   const { harness, provider, model, access } = target;
+  const sub = routeSubagents(input, rule, target, effort, candidates, cost);
+  if (sub.trace) trace.push(sub.trace);
   return {
     source: remembered && target === pick ? "memory" : "policy",
     ...(memory && { memory }),
     ...classified,
     target: { harness, provider, model, access },
     effort,
+    ...(sub.subagents && { subagents: sub.subagents }),
     estimate: { tokens, cost: cost(target), switchCost },
     reason,
     trace,

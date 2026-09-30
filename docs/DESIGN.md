@@ -409,7 +409,7 @@ restrictions:
 fallback: { prefer: [cc-sonnet], effort: medium, max: { prefer: [cc-opus] }, maxCost: 5 }   # safe default below minConfidence; maxCost/maxTurns apply to classes that set none (§8.9)
 ```
 
-A class's route is its Balanced route. `thrifty` and `max` change only the keys they set for those modes, and `plan` does the same for tasks started in plan mode. Layers merge key by key, except `restrictions`, which add up, so a project can't lift a profile's restriction. Unknown keys are errors that name the file and the key. `effortBand`, `subagents`, `quota` and `escalation` are rejected until the features behind them land (§8.7, §8.9, M2 subagent routing).
+A class's route is its Balanced route. `thrifty` and `max` change only the keys they set for those modes, and `plan` does the same for tasks started in plan mode. Layers merge key by key, except `restrictions`, which add up, so a project can't lift a profile's restriction. Unknown keys are errors that name the file and the key. `subagents` routes a class's subagent profiles, `explorer` and `reviewer`, each to the cheapest available target it prefers on the main route's harness, at its own effort or the task's. A harness session keeps the subagents it started with, so a new policy reaches a thread at its next fresh session (ADR 0014). `effortBand`, `quota` and `escalation` are rejected until the features behind them land (§8.7, §8.9).
 
 ### 8.7 Escalation and de-escalation while a task runs
 
