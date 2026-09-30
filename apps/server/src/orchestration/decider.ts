@@ -21,7 +21,7 @@ import {
   type TurnId,
 } from "@verdandi/contracts";
 import { Result } from "effect";
-import { decideExecuteRoute, decideRoute, type RoutingContext, type RoutingThread, routeOf } from "../routing/routing.ts";
+import { decideExecuteRoute, decideRoute, type RoutingContext, type RoutingThread, routeInputs, routeOf } from "../routing/routing.ts";
 import type { SpendState } from "./spend.ts";
 
 export type PendingRequest = {
@@ -180,11 +180,12 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       ? [{ type: "decision.recorded", v: 1, threadId: c.threadId, turnId: c.turnId, ...state.decisions }]
       : [];
     if (state.thread.taskId) return accept(...recorded, turn);
-    const task = { type: "task.started", v: 1, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
+    const task = { type: "task.started", v: 2, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
     if (!state.routing) return accept(...recorded, { ...task, route: state.thread.route }, turn);
     const decided = decideRoute(state.thread, state.routing, c.text, c.mode, state.decisions?.answers ?? []);
     if (Result.isFailure(decided)) return reject(decided.failure.reason, decided.failure.message);
-    return accept(...recorded, { ...task, route: routeOf(decided.success), decision: decided.success }, turn);
+    const inputs = routeInputs(state.thread, state.routing);
+    return accept(...recorded, { ...task, route: routeOf(decided.success), decision: decided.success, inputs }, turn);
   },
   "thread.route.set": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);

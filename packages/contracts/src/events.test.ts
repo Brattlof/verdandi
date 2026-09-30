@@ -10,7 +10,7 @@ const route = { harness: "fake", model: "fake", effort: "low" } as const;
 const samples: Event[] = [
   { type: "thread.created", v: 1, threadId, projectId: "p1" as never, projectPath: "C:/Users/a b/repo", route },
   { type: "thread.route.changed", v: 1, threadId, from: route, to: { ...route, model: "fake-2" }, by: "user" },
-  { type: "task.started", v: 1, threadId, taskId: turnId as string as TaskId, route },
+  { type: "task.started", v: 2, threadId, taskId: turnId as string as TaskId, route },
   { type: "thread.archived", v: 1, threadId },
   { type: "thread.unarchived", v: 1, threadId },
   { type: "turn.started", v: 1, threadId, turnId, text: "hi" },
@@ -78,6 +78,16 @@ describe("stored events", () => {
     expect(result.message).toContain("turn.started");
     expect(result.message).toContain("v2");
     expect(result.message).toContain("newer");
+  });
+
+  test("reads a v1 task.started as v2 without router inputs, and keeps a v2 task's inputs", async () => {
+    const taskId = turnId as string as TaskId;
+    const v1 = { type: "task.started", v: 1, threadId, taskId, route } as const;
+    const read = await Effect.runPromise(decodeStoredEvent({ type: "task.started", v: 1, payload: JSON.stringify(v1) }));
+    expect(read).toEqual({ ...v1, v: 2 });
+    const inputs = { route, pinned: false, budgetMode: "thrifty", warm: true, cachedTokens: 1200, harnesses: ["fake"] } as const;
+    const v2: Event = { type: "task.started", v: 2, threadId, taskId, route, inputs };
+    expect(await roundTrip(v2)).toEqual(v2);
   });
 
   test("round-trips CRLF and unicode text", async () => {

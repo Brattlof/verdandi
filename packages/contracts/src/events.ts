@@ -4,7 +4,7 @@ import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields } from "./items.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
-import { BudgetMode, RouteDecision } from "./routing.ts";
+import { BudgetMode, RouteDecision, RouteInputs } from "./routing.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 
 // Events are append-only and must stay readable forever. To change one, add a v2 schema
@@ -37,9 +37,9 @@ export const ThreadRouteChanged = Schema.Struct({
 });
 /**
  * A task (DESIGN §7) starts with the turn `taskId` names: a thread's first turn, and the first after a route
- * change. Committed right before that turn's `turn.started`; its turns run on `route`.
+ * change. Committed right before that turn's `turn.started`; its turns run on `route`. v1 is read as v2 without `inputs`.
  */
-export const TaskStarted = Schema.Struct({
+const TaskStartedV1 = Schema.Struct({
   type: Schema.Literal("task.started"),
   v: v1,
   threadId: ThreadId,
@@ -47,6 +47,12 @@ export const TaskStarted = Schema.Struct({
   route: Route,
   /** Why the task runs on `route`: the router's pick or the user's pin. Absent on tasks from before routing. */
   decision: Schema.optionalKey(RouteDecision),
+});
+export const TaskStarted = Schema.Struct({
+  ...TaskStartedV1.fields,
+  v: Schema.Literal(2),
+  /** What the router read besides the turn's text and mode, for offline replay. Absent on v1 tasks, and when routing didn't run. */
+  inputs: Schema.optionalKey(RouteInputs),
 });
 /** The user let the router pick again: the thread's next turn starts a routed task. */
 export const ThreadRouteUnpinned = Schema.Struct({
@@ -269,6 +275,12 @@ export type StoredEvent = typeof StoredEvent.Type;
 
 export class EventDecodeError extends Data.TaggedError("EventDecodeError")<{ readonly message: string }> {}
 
+/** Published versions that are no longer current, each with its upgrade to the current one. */
+const upgrades: Record<string, (payload: string) => Effect.Effect<Event, Schema.SchemaError>> = {
+  "task.started@1": (payload) =>
+    Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TaskStartedV1))(payload), (e): Event => ({ ...e, v: 2 })),
+};
+
 const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.created@1": ThreadCreated,
   "thread.route.changed@1": ThreadRouteChanged,
@@ -277,7 +289,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "routing.memory.cleared@1": RoutingMemoryCleared,
   "thread.archived@1": ThreadArchived,
   "thread.unarchived@1": ThreadUnarchived,
-  "task.started@1": TaskStarted,
+  "task.started@2": TaskStarted,
   "turn.started@1": TurnStarted,
   "harness.session.bound@1": HarnessSessionBound,
   "turn.item.added@1": TurnItemAdded,
@@ -300,15 +312,16 @@ export type EventRow = { readonly type: string; readonly v: number; readonly pay
 export const encodeEvent = (event: Event): EventRow => ({ type: event.type, v: event.v, payload: JSON.stringify(event) });
 
 export const decodeStoredEvent = (row: EventRow): Effect.Effect<Event, EventDecodeError> => {
+  const upgrade = upgrades[`${row.type}@${row.v}`];
   const schema = byTypeAndVersion[`${row.type}@${row.v}`];
-  if (!schema) {
+  if (!schema && !upgrade) {
     return Effect.fail(
       new EventDecodeError({
         message: `Stored event ${row.type} v${row.v} is newer than this build of Verdandi understands. Update Verdandi to read this database.`,
       }),
     );
   }
-  return Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(row.payload).pipe(
-    Effect.mapError((e) => new EventDecodeError({ message: `Stored event ${row.type} v${row.v} is malformed: ${e.message}` })),
-  );
+  return (
+    upgrade ? upgrade(row.payload) : Schema.decodeUnknownEffect(Schema.fromJsonString(schema as Schema.Codec<Event, unknown>))(row.payload)
+  ).pipe(Effect.mapError((e) => new EventDecodeError({ message: `Stored event ${row.type} v${row.v} is malformed: ${e.message}` })));
 };
