@@ -1,4 +1,6 @@
 import {
+  type DecisionAnswer,
+  decisionKinds,
   describeRouteChange,
   type Event,
   type Route,
@@ -28,6 +30,10 @@ type Draft = {
   readonly usage: Map<string, Usage>;
 };
 
+/** The decision layer says a follow-up pushes back on the agent. Unsure answers take the safe default: it doesn't. */
+const corrects = (a: DecisionAnswer) =>
+  a.type === "noul" && a.kind === decisionKinds.correcting && !a.lowConfidence && a.probability >= 0.5;
+
 /**
  * Pure: the outcome of each task in a thread's events, in `seq` order, whose last turn has ended. A task
  * runs from its `task.started` to the next one; turns from before tasks existed belong to none.
@@ -35,6 +41,8 @@ type Draft = {
 export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[] => {
   const tasks: Draft[] = [];
   const plans = new Set<string>();
+  /** The task of the latest turn: a follow-up correcting the agent, recorded before its own turn starts, corrects that task. */
+  let current: Draft | undefined;
   for (const { event: e, at } of events) {
     if (e.type === "task.started") {
       tasks.push({ ...e, turns: 0, last: undefined, startedMs: 0, wallMs: 0, corrections: 0, override: undefined, usage: new Map() });
@@ -48,12 +56,16 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         if (describeRouteChange(e.from, e.to) !== "") task.override = { from: task.route, to: e.to };
         break;
       case "turn.started":
+        current = task;
         task.turns++;
         task.last = undefined;
         task.startedMs = Date.parse(at);
         break;
       case "turn.steered":
         task.corrections++;
+        break;
+      case "decision.recorded":
+        if (current && e.answers.some(corrects)) current.corrections++;
         break;
       case "plan.requested":
         plans.add(e.requestId);
@@ -86,9 +98,9 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
   }
   return tasks.flatMap((t): TaskOutcome[] => {
     if (t.last === undefined) return [];
-    // ponytail: satisfaction counts only corrections Verdandi sees (steers, interrupts, rejected plans,
-    // a route override), and status is the last turn's. Upgrade: classify follow-up turns and read
-    // verifier results once the decision layer (M2) and verifiers (M3) exist.
+    // ponytail: satisfaction counts the corrections Verdandi sees (steers, interrupts, rejected plans, a route
+    // override, follow-ups the decision layer calls corrections), and status is the last turn's. Upgrade: read
+    // verifier results once verifiers (M3) exist.
     const corrections = t.corrections + (t.override ? 1 : 0);
     return [
       {

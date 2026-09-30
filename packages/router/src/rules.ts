@@ -7,6 +7,8 @@ export type Classification = {
   readonly difficulty: number;
   /** 0..1; below the policy's `minConfidence` the router falls back to the budget mode's safe default. */
   readonly confidence: number;
+  /** Set by the decision layer, which checks confidence itself (DESIGN §9.8); it then decides the fallback instead. */
+  readonly lowConfidence?: boolean;
   /** What the classifier saw, for the trace. */
   readonly why: string;
 };

@@ -1,9 +1,25 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { BudgetMode, Catalog, HarnessId, InteractionMode, Route, RouteDecision, RouteTarget } from "@verdandi/contracts";
-import { builtInCatalog, loadPolicy, PolicyError, type ResolvedPolicy, RouterError, route, rules } from "@verdandi/router";
+import type {
+  BudgetMode,
+  Catalog,
+  DecisionAnswer,
+  HarnessId,
+  InteractionMode,
+  Route,
+  RouteDecision,
+  RouteTarget,
+} from "@verdandi/contracts";
+import { classificationOf, followUpRules, makeDecide, routingQuestions, routingRules, rulesBackend } from "@verdandi/decisions";
+import { builtInCatalog, loadPolicy, PolicyError, type ResolvedPolicy, RouterError, route, rules, signals } from "@verdandi/router";
 import { fakeCatalog } from "@verdandi/testkit";
 import { Effect, Result } from "effect";
+
+/**
+ * The decision layer verdandid runs: `rules` for every kind of question (ADR 0009). Routing classification
+ * uses the router's keyword rules, which read only the text: the mode picks a class's plan route, not its class.
+ */
+export const rulesDecide = makeDecide([rulesBackend({ ...routingRules((text) => rules(signals(text, "build"))), ...followUpRules })]);
 
 /** What routing a task needs from outside the database: the policy that applies and the harnesses that run. */
 export type RoutingContext = {
@@ -63,16 +79,26 @@ const targetOf = (r: Route, catalog: Catalog): RouteTarget => {
 
 export const routeOf = (d: RouteDecision): Route => ({ harness: d.target.harness, model: d.target.model, effort: d.effort });
 
+/** The decision layer's routing questions for a new task, at the confidence the project's policy asks for. */
+export const taskQuestions = (routing: RoutingContext) =>
+  routingQuestions(Result.getOrElse(routing.policy, () => routing.builtIn).minConfidence);
+
+/** When the answers hold no classification, the router takes its safe default. */
+const unclassified = { taskClass: "chat.general", difficulty: 0, confidence: 0, lowConfidence: true, why: "no classification" } as const;
+
 /**
- * Pure: the decision for a new task in `thread` starting with `text`. A pinned thread keeps its route
- * (DESIGN §8.4 stage 0); otherwise the router picks, with the thread's warm session for the switch-cost gate.
+ * Pure: the decision for a new task in `thread` starting with `text`, classified by the decision layer's
+ * `answers` to `taskQuestions`. A pinned thread keeps its route (DESIGN §8.4 stage 0); otherwise the
+ * router picks, with the thread's warm session for the switch-cost gate.
  */
 export const decideRoute = (
   thread: RoutingThread,
   routing: RoutingContext,
   text: string,
   mode: InteractionMode,
+  answers: readonly DecisionAnswer[],
 ): Result.Result<RouteDecision, RoutingFailure> => {
+  const classification = classificationOf(answers) ?? unclassified;
   if (Result.isFailure(routing.policy) && !thread.pinned) return Result.fail({ reason: "InvalidPolicy", message: routing.policy.failure });
   const layered = Result.getOrElse(routing.policy, () => routing.builtIn);
   const policy = thread.budgetMode ? { ...layered, mode: thread.budgetMode } : layered;
@@ -88,7 +114,7 @@ export const decideRoute = (
           ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens } }),
         },
         policy,
-        rules,
+        () => classification,
       ),
     );
   } catch (e) {

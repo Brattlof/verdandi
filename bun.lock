@@ -20,6 +20,7 @@
         "@effect/platform-bun": "4.0.0-rc.115",
         "@effect/sql-sqlite-bun": "4.0.0-rc.115",
         "@verdandi/contracts": "workspace:*",
+        "@verdandi/decisions": "workspace:*",
         "@verdandi/harness-claude-code": "workspace:*",
         "@verdandi/router": "workspace:*",
         "@verdandi/testkit": "workspace:*",
@@ -47,6 +48,13 @@
     "packages/contracts": {
       "name": "@verdandi/contracts",
       "dependencies": {
+        "effect": "4.0.0-rc.115",
+      },
+    },
+    "packages/decisions": {
+      "name": "@verdandi/decisions",
+      "dependencies": {
+        "@verdandi/contracts": "workspace:*",
         "effect": "4.0.0-rc.115",
       },
     },
@@ -229,6 +237,8 @@
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
 
     "@verdandi/contracts": ["@verdandi/contracts@workspace:packages/contracts"],
+
+    "@verdandi/decisions": ["@verdandi/decisions@workspace:packages/decisions"],
 
     "@verdandi/harness-claude-code": ["@verdandi/harness-claude-code@workspace:packages/harness-claude-code"],
 

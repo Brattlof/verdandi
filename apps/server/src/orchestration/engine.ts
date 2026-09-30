@@ -12,9 +12,10 @@ import {
   type ThreadId,
   type TurnId,
 } from "@verdandi/contracts";
+import { correctingQuestion, type Decide } from "@verdandi/decisions";
 import { Context, Effect, Layer, PubSub, Result, Stream } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
-import type { RoutingContext } from "../routing/routing.ts";
+import { type RoutingContext, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { decide } from "./decider.ts";
 import { loadDeciderState, loadProjects, loadQuotas, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
 
@@ -55,6 +56,8 @@ export type EngineOptions = {
   readonly project?: Projector;
   /** Loads what routing a new task needs for a project. Without it tasks keep the thread's route, unexplained. */
   readonly routing?: (projectPath: string) => Effect.Effect<RoutingContext>;
+  /** The decision layer that classifies new tasks and judges follow-ups. Defaults to `rules`. */
+  readonly decide?: Decide["Service"];
 };
 
 export const EngineLive = (options: EngineOptions = {}) =>
@@ -66,6 +69,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
       const changes = yield* PubSub.unbounded<ProjectsChange>();
       const reactions: Reaction[] = [];
       const projectOne = options.project ?? project;
+      const decider = options.decide ?? rulesDecide;
 
       const append = (command: Command, event: Event) =>
         Effect.gen(function* () {
@@ -92,12 +96,18 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 published: [] as ProjectsChange[],
               };
             const state = yield* loadDeciderState(command.threadId);
-            // Routing reads the project's policy file, so only when this command may start a task.
-            const starts = command.type === "turn.send" && state.thread?.taskId === null && options.routing;
-            const decision = decide(
-              starts && state.thread ? { ...state, routing: yield* starts(state.thread.projectPath) } : state,
-              command,
-            );
+            const current = state.thread;
+            const send = command.type === "turn.send" && current?.runningTurnId === null ? command : undefined;
+            // Routing reads the project's policy file, so only when this command starts a task.
+            const routing = send && current?.taskId === null && options.routing ? yield* options.routing(current.projectPath) : undefined;
+            // A new task is classified, and a later turn is asked whether it corrects the agent's last answer.
+            const questions = send ? [...(routing ? taskQuestions(routing) : []), ...(current?.turns ? [correctingQuestion] : [])] : [];
+            // ponytail: asked inside the write transaction, which is free on `rules`; ask before it once a backend takes real time (ADR 0009).
+            const decisions =
+              send && questions.length > 0
+                ? { questions, answers: (yield* decider.decide({ state: send.text, questions })).answers }
+                : undefined;
+            const decision = decide({ ...state, ...(routing && { routing }), ...(decisions && { decisions }) }, command);
             if (Result.isFailure(decision)) return yield* Effect.fail(decision.failure);
             const stored = yield* Effect.forEach(decision.success, (event) => append(command, event));
             const [last] = yield* sql<{ seq: number }>`select coalesce(max(seq), 0) as seq from events`;

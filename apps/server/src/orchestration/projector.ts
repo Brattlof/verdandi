@@ -121,6 +121,17 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         sql`update requests set resolution = ${JSON.stringify(e.resolution)}, reason = ${e.reason ?? null}, resolved_at = ${at}
             where id = ${e.requestId}`,
     ),
+  "decision.recorded": (e, at, seq) =>
+    withSql((sql) =>
+      Effect.forEach(
+        e.answers,
+        (a, idx) =>
+          sql`insert into decisions (seq, idx, thread_id, turn_id, kind, question, answer, confidence, low_confidence, backend, decided_at)
+            values (${seq}, ${idx}, ${e.threadId}, ${e.turnId}, ${a.kind}, ${JSON.stringify(e.questions[idx] ?? null)}, ${JSON.stringify(a)},
+              ${a.confidence}, ${a.lowConfidence ? 1 : 0}, ${a.backend}, ${at})`,
+        { discard: true },
+      ),
+    ),
   "turn.completed": (e, at) =>
     withSql((sql) =>
       Effect.andThen(
@@ -145,9 +156,11 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         task_id: TaskId | null;
         pinned: number;
         budget_mode: BudgetMode | null;
+        turns: number;
         cached_tokens: number;
       }>`
         select p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned, t.budget_mode,
+          (select count(*) from turns n where n.thread_id = t.id) as turns,
           -- ponytail: the context a warm session has cached, read as every token the thread wrote to cache. Harnesses
           -- report usage summed over a turn's model calls, not the context size; upgrade once one reports that.
           (select coalesce(sum(u.cache_write_tokens), 0) from usage_ledger u join turns n on n.id = u.turn_id where n.thread_id = t.id)
@@ -163,6 +176,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           runningTurnId: row.running_turn_id,
           sessionId: row.session_id,
           taskId: row.task_id,
+          turns: row.turns,
           pinned: row.pinned === 1,
           budgetMode: row.budget_mode,
           cachedTokens: row.cached_tokens,

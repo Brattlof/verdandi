@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import {
   type Command,
   CommandRejected,
+  type DecisionAnswer,
+  type DecisionQuestion,
   defaultRoute,
   type Event,
   type HarnessEvent,
@@ -24,11 +26,15 @@ export type DeciderState = {
         readonly runningTurnId: string | null;
         /** The task the next turn continues; null before the first turn and after a route change. */
         readonly taskId: TaskId | null;
+        /** How many turns the thread has had. */
+        readonly turns: number;
         readonly pendingRequests: readonly PendingRequest[];
       })
     | undefined;
   /** Loaded only when a `turn.send` starts a task. Without it the task keeps the thread's route, unexplained. */
   readonly routing?: RoutingContext;
+  /** The decision layer's answers about a `turn.send`'s text, asked by the engine: recorded, and routing reads them. */
+  readonly decisions?: { readonly questions: readonly DecisionQuestion[]; readonly answers: readonly DecisionAnswer[] };
 };
 
 type Decision = Result.Result<Event[], CommandRejected>;
@@ -108,12 +114,16 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     if (state.thread.runningTurnId) return reject("ThreadBusy", "A turn is already running in this thread. Wait for it to finish.");
     const turn: Event = { type: "turn.started", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text, mode: c.mode };
-    if (state.thread.taskId) return accept(turn);
+    // First: the reactor starts the turn on turn.started, and a later event of this commit could reach feeds after the turn ends.
+    const recorded: Event[] = state.decisions
+      ? [{ type: "decision.recorded", v: 1, threadId: c.threadId, turnId: c.turnId, ...state.decisions }]
+      : [];
+    if (state.thread.taskId) return accept(...recorded, turn);
     const task = { type: "task.started", v: 1, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
-    if (!state.routing) return accept({ ...task, route: state.thread.route }, turn);
-    const decided = decideRoute(state.thread, state.routing, c.text, c.mode);
+    if (!state.routing) return accept(...recorded, { ...task, route: state.thread.route }, turn);
+    const decided = decideRoute(state.thread, state.routing, c.text, c.mode, state.decisions?.answers ?? []);
     if (Result.isFailure(decided)) return reject(decided.failure.reason, decided.failure.message);
-    return accept({ ...task, route: routeOf(decided.success), decision: decided.success }, turn);
+    return accept(...recorded, { ...task, route: routeOf(decided.success), decision: decided.success }, turn);
   },
   "thread.route.set": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);

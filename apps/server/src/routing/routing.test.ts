@@ -274,3 +274,51 @@ fallback: { prefer: [small], effort: low }
     expect(v?.task?.source).toBe("pin");
   });
 });
+
+describe("the decision layer", () => {
+  type Logged = { turn_id: string; kind: string; backend: string; low_confidence: number; answer: string };
+  const logged = Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) => sql<Logged>`select turn_id, kind, backend, low_confidence, answer from decisions order by seq, idx`,
+  );
+
+  test("classifies each routed task and logs it, and a follow-up it calls a correction lowers the task's satisfaction", async () => {
+    const { projectPath, run } = setup();
+    const first = id<TurnId>();
+    const second = id<TurnId>();
+    const { rows, outcome } = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath));
+        yield* dispatch(send(SEARCH, first));
+        yield* drain;
+        yield* dispatch(send("No, that's not what I asked for", second));
+        yield* drain;
+        const [row] = yield* (yield* SqlClient.SqlClient)<{ payload: string }>`select payload from task_outcomes`;
+        return { rows: yield* logged, outcome: JSON.parse(row?.payload ?? "{}") as TaskOutcome };
+      }),
+    );
+    expect(rows.map((r) => [r.turn_id, r.kind, r.backend, r.low_confidence])).toEqual([
+      [first, "routing.task-class", "rules", 0],
+      [first, "routing.difficulty", "rules", 0],
+      [second, "follow-up.correcting", "rules", 0],
+    ]);
+    expect(JSON.parse(rows[0]?.answer ?? "{}")).toMatchObject({ type: "choice", answer: "ask.search" });
+    expect(outcome.implicitSatisfaction).toBe(0);
+  });
+
+  test("a low-confidence classification takes the budget mode's safe default", async () => {
+    const { projectPath, fake, run } = setup(`${policy}fallback: { prefer: [large], effort: medium }\n`);
+    const { v, rows } = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath));
+        // "refactor" hints at a small edit and a large refactor alike.
+        yield* dispatch(send("Refactor the parser"));
+        yield* drain;
+        return { v: yield* view, rows: yield* logged };
+      }),
+    );
+    expect(rows[0]).toMatchObject({ kind: "routing.task-class", low_confidence: 1 });
+    expect(v?.task?.reason).toStartWith("Not sure what kind of task this is");
+    expect(fake.calls.map((c) => c.route)).toEqual([{ harness: "fake", model: "fake-large", effort: "medium" }]);
+  });
+});

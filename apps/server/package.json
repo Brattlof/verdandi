@@ -11,7 +11,8 @@
     "@verdandi/testkit": "workspace:*",
     "@verdandi/trajectories": "workspace:*",
     "@verdandi/web": "workspace:*",
-    "@verdandi/router": "workspace:*"
+    "@verdandi/router": "workspace:*",
+    "@verdandi/decisions": "workspace:*"
   },
   "bin": {
     "verdandi": "./src/bin.ts"
