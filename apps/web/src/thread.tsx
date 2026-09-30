@@ -1,9 +1,10 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { InteractionMode, Item, ThreadId, TurnView } from "@verdandi/contracts";
-import { memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { InteractionMode, Item, ThreadId, TurnId, TurnView } from "@verdandi/contracts";
+import { memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
 import { type Connection, createStore, useStore } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
-import { applyThreadFeed, type LiveThread, type LiveTurn } from "./state.ts";
+import { SidePanel } from "./diff.tsx";
+import { applyDiffPanel, applyThreadFeed, closedPanel, type LiveThread, type LiveTurn } from "./state.ts";
 
 export const ThreadPane = ({ connection, threadId }: { connection: Connection; threadId: ThreadId }) => {
   const [store] = useState(() => createStore<LiveThread | undefined>(undefined));
@@ -20,34 +21,66 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
   const thread = useStore(store);
   // Chosen per turn, like `verdandi chat`: the thread's last mode, until the user picks another.
   const [mode, setMode] = useState<InteractionMode>();
+  const [panel, setPanel] = useReducer(applyDiffPanel, closedPanel);
+  // Diffs are fetched only when asked for: opening the panel, switching what it shows, or Refresh.
+  const fetchDiff = useCallback(
+    (turnId: TurnId | undefined, all: boolean) => {
+      const request = crypto.randomUUID();
+      setPanel({ type: "fetch", turnId, all, request });
+      void connection.diff(threadId, all ? undefined : turnId).then((result) => setPanel({ type: "result", request, result }));
+    },
+    [connection, threadId],
+  );
+  const showTurnDiff = useCallback((turnId: TurnId) => fetchDiff(turnId, false), [fetchDiff]);
   if (error) return <p role="alert">{error}</p>;
   if (!thread) return null;
   const { harness, model, effort } = thread.route;
   const last = thread.turns.at(-1);
+  const lastFinished = thread.turns.findLast((t) => t.status !== "running");
+  const turnIndex = panel.open ? thread.turns.findIndex((t) => t.turnId === panel.turnId) : -1;
   return (
-    <>
-      <header className="thread-header">
-        <span title={thread.projectPath}>{thread.projectPath}</span>
-        <span className="chip">
-          {harness} · {model} · {effort}
-        </span>
-      </header>
-      <Conversation turns={thread.turns} />
-      <Requests connection={connection} threadId={threadId} requests={thread.pendingRequests} onPlanApproved={() => setMode("build")} />
-      <Composer connection={connection} thread={thread} mode={mode ?? last?.mode ?? "build"} onMode={setMode} />
-      <div role="status" className="sr-only">
-        {thread.pendingRequests.length > 0
-          ? "The agent is waiting for your answer."
-          : last && last.status !== "running"
-            ? `Turn ${statusText[last.status].toLowerCase()}.`
-            : ""}
+    <div className="thread">
+      <div className="thread-column">
+        <header className="thread-header">
+          <span title={thread.projectPath}>{thread.projectPath}</span>
+          <span className="header-end">
+            <span className="chip">
+              {harness} · {model} · {effort}
+            </span>
+            <button
+              type="button"
+              aria-pressed={panel.open}
+              onClick={() => (panel.open ? setPanel({ type: "close" }) : fetchDiff(lastFinished?.turnId, true))}
+            >
+              Diff
+            </button>
+          </span>
+        </header>
+        <Conversation turns={thread.turns} onChanges={showTurnDiff} />
+        <Requests connection={connection} threadId={threadId} requests={thread.pendingRequests} onPlanApproved={() => setMode("build")} />
+        <Composer connection={connection} thread={thread} mode={mode ?? last?.mode ?? "build"} onMode={setMode} />
+        <div role="status" className="sr-only">
+          {thread.pendingRequests.length > 0
+            ? "The agent is waiting for your answer."
+            : last && last.status !== "running"
+              ? `Turn ${statusText[last.status].toLowerCase()}.`
+              : ""}
+        </div>
       </div>
-    </>
+      {panel.open && (
+        <SidePanel
+          panel={panel}
+          turnLabel={turnIndex >= 0 ? `Turn ${turnIndex + 1}` : undefined}
+          onFetch={fetchDiff}
+          onClose={() => setPanel({ type: "close" })}
+        />
+      )}
+    </div>
   );
 };
 
 /** Only the turns in view are rendered. The list follows new output while scrolled to the bottom. */
-const Conversation = ({ turns }: { turns: readonly LiveTurn[] }) => {
+const Conversation = ({ turns, onChanges }: { turns: readonly LiveTurn[]; onChanges: (turnId: TurnId) => void }) => {
   const scroller = useRef<HTMLElement>(null);
   const atBottom = useRef(true);
   const virtualizer = useVirtualizer({
@@ -87,7 +120,7 @@ const Conversation = ({ turns }: { turns: readonly LiveTurn[] }) => {
                 className="row"
                 style={{ transform: `translateY(${row.start}px)` }}
               >
-                <Turn turn={turn} />
+                <Turn turn={turn} onChanges={onChanges} />
               </div>
             )
           );
@@ -99,7 +132,7 @@ const Conversation = ({ turns }: { turns: readonly LiveTurn[] }) => {
 
 const statusText: Record<LiveTurn["status"], string> = { running: "Working", success: "Done", error: "Failed", interrupted: "Stopped" };
 
-const Turn = memo(({ turn }: { turn: LiveTurn }) => (
+const Turn = memo(({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => (
   <article className="turn">
     <div className="user">
       <span className="who">You{turn.mode === "build" ? "" : ` · ${turn.mode}`}</span>
@@ -107,13 +140,18 @@ const Turn = memo(({ turn }: { turn: LiveTurn }) => (
     </div>
     <Items items={turn.items} />
     {turn.streaming && <p className="assistant">{turn.streaming}</p>}
-    <TurnStatus turn={turn} />
+    <TurnStatus turn={turn} onChanges={onChanges} />
   </article>
 ));
 
-const TurnStatus = ({ turn }: { turn: LiveTurn }) => (
+const TurnStatus = ({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => (
   <footer className="turn-status">
     <span className={`status ${turn.status}`}>{statusText[turn.status]}</span>
+    {turn.status !== "running" && (
+      <button type="button" className="link" onClick={() => onChanges(turn.turnId)}>
+        Changes
+      </button>
+    )}
     {turn.error && <span className="error">{turn.error}</span>}
     {turn.usage.map((u) => (
       <span key={u.model} title={`cache read ${u.cacheReadTokens} · cache write ${u.cacheWriteTokens} tokens`}>

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Event, ProjectId, ThreadFeed, ThreadId, ThreadSummary, TurnId } from "@verdandi/contracts";
-import { applyProjectsFeed, applyThreadFeed, type LiveThread } from "./state.ts";
+import { applyDiffPanel, applyProjectsFeed, applyThreadFeed, closedPanel, type DiffPanelAction, type LiveThread } from "./state.ts";
 
 const threadId = "thread-1" as ThreadId;
 const turnId = "turn-1" as TurnId;
@@ -107,4 +107,36 @@ test("the projects feed adds new threads on top and moves a changed thread up", 
   });
   expect(sidebar?.threads.map((t) => t.threadId as string)).toEqual(["c", "a", "b"]);
   expect(sidebar?.projects.map((p) => p.path)).toEqual(["/repo", "/other"]);
+});
+
+test("the diff panel shows the latest fetch's result, drops stale ones, and closes", () => {
+  const view = { files: [{ path: "a.txt", diff: "+x\n", truncated: false }], omittedFiles: 0 };
+  const panel = (actions: DiffPanelAction[]) => actions.reduce(applyDiffPanel, closedPanel);
+
+  const turn = panel([
+    { type: "fetch", turnId, all: false, request: "r1" },
+    { type: "result", request: "r1", result: { ok: true, view } },
+  ]);
+  expect(turn).toMatchObject({ open: true, turnId, all: false, result: { ok: true, view } });
+
+  // Switching to the whole project while the turn's diff is in flight: the turn's answer is dropped.
+  const switched = panel([
+    { type: "fetch", turnId, all: false, request: "r1" },
+    { type: "fetch", turnId, all: true, request: "r2" },
+    { type: "result", request: "r1", result: { ok: true, view } },
+  ]);
+  expect(switched).toMatchObject({ open: true, turnId, all: true, result: undefined });
+
+  const failed = applyDiffPanel(switched, { type: "result", request: "r2", result: { ok: false, message: "Run git init." } });
+  expect(failed).toMatchObject({ all: true, result: { ok: false, message: "Run git init." } });
+
+  // Without a turn there is only the whole project; a result after closing is dropped.
+  expect(panel([{ type: "fetch", turnId: undefined, all: false, request: "r3" }])).toMatchObject({ all: true });
+  expect(
+    panel([
+      { type: "fetch", turnId, all: false, request: "r4" },
+      { type: "close" },
+      { type: "result", request: "r4", result: { ok: true, view } },
+    ]),
+  ).toEqual(closedPanel);
 });

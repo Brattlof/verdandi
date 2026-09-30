@@ -1,4 +1,5 @@
 import type {
+  DiffView,
   Event,
   Item,
   ProjectSummary,
@@ -94,4 +95,40 @@ export const applyProjectsFeed = (sidebar: Sidebar | undefined, feed: ProjectsFe
     (a, b) => Number(b.lastActivityAt > a.lastActivityAt) - Number(b.lastActivityAt < a.lastActivityAt),
   );
   return { projects, threads };
+};
+
+/**
+ * The right panel. Open, it shows a diff: the files `turnId` touched, or with `all` the whole project
+ * against `HEAD`. `turnId` is kept while `all` is on, so switching back shows the same turn. Each fetch
+ * has its own `request`, and a result for any other request is dropped, so a slow answer never
+ * replaces a newer one.
+ */
+export type DiffPanel =
+  | { readonly open: false }
+  | {
+      readonly open: true;
+      readonly turnId: TurnId | undefined;
+      readonly all: boolean;
+      readonly request: string;
+      readonly result: { readonly ok: true; readonly view: DiffView } | { readonly ok: false; readonly message: string } | undefined;
+    };
+
+export type DiffPanelAction =
+  | { readonly type: "fetch"; readonly turnId: TurnId | undefined; readonly all: boolean; readonly request: string }
+  | { readonly type: "result"; readonly request: string; readonly result: NonNullable<Extract<DiffPanel, { open: true }>["result"]> }
+  | { readonly type: "close" };
+
+export const closedPanel: DiffPanel = { open: false };
+
+export const applyDiffPanel = (panel: DiffPanel, action: DiffPanelAction): DiffPanel => {
+  if (action.type === "close") return closedPanel;
+  if (action.type === "fetch")
+    return {
+      open: true,
+      turnId: action.turnId,
+      all: action.all || action.turnId === undefined,
+      request: action.request,
+      result: undefined,
+    };
+  return panel.open && panel.request === action.request ? { ...panel, result: action.result } : panel;
 };

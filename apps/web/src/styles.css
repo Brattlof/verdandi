@@ -9,6 +9,8 @@
   --accent: light-dark(#2f5fd0, #86a8ff);
   --error: light-dark(#b3261e, #ff8a80);
   --user: light-dark(#e9eefb, #243049);
+  --added: light-dark(#e3f4e6, #1c3322);
+  --removed: light-dark(#fbe7e6, #3d2222);
   font:
     14px / 1.5 system-ui,
     sans-serif;
@@ -174,11 +176,38 @@ input[type="text"] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.header-end {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.header-end button {
+  padding: 0 8px;
+  font-size: 12px;
+}
+button.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+}
 .chip {
   padding: 0 8px;
   border: 1px solid var(--border);
   border-radius: 10px;
   font-size: 12px;
+}
+.thread {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.thread-column {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
 }
 .conversation {
   flex: 1;
@@ -306,4 +335,77 @@ input[type="text"] {
 }
 .modes .muted {
   font-size: 12px;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  width: min(50%, 760px);
+  min-width: 0;
+  border-left: 1px solid var(--border);
+}
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-header button {
+  padding: 0 8px;
+  font-size: 12px;
+}
+.panel-header [role="tab"][aria-selected="true"] {
+  border-color: var(--accent);
+}
+.panel-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.panel-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px 0;
+}
+.panel-body > [role="status"] {
+  margin: 4px 8px;
+  font-size: 12px;
+}
+.diff {
+  flex: 1;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.diff .row {
+  padding: 0 8px;
+}
+.diff .diff-file {
+  padding-top: 8px;
+}
+.diff-file button {
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  font-weight: 600;
+}
+.diff-meta,
+.diff-hunk,
+.diff-note {
+  color: var(--muted);
+}
+.diff-note {
+  font-family: system-ui, sans-serif;
+  font-style: italic;
+}
+.diff-add {
+  background: var(--added);
+}
+.diff-del {
+  background: var(--removed);
 }
