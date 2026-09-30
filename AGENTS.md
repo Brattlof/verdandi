@@ -180,7 +180,7 @@ Not built yet: the router and decision layer, checkpoints, worktrees, memory, sk
 ## Where code lives
 
 - **Now:**
-  - `apps/server`: verdandid and the `verdandi` CLI (`start`, `open`, `chat`). `src/orchestration` holds the decider, projector, engine and reactor; `src/rpc` the WebSocket API; `src/persistence` SQLite and migrations; `src/config` the Verdandi home and flags;
+  - `apps/server`: verdandid and the `verdandi` CLI (`start`, `open`, `chat`, `doctor`). `src/orchestration` holds the decider, projector, engine and reactor; `src/rpc` the WebSocket API; `src/persistence` SQLite and migrations; `src/config` the Verdandi home and flags;
   - `apps/web`: the web UI (React). `src/state.ts` folds feed messages into what the page shows; the rest is components and the RPC connection;
   - `packages/contracts`: every schema sent over the wire or persisted (commands, events, RPC, harness contract, routes);
   - `packages/harness-claude-code`: the Claude Code adapter and event normalization. `src/smoke.ts` is a manual live check, never run in tests;

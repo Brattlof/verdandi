@@ -3,17 +3,8 @@ import { type HarnessAdapter, HarnessError, type HarnessId } from "@verdandi/con
 import { findClaude, makeClaudeCodeAdapter } from "@verdandi/harness-claude-code";
 import { makeFakeHarness } from "@verdandi/testkit";
 import { Effect, ManagedRuntime, Stream } from "effect";
-import { flag, resolveHome, type ServerFile, serverFile } from "./config/home.ts";
+import { alive, flag, resolveHome, type ServerFile, serverFile } from "./config/home.ts";
 import { ServerInfo, ServerLayer } from "./rpc/server.ts";
-
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0); // signal 0 only checks that the process exists
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 const claudeMissing: HarnessAdapter = {
   id: "claude-code",
