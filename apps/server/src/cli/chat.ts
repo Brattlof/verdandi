@@ -173,7 +173,7 @@ export const chat = async (argv: readonly string[]) => {
           if (f.kind === "delta") process.stdout.write(f.text);
           if (f.kind !== "event") return;
           const e = f.stored.event;
-          if (e.type === "task.started" && e.decision?.source === "policy") {
+          if (e.type === "task.started" && e.decision && e.decision.source !== "pin") {
             process.stdout.write(`[routed to ${e.route.model} ${e.route.effort} on ${e.route.harness}: ${e.decision.reason}]\n`);
           }
           if (e.type === "task.rerouted") {
@@ -298,7 +298,7 @@ export const chat = async (argv: readonly string[]) => {
         ? `${harness} ${model} ${effort} (routed; --model or --effort pins a route)`
         : "the route the router picks for the next task";
   process.stdout.write(
-    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; Ctrl+C stops a turn; /exit quits.\n`,
+    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /forget-routing clears what the router learned from this project's tasks; Ctrl+C stops a turn; /exit quits.\n`,
   );
   if (changed) process.stdout.write(change ? `Route changed: ${change}\n` : `Route pinned: ${harness} ${model} ${effort}\n`);
   if (unpinned) process.stdout.write("Route unpinned: the router picks the next task's route.\n");
@@ -321,7 +321,11 @@ export const chat = async (argv: readonly string[]) => {
     const switchTo = modeCommands.get(text);
     if (request) await answer(request, text);
     else if (text === "/exit") break;
-    else if (text === "/diff" || text === "/diff all") {
+    else if (text === "/forget-routing") {
+      if (await dispatch({ type: "routing.memory.clear", commandId: uuid<CommandId>(), threadId }))
+        process.stdout.write("[routing memory cleared: this project's next routed tasks go by the policy alone]\n");
+      if (!running) prompt();
+    } else if (text === "/diff" || text === "/diff all") {
       await showDiff(text === "/diff all", thread.projectPath);
       if (!running) prompt();
     } else if (switchTo) {

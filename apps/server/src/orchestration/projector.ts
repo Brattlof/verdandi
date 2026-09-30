@@ -79,6 +79,13 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
             values (${e.taskId}, ${e.decision.source}, ${e.decision.taskClass}, ${e.decision.reason}, ${JSON.stringify(e.decision)}, ${at})`;
       }),
     ),
+  // Tasks started at or before `seq` no longer count toward the project's routing memory.
+  "routing.memory.cleared": (e, at, seq) =>
+    withSql(
+      (sql) =>
+        sql`insert into routing_memory (project_id, cleared_seq, cleared_at) values (${e.projectId}, ${seq}, ${at})
+            on conflict (project_id) do update set cleared_seq = excluded.cleared_seq, cleared_at = excluded.cleared_at`,
+    ),
   "thread.route.unpinned": (e) => withSql((sql) => sql`update threads set pinned = 0, task_id = null where id = ${e.threadId}`),
   // A routed thread's task ends, so the next turn is routed under the new mode; a pinned thread's task keeps its pin.
   "thread.budget.changed": (e) =>
@@ -169,6 +176,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
   withSql((sql) =>
     Effect.gen(function* () {
       const [row] = yield* sql<{
+        project_id: ProjectId;
         path: string;
         route: string;
         running_turn_id: string | null;
@@ -181,7 +189,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         task_mode: string | null;
         cached_tokens: number;
       }>`
-        select p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned, t.budget_mode,
+        select t.project_id, p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned, t.budget_mode,
           (select count(*) from turns n where n.thread_id = t.id) as turns,
           (select payload from route_decisions where task_id = t.task_id) as task_decision,
           (select mode from turns where id = t.task_id) as task_mode,
@@ -196,6 +204,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         from requests where thread_id = ${threadId} and resolution is null`;
       return {
         thread: {
+          projectId: row.project_id,
           projectPath: row.path,
           route: JSON.parse(row.route) as Route,
           runningTurnId: row.running_turn_id,

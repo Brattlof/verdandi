@@ -372,6 +372,7 @@ Defaults differ between models, so **the router always sets effort explicitly**.
 mode: balanced                       # thrifty | balanced | max
 classifier: rules                    # rules | decision | api | learned
 minConfidence: 0.6
+memory: { minTasks: 5, minShare: 0.5 }   # routing memory (§8.8) acts once 5 tasks of a class ran on a route and half were moved or failed
 
 targets:                             # named targets used below
   cc-haiku:   { harness: claude-code, provider: claude-subscription, model: haiku }

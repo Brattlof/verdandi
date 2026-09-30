@@ -64,6 +64,13 @@ export const ThreadBudgetChanged = Schema.Struct({
   threadId: ThreadId,
   mode: Schema.NullOr(BudgetMode),
 });
+/** The user cleared the routing memory of `threadId`'s project: outcomes of tasks started before this no longer move routes. */
+export const RoutingMemoryCleared = Schema.Struct({
+  type: Schema.Literal("routing.memory.cleared"),
+  v: v1,
+  threadId: ThreadId,
+  projectId: ProjectId,
+});
 export const TurnStarted = Schema.Struct({
   type: Schema.Literal("turn.started"),
   v: v1,
@@ -218,6 +225,7 @@ export const Event = Schema.Union([
   ThreadRouteChanged,
   ThreadRouteUnpinned,
   ThreadBudgetChanged,
+  RoutingMemoryCleared,
   TaskStarted,
   TurnStarted,
   HarnessSessionBound,
@@ -252,6 +260,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.route.changed@1": ThreadRouteChanged,
   "thread.route.unpinned@1": ThreadRouteUnpinned,
   "thread.budget.changed@1": ThreadBudgetChanged,
+  "routing.memory.cleared@1": RoutingMemoryCleared,
   "task.started@1": TaskStarted,
   "turn.started@1": TurnStarted,
   "harness.session.bound@1": HarnessSessionBound,

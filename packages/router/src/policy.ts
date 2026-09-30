@@ -23,6 +23,7 @@ export type PolicyLayer = { readonly source: string; readonly data: unknown };
 export type ResolvedPolicy = {
   readonly mode: BudgetMode;
   readonly minConfidence: number;
+  readonly memory: NonNullable<Policy["memory"]>;
   /** Named targets with their catalog entries, in policy order. */
   readonly targets: ReadonlyMap<string, CatalogEntry>;
   readonly routes: NonNullable<Policy["routes"]>;
@@ -95,6 +96,7 @@ export const loadPolicy = (layers: readonly PolicyLayer[] = [], catalog: Catalog
   return {
     mode: merged.mode ?? "balanced",
     minConfidence: merged.minConfidence ?? 0.6,
+    memory: merged.memory ?? { minTasks: 5, minShare: 0.5 },
     targets,
     routes: merged.routes ?? {},
     fallback: merged.fallback ?? {},

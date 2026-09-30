@@ -383,3 +383,46 @@ minConfidence: 0.4
     expect(onPin.after?.route).toEqual(pinned);
   });
 });
+
+describe("routing memory", () => {
+  test("the user's usual override moves a project's next task, the decision says so, and clearing restores the policy's route", async () => {
+    const { projectPath, fake, run } = setup();
+    const large: Route = { harness: "fake", model: "fake-large", effort: "high" };
+    /** A new unpinned thread in the project, and its first turn. */
+    const task = (text: string) =>
+      Effect.gen(function* () {
+        const thread = id<ThreadId>();
+        const turnId = id<TurnId>();
+        yield* dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId: thread, projectPath });
+        yield* dispatch({ type: "turn.send", commandId: id<CommandId>(), threadId: thread, turnId, text, mode: "build" });
+        yield* drain;
+        const [row] = yield* (yield* SqlClient.SqlClient)<{
+          payload: string;
+        }>`select payload from route_decisions where task_id = ${turnId}`;
+        return { thread, decision: JSON.parse(row?.payload ?? "{}") as RouteDecision };
+      });
+    const { moved, cleared } = await run(
+      Effect.gen(function* () {
+        // Five search tasks, each moved to the large model by the user: the built-in minimum sample.
+        for (let i = 0; i < 5; i++) {
+          const { thread } = yield* task(SEARCH);
+          yield* dispatch({ type: "thread.route.set", commandId: id<CommandId>(), threadId: thread, route: large });
+          yield* drain;
+        }
+        const moved = yield* task(SEARCH);
+        yield* dispatch({ type: "routing.memory.clear", commandId: id<CommandId>(), threadId: moved.thread });
+        return { moved: moved.decision, cleared: (yield* task(SEARCH)).decision };
+      }),
+    );
+    expect(moved).toMatchObject({
+      source: "memory",
+      target: { model: "fake-large" },
+      effort: "high",
+      reason: "ask.search tasks here were moved off fake-small by you 5 of 5 times, so it starts on fake-large at high effort.",
+      memory: { taskClass: "ask.search", tasks: 5, overrides: [{ to: large, count: 5 }] },
+    });
+    expect(cleared).toMatchObject({ source: "policy", target: { model: "fake-small" }, effort: "low" });
+    expect(cleared.memory).toBeUndefined();
+    expect(fake.calls.map((c) => c.route.model).slice(-2)).toEqual(["fake-large", "fake-small"]);
+  });
+});

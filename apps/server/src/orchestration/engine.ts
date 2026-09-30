@@ -16,6 +16,7 @@ import { correctingQuestion, type Decide } from "@verdandi/decisions";
 import { Context, Effect, Layer, PubSub, Result, Stream } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import type { SpendCaps } from "../config/spend-caps.ts";
+import { loadRoutingMemory } from "../routing/memory.ts";
 import { type RoutingContext, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { decide } from "./decider.ts";
 import { loadDeciderState, loadProjects, loadQuotas, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
@@ -116,7 +117,11 @@ export const EngineLive = (options: EngineOptions = {}) =>
             // Routing reads the project's policy file, so only when this command starts a task or routes a planned task's build.
             const routing =
               current && ((send && current.taskId === null) || plans) && options.routing
-                ? yield* options.routing(current.projectPath)
+                ? {
+                    ...(yield* options.routing(current.projectPath)),
+                    // Routing memory moves where a task starts, not an approved plan's build.
+                    ...(send ? { memory: yield* loadRoutingMemory(command.threadId) } : {}),
+                  }
                 : undefined;
             // A new task is classified, and a later turn is asked whether it corrects the agent's last answer.
             const questions = send ? [...(routing ? taskQuestions(routing) : []), ...(current?.turns ? [correctingQuestion] : [])] : [];

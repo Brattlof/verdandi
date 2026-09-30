@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Command, CommandId, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
+import type { Command, CommandId, ProjectId, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
 import { Result } from "effect";
 import { type DeciderState, decide, projectIdFor } from "./decider.ts";
 
@@ -12,6 +12,7 @@ const none: DeciderState = { thread: undefined };
 const taskId = "task-1" as TaskId;
 const idle: DeciderState = {
   thread: {
+    projectId: "p1" as ProjectId,
     projectPath: "C:/r",
     route,
     pinned: true,
@@ -28,6 +29,7 @@ const idle: DeciderState = {
 };
 const running: DeciderState = {
   thread: {
+    projectId: "p1" as ProjectId,
     projectPath: "C:/r",
     route,
     pinned: true,
@@ -44,6 +46,7 @@ const running: DeciderState = {
 };
 const waiting: DeciderState = {
   thread: {
+    projectId: "p1" as ProjectId,
     projectPath: "C:/r",
     route,
     pinned: true,
@@ -174,6 +177,7 @@ describe("decide", () => {
     ]);
     const planning: DeciderState = {
       thread: {
+        projectId: "p1" as ProjectId,
         projectPath: "C:/r",
         route,
         pinned: true,

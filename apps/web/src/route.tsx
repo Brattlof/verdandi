@@ -9,7 +9,7 @@ import {
   type ThreadView,
 } from "@verdandi/contracts";
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
-import { type Connection, type Routed, uuid } from "./client.ts";
+import { type Connection, type Dispatched, type Routed, uuid } from "./client.ts";
 import type { LiveThread } from "./state.ts";
 
 /**
@@ -52,8 +52,11 @@ export const RouteChip = ({ connection, thread }: { connection: Connection; thre
       </summary>
       {open && (
         <div>
-          {thread.task?.source === "policy" && reason && <Why connection={connection} taskId={thread.task.taskId} reason={reason} />}
+          {thread.task && thread.task.source !== "pin" && reason && (
+            <Why connection={connection} taskId={thread.task.taskId} reason={reason} />
+          )}
           <RouteForm connection={connection} thread={thread} close={close} />
+          <ForgetMemory connection={connection} thread={thread} />
         </div>
       )}
     </details>
@@ -195,6 +198,34 @@ const RouteForm = ({ connection, thread, close }: { connection: Connection; thre
         </button>
       </div>
     </form>
+  );
+};
+
+/**
+ * Clears the project's routing memory (DESIGN §8.8): its next routed tasks go by the policy alone, until new
+ * outcomes build memory again. The clear is recorded.
+ */
+const ForgetMemory = ({ connection, thread }: { connection: Connection; thread: LiveThread }) => {
+  const [result, setResult] = useState<Dispatched>();
+  const [sending, setSending] = useState(false);
+  const forget = async () => {
+    setSending(true);
+    setResult(await connection.dispatch({ type: "routing.memory.clear", commandId: uuid<CommandId>(), threadId: thread.threadId }));
+    setSending(false);
+  };
+  return (
+    <p className="mt-1.5 flex flex-wrap items-center gap-2 text-muted">
+      How this project's earlier tasks went can move the router's pick.
+      <button type="button" onClick={forget} disabled={sending}>
+        Clear routing memory
+      </button>
+      {result?.ok === true && <span role="status">Cleared: the next routed tasks go by the policy alone.</span>}
+      {result?.ok === false && (
+        <span role="alert" className="text-error">
+          {result.message}
+        </span>
+      )}
+    </p>
   );
 };
 

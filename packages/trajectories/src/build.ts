@@ -37,7 +37,13 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
       }
       continue;
     }
-    if (e.type === "thread.route.unpinned" || e.type === "thread.budget.changed" || e.type === "spend.cap.raised") continue;
+    if (
+      e.type === "thread.route.unpinned" ||
+      e.type === "thread.budget.changed" ||
+      e.type === "spend.cap.raised" ||
+      e.type === "routing.memory.cleared"
+    )
+      continue;
     if (e.type === "harness.session.bound") {
       session = e;
       continue;

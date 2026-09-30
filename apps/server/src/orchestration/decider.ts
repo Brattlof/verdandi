@@ -36,6 +36,7 @@ export type PendingRequest = {
 export type DeciderState = {
   readonly thread:
     | (RoutingThread & {
+        readonly projectId: ProjectId;
         readonly projectPath: string;
         readonly runningTurnId: string | null;
         /** The task the next turn continues; null before the first turn and after a route change. */
@@ -195,6 +196,10 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       ? accept()
       : accept({ type: "thread.budget.changed", v: 1, threadId: c.threadId, mode: c.mode });
   },
+  "routing.memory.clear": (state, c) =>
+    state.thread
+      ? accept({ type: "routing.memory.cleared", v: 1, threadId: c.threadId, projectId: state.thread.projectId })
+      : reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`),
   "thread.route.unpin": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     return state.thread.pinned ? accept({ type: "thread.route.unpinned", v: 1, threadId: c.threadId }) : accept();
