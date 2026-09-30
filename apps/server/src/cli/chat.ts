@@ -1,11 +1,22 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ClientCommand, CommandId, InteractionMode, Resolution, ThreadFeed, ThreadId, ThreadView, TurnId } from "@verdandi/contracts";
+import type {
+  ClientCommand,
+  CommandId,
+  InteractionMode,
+  ProjectsFeed,
+  Resolution,
+  ThreadFeed,
+  ThreadId,
+  ThreadView,
+  TurnId,
+} from "@verdandi/contracts";
 import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { resolveHome, type ServerFile, serverFile } from "../config/home.ts";
+import { flag, resolveHome, type ServerFile, serverFile } from "../config/home.ts";
 import { connect } from "../rpc/client.ts";
 import { approvalPrompt, type PendingRequest, parseAnswer, planPrompt, questionPrompt } from "./requests.ts";
 import { describeRouteChange, routeFromFlags } from "./route-flags.ts";
+import { threadList } from "./thread-list.ts";
 
 class Client extends Context.Service<Client, Effect.Success<ReturnType<typeof connect>>>()("verdandi/cli/Client") {}
 
@@ -34,12 +45,30 @@ const modeHelp: Record<InteractionMode, string> = {
   build: "build mode: the agent does the work",
 };
 
-/** `verdandi chat`: a simple terminal chat with the thread for the current folder. */
+/** Prints every thread from the projects feed's snapshot, then ends the feed (ADR 0008). */
+const list = async (runtime: ManagedRuntime.ManagedRuntime<Client, never>, client: Client["Service"]) => {
+  const subscriptionId = crypto.randomUUID();
+  const snapshot = Promise.withResolvers<Extract<ProjectsFeed, { kind: "snapshot" }>>();
+  const feed = runtime.runPromise(
+    client
+      .ProjectsSubscribe({ subscriptionId })
+      .pipe(Stream.runForEach((f: ProjectsFeed) => Effect.sync(() => f.kind === "snapshot" && snapshot.resolve(f)))),
+  );
+  const noSnapshot = new Error("The projects feed ended before its snapshot arrived. Restart verdandid and try again.");
+  feed.then(() => snapshot.reject(noSnapshot), snapshot.reject);
+  const { projects, threads } = await snapshot.promise;
+  await runtime.runPromise(client.Unsubscribe({ subscriptionId }));
+  await feed;
+  process.stdout.write(threadList(projects, threads));
+};
+
+/** `verdandi chat`: a simple terminal chat with the thread for the current folder, or the one `--thread` names. */
 export const chat = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
   if (!existsSync(serverFile(home))) throw new Error(`verdandid is not running for ${home}. Start it with: verdandi start`);
   const server = JSON.parse(readFileSync(serverFile(home), "utf8")) as ServerFile;
   const route = routeFromFlags(argv); // also rejects bad flags before connecting
+  const picked = flag(argv, "--thread") as ThreadId | undefined;
 
   const runtime = ManagedRuntime.make(Layer.effect(Client)(connect(server)));
   const client = await runtime.runPromise(
@@ -47,9 +76,13 @@ export const chat = async (argv: readonly string[]) => {
       return yield* Client;
     }),
   );
+  if (argv.includes("--list")) {
+    await list(runtime, client);
+    return runtime.dispose();
+  }
   const cwd = process.cwd();
   const threads = readThreads(home);
-  let threadId = threads[cwd] as ThreadId | undefined;
+  let threadId = picked ?? (threads[cwd] as ThreadId | undefined);
   if (!threadId) {
     threadId = uuid<ThreadId>();
     await runtime.runPromise(
@@ -225,7 +258,7 @@ export const chat = async (argv: readonly string[]) => {
       }
     }
   }
-  await runtime.runPromise(client.ThreadUnsubscribe({ subscriptionId }));
+  await runtime.runPromise(client.Unsubscribe({ subscriptionId }));
   await feed;
   await runtime.dispose();
 };

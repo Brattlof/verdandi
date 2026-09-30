@@ -5,6 +5,7 @@ import {
   CommandRejected,
   type Event,
   encodeEvent,
+  type ProjectsFeed,
   type Receipt,
   type StoredEvent,
   type ThreadFeed,
@@ -14,9 +15,13 @@ import {
 import { Context, Effect, Layer, PubSub, Result, Stream } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { decide } from "./decider.ts";
-import { loadDeciderState, loadThreadView, project } from "./projector.ts";
+import { loadDeciderState, loadProjects, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
 
 type FeedMessage = { readonly threadId: ThreadId; readonly feed: ThreadFeed };
+type ThreadChange = Extract<ProjectsFeed, { kind: "thread" }>;
+
+/** Events that change a thread's summary in the projects feed. */
+const summaryEvents: ReadonlySet<Event["type"]> = new Set(["thread.created", "thread.route.changed", "turn.started", "turn.completed"]);
 
 /** Runs after each commit with the new events. Must not block: fork long work. */
 export type Reaction = (stored: StoredEvent) => Effect.Effect<void>;
@@ -30,6 +35,8 @@ export class Engine extends Context.Service<
     readonly dispatch: (command: Command) => Effect.Effect<Receipt, CommandRejected | SqlError.SqlError>;
     /** A snapshot of the thread, then its events and text deltas as they happen. */
     readonly feed: (threadId: ThreadId) => Stream.Stream<ThreadFeed, CommandRejected | SqlError.SqlError>;
+    /** A snapshot of every project and thread summary, then each summary again whenever it changes. */
+    readonly projectsFeed: Stream.Stream<ProjectsFeed, SqlError.SqlError>;
     /** Deltas are broadcast to subscribers and never stored. */
     readonly publishDelta: (threadId: ThreadId, turnId: TurnId, text: string) => Effect.Effect<void>;
     readonly react: (reaction: Reaction) => Effect.Effect<void>;
@@ -42,6 +49,7 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const pubsub = yield* PubSub.unbounded<FeedMessage>();
+      const changes = yield* PubSub.unbounded<ThreadChange>();
       const reactions: Reaction[] = [];
       const projectOne = options.project ?? project;
 
@@ -70,7 +78,16 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
             const [last] = yield* sql<{ seq: number }>`select coalesce(max(seq), 0) as seq from events`;
             const seq = stored.at(-1)?.seq ?? last?.seq ?? 0;
             yield* sql`insert into command_receipts (command_id, seq) values (${command.commandId}, ${seq})`;
-            return { receipt: { commandId: command.commandId as CommandId, seq }, stored };
+            // Read in the same transaction, so the summary is exactly the state as of `seq`.
+            const [thread] = stored.some((s) => summaryEvents.has(s.event.type)) ? yield* loadThreadSummaries(command.threadId) : [];
+            const created = stored.find((s) => s.event.type === "thread.created")?.event;
+            const change: ThreadChange | undefined = thread && {
+              kind: "thread",
+              thread,
+              seq,
+              ...(created?.type === "thread.created" ? { project: { projectId: created.projectId, path: created.projectPath } } : {}),
+            };
+            return { receipt: { commandId: command.commandId as CommandId, seq }, stored, change };
           }),
         );
 
@@ -78,6 +95,7 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
       // would otherwise leave a committed turn.started with no harness run, and the thread busy.
       const dispatch = (command: Command) =>
         commit(command).pipe(
+          Effect.tap(({ change }) => (change ? PubSub.publish(changes, change) : Effect.void)),
           Effect.tap(({ stored }) =>
             Effect.forEach(
               stored,
@@ -115,9 +133,34 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
           }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
         );
 
+      const projectsFeed = Stream.unwrap(
+        Effect.gen(function* () {
+          // Same order as `feed`: subscribe, then read the snapshot.
+          const subscription = yield* PubSub.subscribe(changes);
+          const snapshot = yield* sql.withTransaction(
+            Effect.all({
+              projects: loadProjects,
+              threads: loadThreadSummaries(),
+              seq: sql<{ seq: number }>`select coalesce(max(seq), 0) as seq from events`.pipe(Effect.map(([r]) => r?.seq ?? 0)),
+            }),
+          );
+          // Commits can publish out of order, so drop a summary older than the one the client already has.
+          const latest = new Map<ThreadId, number>();
+          const live = Stream.fromSubscription(subscription).pipe(
+            Stream.filter((c) => {
+              const newer = c.seq > (latest.get(c.thread.threadId) ?? snapshot.seq);
+              if (newer) latest.set(c.thread.threadId, c.seq);
+              return newer;
+            }),
+          );
+          return Stream.concat(Stream.succeed<ProjectsFeed>({ kind: "snapshot", ...snapshot }), live);
+        }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      );
+
       return Engine.of({
         dispatch: (command) => dispatch(command).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
         feed,
+        projectsFeed,
         publishDelta: (threadId, turnId, text) =>
           PubSub.publish(pubsub, { threadId, feed: { kind: "delta", turnId, text } }).pipe(Effect.asVoid),
         react: (reaction) => Effect.sync(() => void reactions.push(reaction)),

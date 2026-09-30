@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { CommandId, ThreadFeed, ThreadId, TurnId } from "@verdandi/contracts";
+import type { CommandId, ProjectsFeed, ThreadFeed, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { Reactor } from "../orchestration/reactor.ts";
@@ -120,7 +120,7 @@ describe("rpc server", () => {
           }),
         );
         yield* step("turn.completed", Deferred.await(completed));
-        yield* step("unsubscribe", c.ThreadUnsubscribe({ subscriptionId }));
+        yield* step("unsubscribe", c.Unsubscribe({ subscriptionId }));
         yield* step("feed end", Fiber.join(feed));
         const after = yield* step("create after", createThread(c, uuid<ThreadId>()));
         return [seen, after] as const;
@@ -131,6 +131,49 @@ describe("rpc server", () => {
     expect(kinds).toContain("delta");
     expect(kinds.at(-1)).toBe("turn.completed");
     expect(after.seq).toBeGreaterThan(0); // the connection still answers after the feed ended (ADR 0008)
+  });
+
+  test("projects feed shows a new thread and its busy/idle changes without polling", async () => {
+    const { info, fake } = await startServer();
+    const before = uuid<ThreadId>();
+    const threadId = uuid<ThreadId>();
+    const [snapshot, changes] = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        yield* step("create before", createThread(c, before));
+        const subscriptionId = crypto.randomUUID();
+        const changes: Extract<ProjectsFeed, { kind: "thread" }>[] = [];
+        const snapshot = yield* Deferred.make<Extract<ProjectsFeed, { kind: "snapshot" }>>();
+        const idle = yield* Deferred.make<void>();
+        // The consumer only records; commands and the unsubscribe happen outside it (ADR 0008).
+        const feed = yield* c.ProjectsSubscribe({ subscriptionId }).pipe(
+          Stream.runForEach((f: ProjectsFeed) => {
+            if (f.kind === "snapshot") return Deferred.succeed(snapshot, f);
+            changes.push(f);
+            return changes.some((x) => x.thread.busy) && !f.thread.busy ? Deferred.succeed(idle, undefined) : Effect.void;
+          }),
+          Effect.forkChild,
+        );
+        const first = yield* step("snapshot", Deferred.await(snapshot));
+        yield* step("create", createThread(c, threadId));
+        const turn = { type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), mode: "build" } as const;
+        yield* step("send", c.CommandDispatch({ ...turn, text: "gate\nsecond line" }));
+        fake.release();
+        yield* step("idle", Deferred.await(idle));
+        yield* step("unsubscribe", c.Unsubscribe({ subscriptionId }));
+        yield* step("feed end", Fiber.join(feed));
+        return [first, changes] as const;
+      }),
+    );
+    expect(snapshot.threads.map((t) => t.threadId)).toEqual([before]);
+    expect(snapshot.projects.map((p) => p.path)).toEqual(["C:/Users/a b/repo"]);
+    expect(changes.map((c) => [c.thread.threadId, c.thread.busy, c.thread.title])).toEqual([
+      [threadId, false, ""],
+      [threadId, true, "gate"],
+      [threadId, false, "gate"],
+    ]);
+    expect(changes[0]?.project?.path).toBe("C:/Users/a b/repo");
+    expect(changes[1]?.project).toBeUndefined();
+    expect(changes.map((c) => c.seq)).toEqual(changes.map((c) => c.seq).sort((a, b) => a - b));
   });
 
   test("turn survives client disconnect", async () => {
@@ -171,7 +214,7 @@ describe("rpc server", () => {
           Effect.forkChild,
         );
         const statuses = yield* step("snapshot", Deferred.await(snapshot));
-        yield* step("unsubscribe", c.ThreadUnsubscribe({ subscriptionId }));
+        yield* step("unsubscribe", c.Unsubscribe({ subscriptionId }));
         yield* step("feed end", Fiber.join(feed));
         return statuses;
       }),

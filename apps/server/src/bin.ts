@@ -5,7 +5,8 @@ import { start } from "./main.ts";
 
 const usage = `Usage:
   verdandi start [--home <dir>] [--port <n>]      run verdandid in the foreground
-  verdandi chat  [--home <dir>] [--model <m>] [--effort <e>]   chat with the thread for this folder`;
+  verdandi chat  [--home <dir>] [--model <m>] [--effort <e>] [--thread <id>]   chat with the thread for this folder, or the one named
+  verdandi chat  --list [--home <dir>]              list every thread by project`;
 
 const commands: Record<string, (argv: readonly string[]) => Promise<void>> = { start, chat };
 

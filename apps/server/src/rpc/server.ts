@@ -4,6 +4,7 @@ import { Api, type HarnessAdapter, type HarnessId } from "@verdandi/contracts";
 import { Context, Deferred, Effect, Layer, Stream } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import type { SqlError } from "effect/unstable/sql";
 import { AppLayer } from "../orchestration/app.ts";
 import { Engine } from "../orchestration/engine.ts";
 
@@ -14,22 +15,25 @@ const Handlers = Api.toLayer(
   Effect.gen(function* () {
     const engine = yield* Engine;
     const subscriptions = new Map<string, Deferred.Deferred<void>>();
+    /** Runs `feed` until `Unsubscribe` names `subscriptionId`: the server ends feeds, clients never stop them early (ADR 0008). */
+    const untilUnsubscribed = <A, E>(subscriptionId: string, feed: Stream.Stream<A, E | SqlError.SqlError>) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const stop = yield* Deferred.make<void>();
+          subscriptions.set(subscriptionId, stop);
+          return feed.pipe(
+            // interruptWhen, not haltWhen: an idle feed sits in a pull that haltWhen would wait out.
+            Stream.interruptWhen(Deferred.await(stop)),
+            Stream.catchTag("SqlError", Stream.die),
+            Stream.ensuring(Effect.sync(() => subscriptions.delete(subscriptionId))),
+          );
+        }),
+      );
     return {
       CommandDispatch: (command) => engine.dispatch(command).pipe(Effect.catchTag("SqlError", Effect.die)),
-      ThreadSubscribe: ({ threadId, subscriptionId }) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const stop = yield* Deferred.make<void>();
-            subscriptions.set(subscriptionId, stop);
-            return engine.feed(threadId).pipe(
-              // The server ends the feed; clients never stop it early (ADR 0008).
-              Stream.haltWhen(Deferred.await(stop)),
-              Stream.catchTag("SqlError", Stream.die),
-              Stream.ensuring(Effect.sync(() => subscriptions.delete(subscriptionId))),
-            );
-          }),
-        ),
-      ThreadUnsubscribe: ({ subscriptionId }) => {
+      ThreadSubscribe: ({ threadId, subscriptionId }) => untilUnsubscribed(subscriptionId, engine.feed(threadId)),
+      ProjectsSubscribe: ({ subscriptionId }) => untilUnsubscribed(subscriptionId, engine.projectsFeed),
+      Unsubscribe: ({ subscriptionId }) => {
         const stop = subscriptions.get(subscriptionId);
         return stop ? Deferred.succeed(stop, undefined).pipe(Effect.asVoid) : Effect.void;
       },
