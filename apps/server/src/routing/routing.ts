@@ -75,13 +75,21 @@ export const projectRouting =
 export const routingFor = (harnesses: Partial<Record<HarnessId, unknown>>) =>
   projectRouting(Object.keys(harnesses) as HarnessId[], harnesses.fake ? [...builtInCatalog, ...fakeCatalog] : builtInCatalog);
 
+/** The subagent routes a warm session started with, which it keeps. */
+const warmSubagents = (thread: RoutingThread) => (thread.route.subagents ? { subagents: thread.route.subagents } : {});
+
 /** The catalog's target for a route. A model it doesn't know keeps its harness's provider and access mode. */
 const targetOf = (r: Route, catalog: Catalog): RouteTarget => {
   const entry = catalog.find((e) => e.harness === r.harness && e.model === r.model) ?? catalog.find((e) => e.harness === r.harness);
   return { harness: r.harness, provider: entry?.provider ?? r.harness, model: r.model, access: entry?.access ?? "local" };
 };
 
-export const routeOf = (d: RouteDecision): Route => ({ harness: d.target.harness, model: d.target.model, effort: d.effort });
+export const routeOf = (d: RouteDecision): Route => ({
+  harness: d.target.harness,
+  model: d.target.model,
+  effort: d.effort,
+  ...(d.subagents && { subagents: d.subagents }),
+});
 
 /** The decision layer's routing questions for a new task, at the confidence the project's policy asks for. */
 export const taskQuestions = (routing: RoutingContext) =>
@@ -115,7 +123,7 @@ export const decideExecuteRoute = (
         planApproved: true,
         // A running turn can't change harness.
         harnesses: [thread.route.harness],
-        ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens } }),
+        ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens, ...warmSubagents(thread) } }),
       },
       policy,
       classify,
@@ -153,7 +161,7 @@ export const decideRoute = (
           harnesses: routing.harnesses,
           ...(routing.memory ? { memory: routing.memory } : {}),
           ...(thread.pinned ? { pin: current } : {}),
-          ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens } }),
+          ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens, ...warmSubagents(thread) } }),
         },
         policy,
         () => classification,

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import {
+  type AgentDefinition,
   type CanUseTool,
   type PermissionMode,
   type PermissionResult,
@@ -18,6 +19,7 @@ import {
   Question,
   type Resolution,
   type Route,
+  type SubagentProfile,
   type TaskId,
   type ThreadId,
 } from "@verdandi/contracts";
@@ -65,6 +67,45 @@ type Session = {
   reportsState: boolean;
   /** The task whose budget guards the process was started with; undefined when it has none. */
   readonly limitedTask: TaskId | undefined;
+};
+
+/**
+ * Claude Code's subagent for each Verdandi profile (ADR 0014). `explorer` takes the name of Claude Code's
+ * built-in `Explore`, which a definition replaces, model included; the built-in inherits the main model.
+ */
+const subagentDefinitions: Record<
+  SubagentProfile,
+  { readonly name: string; readonly definition: Omit<AgentDefinition, "model" | "effort"> }
+> = {
+  explorer: {
+    name: "Explore",
+    definition: {
+      description:
+        "Fast, read-only search of the codebase: finds files, symbols and how the code fits together. Use it for exploration that would otherwise fill the main context.",
+      prompt:
+        "You explore a codebase read-only to answer the question you were given. Search with Glob and Grep, read with Read, and don't change anything. Report what you found briefly, with file paths and line numbers, so the caller can act on it without reading it all again.",
+      tools: ["Glob", "Grep", "Read"],
+    },
+  },
+  reviewer: {
+    name: "reviewer",
+    definition: {
+      description:
+        "Reviews a change or a piece of code read-only for bugs, risky edge cases and missing tests. Use it for a second look before calling work done.",
+      prompt:
+        "You review code read-only. Read the change you were pointed at and what it touches, and don't change anything. Report concrete problems, most severe first, each with its file path and line and why it's wrong. Say plainly when you found none.",
+      tools: ["Glob", "Grep", "Read", "Bash"],
+    },
+  },
+};
+
+/** The `agents` option for a session's subagent routes; undefined when there are none, so Claude Code keeps its own. */
+export const agentsFor = (subagents: Route["subagents"]): Record<string, AgentDefinition> | undefined => {
+  const routed = Object.entries(subagents ?? {}).flatMap(([profile, r]) => {
+    const { name, definition } = subagentDefinitions[profile as SubagentProfile];
+    return r ? [[name, { ...definition, model: r.model, effort: r.effort }] as const] : [];
+  });
+  return routed.length > 0 ? Object.fromEntries(routed) : undefined;
 };
 
 const decodeQuestions = Schema.decodeUnknownOption(Schema.Struct({ questions: Schema.Array(Question) }));
@@ -139,9 +180,12 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
       raise(requestFor(requestId, toolName, toolInput));
     });
 
+  // Fixed for the process: the agent list sits in the cached prompt. The route's subagents only change with a new session.
+  const agents = agentsFor(input.route.subagents);
   const q = queryFn({
     prompt,
     options: {
+      ...(agents && { agents }),
       pathToClaudeCodeExecutable: claudePath,
       cwd: input.cwd,
       model: input.route.model,

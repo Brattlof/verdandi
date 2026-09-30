@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { Effort, HarnessId, Route } from "./route.ts";
+import { Effort, HarnessId, Route, SubagentProfile, SubagentRoutes } from "./route.ts";
 
 /** The v1 task taxonomy (DESIGN §8.5). A task's class picks its route from the policy. */
 export const TaskClass = Schema.Literals([
@@ -70,6 +70,8 @@ const PhaseRule = Schema.Struct({ ...RouteSpec.fields, thrifty: Schema.optionalK
 export const RouteRule = Schema.Struct({
   ...PhaseRule.fields,
   plan: Schema.optionalKey(PhaseRule),
+  /** Routes for the task's subagents by profile, on the main route's harness (DESIGN §8.2 lever 1). */
+  subagents: Schema.optionalKey(Schema.Record(SubagentProfile, Schema.optionalKey(RouteSpec))),
   /** Rough size of a task of this class, for cost estimates and the switch-cost gate. */
   tokens: Schema.optionalKey(Schema.Int),
   /** Budget guards for each task of this class (DESIGN §8.9); `fallback`'s apply to classes that set none. */
@@ -133,7 +135,7 @@ export type RouteStats = typeof RouteStats.Type;
 
 /** One step of how the router reached a decision, shown when the user opens the route's trace. */
 export const RuleTrace = Schema.Struct({
-  stage: Schema.Literals(["pin", "candidates", "signals", "classify", "policy", "memory", "switch"]),
+  stage: Schema.Literals(["pin", "candidates", "signals", "classify", "policy", "memory", "switch", "subagents"]),
   note: Schema.String,
 });
 export type RuleTrace = typeof RuleTrace.Type;
@@ -147,6 +149,8 @@ export const RouteDecision = Schema.Struct({
   confidence: Schema.Number,
   target: RouteTarget,
   effort: Effort,
+  /** The task's subagent routes: the policy's for a new session, the warm session's own otherwise. Absent when there are none. */
+  subagents: Schema.optionalKey(SubagentRoutes),
   /** Effective cost in dollar equivalents (DESIGN §8.3). Absent for a pinned target the catalog doesn't know. */
   estimate: Schema.optionalKey(Schema.Struct({ tokens: Schema.Int, cost: Schema.Number, switchCost: Schema.Number })),
   /** One sentence, shown in the UI. */

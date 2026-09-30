@@ -49,6 +49,7 @@ const specs = (path: string, rule: RouteRule | undefined) =>
         [`${path}.plan`, rule.plan],
         [`${path}.plan.thrifty`, rule.plan?.thrifty],
         [`${path}.plan.max`, rule.plan?.max],
+        ...Object.entries(rule.subagents ?? {}).map(([profile, spec]) => [`${path}.subagents.${profile}`, spec] as const),
       ] as const)
     : [];
 

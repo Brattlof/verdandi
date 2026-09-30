@@ -188,7 +188,10 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (from.harness !== c.route.harness && state.thread.runningTurnId) {
       return reject("ThreadBusy", "A turn is running in this thread. Change the harness when it finishes.");
     }
-    return accept({ type: "thread.route.changed", v: 1, threadId: c.threadId, from, to: c.route, by: "user" });
+    // A harness session keeps the subagents it started with, whatever the client sent; a new harness starts without.
+    const { subagents: _, ...picked } = c.route;
+    const to = from.harness === picked.harness && from.subagents ? { ...picked, subagents: from.subagents } : picked;
+    return accept({ type: "thread.route.changed", v: 1, threadId: c.threadId, from, to, by: "user" });
   },
   "thread.budget.set": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);

@@ -426,3 +426,36 @@ describe("routing memory", () => {
     expect(fake.calls.map((c) => c.route.model).slice(-2)).toEqual(["fake-large", "fake-small"]);
   });
 });
+
+describe("subagent routing", () => {
+  const withExplorer = (
+    target: string,
+  ) => `${policy}  code.feature: { prefer: [large], effort: medium, subagents: { explorer: { prefer: [${target}], effort: low } } }
+`;
+  const FEATURE = "Implement dark mode for the settings page";
+
+  test("a new session runs with the policy's subagents, and a policy edit leaves a warm session's alone", async () => {
+    const { projectPath, fake, run } = setup(withExplorer("small"));
+    const second = id<TurnId>();
+    const decision = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath));
+        yield* dispatch(send(FEATURE));
+        yield* drain;
+        writeFileSync(join(projectPath, ".verdandi", "routing.yaml"), withExplorer("large"));
+        // A budget change ends the task, so the next turn is routed again on the warm session.
+        yield* dispatch({ type: "thread.budget.set", commandId: id<CommandId>(), threadId, mode: "max" });
+        yield* dispatch(send(FEATURE, second));
+        yield* drain;
+        const [row] = yield* (yield* SqlClient.SqlClient)<{
+          payload: string;
+        }>`select payload from route_decisions where task_id = ${second}`;
+        return JSON.parse(row?.payload ?? "{}") as RouteDecision;
+      }),
+    );
+    const small = { explorer: { model: "fake-small", effort: "low" } } as const;
+    expect(fake.calls.map((c) => c.route.subagents)).toEqual([small, small]);
+    expect(decision.subagents).toEqual(small);
+    expect(decision.trace.at(-1)?.note).toContain("kept the warm session's");
+  });
+});
