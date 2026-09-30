@@ -89,6 +89,11 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const unsure = c.lowConfidence ?? c.confidence < policy.minConfidence;
   const rule = (!unsure && policy.routes[c.taskClass]) || policy.fallback;
   const tokens = rule.tokens ?? policy.fallback.tokens ?? 0;
+  // Budget guards apply to pinned tasks too: a pin picks the route, not the budget (DESIGN §8.9).
+  const maxCost = rule.maxCost ?? policy.fallback.maxCost;
+  const maxTurns = rule.maxTurns ?? policy.fallback.maxTurns;
+  const limits =
+    maxCost === undefined && maxTurns === undefined ? {} : { limits: { ...(maxCost && { maxCost }), ...(maxTurns && { maxTurns }) } };
   const signalNotes: RuleTrace[] = [
     { stage: "signals", note: describeSignals(sig) },
     { stage: "classify", note: `${c.taskClass}, confidence ${c.confidence.toFixed(2)}, difficulty ${c.difficulty.toFixed(2)} (${c.why})` },
@@ -106,6 +111,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
       ...(entry && { estimate: { tokens, cost: effectiveCost(entry, tokens, input), switchCost: 0 } }),
       reason: `You pinned ${describe(target, effort)}.`,
       trace: [{ stage: "pin", note: `pinned ${target.harness} · ${target.model} · ${effort}; routing skipped` }, ...signalNotes],
+      ...limits,
     };
   }
 
@@ -221,5 +227,6 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
     estimate: { tokens, cost: cost(target), switchCost },
     reason,
     trace,
+    ...limits,
   };
 };

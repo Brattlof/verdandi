@@ -1,5 +1,47 @@
+import { Schema } from "effect";
 import type { HarnessId } from "./route.ts";
 import type { QuotaView, ThreadSummary } from "./rpc.ts";
+
+/** Who a spend cap covers: every project in the profile, or one project (DESIGN §8.9). */
+export const CapScope = Schema.Literals(["profile", "project"]);
+export type CapScope = typeof CapScope.Type;
+
+/** A cap's period, in the user's local time: today, or this calendar month. */
+export const CapPeriod = Schema.Literals(["day", "month"]);
+export type CapPeriod = typeof CapPeriod.Type;
+
+/**
+ * A metered spend cap as it stands now. `baseUsd` is the configured cap and `limitUsd` the one in force,
+ * higher when the user raised it for the rest of the period `periodKey` (`2026-09-30`, `2026-09`).
+ * `spentUsd` counts metered usage only, extra usage on a subscription included.
+ */
+export const SpendCap = Schema.Struct({
+  scope: CapScope,
+  period: CapPeriod,
+  periodKey: Schema.String,
+  baseUsd: Schema.Number,
+  limitUsd: Schema.Number,
+  spentUsd: Schema.Number,
+});
+export type SpendCap = typeof SpendCap.Type;
+
+const scopeNames: Record<CapScope, string> = { profile: "profile's", project: "project's" };
+const periodNames: Record<CapPeriod, { readonly cap: string; readonly now: string }> = {
+  day: { cap: "daily", now: "today" },
+  month: { cap: "monthly", now: "this month" },
+};
+
+/** e.g. `project's daily cap` */
+export const capName = (cap: Pick<SpendCap, "scope" | "period">) => `${scopeNames[cap.scope]} ${periodNames[cap.period].cap} cap`;
+/** `today` or `this month` */
+export const capPeriodNow = (period: CapPeriod) => periodNames[period].now;
+
+/** A cap on one line, e.g. `project's daily cap: $1.20 of $5.00 spent today`. */
+export const describeSpendCap = (cap: SpendCap) =>
+  `${capName(cap)}: ${formatUsd(cap.spentUsd)} of ${formatUsd(cap.limitUsd)} spent ${capPeriodNow(cap.period)}${cap.limitUsd > cap.baseUsd ? ` (raised from ${formatUsd(cap.baseUsd)})` : ""}`;
+
+/** Whether the cap stops new turns. */
+export const capReached = (cap: SpendCap) => cap.spentUsd >= cap.limitUsd;
 
 /** Dollars to the cent; a nonzero amount under half a cent shows as `<$0.01`. */
 export const formatUsd = (usd: number) => (usd > 0 && usd < 0.005 ? "<$0.01" : `$${usd.toFixed(2)}`);

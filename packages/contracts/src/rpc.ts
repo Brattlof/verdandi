@@ -6,6 +6,7 @@ import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, Usage } from "./items.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, RouteDecision } from "./routing.ts";
+import { SpendCap } from "./spend.ts";
 import { RouteCost } from "./task.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
@@ -19,7 +20,16 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "InvalidProjectPath",
     "InvalidPolicy",
     "NoRoute",
+    "InvalidSpendCaps",
+    "SpendCapReached",
+    "SpendCapNotSet",
   ]),
+  message: Schema.String,
+}) {}
+
+/** Why a thread's spend caps can't be shown. The message names the cause and the fix. */
+export class SpendCapsUnavailable extends Schema.TaggedError<SpendCapsUnavailable>()("SpendCapsUnavailable", {
+  reason: Schema.Literals(["ThreadNotFound", "InvalidSpendCaps"]),
   message: Schema.String,
 }) {}
 
@@ -176,6 +186,8 @@ export class Api extends RpcGroup.make(
   }),
   /** Cost per completed task on each route that ran one, most spent first. */
   Rpc.make("TaskCostsList", { success: Schema.Array(RouteCost) }),
+  /** The spend caps over the thread's project and profile, with what they've spent this period; empty when none are set. */
+  Rpc.make("SpendCapsGet", { payload: { threadId: ThreadId }, success: Schema.Array(SpendCap), error: SpendCapsUnavailable }),
   /** A task's routing decision: its reason, trace and the classification behind it. */
   Rpc.make("RoutingExplain", { payload: { taskId: TaskId }, success: RouteDecision, error: RoutingUnavailable }),
   /**

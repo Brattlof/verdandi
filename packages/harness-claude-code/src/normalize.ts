@@ -36,6 +36,12 @@ const usageEvents = (context: NormalizeContext, modelUsage: Record<string, Model
     return [{ type: "usage", model, accessMode: context.overage ? "metered" : "subscription", ...usage }];
   });
 
+/** Results for a budget guard the task reached (ADR 0005), and what the turn's error says. */
+const guards: Partial<Record<string, string>> = {
+  error_max_budget_usd: "Stopped at the task's cost limit (maxCost in the routing policy).",
+  error_max_turns: "Stopped at the task's turn limit (maxTurns in the routing policy).",
+};
+
 /**
  * Pure: one SDK message in, Verdandi harness events out. A subagent's messages (non-null
  * `parent_tool_use_id`) become items tagged with that tool call; its text deltas aren't streamed.
@@ -92,14 +98,17 @@ export const normalize = (msg: SDKMessage, context: NormalizeContext): { events:
       };
     }
     case "result": {
+      const guard = guards[msg.subtype];
       const finished: HarnessEvent =
         msg.subtype === "success" && !msg.is_error
           ? { type: "turn.finished", status: "success" }
-          : {
-              type: "turn.finished",
-              status: "error",
-              error: ("errors" in msg && msg.errors.join("\n")) || `Claude Code ended the turn with ${msg.subtype}.`,
-            };
+          : guard
+            ? { type: "turn.finished", status: "limit", error: guard }
+            : {
+                type: "turn.finished",
+                status: "error",
+                error: ("errors" in msg && msg.errors.join("\n")) || `Claude Code ended the turn with ${msg.subtype}.`,
+              };
       return {
         events: [...usageEvents(context, msg.modelUsage), finished],
         context: { ...context, prevModelUsage: msg.modelUsage },

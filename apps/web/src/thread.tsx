@@ -146,12 +146,19 @@ const Conversation = ({
   );
 };
 
-const statusText: Record<LiveTurn["status"], string> = { running: "Working", success: "Done", error: "Failed", interrupted: "Stopped" };
+const statusText: Record<LiveTurn["status"], string> = {
+  running: "Working",
+  success: "Done",
+  error: "Failed",
+  interrupted: "Stopped",
+  limit: "Stopped at the task's limit",
+};
 const statusColor: Record<LiveTurn["status"], string> = {
   running: "text-accent",
   success: "",
   error: "text-error",
   interrupted: "text-error",
+  limit: "text-error",
 };
 
 const Turn = memo(({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => (

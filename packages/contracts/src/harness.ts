@@ -1,8 +1,9 @@
 import { Data, type Effect, Schema, type Stream } from "effect";
-import type { ThreadId, TurnId } from "./ids.ts";
+import type { TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields } from "./items.ts";
 import { Question, type Resolution } from "./requests.ts";
 import type { HarnessId, InteractionMode, Route } from "./route.ts";
+import type { TaskLimits } from "./routing.ts";
 
 /** What every harness adapter reports, normalized. */
 export const HarnessEvent = Schema.Union([
@@ -28,9 +29,10 @@ export const HarnessEvent = Schema.Union([
     plan: Schema.String,
     filePath: Schema.optionalKey(Schema.String),
   }),
+  /** `limit`: the task's `maxCost` or `maxTurns` stopped the turn; `error` says which. */
   Schema.Struct({
     type: Schema.Literal("turn.finished"),
-    status: Schema.Literals(["success", "error"]),
+    status: Schema.Literals(["success", "error", "limit"]),
     error: Schema.optionalKey(Schema.String),
   }),
 ]);
@@ -63,6 +65,12 @@ export type HarnessRunInput = {
    * `turn.steer` on its threads rather than record a steer nobody reads.
    */
   readonly steers: Stream.Stream<string>;
+  /**
+   * The running task's budget guards, as totals for the whole task; `spentUsd` is what its earlier turns
+   * cost. Stop the turn with status `limit` once one is reached (Claude Code: `maxBudgetUsd` and
+   * `maxTurns`, ADR 0005). Absent when the task has none.
+   */
+  readonly limits?: TaskLimits & { readonly taskId: TaskId; readonly spentUsd: number };
 };
 
 /**

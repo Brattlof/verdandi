@@ -46,6 +46,16 @@ export const Catalog = Schema.Array(CatalogEntry);
 export type Catalog = typeof Catalog.Type;
 export const decodeCatalog = Schema.decodeUnknownSync(Catalog);
 
+/**
+ * A task's budget guards (DESIGN §8.9): at most `maxCost` USD, and `maxTurns` agent turns (model round trips).
+ * A task that reaches one stops, and its turn ends with status `limit`. Turn count is only a guard, never an escalation signal.
+ */
+export const TaskLimits = Schema.Struct({
+  maxCost: Schema.optionalKey(Schema.Number.check(Schema.isGreaterThan(0))),
+  maxTurns: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+});
+export type TaskLimits = typeof TaskLimits.Type;
+
 /** A partial route: layers merge key by key, so a later layer can change only the effort. */
 export const RouteSpec = Schema.Struct({
   /** Acceptable targets by name; the router picks the cheapest available one, ties going to the earlier. */
@@ -62,6 +72,8 @@ export const RouteRule = Schema.Struct({
   plan: Schema.optionalKey(PhaseRule),
   /** Rough size of a task of this class, for cost estimates and the switch-cost gate. */
   tokens: Schema.optionalKey(Schema.Int),
+  /** Budget guards for each task of this class (DESIGN §8.9); `fallback`'s apply to classes that set none. */
+  ...TaskLimits.fields,
 });
 export type RouteRule = typeof RouteRule.Type;
 
@@ -112,5 +124,7 @@ export const RouteDecision = Schema.Struct({
   /** One sentence, shown in the UI. */
   reason: Schema.String,
   trace: Schema.Array(RuleTrace),
+  /** The task's budget guards, from its class's policy; absent when the policy sets none. */
+  limits: Schema.optionalKey(TaskLimits),
 });
 export type RouteDecision = typeof RouteDecision.Type;

@@ -187,6 +187,21 @@ const decisions = Effect.gen(function* () {
   yield* sql`create index decisions_kind on decisions (kind, backend)`;
 });
 
+/** Spend caps the user raised for the rest of a period (DESIGN §8.9); `project_id` is null for the profile's. */
+const spendCapRaises = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table spend_cap_raises (
+    seq integer primary key,
+    scope text not null,
+    project_id text,
+    period text not null,
+    period_key text not null,
+    limit_usd real not null,
+    at text not null
+  )`;
+  yield* sql`create index usage_ledger_at on usage_ledger (at)`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -198,4 +213,5 @@ export const migrations = {
   "8_route_decisions": routeDecisions,
   "9_budget_mode": budgetMode,
   "10_decisions": decisions,
+  "11_spend_cap_raises": spendCapRaises,
 };

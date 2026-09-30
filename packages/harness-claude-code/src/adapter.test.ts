@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { HarnessRunInput, InteractionMode, Route, ThreadId, TurnId } from "@verdandi/contracts";
+import type { HarnessRunInput, InteractionMode, Route, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Fiber, Stream } from "effect";
 import { makeClaudeCodeAdapter, type QueryFn } from "./adapter.ts";
@@ -308,6 +308,44 @@ describe("Claude Code adapter", () => {
       await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "two", U2))));
       expect(spawns).toHaveLength(2);
       expect(spawns[1]?.options.resume).toBeUndefined();
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("a task's budget guards start a process of its own, with what the task has left to spend", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery();
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const run = (text: string, turnId: string, limits?: HarnessRunInput["limits"]) =>
+        Effect.runPromise(Stream.runCollect(adapter.run({ ...input(home, text, turnId, "sess-1"), ...(limits && { limits }) })));
+      await run("one", U1);
+      const task = { taskId: U2 as TaskId, maxCost: 2, maxTurns: 30 };
+      await run("two", U2, { ...task, spentUsd: 0 });
+      await run("three", U3, { ...task, spentUsd: 0.5 });
+      await run("four", "00000000-0000-4000-8000-000000000004");
+      // One process per task with guards, and one to drop them again; the same task keeps its process.
+      expect(spawns.map((s) => [s.options.resume, s.options.maxBudgetUsd, s.options.maxTurns])).toEqual([
+        ["sess-1", undefined, undefined],
+        ["sess-1", 2, 30],
+        ["sess-1", undefined, undefined],
+      ]);
+      expect(spawns[1]?.prompts.map((p) => p.message.content)).toEqual(["two", "three"]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("a guard's result ends the turn at its limit and closes the session", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery(() => [result(turn1Usage, "error_max_budget_usd")]);
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const events = await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "go", U1))));
+      expect(Array.from(events).at(-1)).toMatchObject({ type: "turn.finished", status: "limit" });
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "again", U2, "sess-1"))));
+      expect(spawns).toHaveLength(2);
     } finally {
       removeTempHome(home);
     }

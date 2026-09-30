@@ -19,7 +19,8 @@ import { Effect, Stream } from "effect";
  * appends a line to that file through an Edit tool call, "subagent" delegates a read to a subagent whose
  * steps carry `parentToolUseId`, "background" does the same in a background subagent that reports after the main
  * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back with fixed usage on the route's model.
- * `calls` records every run.
+ * Every reply costs $0.01. Like Claude Code, it checks the task's `maxCost` after the call: when the task's
+ * spend then exceeds it, the turn ends with status `limit`. `calls` records every run.
  */
 export const makeFakeHarness = () => {
   const calls: { resumeSessionId: string | undefined; route: Route; text: string; mode: InteractionMode }[] = [];
@@ -61,121 +62,127 @@ export const makeFakeHarness = () => {
     );
   };
 
+  const script = (input: HarnessRunInput): Stream.Stream<HarnessEvent> => {
+    calls.push({ resumeSessionId: input.resumeSessionId, route: input.route, text: input.text, mode: input.mode });
+    routes.set(input.threadId, input.route);
+    const start: HarnessEvent[] =
+      input.resumeSessionId === undefined
+        ? [{ type: "session.started", sessionId: `fake-session-${++sessions}`, harnessVersion: "fake" }]
+        : [];
+    if (input.text === "hang") return Stream.concat(Stream.fromIterable(start), Stream.never);
+    if (input.text === "fail") return Stream.fromIterable([...start, { type: "turn.finished", status: "error", error: "fake failure" }]);
+    if (input.text === "overage") {
+      const quota: HarnessEvent = {
+        type: "quota",
+        quota: { status: "rejected", window: "five_hour", utilization: 1, resetsAt: "2026-10-01T00:00:00.000Z", usingOverage: true },
+      };
+      return Stream.concat(Stream.fromIterable([...start, quota]), reply(input.route.model, "on extra usage", "metered"));
+    }
+    if (input.text === "approve") {
+      const edit = request(
+        input,
+        (requestId) => ({ type: "approval.requested", requestId, toolName: "Edit", input: { file_path: "a.txt" } }),
+        (r) => (r.decision === "allow" ? "edited a.txt" : "left a.txt alone"),
+      );
+      return Stream.concat(Stream.fromIterable(start), edit);
+    }
+    if (input.text === "ask") {
+      const question = "Which color?";
+      const ask = request(
+        input,
+        (requestId) => ({
+          type: "user-input.requested",
+          requestId,
+          questions: [
+            {
+              question,
+              header: "Color",
+              options: [
+                { label: "Red", description: "warm" },
+                { label: "Blue", description: "cool" },
+              ],
+              multiSelect: false,
+            },
+          ],
+        }),
+        (r) => (r.decision === "answer" ? `you picked ${r.answers[question]}` : "no answer"),
+      );
+      return Stream.concat(Stream.fromIterable(start), ask);
+    }
+    if (input.text === "plan") {
+      const plan = request(
+        input,
+        (requestId) => ({ type: "plan.requested", requestId, plan: "1. Edit a.txt" }),
+        (r) => (r.decision === "allow" ? "built the plan" : `kept planning${r.decision === "deny" && r.feedback ? `: ${r.feedback}` : ""}`),
+      );
+      return Stream.concat(Stream.fromIterable(start), plan);
+    }
+    if (input.text.startsWith("edit ")) {
+      const path = input.text.slice("edit ".length);
+      const edit = Stream.suspend(() => {
+        appendFileSync(path, "edited by the fake harness\n");
+        return Stream.fromIterable<HarnessEvent>([
+          { type: "item", item: { kind: "tool.call", toolUseId: "fake-edit", name: "Edit", input: { file_path: path } } },
+          { type: "item", item: { kind: "tool.result", toolUseId: "fake-edit", isError: false, content: "ok" } },
+        ]);
+      });
+      return Stream.concat(Stream.fromIterable(start), Stream.concat(edit, reply(input.route.model, `edited ${path}`)));
+    }
+    if (input.text === "steer") {
+      const answer = input.steers.pipe(
+        Stream.take(1),
+        Stream.flatMap((steer) => reply(input.route.model, `steered: ${steer}`)),
+      );
+      return Stream.concat(Stream.fromIterable(start), answer);
+    }
+    if (input.text === "subagent") {
+      const parentToolUseId = "fake-agent-1";
+      const steps = (
+        [
+          { kind: "tool.call", toolUseId: parentToolUseId, name: "Agent", input: { prompt: "Read a.txt" } },
+          { kind: "tool.call", toolUseId: "fake-read-1", name: "Read", input: { file_path: "a.txt" }, parentToolUseId },
+          { kind: "tool.result", toolUseId: "fake-read-1", isError: false, content: "hello", parentToolUseId },
+          { kind: "assistant.message", text: "a.txt says hello", parentToolUseId },
+          { kind: "tool.result", toolUseId: parentToolUseId, isError: false, content: "a.txt says hello" },
+        ] satisfies Item[]
+      ).map((item): HarnessEvent => ({ type: "item", item }));
+      return Stream.concat(Stream.fromIterable([...start, ...steps]), reply(input.route.model, "the subagent read a.txt"));
+    }
+    if (input.text === "background") {
+      const parentToolUseId = "fake-agent-1";
+      const steps = (
+        [
+          { kind: "tool.call", toolUseId: parentToolUseId, name: "Agent", input: { prompt: "Read a.txt", run_in_background: true } },
+          { kind: "tool.result", toolUseId: parentToolUseId, isError: false, content: "Async agent launched successfully." },
+          { kind: "assistant.message", text: "launched a subagent" },
+          { kind: "tool.call", toolUseId: "fake-read-1", name: "Read", input: { file_path: "a.txt" }, parentToolUseId },
+          { kind: "tool.result", toolUseId: "fake-read-1", isError: false, content: "hello", parentToolUseId },
+          { kind: "assistant.message", text: "a.txt says hello", parentToolUseId },
+        ] satisfies Item[]
+      ).map((item): HarnessEvent => ({ type: "item", item }));
+      return Stream.concat(Stream.fromIterable([...start, ...steps]), reply(input.route.model, "the background subagent read a.txt"));
+    }
+    const echo = Stream.concat(
+      Stream.fromIterable<HarnessEvent>([
+        { type: "text.delta", text: "echo: " },
+        { type: "text.delta", text: input.text },
+      ]),
+      reply(input.route.model, `echo: ${input.text}`),
+    );
+    const waitForGate = input.text === "gate" ? Stream.unwrap(Effect.promise(() => gate).pipe(Effect.as(echo))) : echo;
+    return Stream.concat(Stream.fromIterable(start), waitForGate);
+  };
+
   const adapter: HarnessAdapter & { calls: typeof calls; reroutes: typeof reroutes; release: () => void } = {
     id: "fake",
     calls,
     reroutes,
     release: () => release(),
     run(input: HarnessRunInput) {
-      calls.push({ resumeSessionId: input.resumeSessionId, route: input.route, text: input.text, mode: input.mode });
-      routes.set(input.threadId, input.route);
-      const start: HarnessEvent[] =
-        input.resumeSessionId === undefined
-          ? [{ type: "session.started", sessionId: `fake-session-${++sessions}`, harnessVersion: "fake" }]
-          : [];
-      if (input.text === "hang") return Stream.concat(Stream.fromIterable(start), Stream.never);
-      if (input.text === "fail") return Stream.fromIterable([...start, { type: "turn.finished", status: "error", error: "fake failure" }]);
-      if (input.text === "overage") {
-        const quota: HarnessEvent = {
-          type: "quota",
-          quota: { status: "rejected", window: "five_hour", utilization: 1, resetsAt: "2026-10-01T00:00:00.000Z", usingOverage: true },
-        };
-        return Stream.concat(Stream.fromIterable([...start, quota]), reply(input.route.model, "on extra usage", "metered"));
-      }
-      if (input.text === "approve") {
-        const edit = request(
-          input,
-          (requestId) => ({ type: "approval.requested", requestId, toolName: "Edit", input: { file_path: "a.txt" } }),
-          (r) => (r.decision === "allow" ? "edited a.txt" : "left a.txt alone"),
-        );
-        return Stream.concat(Stream.fromIterable(start), edit);
-      }
-      if (input.text === "ask") {
-        const question = "Which color?";
-        const ask = request(
-          input,
-          (requestId) => ({
-            type: "user-input.requested",
-            requestId,
-            questions: [
-              {
-                question,
-                header: "Color",
-                options: [
-                  { label: "Red", description: "warm" },
-                  { label: "Blue", description: "cool" },
-                ],
-                multiSelect: false,
-              },
-            ],
-          }),
-          (r) => (r.decision === "answer" ? `you picked ${r.answers[question]}` : "no answer"),
-        );
-        return Stream.concat(Stream.fromIterable(start), ask);
-      }
-      if (input.text === "plan") {
-        const plan = request(
-          input,
-          (requestId) => ({ type: "plan.requested", requestId, plan: "1. Edit a.txt" }),
-          (r) =>
-            r.decision === "allow" ? "built the plan" : `kept planning${r.decision === "deny" && r.feedback ? `: ${r.feedback}` : ""}`,
-        );
-        return Stream.concat(Stream.fromIterable(start), plan);
-      }
-      if (input.text.startsWith("edit ")) {
-        const path = input.text.slice("edit ".length);
-        const edit = Stream.suspend(() => {
-          appendFileSync(path, "edited by the fake harness\n");
-          return Stream.fromIterable<HarnessEvent>([
-            { type: "item", item: { kind: "tool.call", toolUseId: "fake-edit", name: "Edit", input: { file_path: path } } },
-            { type: "item", item: { kind: "tool.result", toolUseId: "fake-edit", isError: false, content: "ok" } },
-          ]);
-        });
-        return Stream.concat(Stream.fromIterable(start), Stream.concat(edit, reply(input.route.model, `edited ${path}`)));
-      }
-      if (input.text === "steer") {
-        const answer = input.steers.pipe(
-          Stream.take(1),
-          Stream.flatMap((steer) => reply(input.route.model, `steered: ${steer}`)),
-        );
-        return Stream.concat(Stream.fromIterable(start), answer);
-      }
-      if (input.text === "subagent") {
-        const parentToolUseId = "fake-agent-1";
-        const steps = (
-          [
-            { kind: "tool.call", toolUseId: parentToolUseId, name: "Agent", input: { prompt: "Read a.txt" } },
-            { kind: "tool.call", toolUseId: "fake-read-1", name: "Read", input: { file_path: "a.txt" }, parentToolUseId },
-            { kind: "tool.result", toolUseId: "fake-read-1", isError: false, content: "hello", parentToolUseId },
-            { kind: "assistant.message", text: "a.txt says hello", parentToolUseId },
-            { kind: "tool.result", toolUseId: parentToolUseId, isError: false, content: "a.txt says hello" },
-          ] satisfies Item[]
-        ).map((item): HarnessEvent => ({ type: "item", item }));
-        return Stream.concat(Stream.fromIterable([...start, ...steps]), reply(input.route.model, "the subagent read a.txt"));
-      }
-      if (input.text === "background") {
-        const parentToolUseId = "fake-agent-1";
-        const steps = (
-          [
-            { kind: "tool.call", toolUseId: parentToolUseId, name: "Agent", input: { prompt: "Read a.txt", run_in_background: true } },
-            { kind: "tool.result", toolUseId: parentToolUseId, isError: false, content: "Async agent launched successfully." },
-            { kind: "assistant.message", text: "launched a subagent" },
-            { kind: "tool.call", toolUseId: "fake-read-1", name: "Read", input: { file_path: "a.txt" }, parentToolUseId },
-            { kind: "tool.result", toolUseId: "fake-read-1", isError: false, content: "hello", parentToolUseId },
-            { kind: "assistant.message", text: "a.txt says hello", parentToolUseId },
-          ] satisfies Item[]
-        ).map((item): HarnessEvent => ({ type: "item", item }));
-        return Stream.concat(Stream.fromIterable([...start, ...steps]), reply(input.route.model, "the background subagent read a.txt"));
-      }
-      const echo = Stream.concat(
-        Stream.fromIterable<HarnessEvent>([
-          { type: "text.delta", text: "echo: " },
-          { type: "text.delta", text: input.text },
-        ]),
-        reply(input.route.model, `echo: ${input.text}`),
-      );
-      const waitForGate = input.text === "gate" ? Stream.unwrap(Effect.promise(() => gate).pipe(Effect.as(echo))) : echo;
-      return Stream.concat(Stream.fromIterable(start), waitForGate);
+      const maxCost = input.limits?.maxCost;
+      const over = maxCost !== undefined && (input.limits?.spentUsd ?? 0) + 0.01 > maxCost;
+      const stopped: HarnessEvent = { type: "turn.finished", status: "limit", error: `Stopped at the task's $${maxCost} cost limit.` };
+      return over ? Stream.map(script(input), (e) => (e.type === "turn.finished" && e.status === "success" ? stopped : e)) : script(input);
     },
     respond: (_threadId, requestId, resolution) =>
       Effect.sync(() => {
