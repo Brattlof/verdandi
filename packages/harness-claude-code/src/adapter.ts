@@ -50,6 +50,8 @@ type Session = {
   readonly unanswered: Set<string>;
   /** The route the process is running on now. */
   route: Route;
+  /** A `reroute` in flight: answers wait for it, so the agent's next step runs on the new route (ADR 0013). */
+  rerouting: Promise<void>;
   /** Whether Claude Code is in its read-only plan mode, which ask and plan turns run in. */
   planning: boolean;
   /** The permission mode Claude Code last reported outside plan mode: the user's own default, which build restores. */
@@ -122,10 +124,12 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
       const requestId = randomUUID();
       const answer = (resolution: Resolution) => {
         if (!waiting.delete(requestId)) return;
-        resolve(toPermission(toolInput, resolution));
-        // Allowing ExitPlanMode makes Claude Code leave plan mode for the mode it was in before.
-        if (toolName === "ExitPlanMode" && resolution.decision === "allow") session.planning = false;
-        if (resolution.decision === "deny" && resolution.feedback) say(session, resolution.feedback, "next");
+        void session.rerouting.then(() => {
+          resolve(toPermission(toolInput, resolution));
+          // Allowing ExitPlanMode makes Claude Code leave plan mode for the mode it was in before.
+          if (toolName === "ExitPlanMode" && resolution.decision === "allow") session.planning = false;
+          if (resolution.decision === "deny" && resolution.feedback) say(session, resolution.feedback, "next");
+        });
       };
       waiting.set(requestId, answer);
       signal.addEventListener("abort", () => answer({ decision: "deny" }), { once: true });
@@ -184,6 +188,7 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
     live: false,
     unanswered: new Set(),
     route: input.route,
+    rerouting: Promise.resolve(),
     planning: input.mode !== "build",
     buildMode: undefined,
     sessionId: undefined,
@@ -368,5 +373,13 @@ export const makeClaudeCodeAdapter = (options: { readonly claudePath: string; re
         }),
       ),
     respond: (threadId, requestId, resolution) => Effect.sync(() => sessions.get(threadId)?.waiting.get(requestId)?.(resolution)),
+    reroute: (threadId, route) =>
+      Effect.sync(() => {
+        const session = sessions.get(threadId);
+        if (!session?.live) return;
+        // ponytail: a failed switch leaves the build on the plan's model, which its usage still records by model.
+        // Upgrade: report it, once a harness event can say the route didn't change.
+        session.rerouting = session.rerouting.then(() => applyRoute(session, route)).catch(() => undefined);
+      }),
   };
 };

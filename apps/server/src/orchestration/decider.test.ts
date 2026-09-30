@@ -16,6 +16,8 @@ const idle: DeciderState = {
     route,
     pinned: true,
     budgetMode: null,
+    taskDecision: null,
+    taskPlanned: false,
     cachedTokens: 0,
     turns: 0,
     runningTurnId: null,
@@ -30,6 +32,8 @@ const running: DeciderState = {
     route,
     pinned: true,
     budgetMode: null,
+    taskDecision: null,
+    taskPlanned: false,
     cachedTokens: 0,
     turns: 0,
     runningTurnId: turnId,
@@ -44,6 +48,8 @@ const waiting: DeciderState = {
     route,
     pinned: true,
     budgetMode: null,
+    taskDecision: null,
+    taskPlanned: false,
     cachedTokens: 0,
     turns: 0,
     runningTurnId: turnId,
@@ -172,6 +178,8 @@ describe("decide", () => {
         route,
         pinned: true,
         budgetMode: null,
+        taskDecision: null,
+        taskPlanned: false,
         cachedTokens: 0,
         turns: 0,
         runningTurnId: turnId,
@@ -184,6 +192,32 @@ describe("decide", () => {
       { type: "approval.resolved", v: 1, threadId, turnId, requestId: "p1", resolution: { decision: "deny", feedback: "smaller" } },
     ]);
     expect(reason(decide(planning, respond("p1", { decision: "answer", answers: {} })))).toBe("InvalidResolution");
+  });
+
+  test("approving a plan moves its build before the approval, unless the user pinned the thread since", () => {
+    const decision = {
+      source: "policy",
+      taskClass: "code.feature",
+      difficulty: 0.5,
+      confidence: 0.9,
+      target: { harness: "fake", provider: "fake", model: "fake-large", access: "local" },
+      effort: "medium",
+      reason: "The plan for this code.feature task is approved, so it runs on fake-large at medium effort.",
+      trace: [],
+    } as const;
+    const routed = (pinned: boolean): DeciderState => ({
+      thread: running.thread && {
+        ...running.thread,
+        pinned,
+        pendingRequests: [{ requestId: "p1", turnId, kind: "plan", execute: decision }],
+      },
+    });
+    const to = { harness: "fake", model: "fake-large", effort: "medium" } as const;
+    expect(events(decide(routed(false), respond("p1", { decision: "allow" })))).toEqual([
+      { type: "task.rerouted", v: 1, threadId, taskId, turnId, from: route, to, decision },
+      { type: "approval.resolved", v: 1, threadId, turnId, requestId: "p1", resolution: { decision: "allow" } },
+    ]);
+    expect(events(decide(routed(true), respond("p1", { decision: "allow" }))).map((e) => e.type)).toEqual(["approval.resolved"]);
   });
 
   test("a turn that ends denies its pending requests, then completes", () => {

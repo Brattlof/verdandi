@@ -59,6 +59,15 @@ describe("switch-cost gate", () => {
     expect(d.target.model).toBe("opus");
   });
 
+  test("an approved Opus plan moves its build to Sonnet once the savings beat moving the plan's context", () => {
+    const classify = () => ({ taskClass: "code.feature" as const, difficulty: 0.5, confidence: 0.9, why: "the task's class" });
+    const current = { target: cc("opus"), effort: "high" as const, cachedTokens: 60_000 };
+    const d = route({ text: "1. Add a toggle to src/settings.tsx", mode: "build", planApproved: true, current }, policy, classify);
+    expect(`${d.target.model} ${d.effort}`).toBe("sonnet medium");
+    expect(d.estimate?.switchCost).toBeGreaterThan(0);
+    expect(d.trace.find((t) => t.stage === "policy")?.note).toStartWith("code.feature (build after its plan)");
+  });
+
   test("staying at a different effort reports the cache rewrite (ADR 0002)", () => {
     const d = route(
       { text: SEARCH, mode: "build", current: { target: cc("sonnet"), effort: "high", cachedTokens: 150_000 } },

@@ -9,8 +9,11 @@ export const approvalPrompt = (r: Extract<PendingRequest, { type: "approval.requ
   `\n[approval] ${r.toolName} ${clip(JSON.stringify(r.input))}\nAllow? [y/n] `;
 
 /** A plan prints in full: the user approves what they read. */
-export const planPrompt = (r: Extract<PendingRequest, { type: "plan.requested" }>) =>
-  `\n[plan${r.filePath ? ` ${r.filePath}` : ""}]\n${r.plan}\nApprove and build? [y/n] `;
+/** A plan and, when approving it moves the build to another route, where and why. */
+export const planPrompt = (r: Extract<PendingRequest, { type: "plan.requested" }>) => {
+  const moves = r.execute ? `[approving moves the build to ${r.execute.target.model} ${r.execute.effort}: ${r.execute.reason}]\n` : "";
+  return `\n[plan${r.filePath ? ` ${r.filePath}` : ""}]\n${r.plan}\n${moves}Approve and build? [y/n] `;
+};
 
 export const questionPrompt = (q: Question) => {
   const options = q.options.map((o, i) => `  ${i + 1}. ${o.label}: ${o.description}`).join("\n");

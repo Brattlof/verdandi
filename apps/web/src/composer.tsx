@@ -321,6 +321,11 @@ const PlanApproval = ({ request, sending, respond }: CardProps<"plan.requested">
     <>
       <h3 className="my-1 font-bold">Approve the plan above and build it?</h3>
       {request.filePath && <p className="text-muted">{request.filePath}</p>}
+      {request.execute && (
+        <p className="text-accent">
+          Approving moves the build to {request.execute.target.model} · {request.execute.effort}: {request.execute.reason}
+        </p>
+      )}
       <label htmlFor={id}>Feedback if you keep planning (optional)</label>
       <textarea id={id} rows={2} className="w-full" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
       <div className="mt-1.5 flex items-center justify-end gap-2">

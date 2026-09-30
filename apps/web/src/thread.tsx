@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { InteractionMode, Item, ThreadId, TurnId, TurnView } from "@verdandi/contracts";
+import { describeRouteChange, type InteractionMode, type Item, type ThreadId, type TurnId, type TurnView } from "@verdandi/contracts";
 import { memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { type Connection, createStore, useStore } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
@@ -244,6 +244,11 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
       <span className="text-xs text-muted">Plan{item.filePath ? ` · ${item.filePath}` : ""}</span>
       <Markdown text={item.text} />
     </div>
+  ),
+  "route.switch": ({ item }) => (
+    <p className="my-2 text-center text-xs text-muted">
+      Route changed by the router: {describeRouteChange(item.from, item.to)}. {item.reason}
+    </p>
   ),
   "tool.call": ({ item, tree }) => {
     const result = tree.results.get(item.toolUseId);

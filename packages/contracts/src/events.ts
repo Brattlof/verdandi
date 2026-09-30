@@ -140,6 +140,27 @@ export const PlanRequested = Schema.Struct({
   requestId: Schema.String,
   plan: Schema.String,
   filePath: Schema.optionalKey(Schema.String),
+  /**
+   * Where approving moves the build: the router's pick for the task's class without its plan-mode route
+   * (DESIGN §8.2 lever 3). Absent when the build stays on the thread's route, the thread is pinned, or the
+   * plan came before this existed.
+   */
+  execute: Schema.optionalKey(RouteDecision),
+});
+/**
+ * The user approved the plan of routed task `taskId`, and the router moved the rest of it to `to`, starting
+ * with the running turn `turnId`. Committed right before that approval's `approval.resolved`, so the harness
+ * switches before the agent's next step. Projected as a `route.switch` item of that turn.
+ */
+export const TaskRerouted = Schema.Struct({
+  type: Schema.Literal("task.rerouted"),
+  v: v1,
+  threadId: ThreadId,
+  taskId: TaskId,
+  turnId: TurnId,
+  from: Route,
+  to: Route,
+  decision: RouteDecision,
 });
 export const ApprovalResolved = Schema.Struct({
   type: Schema.Literal("approval.resolved"),
@@ -190,6 +211,7 @@ export const Event = Schema.Union([
   ApprovalRequested,
   UserInputRequested,
   PlanRequested,
+  TaskRerouted,
   ApprovalResolved,
   TurnCompleted,
   DecisionRecorded,
@@ -222,6 +244,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "approval.requested@1": ApprovalRequested,
   "user-input.requested@1": UserInputRequested,
   "plan.requested@1": PlanRequested,
+  "task.rerouted@1": TaskRerouted,
   "approval.resolved@1": ApprovalResolved,
   "turn.completed@1": TurnCompleted,
   "decision.recorded@1": DecisionRecorded,

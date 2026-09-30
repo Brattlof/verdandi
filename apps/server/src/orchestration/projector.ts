@@ -115,6 +115,18 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       addItem(e.turnId, { kind: "plan", text: e.plan, ...(e.filePath === undefined ? {} : { filePath: e.filePath }) }),
       insertRequest(e, at),
     ),
+  // The task's decision becomes the one it runs on now, so the route chip and `RoutingExplain` match the route.
+  "task.rerouted": (e) =>
+    Effect.andThen(
+      withSql((sql) =>
+        Effect.andThen(
+          sql`update threads set route = ${JSON.stringify(e.to)} where id = ${e.threadId}`,
+          sql`update route_decisions set source = ${e.decision.source}, task_class = ${e.decision.taskClass},
+              reason = ${e.decision.reason}, payload = ${JSON.stringify(e.decision)} where task_id = ${e.taskId}`,
+        ),
+      ),
+      addItem(e.turnId, { kind: "route.switch", from: e.from, to: e.to, reason: e.decision.reason }),
+    ),
   "approval.resolved": (e, at) =>
     withSql(
       (sql) =>
@@ -157,18 +169,23 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         pinned: number;
         budget_mode: BudgetMode | null;
         turns: number;
+        task_decision: string | null;
+        task_mode: string | null;
         cached_tokens: number;
       }>`
         select p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned, t.budget_mode,
           (select count(*) from turns n where n.thread_id = t.id) as turns,
+          (select payload from route_decisions where task_id = t.task_id) as task_decision,
+          (select mode from turns where id = t.task_id) as task_mode,
           -- ponytail: the context a warm session has cached, read as every token the thread wrote to cache. Harnesses
           -- report usage summed over a turn's model calls, not the context size; upgrade once one reports that.
           (select coalesce(sum(u.cache_write_tokens), 0) from usage_ledger u join turns n on n.id = u.turn_id where n.thread_id = t.id)
             as cached_tokens
         from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
       if (!row) return { thread: undefined };
-      const pending = yield* sql<{ id: string; turn_id: string; kind: PendingRequest["kind"] }>`
-        select id, turn_id, kind from requests where thread_id = ${threadId} and resolution is null`;
+      const pending = yield* sql<{ id: string; turn_id: string; kind: PendingRequest["kind"]; execute: string | null }>`
+        select id, turn_id, kind, json_extract(payload, '$.execute') as execute
+        from requests where thread_id = ${threadId} and resolution is null`;
       return {
         thread: {
           projectPath: row.path,
@@ -179,8 +196,15 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           turns: row.turns,
           pinned: row.pinned === 1,
           budgetMode: row.budget_mode,
+          taskDecision: row.task_decision === null ? null : (JSON.parse(row.task_decision) as RouteDecision),
+          taskPlanned: row.task_mode === "plan",
           cachedTokens: row.cached_tokens,
-          pendingRequests: pending.map((r) => ({ requestId: r.id, turnId: r.turn_id as TurnId, kind: r.kind })),
+          pendingRequests: pending.map((r) => ({
+            requestId: r.id,
+            turnId: r.turn_id as TurnId,
+            kind: r.kind,
+            ...(r.execute === null ? {} : { execute: JSON.parse(r.execute) as RouteDecision }),
+          })),
         },
       };
     }),

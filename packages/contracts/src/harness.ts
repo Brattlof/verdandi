@@ -76,4 +76,12 @@ export interface HarnessAdapter {
   run(input: HarnessRunInput): Stream.Stream<HarnessEvent, HarnessError>;
   /** Answers a request the running turn raised. Unknown ids are ignored: their turn has ended. */
   respond(threadId: ThreadId, requestId: string, resolution: Resolution): Effect.Effect<void>;
+  /**
+   * Moves the running turn onto `route` for the rest of its steps: an approved plan's build (DESIGN §8.2
+   * lever 3). Verdandi calls it just before `respond` allows the plan, and the agent's next step must run
+   * on `route` (Claude Code: `setModel` lands before the approval is answered, ADR 0013). `route` keeps the
+   * turn's harness. Every harness today can (Claude Code, fake); one that can't must be listed here, and
+   * the decider must not reroute its threads. A thread with no running turn is ignored.
+   */
+  reroute(threadId: ThreadId, route: Route): Effect.Effect<void>;
 }

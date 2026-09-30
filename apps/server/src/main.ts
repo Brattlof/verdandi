@@ -10,6 +10,7 @@ const claudeMissing: HarnessAdapter = {
   id: "claude-code",
   run: () => Stream.fail(new HarnessError({ message: "Claude Code CLI not found on PATH. Install it and run `claude` once to log in." })),
   respond: () => Effect.void,
+  reroute: () => Effect.void,
 };
 
 /** `verdandi start`: runs verdandid in the foreground until Ctrl+C. */
