@@ -10,11 +10,14 @@ import {
 import { type FormEvent, useEffect, useState, useSyncExternalStore } from "react";
 import { ArchiveButton } from "./archive.tsx";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
+import { Dashboard } from "./dashboard.tsx";
 import { applyProjectsFeed, type Sidebar as SidebarData } from "./state.ts";
 import { ThreadPane } from "./thread.tsx";
 
 /** The open thread lives in the URL hash (`#thread=<id>`), so links, Back and reloads just work. */
 const hashThread = () => new URLSearchParams(location.hash.slice(1)).get("thread") as ThreadId | null;
+/** `#view=spend` opens the spend dashboard instead of a thread. */
+const hashView = () => new URLSearchParams(location.hash.slice(1)).get("view");
 const onHashChange = (listener: () => void) => {
   addEventListener("hashchange", listener);
   return () => removeEventListener("hashchange", listener);
@@ -26,6 +29,8 @@ export const openThread = (threadId: ThreadId) => {
 export const App = ({ connection }: { connection: Connection }) => {
   const [sidebar] = useState(() => createStore<SidebarData | undefined>(undefined));
   const threadId = useSyncExternalStore(onHashChange, hashThread);
+  const view = useSyncExternalStore(onHashChange, hashView);
+  const data = useStore(sidebar);
   const lost = useStore(connection.lost);
   // Showing archived threads asks verdandid for a feed that includes them; hiding them goes back to one that doesn't.
   const [archived, setArchived] = useState(false);
@@ -53,9 +58,18 @@ export const App = ({ connection }: { connection: Connection }) => {
           If verdandid restarted, run <code>verdandi open</code> again.
         </div>
       )}
-      <Sidebar connection={connection} data={useStore(sidebar)} current={threadId} archived={archived} onArchived={setArchived} />
+      <Sidebar
+        connection={connection}
+        data={data}
+        current={view === "spend" ? null : threadId}
+        spend={view === "spend"}
+        archived={archived}
+        onArchived={setArchived}
+      />
       <main className="flex min-h-0 min-w-0 flex-col">
-        {threadId ? (
+        {view === "spend" ? (
+          <Dashboard connection={connection} projects={data?.projects ?? []} />
+        ) : threadId ? (
           <ThreadPane key={threadId} connection={connection} threadId={threadId} />
         ) : (
           <p className="p-6 text-muted">Pick a thread on the left.</p>
@@ -71,12 +85,15 @@ const Sidebar = ({
   connection,
   data,
   current,
+  spend,
   archived,
   onArchived,
 }: {
   connection: Connection;
   data: SidebarData | undefined;
   current: ThreadId | null;
+  /** Whether the spend dashboard is open. */
+  spend: boolean;
   archived: boolean;
   onArchived: (archived: boolean) => void;
 }) => {
@@ -88,6 +105,13 @@ const Sidebar = ({
   );
   return (
     <nav aria-label="Projects and threads" className="overflow-y-auto border-r border-line bg-panel p-2">
+      <a
+        href="#view=spend"
+        aria-current={spend ? "page" : undefined}
+        className="mb-2 block rounded px-2 py-1 hover:bg-line aria-[current=page]:bg-user"
+      >
+        Spend dashboard
+      </a>
       <Quotas quotas={data.quotas} />
       <OpenFolder connection={connection} />
       <label className="mx-1 mt-2 block text-xs text-muted">

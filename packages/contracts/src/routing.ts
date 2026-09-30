@@ -42,6 +42,22 @@ export const CatalogEntry = Schema.Struct({
 });
 export type CatalogEntry = typeof CatalogEntry.Type;
 
+/** What these tokens cost at `price`, a catalog entry's $/MTok list prices. */
+export const listCost = (
+  price: CatalogEntry["price"],
+  tokens: {
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly cacheReadTokens: number;
+    readonly cacheWriteTokens: number;
+  },
+) =>
+  (tokens.inputTokens * price.input +
+    tokens.outputTokens * price.output +
+    tokens.cacheReadTokens * price.cacheRead +
+    tokens.cacheWriteTokens * price.cacheWrite) /
+  1e6;
+
 export const Catalog = Schema.Array(CatalogEntry);
 export type Catalog = typeof Catalog.Type;
 export const decodeCatalog = Schema.decodeUnknownSync(Catalog);

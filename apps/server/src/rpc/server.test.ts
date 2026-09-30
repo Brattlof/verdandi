@@ -6,6 +6,7 @@ import { makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@ve
 import { Deferred, Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { spendCapsFile } from "../config/spend-caps.ts";
+import { projectIdFor } from "../orchestration/decider.ts";
 import { Reactor } from "../orchestration/reactor.ts";
 import { connect } from "./client.ts";
 import { ServerInfo, ServerLayer } from "./server.ts";
@@ -262,6 +263,53 @@ describe("rpc server", () => {
         [kept, false],
       ].toSorted(),
     );
+  });
+
+  test("UsageQuery totals fake-harness tasks with metered and subscription apart, by project and period", async () => {
+    const { info, drain } = await startServer();
+    const [one, two] = [uuid<ThreadId>(), uuid<ThreadId>()];
+    const other = makeTempHome(); // a second project folder
+    cleanups.push(async () => removeTempHome(other));
+    const send = async (threadId: ThreadId, text: string) => {
+      await withClient(info.port, info.token, (c) =>
+        c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), text, mode: "build" }),
+      );
+      await drain();
+    };
+    await withClient(info.port, info.token, (c) =>
+      Effect.all([
+        createThread(c, one),
+        c.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId: two, projectPath: other, route }),
+      ]),
+    );
+    await send(one, "hi"); // a completed task on subscription
+    await withClient(info.port, info.token, (c) =>
+      c.CommandDispatch({ type: "thread.route.set", commandId: uuid<CommandId>(), threadId: one, route: { ...route, model: "fake-2" } }),
+    );
+    await send(one, "overage"); // the user moved it: a second task, on metered extra usage
+    await send(two, "fail"); // a failed task in the other project
+    const [all, today, otherProject] = await withClient(info.port, info.token, (c) =>
+      Effect.all([c.UsageQuery({}), c.UsageQuery({ days: 1 }), c.UsageQuery({ projectId: projectIdFor(realpathSync.native(other)) })]),
+    );
+    expect(all.since).toBeNull();
+    expect(all.spend).toEqual({ meteredUsd: 0.01, subscriptionUsd: 0.01 });
+    expect(all.daily).toHaveLength(1);
+    expect(all.daily[0]).toMatchObject({ meteredUsd: 0.01, subscriptionUsd: 0.01 });
+    expect(all.byTarget.map((t) => [t.model, t.accessMode, t.costUsd])).toEqual([
+      ["fake", "subscription", 0.01],
+      ["fake-2", "metered", 0.01],
+    ]);
+    expect(all.byClass.reduce((n, c) => n + c.tasks, 0)).toBe(3);
+    expect(all.byClass.reduce((n, c) => n + c.completed, 0)).toBe(2);
+    expect(all.rates).toEqual({ tasks: 3, overridden: 1, escalated: 0 });
+    // Two replies of 10 input and 5 output tokens at Opus's catalog list price ($4 and $20 per MTok).
+    expect(all.savings).toMatchObject({ estimate: true, tasks: 3, completed: 2, actualUsd: 0.02 });
+    expect(all.savings.baselineUsd).toBeCloseTo((2 * (10 * 4 + 5 * 20)) / 1e6, 10);
+    expect(today.spend).toEqual(all.spend);
+    expect(today.since).not.toBeNull();
+    expect(otherProject.spend).toEqual({ meteredUsd: 0, subscriptionUsd: 0 });
+    expect(otherProject.rates).toEqual({ tasks: 1, overridden: 0, escalated: 0 });
+    expect(otherProject.byClass.map((c) => [c.tasks, c.completed])).toEqual([[1, 0]]);
   });
 
   test("a reported quota and the thread's metered cost reach the feed live and after a reload", async () => {
