@@ -202,6 +202,16 @@ const spendCapRaises = Effect.gen(function* () {
   yield* sql`create index usage_ledger_at on usage_ledger (at)`;
 });
 
+/** When each project's routing memory was last cleared (DESIGN §8.8): only tasks started after `cleared_seq` count. */
+const routingMemory = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table routing_memory (
+    project_id text primary key references projects (id),
+    cleared_seq integer not null,
+    cleared_at text not null
+  )`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -214,4 +224,5 @@ export const migrations = {
   "9_budget_mode": budgetMode,
   "10_decisions": decisions,
   "11_spend_cap_raises": spendCapRaises,
+  "12_routing_memory": routingMemory,
 };

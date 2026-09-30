@@ -20,6 +20,7 @@ import { loadDeciderState } from "../orchestration/projector.ts";
 import { HarnessRegistry } from "../orchestration/reactor.ts";
 import { loadSpendState } from "../orchestration/spend.ts";
 import { loadTaskCosts } from "../orchestration/task-outcome.ts";
+import { loadRoutingMemory } from "../routing/memory.ts";
 import { decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { threadDiff } from "../workspace/diff.ts";
 import { resolveProjectPath } from "../workspace/project.ts";
@@ -97,7 +98,11 @@ const Handlers = (home: string) =>
               Effect.catchTag("SqlError", Effect.die),
             );
             if (!thread) return yield* new RoutingUnavailable({ reason: "ThreadNotFound", message: `Thread ${threadId} does not exist.` });
-            const context = yield* routing(thread.projectPath);
+            const memory = yield* loadRoutingMemory(threadId).pipe(
+              Effect.provideService(SqlClient.SqlClient, sql),
+              Effect.catchTag("SqlError", Effect.die),
+            );
+            const context = { ...(yield* routing(thread.projectPath)), memory };
             const { answers } = yield* rulesDecide.decide({ state: text, questions: taskQuestions(context) });
             const decided = decideRoute(thread, context, text, mode, answers);
             if (Result.isFailure(decided)) return yield* new RoutingUnavailable(decided.failure);

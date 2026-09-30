@@ -7,6 +7,7 @@ import type {
   RouteDecision,
   RouteRule,
   RouteSpec,
+  RouteStats,
   RouteTarget,
   RuleTrace,
   Tier,
@@ -36,6 +37,8 @@ export type RouteInput = {
    * plan, and the classifier should return the task's own class, so the class's route without its `plan` override applies.
    */
   readonly planApproved?: boolean;
+  /** The project's routing memory (DESIGN §8.8): how its tasks went, per class and route. Pins ignore it. */
+  readonly memory?: readonly RouteStats[];
 };
 
 /** No target is available at all. The message says why each one dropped out. */
@@ -152,7 +155,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   // Stage 4: the cheapest available target the class accepts. If none is left, the cheapest one at
   // least as capable as the weakest it accepts, and failing that the strongest there is.
   const spec = resolveSpec(rule, policy.mode, planning);
-  const effort = spec.effort ?? "medium";
+  let effort = spec.effort ?? "medium";
   const cost = (t: CatalogEntry) => effectiveCost(t, tokens, input);
   const cheapest = (ts: CatalogEntry[]) => ts.reduce((a, b) => (cost(b) < cost(a) ? b : a));
   const accepted = spec.prefer ?? [];
@@ -161,7 +164,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const others = [...candidates.values()];
   const above = others.filter((t) => rank(t.tier) >= floor);
   const strongest = Math.max(...others.map((t) => rank(t.tier)));
-  const pick =
+  let pick =
     preferred.length > 0 ? cheapest(preferred) : cheapest(above.length > 0 ? above : others.filter((t) => rank(t.tier) === strongest));
   const lead = unsure
     ? `Not sure what kind of task this is (best guess ${c.taskClass}, confidence ${c.confidence.toFixed(2)})`
@@ -179,6 +182,58 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
     preferred.length > 0
       ? `${lead}, so ${unsure ? `it runs on the ${policy.mode} default, ` : `${byMode}it runs on `}${describe(pick, effort)}.`
       : `${lead}, but ${accepted.map((n) => policy.targets.get(n)?.model ?? n).join(" and ")} ${accepted.length === 1 ? "is" : "are"} unavailable, so it runs on ${describe(pick, effort)}, the ${above.length > 0 ? "cheapest capable" : "strongest"} target left.`;
+
+  // Stage 4, continued: routing memory. How this project's tasks of the class went on the policy's route
+  // can move it: to where the user kept moving them, or else one tier up from where they kept failing.
+  const memory =
+    unsure || input.planApproved
+      ? undefined
+      : input.memory?.find(
+          (s) =>
+            s.taskClass === c.taskClass && s.route.harness === pick.harness && s.route.model === pick.model && s.route.effort === effort,
+        );
+  let remembered = false;
+  if (memory) {
+    const { minTasks, minShare } = policy.memory;
+    const n = memory.tasks;
+    const top = memory.overrides[0];
+    const failures = memory.failed + memory.escalated + memory.reverted;
+    const counts = `${n} ${c.taskClass} task${n === 1 ? "" : "s"} on ${describe(pick, effort)}: ${memory.completed} completed, ${failures} failed, escalated or reverted, ${top?.count ?? 0} moved by you`;
+    let move: { readonly to: CatalogEntry; readonly effort: Effort; readonly why: string } | undefined;
+    let note = `${counts}; `;
+    if (n < minTasks) note += `too few to act on (minTasks ${minTasks})`;
+    else if (top && top.count / n >= minShare) {
+      const to = policy.catalog.find((e) => e.harness === top.to.harness && e.model === top.to.model);
+      const why = to ? unavailable(to) : `${top.to.model} isn't in the catalog`;
+      // An effort-only move names the effort it moved off.
+      const off = to?.model === pick.model ? describe(pick, effort) : pick.model;
+      if (to && !why) {
+        move = {
+          to,
+          effort: top.to.effort,
+          why: `${c.taskClass} tasks here were moved off ${off} by you ${top.count} of ${n} times, so it starts on ${describe(to, top.to.effort)}.`,
+        };
+      } else note += `you moved most to ${top.to.model} at ${top.to.effort} effort, but ${why}`;
+    } else if (failures / n >= minShare) {
+      const stronger = others.filter((t) => rank(t.tier) > rank(pick.tier));
+      if (stronger.length > 0) {
+        const to = cheapest(stronger);
+        move = {
+          to,
+          effort,
+          why: `${c.taskClass} tasks here didn't succeed on ${pick.model} ${failures} of ${n} times, so it starts on the stronger ${describe(to, effort)}.`,
+        };
+      } else note += "most didn't succeed, but no stronger target is available";
+    } else note += `below the ${minShare} share that moves it`;
+    if (move) {
+      note += `moved to ${move.to.model} at ${move.effort}`;
+      pick = move.to;
+      effort = move.effort;
+      reason = move.why;
+      remembered = true;
+    }
+    trace.push({ stage: "memory", note });
+  }
 
   // Stage 5: switch-cost gate. Leave a warm session only for a more capable target, or when the savings beat re-reading the cached context.
   const current = input.current;
@@ -220,7 +275,8 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
 
   const { harness, provider, model, access } = target;
   return {
-    source: "policy",
+    source: remembered && target === pick ? "memory" : "policy",
+    ...(memory && { memory }),
     ...classified,
     target: { harness, provider, model, access },
     effort,

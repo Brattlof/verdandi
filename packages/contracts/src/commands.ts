@@ -83,6 +83,16 @@ export const SpendCapRaise = Schema.Struct({
   period: CapPeriod,
 });
 
+/**
+ * Forgets the routing memory of the thread's project (DESIGN §8.8): its later tasks route on the policy alone,
+ * until new outcomes build memory again.
+ */
+export const RoutingMemoryClear = Schema.Struct({
+  type: Schema.Literal("routing.memory.clear"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
   type: Schema.Literal("harness.report"),
@@ -109,6 +119,7 @@ export const ClientCommand = Schema.Union([
   ThreadRouteUnpin,
   ThreadBudgetSet,
   SpendCapRaise,
+  RoutingMemoryClear,
   ApprovalRespond,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
@@ -122,6 +133,7 @@ export const Command = Schema.Union([
   ThreadRouteUnpin,
   ThreadBudgetSet,
   SpendCapRaise,
+  RoutingMemoryClear,
   ApprovalRespond,
   HarnessReport,
   TurnRecover,

@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { Effort, HarnessId } from "./route.ts";
+import { Effort, HarnessId, Route } from "./route.ts";
 
 /** The v1 task taxonomy (DESIGN §8.5). A task's class picks its route from the policy. */
 export const TaskClass = Schema.Literals([
@@ -92,6 +92,16 @@ export const Policy = Schema.Struct({
   ),
   routes: Schema.optionalKey(Schema.Record(TaskClass, Schema.optionalKey(RouteRule))),
   fallback: Schema.optionalKey(RouteRule),
+  /**
+   * Routing memory (DESIGN §8.8): once `minTasks` of a class ran on the policy's route in this project, the
+   * route moves when at least `minShare` of them were moved elsewhere by the user, or didn't succeed.
+   */
+  memory: Schema.optionalKey(
+    Schema.Struct({
+      minTasks: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+      minShare: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+    }),
+  ),
   /** When a task touches a path matching `match` (a glob), drop targets with a forbidden access mode or below `minTier`. */
   restrictions: Schema.optionalKey(
     Schema.Array(
@@ -104,16 +114,34 @@ export type Policy = typeof Policy.Type;
 /** Decodes one policy layer. Throws with every problem and its key path, e.g. `at ["routes"]["review"]["effort"]`. */
 export const decodePolicy = (data: unknown) => Schema.decodeUnknownSync(Policy)(data, { onExcessProperty: "error", errors: "all" });
 
+/**
+ * How a project's tasks of one class went on one route (DESIGN §8.8, routing memory level 1), from their
+ * outcomes since the project's routing memory was last cleared.
+ */
+export const RouteStats = Schema.Struct({
+  taskClass: TaskClass,
+  route: Route,
+  tasks: Schema.Int,
+  completed: Schema.Int,
+  failed: Schema.Int,
+  escalated: Schema.Int,
+  reverted: Schema.Int,
+  /** Where the user moved these tasks, most often first. */
+  overrides: Schema.Array(Schema.Struct({ to: Route, count: Schema.Int })),
+});
+export type RouteStats = typeof RouteStats.Type;
+
 /** One step of how the router reached a decision, shown when the user opens the route's trace. */
 export const RuleTrace = Schema.Struct({
-  stage: Schema.Literals(["pin", "candidates", "signals", "classify", "policy", "switch"]),
+  stage: Schema.Literals(["pin", "candidates", "signals", "classify", "policy", "memory", "switch"]),
   note: Schema.String,
 });
 export type RuleTrace = typeof RuleTrace.Type;
 
 /** The router's answer for a task (DESIGN §8.1). Pinned tasks are classified too, so overrides can be learned from. */
 export const RouteDecision = Schema.Struct({
-  source: Schema.Literals(["pin", "policy"]),
+  /** `memory`: the project's routing memory moved the task off the policy's route. */
+  source: Schema.Literals(["pin", "policy", "memory"]),
   taskClass: TaskClass,
   difficulty: Schema.Number,
   confidence: Schema.Number,
@@ -126,5 +154,7 @@ export const RouteDecision = Schema.Struct({
   trace: Schema.Array(RuleTrace),
   /** The task's budget guards, from its class's policy; absent when the policy sets none. */
   limits: Schema.optionalKey(TaskLimits),
+  /** The routing memory the router consulted: its class on the policy's route, whether or not it moved the route. */
+  memory: Schema.optionalKey(RouteStats),
 });
 export type RouteDecision = typeof RouteDecision.Type;

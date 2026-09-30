@@ -9,6 +9,7 @@ import {
   type InteractionMode,
   type Route,
   type RouteDecision,
+  type RouteStats,
   type RouteTarget,
 } from "@verdandi/contracts";
 import { classificationOf, followUpRules, makeDecide, routingQuestions, routingRules, rulesBackend } from "@verdandi/decisions";
@@ -29,6 +30,8 @@ export type RoutingContext = {
   /** The built-in policy alone: pins still get classified when the project's policy is broken. */
   readonly builtIn: ResolvedPolicy;
   readonly harnesses: readonly HarnessId[];
+  /** The project's routing memory, loaded with the thread's state; none means the policy alone decides. */
+  readonly memory?: readonly RouteStats[];
 };
 
 /**
@@ -148,6 +151,7 @@ export const decideRoute = (
           text,
           mode,
           harnesses: routing.harnesses,
+          ...(routing.memory ? { memory: routing.memory } : {}),
           ...(thread.pinned ? { pin: current } : {}),
           ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens } }),
         },
