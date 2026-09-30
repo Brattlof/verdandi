@@ -93,6 +93,20 @@ export const RoutingMemoryClear = Schema.Struct({
   threadId: ThreadId,
 });
 
+/** Puts a thread away: it leaves the thread lists, and nothing is deleted. A thread with a running turn can't be archived. */
+export const ThreadArchive = Schema.Struct({
+  type: Schema.Literal("thread.archive"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
+/** Brings an archived thread back into the thread lists, so it takes turns again. */
+export const ThreadUnarchive = Schema.Struct({
+  type: Schema.Literal("thread.unarchive"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
   type: Schema.Literal("harness.report"),
@@ -120,6 +134,8 @@ export const ClientCommand = Schema.Union([
   ThreadBudgetSet,
   SpendCapRaise,
   RoutingMemoryClear,
+  ThreadArchive,
+  ThreadUnarchive,
   ApprovalRespond,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
@@ -134,6 +150,8 @@ export const Command = Schema.Union([
   ThreadBudgetSet,
   SpendCapRaise,
   RoutingMemoryClear,
+  ThreadArchive,
+  ThreadUnarchive,
   ApprovalRespond,
   HarnessReport,
   TurnRecover,

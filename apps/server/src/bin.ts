@@ -11,7 +11,8 @@ const usage = `Usage:
   verdandi open  [--home <dir>]                   open the web UI in your browser
   verdandi doctor [--home <dir>]                  check the setup: Bun, Claude Code, git, the home, the database and verdandid
   verdandi chat  [--home <dir>] [--harness <h>] [--model <m>] [--effort <e> | --auto] [--budget thrifty|balanced|max|policy] [--raise-cap] [--thread <id>]   chat with the thread for this folder, or the one named; route flags pin a route, --auto lets the router pick, --budget sets how it trades cost for strength, --raise-cap raises each reached spend cap for the rest of its period
-  verdandi chat  --list [--home <dir>]              list every thread by project
+  verdandi chat  --list [--archived] [--home <dir>]  list every thread by project; --archived includes archived ones
+  verdandi chat  --archive <thread> | --unarchive <thread> [--home <dir>]   put a thread away, or bring it back
   verdandi costs [--home <dir>]                   cost per completed task on each route`;
 
 const commands: Record<string, (argv: readonly string[]) => Promise<void>> = { start, open, chat, doctor, costs };

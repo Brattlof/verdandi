@@ -212,6 +212,12 @@ const routingMemory = Effect.gen(function* () {
   )`;
 });
 
+/** When the user archived each thread (DESIGN §7); null while it's in the thread lists. */
+const threadArchive = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table threads add column archived_at text`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -225,4 +231,5 @@ export const migrations = {
   "10_decisions": decisions,
   "11_spend_cap_raises": spendCapRaises,
   "12_routing_memory": routingMemory,
+  "13_thread_archive": threadArchive,
 };

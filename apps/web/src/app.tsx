@@ -8,6 +8,7 @@ import {
   type ThreadSummary,
 } from "@verdandi/contracts";
 import { type FormEvent, useEffect, useState, useSyncExternalStore } from "react";
+import { ArchiveButton } from "./archive.tsx";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
 import { applyProjectsFeed, type Sidebar as SidebarData } from "./state.ts";
 import { ThreadPane } from "./thread.tsx";
@@ -26,15 +27,21 @@ export const App = ({ connection }: { connection: Connection }) => {
   const [sidebar] = useState(() => createStore<SidebarData | undefined>(undefined));
   const threadId = useSyncExternalStore(onHashChange, hashThread);
   const lost = useStore(connection.lost);
-  useEffect(
-    () =>
-      connection.follow(
-        (rpc, subscriptionId) => rpc.ProjectsSubscribe({ subscriptionId }),
-        (feed) => sidebar.set(applyProjectsFeed(sidebar.get(), feed)),
-        () => {},
-      ),
-    [connection, sidebar],
-  );
+  // Showing archived threads asks verdandid for a feed that includes them; hiding them goes back to one that doesn't.
+  const [archived, setArchived] = useState(false);
+  useEffect(() => {
+    // A message the previous feed sends after this one started must not be folded in with the new setting.
+    let current = true;
+    const stop = connection.follow(
+      (rpc, subscriptionId) => rpc.ProjectsSubscribe({ subscriptionId, archived }),
+      (feed) => current && sidebar.set(applyProjectsFeed(sidebar.get(), feed, archived)),
+      () => {},
+    );
+    return () => {
+      current = false;
+      stop();
+    };
+  }, [connection, sidebar, archived]);
   return (
     <div className="grid h-screen grid-cols-[260px_1fr]">
       {lost && (
@@ -46,7 +53,7 @@ export const App = ({ connection }: { connection: Connection }) => {
           If verdandid restarted, run <code>verdandi open</code> again.
         </div>
       )}
-      <Sidebar connection={connection} data={useStore(sidebar)} current={threadId} />
+      <Sidebar connection={connection} data={useStore(sidebar)} current={threadId} archived={archived} onArchived={setArchived} />
       <main className="flex min-h-0 min-w-0 flex-col">
         {threadId ? (
           <ThreadPane key={threadId} connection={connection} threadId={threadId} />
@@ -60,7 +67,19 @@ export const App = ({ connection }: { connection: Connection }) => {
 
 const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 
-const Sidebar = ({ connection, data, current }: { connection: Connection; data: SidebarData | undefined; current: ThreadId | null }) => {
+const Sidebar = ({
+  connection,
+  data,
+  current,
+  archived,
+  onArchived,
+}: {
+  connection: Connection;
+  data: SidebarData | undefined;
+  current: ThreadId | null;
+  archived: boolean;
+  onArchived: (archived: boolean) => void;
+}) => {
   if (!data) return <nav aria-label="Projects and threads" className="overflow-y-auto border-r border-line bg-panel p-2" />;
   // Projects with the most recent activity first; `data.threads` is already in that order.
   const byProject = Map.groupBy(data.threads, (t) => t.projectId);
@@ -71,6 +90,10 @@ const Sidebar = ({ connection, data, current }: { connection: Connection; data: 
     <nav aria-label="Projects and threads" className="overflow-y-auto border-r border-line bg-panel p-2">
       <Quotas quotas={data.quotas} />
       <OpenFolder connection={connection} />
+      <label className="mx-1 mt-2 block text-xs text-muted">
+        <input type="checkbox" checked={archived} onChange={(e) => onArchived(e.target.checked)} />
+        Show archived threads
+      </label>
       {projects.length === 0 && (
         <p className="m-1 text-muted">
           No threads yet. Open a project folder above, or run <code>verdandi chat</code> in one.
@@ -182,14 +205,15 @@ const Project = ({
       {error && <p role="alert">{error}</p>}
       <ul className="my-1">
         {threads.map((t) => (
-          <li key={t.threadId}>
+          <li key={t.threadId} className="group relative flex items-start gap-1">
             <a
               href={`#thread=${t.threadId}`}
               aria-current={t.threadId === current ? "page" : undefined}
-              className="flex flex-wrap items-baseline gap-2 rounded px-2 py-1 hover:bg-line aria-[current=page]:bg-user"
+              className="flex min-w-0 flex-1 flex-wrap items-baseline gap-2 rounded px-2 py-1 hover:bg-line aria-[current=page]:bg-user"
             >
-              <span className="flex-1 truncate">{t.title || "New thread"}</span>
+              <span className={`flex-1 truncate ${t.archived ? "text-muted" : ""}`}>{t.title || "New thread"}</span>
               {t.busy && <span className="text-xs text-accent">working</span>}
+              {t.archived && <span className="text-xs text-muted">archived</span>}
               {describeCost(t.cost) && (
                 <span
                   className="basis-full text-xs text-muted"
@@ -199,6 +223,17 @@ const Project = ({
                 </span>
               )}
             </a>
+            {/* Shown on hover or keyboard focus, except Unarchive, which an archived thread always shows. */}
+            {!t.busy && (
+              <ArchiveButton
+                connection={connection}
+                threadId={t.threadId}
+                archived={t.archived}
+                title={t.title || "New thread"}
+                className={t.archived ? "mt-1" : "absolute top-1 right-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"}
+                onError={setError}
+              />
+            )}
           </li>
         ))}
       </ul>

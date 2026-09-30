@@ -39,6 +39,8 @@ export type DeciderState = {
         readonly projectId: ProjectId;
         readonly projectPath: string;
         readonly runningTurnId: string | null;
+        /** Put away by the user: it takes no turns until unarchived. */
+        readonly archived: boolean;
         /** The task the next turn continues; null before the first turn and after a route change. */
         readonly taskId: TaskId | null;
         /** How many turns the thread has had. */
@@ -164,6 +166,12 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
   "turn.send": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     if (state.thread.runningTurnId) return reject("ThreadBusy", "A turn is already running in this thread. Wait for it to finish.");
+    if (state.thread.archived) {
+      return reject(
+        "ThreadArchived",
+        `Thread ${c.threadId} is archived. Unarchive it to send a turn: Unarchive in the web UI, or \`verdandi chat --unarchive ${c.threadId}\`.`,
+      );
+    }
     const stop = capped(state.spend);
     if (stop) return stop;
     const turn: Event = { type: "turn.started", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text, mode: c.mode };
@@ -203,6 +211,20 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     state.thread
       ? accept({ type: "routing.memory.cleared", v: 1, threadId: c.threadId, projectId: state.thread.projectId })
       : reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`),
+  "thread.archive": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    if (state.thread.runningTurnId) {
+      return reject(
+        "ThreadBusy",
+        "A turn is running in this thread. Interrupt it first (Stop in the web UI, Ctrl+C in `verdandi chat`), then archive it.",
+      );
+    }
+    return state.thread.archived ? accept() : accept({ type: "thread.archived", v: 1, threadId: c.threadId });
+  },
+  "thread.unarchive": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    return state.thread.archived ? accept({ type: "thread.unarchived", v: 1, threadId: c.threadId }) : accept();
+  },
   "thread.route.unpin": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     return state.thread.pinned ? accept({ type: "thread.route.unpinned", v: 1, threadId: c.threadId }) : accept();

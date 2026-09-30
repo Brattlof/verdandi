@@ -30,6 +30,8 @@ type ProjectsChange = Exclude<ProjectsFeed, { kind: "snapshot" }>;
 const summaryEvents: ReadonlySet<Event["type"]> = new Set([
   "thread.created",
   "thread.route.changed",
+  "thread.archived",
+  "thread.unarchived",
   "task.started",
   "turn.started",
   "turn.completed",
@@ -47,8 +49,11 @@ export class Engine extends Context.Service<
     readonly dispatch: (command: Command) => Effect.Effect<Receipt, CommandRejected | SqlError.SqlError>;
     /** A snapshot of the thread, then its events and text deltas as they happen. */
     readonly feed: (threadId: ThreadId) => Stream.Stream<ThreadFeed, CommandRejected | SqlError.SqlError>;
-    /** A snapshot of every project and thread summary, then each summary again whenever it changes. */
-    readonly projectsFeed: Stream.Stream<ProjectsFeed, SqlError.SqlError>;
+    /**
+     * A snapshot of every project and thread summary, then each summary again whenever it changes. The
+     * snapshot leaves archived threads out unless `archived`; changes always come, so a client sees a thread leave.
+     */
+    readonly projectsFeed: (archived: boolean) => Stream.Stream<ProjectsFeed, SqlError.SqlError>;
     /** Deltas are broadcast to subscribers and never stored. */
     readonly publishDelta: (threadId: ThreadId, turnId: TurnId, text: string) => Effect.Effect<void>;
     readonly react: (reaction: Reaction) => Effect.Effect<void>;
@@ -200,31 +205,32 @@ export const EngineLive = (options: EngineOptions = {}) =>
           }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
         );
 
-      const projectsFeed = Stream.unwrap(
-        Effect.gen(function* () {
-          // Same order as `feed`: subscribe, then read the snapshot.
-          const subscription = yield* PubSub.subscribe(changes);
-          const snapshot = yield* sql.withTransaction(
-            Effect.all({
-              projects: loadProjects,
-              threads: loadThreadSummaries(),
-              quotas: loadQuotas,
-              seq: sql<{ seq: number }>`select coalesce(max(seq), 0) as seq from events`.pipe(Effect.map(([r]) => r?.seq ?? 0)),
-            }),
-          );
-          // Commits can publish out of order, so drop a thread summary or quota older than the one the client already has.
-          const latest = new Map<string, number>();
-          const live = Stream.fromSubscription(subscription).pipe(
-            Stream.filter((c) => {
-              const key = c.kind === "thread" ? c.thread.threadId : `quota:${c.quota.harness}`;
-              const newer = c.seq > (latest.get(key) ?? snapshot.seq);
-              if (newer) latest.set(key, c.seq);
-              return newer;
-            }),
-          );
-          return Stream.concat(Stream.succeed<ProjectsFeed>({ kind: "snapshot", ...snapshot }), live);
-        }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
-      );
+      const projectsFeed = (archived: boolean) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            // Same order as `feed`: subscribe, then read the snapshot.
+            const subscription = yield* PubSub.subscribe(changes);
+            const snapshot = yield* sql.withTransaction(
+              Effect.all({
+                projects: loadProjects,
+                threads: loadThreadSummaries(undefined, archived),
+                quotas: loadQuotas,
+                seq: sql<{ seq: number }>`select coalesce(max(seq), 0) as seq from events`.pipe(Effect.map(([r]) => r?.seq ?? 0)),
+              }),
+            );
+            // Commits can publish out of order, so drop a thread summary or quota older than the one the client already has.
+            const latest = new Map<string, number>();
+            const live = Stream.fromSubscription(subscription).pipe(
+              Stream.filter((c) => {
+                const key = c.kind === "thread" ? c.thread.threadId : `quota:${c.quota.harness}`;
+                const newer = c.seq > (latest.get(key) ?? snapshot.seq);
+                if (newer) latest.set(key, c.seq);
+                return newer;
+              }),
+            );
+            return Stream.concat(Stream.succeed<ProjectsFeed>({ kind: "snapshot", ...snapshot }), live);
+          }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+        );
 
       return Engine.of({
         dispatch: (command) => dispatch(command).pipe(Effect.provideService(SqlClient.SqlClient, sql)),

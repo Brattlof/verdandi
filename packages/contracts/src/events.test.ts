@@ -11,6 +11,8 @@ const samples: Event[] = [
   { type: "thread.created", v: 1, threadId, projectId: "p1" as never, projectPath: "C:/Users/a b/repo", route },
   { type: "thread.route.changed", v: 1, threadId, from: route, to: { ...route, model: "fake-2" }, by: "user" },
   { type: "task.started", v: 1, threadId, taskId: turnId as string as TaskId, route },
+  { type: "thread.archived", v: 1, threadId },
+  { type: "thread.unarchived", v: 1, threadId },
   { type: "turn.started", v: 1, threadId, turnId, text: "hi" },
   { type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "plan" },
   { type: "harness.session.bound", v: 1, threadId, sessionId: "s1", harnessVersion: "2.1.284" },

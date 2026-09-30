@@ -25,6 +25,7 @@ const snapshot: ThreadFeed = {
     projectPath: "C:/Users/a b/repo",
     route,
     pinned: true,
+    archived: false,
     budgetMode: null,
     task: null,
     sessionId: null,
@@ -129,6 +130,7 @@ test("the projects feed adds new threads on top and moves a changed thread up", 
     projectId,
     title: id,
     busy,
+    archived: false,
     lastActivityAt,
     route,
     cost: { meteredUsd: 0, subscriptionUsd: 0 },
@@ -154,6 +156,14 @@ test("the projects feed adds new threads on top and moves a changed thread up", 
   });
   expect(sidebar?.threads.map((t) => t.threadId as string)).toEqual(["c", "a", "b"]);
   expect(sidebar?.projects.map((p) => p.path)).toEqual(["/repo", "/other"]);
+
+  const archived = { kind: "thread", thread: { ...summary("a", "2026-09-30T13:00:00.000Z"), archived: true }, seq: 8 } as const;
+  expect(applyProjectsFeed(sidebar, archived)?.threads.map((t) => t.threadId as string)).toEqual(["c", "b"]);
+  expect(applyProjectsFeed(sidebar, archived, true)?.threads.map((t) => [t.threadId as string, t.archived])).toEqual([
+    ["a", true],
+    ["c", false],
+    ["b", false],
+  ]);
 });
 
 test("a harness's new quota replaces its old one and keeps the threads", () => {
