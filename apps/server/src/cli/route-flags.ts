@@ -1,8 +1,6 @@
-import { Route } from "@verdandi/contracts";
+import { defaultRoute, Route } from "@verdandi/contracts";
 import { Schema } from "effect";
 import { flag } from "../config/home.ts";
-
-const defaultRoute: Route = { harness: "claude-code", model: "sonnet", effort: "medium" };
 
 /**
  * The route `verdandi chat` asks for: `--harness`, `--model` and `--effort` on top of the thread's

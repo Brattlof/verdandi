@@ -1,5 +1,5 @@
-import type { CommandId, ProjectSummary, ThreadId, ThreadSummary } from "@verdandi/contracts";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { type CommandId, defaultRoute, type ProjectSummary, type Route, type ThreadId, type ThreadSummary } from "@verdandi/contracts";
+import { type FormEvent, useEffect, useState, useSyncExternalStore } from "react";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
 import { applyProjectsFeed, type Sidebar as SidebarData } from "./state.ts";
 import { ThreadPane } from "./thread.tsx";
@@ -61,9 +61,10 @@ const Sidebar = ({ connection, data, current }: { connection: Connection; data: 
   );
   return (
     <nav aria-label="Projects and threads" className="sidebar">
+      <OpenFolder connection={connection} route={data.threads[0]?.route ?? defaultRoute} />
       {projects.length === 0 && (
         <p className="muted">
-          No threads yet. Start one with <code>verdandi chat</code> in a project folder.
+          No threads yet. Open a project folder above, or run <code>verdandi chat</code> in one.
         </p>
       )}
       {projects.map((project) => (
@@ -76,6 +77,47 @@ const Sidebar = ({ connection, data, current }: { connection: Connection; data: 
         />
       ))}
     </nav>
+  );
+};
+
+/** Starts a thread in any folder; verdandid checks the path and resolves it, so a known folder gets a new thread, not a new project. */
+const OpenFolder = ({ connection, route }: { connection: Connection; route: Route }) => {
+  const [error, setError] = useState<string>();
+  const open = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const projectPath = String(new FormData(form).get("path")).trim();
+    if (!projectPath) return;
+    const threadId = uuid<ThreadId>();
+    const result = await connection.dispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath, route });
+    setError(result.ok ? undefined : result.message);
+    if (!result.ok) return;
+    form.reset();
+    openThread(threadId);
+  };
+  return (
+    <form className="open-folder" onSubmit={open}>
+      <label htmlFor="open-folder-path">Open folder</label>
+      <div>
+        <input
+          id="open-folder-path"
+          type="text"
+          name="path"
+          placeholder="Full path to a project folder"
+          required
+          autoComplete="off"
+          spellCheck={false}
+          aria-invalid={error !== undefined}
+          aria-describedby={error ? "open-folder-error" : undefined}
+        />
+        <button type="submit">Open</button>
+      </div>
+      {error && (
+        <p id="open-folder-error" role="alert" className="error">
+          {error}
+        </p>
+      )}
+    </form>
   );
 };
 

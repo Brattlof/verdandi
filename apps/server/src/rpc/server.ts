@@ -9,6 +9,7 @@ import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { AppLayer } from "../orchestration/app.ts";
 import { Engine } from "../orchestration/engine.ts";
 import { threadDiff } from "../workspace/diff.ts";
+import { resolveProjectPath } from "../workspace/project.ts";
 
 /** Where the running server listens, and the token clients must present. */
 export class ServerInfo extends Context.Service<ServerInfo, { readonly port: number; readonly token: string }>()("verdandi/ServerInfo") {}
@@ -33,7 +34,12 @@ const Handlers = Api.toLayer(
         }),
       );
     return {
-      CommandDispatch: (command) => engine.dispatch(command).pipe(Effect.catchTag("SqlError", Effect.die)),
+      // The project path is a trust boundary: checked and resolved here, so the decider stays pure.
+      CommandDispatch: (command) =>
+        (command.type === "thread.create"
+          ? Effect.map(resolveProjectPath(command.projectPath), (projectPath) => ({ ...command, projectPath }))
+          : Effect.succeed(command)
+        ).pipe(Effect.flatMap(engine.dispatch), Effect.catchTag("SqlError", Effect.die)),
       ThreadSubscribe: ({ threadId, subscriptionId }) => untilUnsubscribed(subscriptionId, engine.feed(threadId)),
       ProjectsSubscribe: ({ subscriptionId }) => untilUnsubscribed(subscriptionId, engine.projectsFeed),
       Unsubscribe: ({ subscriptionId }) => {
