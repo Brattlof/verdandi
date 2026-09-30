@@ -84,6 +84,29 @@ describe("engine", () => {
     expect(v?.turns.map((t) => [t.status, t.items])).toEqual([["success", [{ kind: "assistant.message", text: "echo: hi" }]]]);
   });
 
+  test("a steer is recorded in the running turn and the agent answers it", async () => {
+    const { runtime } = start(newHome());
+    const turnId = id<TurnId>();
+    const v = await runtime.runPromise(
+      Effect.gen(function* () {
+        yield* dispatch(create);
+        yield* dispatch(send("steer", turnId));
+        yield* dispatch({ type: "turn.steer", commandId: id<CommandId>(), threadId, turnId, text: "go left" });
+        yield* drain;
+        return yield* view;
+      }),
+    );
+    expect(v?.turns.map((t) => [t.status, t.items])).toEqual([
+      [
+        "success",
+        [
+          { kind: "user.steer", text: "go left" },
+          { kind: "assistant.message", text: "steered: go left" },
+        ],
+      ],
+    ]);
+  });
+
   test("retrying a command returns the same receipt and appends nothing", async () => {
     const { runtime } = start(newHome());
     const c = send("hi");

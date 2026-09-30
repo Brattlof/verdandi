@@ -38,6 +38,14 @@ export const TurnItemAdded = Schema.Struct({
   turnId: TurnId,
   item: Item,
 });
+/** The user steered a running turn. Projected as a `user.steer` item of that turn. */
+export const TurnSteered = Schema.Struct({
+  type: Schema.Literal("turn.steered"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  text: Schema.String,
+});
 export const TurnUsageRecorded = Schema.Struct({
   type: Schema.Literal("turn.usage.recorded"),
   v: v1,
@@ -89,6 +97,7 @@ export const Event = Schema.Union([
   TurnStarted,
   HarnessSessionBound,
   TurnItemAdded,
+  TurnSteered,
   TurnUsageRecorded,
   ApprovalRequested,
   UserInputRequested,
@@ -113,6 +122,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "turn.started@1": TurnStarted,
   "harness.session.bound@1": HarnessSessionBound,
   "turn.item.added@1": TurnItemAdded,
+  "turn.steered@1": TurnSteered,
   "turn.usage.recorded@1": TurnUsageRecorded,
   "approval.requested@1": ApprovalRequested,
   "user-input.requested@1": UserInputRequested,

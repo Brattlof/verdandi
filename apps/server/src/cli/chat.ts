@@ -69,7 +69,8 @@ export const chat = async (argv: readonly string[]) => {
   // Requests are answered one at a time, oldest first. `answered` collects the current user-input request's answers.
   const requests: PendingRequest[] = [];
   let answered: string[] = [];
-  let busy = false;
+  /** The turn a typed line steers; undefined while the thread is idle. */
+  let running: TurnId | undefined;
   let usage: Usage[] = [];
   const prompt = () => process.stdout.write("> ");
   const showRequest = () => {
@@ -104,21 +105,22 @@ export const chat = async (argv: readonly string[]) => {
           if (f.kind === "snapshot") {
             const { threadId, projectPath, turns } = f.thread;
             process.stdout.write(`Thread ${threadId} in ${projectPath} (${turns.length} earlier turns). /exit to quit.\n`);
-            busy = f.thread.busy;
-            if (!busy) prompt();
+            running = turns.find((t) => t.status === "running")?.turnId;
+            if (running) process.stdout.write("A turn is running; lines you type steer it.\n");
+            else prompt();
             for (const r of f.thread.pendingRequests) addRequest(r);
           }
           if (f.kind === "delta") process.stdout.write(f.text);
           if (f.kind !== "event") return;
           const e = f.stored.event;
-          if (e.type === "turn.started") busy = true;
+          if (e.type === "turn.started") running = e.turnId;
           if (e.type === "approval.requested" || e.type === "user-input.requested") addRequest(e);
           if (e.type === "approval.resolved") removeRequest(e.requestId);
           if (e.type === "turn.usage.recorded") usage.push(e);
           if (e.type === "turn.completed") {
             process.stdout.write(summary(e.status, e.error, usage));
             usage = [];
-            busy = false;
+            if (running === e.turnId) running = undefined;
             prompt();
           }
         }),
@@ -148,18 +150,32 @@ export const chat = async (argv: readonly string[]) => {
     return resolve(request, { decision: "answer", answers });
   };
 
+  /** Steers the running turn. False when that turn finished first, so the line goes out as the next turn. */
+  const steer = (turnId: TurnId, text: string) =>
+    runtime.runPromise(
+      client.CommandDispatch({ type: "turn.steer", commandId: uuid<CommandId>(), threadId, turnId, text }).pipe(
+        Effect.as(true),
+        Effect.catchTag("CommandRejected", (e) =>
+          e.reason === "TurnNotRunning"
+            ? Effect.succeed(false)
+            : Effect.sync(() => process.stdout.write(`${e.message}\n`)).pipe(Effect.as(true)),
+        ),
+      ),
+    );
+
   for await (const line of console) {
     const text = line.trim();
     const request = requests[0];
     if (request) await answer(request, text);
     else if (text === "/exit") break;
-    else if (busy) process.stdout.write("A turn is running. Wait for it to finish.\n");
-    else if (!text) prompt();
+    else if (!text) {
+      if (!running) prompt();
+    } else if (running && (await steer(running, text))) process.stdout.write("[steer sent: the agent reads it at its next step]\n");
     else {
-      busy = true;
-      const sent = await dispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId: uuid<TurnId>(), text });
-      if (!sent) {
-        busy = false;
+      const turnId = uuid<TurnId>();
+      running = turnId;
+      if (!(await dispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId, text }))) {
+        running = undefined;
         prompt();
       }
     }

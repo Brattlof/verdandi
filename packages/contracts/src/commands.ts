@@ -26,6 +26,14 @@ export const ApprovalRespond = Schema.Struct({
   requestId: Schema.String,
   resolution: Resolution,
 });
+/** Guidance for the running turn `turnId`; the agent reads it at its next tool boundary (ADR 0003). */
+export const TurnSteer = Schema.Struct({
+  type: Schema.Literal("turn.steer"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  text: Schema.String,
+});
 
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
@@ -44,8 +52,8 @@ export const TurnRecover = Schema.Struct({
 });
 
 /** What clients may send over RPC. */
-export const ClientCommand = Schema.Union([ThreadCreate, TurnSend, ApprovalRespond]);
+export const ClientCommand = Schema.Union([ThreadCreate, TurnSend, TurnSteer, ApprovalRespond]);
 export type ClientCommand = typeof ClientCommand.Type;
 
-export const Command = Schema.Union([ThreadCreate, TurnSend, ApprovalRespond, HarnessReport, TurnRecover]);
+export const Command = Schema.Union([ThreadCreate, TurnSend, TurnSteer, ApprovalRespond, HarnessReport, TurnRecover]);
 export type Command = typeof Command.Type;
