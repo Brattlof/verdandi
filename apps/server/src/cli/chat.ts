@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type AttachmentUpload,
   type ClientCommand,
   type CommandId,
   capReached,
@@ -18,6 +19,7 @@ import {
 import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { flag, readServerFile, resolveHome } from "../config/home.ts";
 import { connect } from "../rpc/client.ts";
+import { readAttachment } from "./attach.ts";
 import { approvalPrompt, type PendingRequest, parseAnswer, planPrompt, questionPrompt } from "./requests.ts";
 import { budgetFromFlags, picksRoute, routeFromFlags } from "./route-flags.ts";
 import { threadList } from "./thread-list.ts";
@@ -149,6 +151,8 @@ export const chat = async (argv: readonly string[]) => {
   let lastTurn: TurnId | undefined;
   /** The mode the next turn is sent in. */
   let mode: InteractionMode = "build";
+  /** Files `/attach` read, which go with the next turn. */
+  let attached: AttachmentUpload[] = [];
   const snapshot = Promise.withResolvers<ThreadView>();
   let usage: Usage[] = [];
   const prompt = () => process.stdout.write(mode === "build" ? "> " : `${mode}> `);
@@ -317,7 +321,7 @@ export const chat = async (argv: readonly string[]) => {
         ? `${harness} ${model} ${effort} (routed; --model or --effort pins a route)`
         : "the route the router picks for the next task";
   process.stdout.write(
-    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /forget-routing clears what the router learned from this project's tasks; Ctrl+C stops a turn; /exit quits.\n`,
+    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; Ctrl+C stops a turn; /exit quits.\n`,
   );
   if (thread.archived) {
     process.stdout.write(`This thread is archived, so turns are rejected. Unarchive it with: verdandi chat --unarchive ${threadId}\n`);
@@ -343,7 +347,22 @@ export const chat = async (argv: readonly string[]) => {
     const switchTo = modeCommands.get(text);
     if (request) await answer(request, text);
     else if (text === "/exit") break;
-    else if (text === "/forget-routing") {
+    else if (text === "/attach" || text.startsWith("/attach ")) {
+      const read = readAttachment(text.slice("/attach".length), cwd);
+      if (typeof read === "string") process.stdout.write(`${read}\n`);
+      else {
+        attached.push(read);
+        const names = attached.map((a) => a.name).join(", ");
+        process.stdout.write(
+          `[attached ${read.name}; ${names} go${attached.length === 1 ? "es" : ""} with your next message${running ? ", after this turn" : ""}. /detach drops them]\n`,
+        );
+      }
+      if (!running) prompt();
+    } else if (text === "/detach") {
+      process.stdout.write(attached.length ? `[dropped ${attached.map((a) => a.name).join(", ")}]\n` : "[nothing attached]\n");
+      attached = [];
+      if (!running) prompt();
+    } else if (text === "/forget-routing") {
       if (await dispatch({ type: "routing.memory.clear", commandId: uuid<CommandId>(), threadId }))
         process.stdout.write("[routing memory cleared: this project's next routed tasks go by the policy alone]\n");
       if (!running) prompt();
@@ -360,10 +379,11 @@ export const chat = async (argv: readonly string[]) => {
     else {
       const turnId = uuid<TurnId>();
       running = turnId;
-      if (!(await dispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId, text, mode }))) {
+      const attachments = attached.length > 0 ? { attachments: attached } : {};
+      if (!(await dispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId, text, mode, ...attachments }))) {
         running = undefined;
         prompt();
-      }
+      } else attached = [];
     }
   }
   await runtime.runPromise(client.Unsubscribe({ subscriptionId }));

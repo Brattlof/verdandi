@@ -174,7 +174,8 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     const stop = capped(state.spend);
     if (stop) return stop;
-    const turn: Event = { type: "turn.started", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text, mode: c.mode };
+    const attachments = c.attachments?.length ? { attachments: c.attachments } : {};
+    const turn: Event = { type: "turn.started", v: 2, threadId: c.threadId, turnId: c.turnId, text: c.text, mode: c.mode, ...attachments };
     // First: the reactor starts the turn on turn.started, and a later event of this commit could reach feeds after the turn ends.
     const recorded: Event[] = state.decisions
       ? [{ type: "decision.recorded", v: 1, threadId: c.threadId, turnId: c.turnId, ...state.decisions }]
@@ -182,7 +183,8 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (state.thread.taskId) return accept(...recorded, turn);
     const task = { type: "task.started", v: 2, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
     if (!state.routing) return accept(...recorded, { ...task, route: state.thread.route }, turn);
-    const decided = decideRoute(state.thread, state.routing, c.text, c.mode, state.decisions?.answers ?? []);
+    const images = c.attachments?.filter((a) => a.kind === "image").length ?? 0;
+    const decided = decideRoute(state.thread, state.routing, c.text, c.mode, state.decisions?.answers ?? [], images);
     if (Result.isFailure(decided)) return reject(decided.failure.reason, decided.failure.message);
     const inputs = routeInputs(state.thread, state.routing);
     return accept(...recorded, { ...task, route: routeOf(decided.success), decision: decided.success, inputs }, turn);

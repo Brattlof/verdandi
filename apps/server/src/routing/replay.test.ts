@@ -98,6 +98,7 @@ const saved = (inputs: SavedTask["inputs"]): SavedTask => ({
   projectPath: "C:/Users/a b/repo",
   text: SEARCH,
   mode: "build",
+  images: 0,
   route: { harness: "claude-code", model: "haiku", effort: "low" },
   taskClass: "ask.search",
   inputs,

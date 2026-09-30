@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
@@ -310,6 +311,79 @@ describe("rpc server", () => {
     expect(otherProject.spend).toEqual({ meteredUsd: 0, subscriptionUsd: 0 });
     expect(otherProject.rates).toEqual({ tasks: 1, overridden: 0, escalated: 0 });
     expect(otherProject.byClass.map((c) => [c.tasks, c.completed])).toEqual([[1, 0]]);
+  });
+
+  test("attachments are stored content-addressed: events hold references, a reload shows them, and bytes need the token", async () => {
+    const { info, fake, drain, home } = await startServer();
+    const threadId = uuid<ThreadId>();
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7, 7]);
+    const b64 = Buffer.from(png).toString("base64");
+    const send = (attachments: { name: string; mediaType: string; data: string }[]) =>
+      withClient(info.port, info.token, (c) =>
+        Effect.exit(
+          c.CommandDispatch({
+            type: "turn.send",
+            commandId: uuid<CommandId>(),
+            threadId,
+            turnId: uuid<TurnId>(),
+            text: "look",
+            mode: "build",
+            attachments,
+          }),
+        ),
+      );
+    await withClient(info.port, info.token, (c) => createThread(c, threadId));
+    const bad = await send([{ name: "fake.png", mediaType: "image/png", data: Buffer.from("not a png").toString("base64") }]);
+    expect(JSON.stringify(bad)).toContain("InvalidAttachment");
+    const sent = await send([
+      { name: "C:\\Users\\a b\\screen shot.png", mediaType: "image/png", data: b64 },
+      { name: "build.log", mediaType: "text/plain", data: Buffer.from("line\r\n").toString("base64") },
+    ]);
+    expect(sent._tag).toBe("Success");
+    await drain();
+
+    const [image, file] = fake.calls.at(-1)?.attachments ?? [];
+    expect(image).toMatchObject({ name: "screen shot.png", kind: "image", mediaType: "image/png", size: png.length });
+    expect(file).toMatchObject({ name: "build.log", kind: "file", size: 6 });
+    expect(image?.id).toMatch(/^[0-9a-f]{64}\.png$/);
+    expect(new Uint8Array(await Bun.file(image?.path ?? "").arrayBuffer())).toEqual(png);
+    expect(image?.path.startsWith(home)).toBe(true);
+
+    const stored = new Database(join(home, "verdandi.db"), { readonly: true });
+    const payload = (stored.query("select payload from events where type = 'turn.started'").get() as { payload: string }).payload;
+    stored.close();
+    expect(payload).toContain(image?.id ?? "?");
+    expect(payload).not.toContain(b64);
+
+    const turns = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        const subscriptionId = crypto.randomUUID();
+        const snapshot = yield* Deferred.make<ThreadFeed>();
+        const feed = yield* c.ThreadSubscribe({ threadId, subscriptionId }).pipe(
+          Stream.runForEach((f: ThreadFeed) => (f.kind === "snapshot" ? Deferred.succeed(snapshot, f) : Effect.void)),
+          Effect.forkChild,
+        );
+        const first = yield* step("snapshot", Deferred.await(snapshot));
+        yield* step("unsubscribe", c.Unsubscribe({ subscriptionId }));
+        yield* step("feed end", Fiber.join(feed));
+        return first.kind === "snapshot" ? first.thread.turns : [];
+      }),
+    );
+    expect(turns.at(-1)?.attachments.map((a) => [a.name, a.kind])).toEqual([
+      ["screen shot.png", "image"],
+      ["build.log", "file"],
+    ]);
+
+    const url = `http://127.0.0.1:${info.port}/attachments/${image?.id}`;
+    expect((await fetch(url)).status).toBe(401);
+    const served = await fetch(url, { headers: { authorization: `Bearer ${info.token}` } });
+    expect(served.headers.get("content-type")).toBe("image/png");
+    expect(served.headers.get("content-security-policy")).toContain("sandbox");
+    expect(new Uint8Array(await served.arrayBuffer())).toEqual(png);
+    const traversal = await fetch(`http://127.0.0.1:${info.port}/attachments/..%2Fverdandi.db`, {
+      headers: { authorization: `Bearer ${info.token}` },
+    });
+    expect(traversal.status).toBe(404);
   });
 
   test("a reported quota and the thread's metered cost reach the feed live and after a reload", async () => {

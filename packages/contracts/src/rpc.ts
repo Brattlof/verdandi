@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
+import { AttachmentRef } from "./attachments.ts";
 import { ClientCommand } from "./commands.ts";
 import { ApprovalRequested, PlanRequested, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
 import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
@@ -24,6 +25,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "SpendCapReached",
     "SpendCapNotSet",
     "ThreadArchived",
+    "InvalidAttachment",
   ]),
   message: Schema.String,
 }) {}
@@ -64,6 +66,8 @@ export const TurnView = Schema.Struct({
   turnId: TurnId,
   text: Schema.String,
   mode: InteractionMode,
+  /** Sent with the turn; fetch an image's bytes from `/attachments/<id>`. */
+  attachments: Schema.Array(AttachmentRef),
   status: Schema.Literals(["running", ...TurnStatus.literals]),
   items: Schema.Array(Item),
   /** One entry per model the turn used, in the order they were recorded. */
@@ -269,11 +273,11 @@ export class Api extends RpcGroup.make(
   /** A task's routing decision: its reason, trace and the classification behind it. */
   Rpc.make("RoutingExplain", { payload: { taskId: TaskId }, success: RouteDecision, error: RoutingUnavailable }),
   /**
-   * What the router would pick if `text` started a new task in the thread, for the composer's live preview.
+   * What the router would pick if `text`, with `images` attached, started a new task in the thread, for the composer's live preview.
    * Pure and stores nothing; a pinned thread gets its pin back.
    */
   Rpc.make("RoutingSimulate", {
-    payload: { threadId: ThreadId, text: Schema.String, mode: InteractionMode },
+    payload: { threadId: ThreadId, text: Schema.String, mode: InteractionMode, images: Schema.optionalKey(Schema.Int) },
     success: RouteDecision,
     error: RoutingUnavailable,
   }),

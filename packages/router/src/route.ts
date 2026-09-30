@@ -38,6 +38,8 @@ export type RouteInput = {
    * plan, and the classifier should return the task's own class, so the class's route without its `plan` override applies.
    */
   readonly planApproved?: boolean;
+  /** How many images are attached: only targets that read images stay candidates. */
+  readonly images?: number;
   /** The project's routing memory (DESIGN §8.8): how its tasks went, per class and route. Pins ignore it. */
   readonly memory?: readonly RouteStats[];
 };
@@ -142,7 +144,10 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const limits =
     maxCost === undefined && maxTurns === undefined ? {} : { limits: { ...(maxCost && { maxCost }), ...(maxTurns && { maxTurns }) } };
   const signalNotes: RuleTrace[] = [
-    { stage: "signals", note: describeSignals(sig) },
+    {
+      stage: "signals",
+      note: `${describeSignals(sig)}${input.images ? `, ${input.images} image${input.images === 1 ? "" : "s"} attached` : ""}`,
+    },
     { stage: "classify", note: `${c.taskClass}, confidence ${c.confidence.toFixed(2)}, difficulty ${c.difficulty.toFixed(2)} (${c.why})` },
   ];
 
@@ -175,6 +180,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const cachedTokens = input.current?.cachedTokens ?? 0;
   const unavailable = (t: CatalogEntry) => {
     if (input.harnesses && !input.harnesses.includes(t.harness)) return `the ${t.harness} harness isn't running`;
+    if (input.images && !t.vision) return `it can't read the attached image${input.images === 1 ? "" : "s"}`;
     const provider = input.providers?.[t.provider];
     if (provider?.healthy === false) return `${t.provider} is unhealthy`;
     if (provider?.remaining !== undefined && provider.remaining <= 0) return `${t.provider} is out of quota`;

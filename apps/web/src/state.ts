@@ -67,7 +67,16 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     busy: true,
     turns: [
       ...thread.turns,
-      { turnId: e.turnId, text: e.text, mode: e.mode ?? "build", status: "running", items: [], usage: [], streaming: "" },
+      {
+        turnId: e.turnId,
+        text: e.text,
+        mode: e.mode ?? "build",
+        attachments: e.attachments ?? [],
+        status: "running",
+        items: [],
+        usage: [],
+        streaming: "",
+      },
     ],
   }),
   "harness.session.bound": (thread, e) => ({ ...thread, sessionId: e.sessionId }),

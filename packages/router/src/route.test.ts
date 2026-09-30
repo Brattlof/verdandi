@@ -116,6 +116,7 @@ describe("candidates and fallbacks", () => {
       model: "fake",
       access: "local",
       tier: "M",
+      vision: true,
       context: 1_000_000,
       price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     } as const;
@@ -178,7 +179,16 @@ describe("subagents", () => {
   const free = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   const catalog = [
     ...builtInCatalog,
-    { harness: "fake", provider: "fake", model: "fake-small", access: "local", tier: "S", context: 200_000, price: free } as const,
+    {
+      harness: "fake",
+      provider: "fake",
+      model: "fake-small",
+      access: "local",
+      tier: "S",
+      context: 200_000,
+      vision: false,
+      price: free,
+    } as const,
   ];
   const withSubagents = loadPolicy(
     [

@@ -163,9 +163,9 @@ export const decideExecuteRoute = (
 };
 
 /**
- * Pure: the decision for a new task in `thread` starting with `text`, classified by the decision layer's
- * `answers` to `taskQuestions`. A pinned thread keeps its route (DESIGN §8.4 stage 0); otherwise the
- * router picks, with the thread's warm session for the switch-cost gate.
+ * Pure: the decision for a new task in `thread` starting with `text` and `images` attached images, classified
+ * by the decision layer's `answers` to `taskQuestions`. A pinned thread keeps its route (DESIGN §8.4 stage 0);
+ * otherwise the router picks, with the thread's warm session for the switch-cost gate.
  */
 export const decideRoute = (
   thread: RoutingThread,
@@ -173,6 +173,7 @@ export const decideRoute = (
   text: string,
   mode: InteractionMode,
   answers: readonly DecisionAnswer[],
+  images = 0,
 ): Result.Result<RouteDecision, RoutingFailure> => {
   const classification = classificationOf(answers) ?? unclassified;
   if (Result.isFailure(routing.policy) && !thread.pinned) return Result.fail({ reason: "InvalidPolicy", message: routing.policy.failure });
@@ -185,6 +186,7 @@ export const decideRoute = (
         {
           text,
           mode,
+          ...(images > 0 && { images }),
           harnesses: routing.harnesses,
           ...(routing.memory ? { memory: routing.memory } : {}),
           ...(thread.pinned ? { pin: current } : {}),

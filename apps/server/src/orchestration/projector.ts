@@ -1,4 +1,5 @@
 import type {
+  AttachmentRef,
   BudgetMode,
   Event,
   Item,
@@ -97,8 +98,8 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "turn.started": (e, at) =>
     withSql((sql) =>
       Effect.andThen(
-        sql`insert into turns (id, thread_id, text, mode, status, started_at)
-            values (${e.turnId}, ${e.threadId}, ${e.text}, ${e.mode ?? "build"}, 'running', ${at})`,
+        sql`insert into turns (id, thread_id, text, mode, attachments, status, started_at)
+            values (${e.turnId}, ${e.threadId}, ${e.text}, ${e.mode ?? "build"}, ${JSON.stringify(e.attachments ?? [])}, 'running', ${at})`,
         sql`update threads set running_turn_id = ${e.turnId} where id = ${e.threadId}`,
       ),
     ),
@@ -252,8 +253,15 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         from threads t join projects p on p.id = t.project_id left join route_decisions d on d.task_id = t.task_id
         where t.id = ${threadId}`;
       if (!thread) return null;
-      const turns = yield* sql<{ id: string; text: string; mode: TurnView["mode"]; status: TurnView["status"]; error: string | null }>`
-        select id, text, mode, status, error from turns where thread_id = ${threadId} order by started_at, rowid`;
+      const turns = yield* sql<{
+        id: string;
+        text: string;
+        mode: TurnView["mode"];
+        attachments: string;
+        status: TurnView["status"];
+        error: string | null;
+      }>`
+        select id, text, mode, attachments, status, error from turns where thread_id = ${threadId} order by started_at, rowid`;
       const items = yield* sql<{ turn_id: string; payload: string }>`
         select i.turn_id, i.payload from items i join turns t on t.id = i.turn_id where t.thread_id = ${threadId} order by i.turn_id, i.idx`;
       const itemsByTurn = Map.groupBy(items, (i) => i.turn_id);
@@ -295,6 +303,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
             turnId: t.id as TurnView["turnId"],
             text: t.text,
             mode: t.mode,
+            attachments: JSON.parse(t.attachments) as AttachmentRef[],
             status: t.status,
             items: (itemsByTurn.get(t.id) ?? []).map((i) => JSON.parse(i.payload) as Item),
             usage: (usageByTurn.get(t.id) ?? []).map((u) => ({

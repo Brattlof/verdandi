@@ -1,7 +1,9 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { BunHttpServer } from "@effect/platform-bun";
 import {
   Api,
+  type Command,
   type HarnessAdapter,
   type HarnessId,
   type RouteDecision,
@@ -23,6 +25,7 @@ import { loadTaskCosts } from "../orchestration/task-outcome.ts";
 import { loadUsageReport } from "../orchestration/usage.ts";
 import { loadRoutingMemory } from "../routing/memory.ts";
 import { decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
+import { attachmentPath, attachmentsDir, storeAttachments } from "../workspace/attachments.ts";
 import { threadDiff } from "../workspace/diff.ts";
 import { resolveProjectPath } from "../workspace/project.ts";
 
@@ -53,11 +56,22 @@ const Handlers = (home: string) =>
           }),
         );
       return {
-        // The project path is a trust boundary: checked and resolved here, so the decider stays pure.
+        // Trust boundaries, checked here so the decider stays pure: the project path is resolved, and
+        // attachments are checked and stored, so the command and its events carry references, never bytes.
         CommandDispatch: (command) =>
           (command.type === "thread.create"
-            ? Effect.map(resolveProjectPath(command.projectPath), (projectPath) => ({ ...command, projectPath }))
-            : Effect.succeed(command)
+            ? Effect.map(resolveProjectPath(command.projectPath), (projectPath): Command => ({ ...command, projectPath }))
+            : command.type === "turn.send"
+              ? Effect.map(
+                  // ponytail: bytes are stored before the engine accepts the turn, and nothing removes unreferenced ones.
+                  // Upgrade: sweep files no turn references, once attachments take real space.
+                  storeAttachments(attachmentsDir(home), command.attachments ?? []),
+                  (refs): Command => {
+                    const { attachments: _, ...rest } = command;
+                    return refs.length > 0 ? { ...rest, attachments: refs } : rest;
+                  },
+                )
+              : Effect.succeed(command)
           ).pipe(Effect.flatMap(engine.dispatch), Effect.catchTag("SqlError", Effect.die)),
         ThreadSubscribe: ({ threadId, subscriptionId }) => untilUnsubscribed(subscriptionId, engine.feed(threadId)),
         ProjectsSubscribe: ({ subscriptionId, archived }) => untilUnsubscribed(subscriptionId, engine.projectsFeed(archived ?? false)),
@@ -97,7 +111,7 @@ const Handlers = (home: string) =>
                   ),
             ),
           ),
-        RoutingSimulate: ({ threadId, text, mode }) =>
+        RoutingSimulate: ({ threadId, text, mode, images }) =>
           Effect.gen(function* () {
             const { thread } = yield* loadDeciderState(threadId).pipe(
               Effect.provideService(SqlClient.SqlClient, sql),
@@ -110,7 +124,7 @@ const Handlers = (home: string) =>
             );
             const context = { ...(yield* routing(thread.projectPath)), memory };
             const { answers } = yield* rulesDecide.decide({ state: text, questions: taskQuestions(context) });
-            const decided = decideRoute(thread, context, text, mode, answers);
+            const decided = decideRoute(thread, context, text, mode, answers, images);
             if (Result.isFailure(decided)) return yield* new RoutingUnavailable(decided.failure);
             return decided.success;
           }),
@@ -121,12 +135,41 @@ const Handlers = (home: string) =>
 const sameToken = (given: string | null, token: string) =>
   given !== null && given.length === token.length && timingSafeEqual(Buffer.from(given), Buffer.from(token));
 
-/** The WebSocket RPC protocol at /rpc, refusing upgrades without the profile's token. */
-const ProtocolWithToken = (token: string) =>
+const imageTypes: Record<string, string> = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+
+/**
+ * An attachment's stored bytes, for the web UI's thumbnails. The token comes in an `Authorization: Bearer`
+ * header, never the URL. Only the four image types are served inline; anything else downloads, and nothing
+ * served here can run script.
+ */
+const serveAttachment = (home: string, token: string) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    if (!sameToken(request.headers.authorization?.replace(/^Bearer /, "") ?? null, token)) {
+      return HttpServerResponse.text("Missing or wrong token.", { status: 401 });
+    }
+    const id = new URL(request.url, "http://localhost").pathname.split("/").at(-1) ?? "";
+    const path = attachmentPath(attachmentsDir(home), id);
+    if (!path || !existsSync(path)) return HttpServerResponse.text("No such attachment.", { status: 404 });
+    const image = imageTypes[id.split(".")[1] ?? ""];
+    return HttpServerResponse.uint8Array(readFileSync(path), {
+      contentType: image ?? "application/octet-stream",
+      headers: {
+        "cache-control": "private, max-age=31536000, immutable",
+        "content-security-policy": "default-src 'none'; sandbox",
+        "x-content-type-options": "nosniff",
+        ...(image ? {} : { "content-disposition": "attachment" }),
+      },
+    });
+  });
+
+/** The WebSocket RPC protocol at /rpc, refusing upgrades without the profile's token, and attachments at /attachments/<id>. */
+const ProtocolWithToken = (home: string, token: string) =>
   Layer.effect(RpcServer.Protocol)(
     Effect.gen(function* () {
       const { httpEffect, protocol } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
       const router = yield* HttpRouter.HttpRouter;
+      yield* router.add("GET", "/attachments/:id", serveAttachment(home, token));
       yield* router.add(
         "GET",
         "/rpc",
@@ -154,7 +197,7 @@ export const ServerLayer = (
   const token = randomBytes(32).toString("hex");
   const rpc = RpcServer.layer(Api).pipe(
     Layer.provide(Handlers(home)),
-    Layer.provide(ProtocolWithToken(token)),
+    Layer.provide(ProtocolWithToken(home, token)),
     Layer.provide(RpcSerialization.layerNdjson),
   );
   const http = HttpRouter.serve(rpc).pipe(
@@ -166,6 +209,8 @@ export const ServerLayer = (
         // RPC layer closes its client sockets, so a connected `verdandi chat` blocked shutdown. Without
         // it, the RPC layer closes the sockets first and the final stop() resolves.
         disablePreemptiveShutdown: true,
+        // A turn's attachments arrive base64-encoded in one message: at most 10 MB of bytes (contracts' attachmentLimits).
+        websocket: { maxPayloadLength: 20 * 1024 * 1024 },
         // The web UI: Bun bundles it from source on the first request and serves it from memory.
         routes: { "/": web },
         development: false,

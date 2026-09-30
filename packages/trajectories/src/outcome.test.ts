@@ -23,7 +23,7 @@ const usage = (turnId: TurnId, model: string, costUsd: number) =>
 const stored = (events: [number, Event][]): StoredEvent[] =>
   events.map(([s, event], i) => ({ seq: i + 1, eventId: `e${i}`, commandId: `c${i}`, at: new Date(s * 1000).toISOString(), event }));
 const [u0, u1, u2, u3, u4] = ["u0", "u1", "u2", "u3", "u4"] as [TurnId, TurnId, TurnId, TurnId, TurnId];
-const started = (turnId: TurnId) => ({ type: "turn.started", v: 1, threadId, turnId, text: "go" }) as const;
+const started = (turnId: TurnId) => ({ type: "turn.started", v: 2, threadId, turnId, text: "go" }) as const;
 const completed = (turnId: TurnId, status: "success" | "interrupted") =>
   ({ type: "turn.completed", v: 1, threadId, turnId, status }) as const;
 

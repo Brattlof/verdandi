@@ -38,6 +38,8 @@ export const CatalogEntry = Schema.Struct({
   ...RouteTarget.fields,
   tier: Tier,
   context: Schema.Int,
+  /** Whether it reads images: a task with an image attached routes only to targets that do. */
+  vision: Schema.Boolean,
   price: Schema.Struct({ input: Schema.Number, output: Schema.Number, cacheRead: Schema.Number, cacheWrite: Schema.Number }),
 });
 export type CatalogEntry = typeof CatalogEntry.Type;

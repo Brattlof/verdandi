@@ -117,9 +117,28 @@ export const connect = (token: string) => {
   };
   /** A task's routing decision, with its trace. */
   const explain = async (taskId: TaskId) => routed(await run((rpc) => rpc.RoutingExplain({ taskId })));
-  /** What the router would pick if `text` started a new task in the thread. Stores nothing. */
-  const simulate = async (threadId: ThreadId, text: string, mode: InteractionMode) =>
-    routed(await run((rpc) => rpc.RoutingSimulate({ threadId, text, mode })));
+  /** What the router would pick if `text`, with `images` attached, started a new task in the thread. Stores nothing. */
+  const simulate = async (threadId: ThreadId, text: string, mode: InteractionMode, images: number) =>
+    routed(await run((rpc) => rpc.RoutingSimulate({ threadId, text, mode, ...(images > 0 && { images }) })));
+
+  /**
+   * An object URL for a stored attachment's bytes, fetched once per page with the token in a header, never the
+   * URL. Undefined when verdandid can't serve it.
+   */
+  const attachments = new Map<string, Promise<string | undefined>>();
+  const attachmentUrl = (id: string) => {
+    let url = attachments.get(id);
+    if (!url) {
+      url = fetch(`/attachments/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.blob() : undefined))
+        .then(
+          (blob) => blob && URL.createObjectURL(blob),
+          () => undefined,
+        );
+      attachments.set(id, url);
+    }
+    return url;
+  };
 
   /** The spend caps over the thread's project and profile, and what each has spent this period. */
   const spendCaps = async (
@@ -180,6 +199,6 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, explain, simulate, spendCaps, usage, follow, harnesses, lost };
+  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, follow, harnesses, lost };
 };
 export type Connection = ReturnType<typeof connect>;

@@ -13,8 +13,8 @@ const samples: Event[] = [
   { type: "task.started", v: 2, threadId, taskId: turnId as string as TaskId, route },
   { type: "thread.archived", v: 1, threadId },
   { type: "thread.unarchived", v: 1, threadId },
-  { type: "turn.started", v: 1, threadId, turnId, text: "hi" },
-  { type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "plan" },
+  { type: "turn.started", v: 2, threadId, turnId, text: "hi" },
+  { type: "turn.started", v: 2, threadId, turnId, text: "hi", mode: "plan" },
   { type: "harness.session.bound", v: 1, threadId, sessionId: "s1", harnessVersion: "2.1.284" },
   { type: "turn.item.added", v: 1, threadId, turnId, item: { kind: "assistant.message", text: "hello" } },
   {
@@ -74,9 +74,9 @@ describe("stored events", () => {
   });
 
   test("rejects an unknown event version with a clear message", async () => {
-    const result = await Effect.runPromise(Effect.flip(decodeStoredEvent({ type: "turn.started", v: 2, payload: "{}" })));
+    const result = await Effect.runPromise(Effect.flip(decodeStoredEvent({ type: "turn.started", v: 3, payload: "{}" })));
     expect(result.message).toContain("turn.started");
-    expect(result.message).toContain("v2");
+    expect(result.message).toContain("v3");
     expect(result.message).toContain("newer");
   });
 
@@ -90,8 +90,21 @@ describe("stored events", () => {
     expect(await roundTrip(v2)).toEqual(v2);
   });
 
+  test("reads a v1 turn.started as v2 without attachments, and keeps a v2 turn's references", async () => {
+    const v1 = { type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "ask" } as const;
+    expect(await Effect.runPromise(decodeStoredEvent({ type: "turn.started", v: 1, payload: JSON.stringify(v1) }))).toEqual({
+      ...v1,
+      v: 2,
+    });
+    const ref = { id: `${"c".repeat(64)}.png`, name: "a b.png", kind: "image", mediaType: "image/png", size: 12 } as const;
+    const v2: Event = { type: "turn.started", v: 2, threadId, turnId, text: "hi", attachments: [ref] };
+    expect(await roundTrip(v2)).toEqual(v2);
+    const traversal = { ...v2, attachments: [{ ...ref, id: "../verdandi.db" }] };
+    expect((await Effect.runPromise(Effect.flip(decodeStoredEvent(encodeEvent(traversal))))).message).toContain("malformed");
+  });
+
   test("round-trips CRLF and unicode text", async () => {
-    const e: Event = { type: "turn.started", v: 1, threadId, turnId, text: "räksmörgås\r\n日本語 \u{1F600}" };
+    const e: Event = { type: "turn.started", v: 2, threadId, turnId, text: "räksmörgås\r\n日本語 \u{1F600}" };
     expect(await roundTrip(e)).toEqual(e);
   });
 });

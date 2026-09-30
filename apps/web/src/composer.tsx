@@ -1,5 +1,6 @@
 import type { BudgetMode, CommandId, InteractionMode, Question, Resolution, ThreadId, ThreadView, TurnId } from "@verdandi/contracts";
-import { type FormEvent, type KeyboardEvent, useEffect, useId, useState } from "react";
+import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, useEffect, useId, useState } from "react";
+import { addFiles, type Pending, PendingList } from "./attachments.tsx";
 import { type Connection, type Routed, uuid } from "./client.ts";
 import { RouteChip } from "./route.tsx";
 import { SpendCaps } from "./spend.tsx";
@@ -13,7 +14,8 @@ const modes: { value: InteractionMode; label: string; hint: string }[] = [
 
 /**
  * Sends the next turn in the chosen mode. While a turn runs, a message steers it instead: the agent
- * reads it at its next step (ADR 0003). Enter sends, Shift+Enter starts a new line.
+ * reads it at its next step (ADR 0003). Enter sends, Shift+Enter starts a new line. Images and files
+ * pasted, dropped or picked go with the next turn; a steer can't carry them.
  */
 export const Composer = ({
   connection,
@@ -28,18 +30,43 @@ export const Composer = ({
 }) => {
   const [text, setText] = useState("");
   const [error, setError] = useState<string>();
+  const [pending, setPending] = useState<readonly Pending[]>([]);
   /** Sends a spend cap rejected, so the caps shown catch up with spend in other threads. */
   const [capRejections, setCapRejections] = useState(0);
   const running = thread.turns.findLast((t) => t.status === "running");
   const { threadId } = thread;
 
+  const attach = async (files: readonly File[]) => {
+    if (files.length === 0) return;
+    if (running) return setError("Attachments go with a new turn: send them once this one finishes.");
+    const { added, error } = await addFiles(files, pending);
+    setError(error);
+    setPending((p) => [...p, ...added]);
+  };
+  const detach = (key: string) =>
+    setPending((p) => {
+      const gone = p.find((x) => x.key === key);
+      if (gone?.preview) URL.revokeObjectURL(gone.preview);
+      return p.filter((x) => x !== gone);
+    });
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData.files);
+    if (files.length === 0) return;
+    e.preventDefault();
+    void attach(files);
+  };
+  const onDrop = (e: DragEvent) => {
+    if (e.dataTransfer.files.length === 0) return;
+    e.preventDefault();
+    void attach(Array.from(e.dataTransfer.files));
+  };
   const fail = (message: string, body: string) => {
     setError(message);
     setText((current) => current || body);
   };
   const send = async () => {
     const body = text.trim();
-    if (!body) return;
+    if (!body && (running || pending.length === 0)) return;
     setText("");
     setError(undefined);
     if (running) {
@@ -63,8 +90,13 @@ export const Composer = ({
       turnId: uuid<TurnId>(),
       text: body,
       mode,
+      ...(pending.length > 0 && { attachments: pending.map(({ name, mediaType, data }) => ({ name, mediaType, data })) }),
     });
     if (!sent.ok) fail(sent.message, body);
+    else {
+      for (const p of pending) if (p.preview) URL.revokeObjectURL(p.preview);
+      setPending([]);
+    }
     if (!sent.ok && sent.reason === "SpendCapReached") setCapRejections((n) => n + 1);
   };
   const stop = async () => {
@@ -89,7 +121,7 @@ export const Composer = ({
     <div className="mx-auto w-full max-w-[860px] px-4 pt-2 pb-3">
       <SpendCaps connection={connection} thread={thread} rejected={capRejections} />
       <RouteChip connection={connection} thread={thread} />
-      <form onSubmit={onSubmit}>
+      <form onSubmit={onSubmit} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
         <fieldset className="mb-1 flex items-center gap-3">
           <legend className="sr-only">Mode for the next turn</legend>
           {modes.map((m) => (
@@ -104,6 +136,7 @@ export const Composer = ({
           </span>
           <BudgetSwitch connection={connection} thread={thread} running={running !== undefined} onError={setError} />
         </fieldset>
+        <PendingList items={pending} onRemove={detach} />
         <label className="sr-only" htmlFor="message">
           {running ? "Steer the running turn" : "Message"}
         </label>
@@ -113,23 +146,46 @@ export const Composer = ({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           className="w-full resize-y"
           placeholder={running ? "Steer the agent: it reads this at its next step" : "Message the agent"}
           aria-describedby={preview ? "route-preview" : undefined}
         />
-        {preview && <RoutePreview connection={connection} thread={thread} text={text} mode={mode} />}
+        {preview && (
+          <RoutePreview
+            connection={connection}
+            thread={thread}
+            text={text}
+            mode={mode}
+            images={pending.filter((p) => p.preview !== undefined).length}
+          />
+        )}
         <div className="mt-1.5 flex items-center justify-end gap-2">
           {error && (
             <span role="alert" className="mr-auto text-error">
               {error}
             </span>
           )}
+          {!running && (
+            <label className="cursor-pointer rounded border border-line bg-panel px-3 py-1 has-focus-visible:outline-2">
+              Attach
+              <input
+                type="file"
+                multiple
+                className="sr-only"
+                onChange={(e) => {
+                  void attach(Array.from(e.target.files ?? []));
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          )}
           {running && (
             <button type="button" onClick={stop}>
               Stop
             </button>
           )}
-          <button type="submit" disabled={!text.trim()}>
+          <button type="submit" disabled={!text.trim() && (running !== undefined || pending.length === 0)}>
             {running ? "Steer" : "Send"}
           </button>
         </div>
@@ -204,11 +260,13 @@ const RoutePreview = ({
   thread,
   text,
   mode,
+  images,
 }: {
   connection: Connection;
   thread: LiveThread;
   text: string;
   mode: InteractionMode;
+  images: number;
 }) => {
   const [routed, setRouted] = useState<Routed>();
   const draft = text.trim();
@@ -217,12 +275,12 @@ const RoutePreview = ({
   useEffect(() => {
     if (!draft) return setRouted(undefined);
     let current = true;
-    const timer = setTimeout(() => void connection.simulate(threadId, draft, mode).then((r) => current && setRouted(r)), 300);
+    const timer = setTimeout(() => void connection.simulate(threadId, draft, mode, images).then((r) => current && setRouted(r)), 300);
     return () => {
       current = false;
       clearTimeout(timer);
     };
-  }, [connection, threadId, draft, mode, budgetMode]);
+  }, [connection, threadId, draft, mode, images, budgetMode]);
   const decision = routed?.ok ? routed.decision : undefined;
   return (
     <p id="route-preview" className="mt-1 text-xs text-muted" aria-live="polite">

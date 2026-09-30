@@ -36,7 +36,7 @@ const turn: Event[] = [
     projectPath: "C:/Users/a b/repo",
     route: { harness: "fake", model: "fake", effort: "low" },
   },
-  { type: "turn.started", v: 1, threadId, turnId, text: "hi" },
+  { type: "turn.started", v: 2, threadId, turnId, text: "hi" },
   { type: "harness.session.bound", v: 1, threadId, sessionId: "s1", harnessVersion: "fake" },
   { type: "turn.item.added", v: 1, threadId, turnId, item: { kind: "assistant.message", text: "echo: hi" } },
   {
@@ -82,6 +82,7 @@ test("projects a full turn into the thread view", async () => {
         turnId,
         text: "hi",
         mode: "build",
+        attachments: [],
         status: "success",
         items: [{ kind: "assistant.message", text: "echo: hi" }],
         usage: [
