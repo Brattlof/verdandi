@@ -1,10 +1,10 @@
 import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { ClientCommand } from "./commands.ts";
-import { ApprovalRequested, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
+import { ApprovalRequested, PlanRequested, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
 import { CommandId, ThreadId, TurnId } from "./ids.ts";
 import { Item } from "./items.ts";
-import { Route } from "./route.ts";
+import { InteractionMode, Route } from "./route.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
   reason: Schema.Literals(["ThreadNotFound", "ThreadExists", "ThreadBusy", "TurnNotRunning", "RequestNotPending", "InvalidResolution"]),
@@ -17,6 +17,7 @@ export type Receipt = typeof Receipt.Type;
 export const TurnView = Schema.Struct({
   turnId: TurnId,
   text: Schema.String,
+  mode: InteractionMode,
   status: Schema.Literals(["running", ...TurnStatus.literals]),
   items: Schema.Array(Item),
   error: Schema.optionalKey(Schema.String),
@@ -31,7 +32,7 @@ export const ThreadView = Schema.Struct({
   busy: Schema.Boolean,
   turns: Schema.Array(TurnView),
   /** Requests still waiting for an answer, oldest first, so a client that reconnects can answer them. */
-  pendingRequests: Schema.Array(Schema.Union([ApprovalRequested, UserInputRequested])),
+  pendingRequests: Schema.Array(Schema.Union([ApprovalRequested, UserInputRequested, PlanRequested])),
 });
 export type ThreadView = typeof ThreadView.Type;
 

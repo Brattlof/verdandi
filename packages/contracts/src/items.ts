@@ -7,6 +7,8 @@ export const Item = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("tool.result"), toolUseId: Schema.String, isError: Schema.Boolean, content: Schema.String }),
   /** A message the user sent while the turn ran, recorded when Verdandi accepted it. */
   Schema.Struct({ kind: Schema.Literal("user.steer"), text: Schema.String }),
+  /** A plan the agent proposed for approval. `filePath` points at the harness's own copy, when it keeps one. */
+  Schema.Struct({ kind: Schema.Literal("plan"), text: Schema.String, filePath: Schema.optionalKey(Schema.String) }),
 ]);
 export type Item = typeof Item.Type;
 

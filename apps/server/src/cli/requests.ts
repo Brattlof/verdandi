@@ -8,6 +8,10 @@ const clip = (text: string, max = 400) => (text.length > max ? `${text.slice(0, 
 export const approvalPrompt = (r: Extract<PendingRequest, { type: "approval.requested" }>) =>
   `\n[approval] ${r.toolName} ${clip(JSON.stringify(r.input))}\nAllow? [y/n] `;
 
+/** A plan prints in full: the user approves what they read. */
+export const planPrompt = (r: Extract<PendingRequest, { type: "plan.requested" }>) =>
+  `\n[plan${r.filePath ? ` ${r.filePath}` : ""}]\n${r.plan}\nApprove and build? [y/n] `;
+
 export const questionPrompt = (q: Question) => {
   const options = q.options.map((o, i) => `  ${i + 1}. ${o.label}: ${o.description}`).join("\n");
   const pick = q.multiSelect ? "Pick numbers separated by commas" : "Pick a number";

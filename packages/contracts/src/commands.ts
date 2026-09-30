@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { HarnessEvent } from "./harness.ts";
 import { CommandId, ThreadId, TurnId } from "./ids.ts";
 import { Resolution } from "./requests.ts";
-import { Route } from "./route.ts";
+import { InteractionMode, Route } from "./route.ts";
 
 export const ThreadCreate = Schema.Struct({
   type: Schema.Literal("thread.create"),
@@ -17,6 +17,7 @@ export const TurnSend = Schema.Struct({
   threadId: ThreadId,
   turnId: TurnId,
   text: Schema.String,
+  mode: InteractionMode,
 });
 /** Answers a pending approval or user-input request. */
 export const ApprovalRespond = Schema.Struct({

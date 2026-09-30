@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Command, CommandId, Resolution, StoredEvent, ThreadId, TurnId } from "@verdandi/contracts";
+import type { Command, CommandId, InteractionMode, Resolution, StoredEvent, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, Fiber, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -41,13 +41,20 @@ const drain = Effect.gen(function* () {
 });
 const view = loadThreadView(threadId);
 const create: Command = { type: "thread.create", commandId: id<CommandId>(), threadId, projectPath: "C:/Users/a b/repo", route };
-const send = (text: string, turnId = id<TurnId>()): Command => ({ type: "turn.send", commandId: id<CommandId>(), threadId, turnId, text });
+const send = (text: string, turnId = id<TurnId>(), mode: InteractionMode = "build"): Command => ({
+  type: "turn.send",
+  commandId: id<CommandId>(),
+  threadId,
+  turnId,
+  text,
+  mode,
+});
 
 /** Completes with the id of the next request a harness raises, once it is committed. */
 const nextRequest = Effect.gen(function* () {
   const raised = yield* Deferred.make<string>();
   yield* (yield* Engine).react((s) =>
-    s.event.type === "approval.requested" || s.event.type === "user-input.requested"
+    s.event.type === "approval.requested" || s.event.type === "user-input.requested" || s.event.type === "plan.requested"
       ? Deferred.succeed(raised, s.event.requestId).pipe(Effect.asVoid)
       : Effect.void,
   );
@@ -63,11 +70,11 @@ const sessionBound = Effect.gen(function* () {
 const interrupt = (turnId: TurnId): Command => ({ type: "turn.interrupt", commandId: id<CommandId>(), threadId, turnId });
 
 /** Sends `text`, answers the request it raises with `resolution`, and returns the view while pending and after. */
-const answerTurn = (text: string, resolution: Resolution) =>
+const answerTurn = (text: string, resolution: Resolution, mode: InteractionMode = "build") =>
   Effect.gen(function* () {
     yield* dispatch(create);
     const raised = yield* nextRequest;
-    yield* dispatch(send(text));
+    yield* dispatch(send(text, id<TurnId>(), mode));
     const requestId = yield* Deferred.await(raised);
     const pending = yield* view;
     yield* dispatch({ type: "approval.respond", commandId: id<CommandId>(), threadId, requestId, resolution });
@@ -318,6 +325,39 @@ describe("engine", () => {
     const { runtime } = start(newHome());
     const { after } = await runtime.runPromise(answerTurn("ask", { decision: "answer", answers: { "Which color?": "Blue" } }));
     expect(lastItem(after)).toEqual({ kind: "assistant.message", text: "you picked Blue" });
+  });
+
+  test("a turn runs in the mode it was sent in, and its view shows it", async () => {
+    const { runtime, fake } = start(newHome());
+    const v = await runtime.runPromise(
+      Effect.gen(function* () {
+        yield* dispatch(create);
+        yield* dispatch(send("one", id<TurnId>(), "ask"));
+        yield* drain;
+        yield* dispatch(send("two"));
+        yield* drain;
+        return yield* view;
+      }),
+    );
+    expect(fake.calls.map((c) => c.mode)).toEqual(["ask", "build"]);
+    expect(v?.turns.map((t) => t.mode)).toEqual(["ask", "build"]);
+  });
+
+  test("an approved plan is recorded and the turn goes on building", async () => {
+    const { runtime } = start(newHome());
+    const { pending, after, requestId } = await runtime.runPromise(answerTurn("plan", { decision: "allow" }, "plan"));
+    expect(pending).toEqual([requestId]);
+    expect(after?.pendingRequests).toEqual([]);
+    expect(after?.turns.at(-1)?.items).toEqual([
+      { kind: "plan", text: "1. Edit a.txt" },
+      { kind: "assistant.message", text: "built the plan" },
+    ]);
+  });
+
+  test("a rejected plan's feedback reaches the harness", async () => {
+    const { runtime } = start(newHome());
+    const { after } = await runtime.runPromise(answerTurn("plan", { decision: "deny", feedback: "smaller steps" }, "plan"));
+    expect(lastItem(after)).toEqual({ kind: "assistant.message", text: "kept planning: smaller steps" });
   });
 
   test("a request pending when verdandid stops is denied on restart, and that is recorded", async () => {

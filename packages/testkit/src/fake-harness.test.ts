@@ -7,6 +7,7 @@ const base = {
   threadId: "t" as ThreadId,
   cwd: "C:/Users/a b/repo",
   route: { harness: "fake", model: "fake", effort: "low" } as const,
+  mode: "build" as const,
   steers: Stream.empty,
 };
 

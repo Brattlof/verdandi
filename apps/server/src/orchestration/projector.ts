@@ -10,7 +10,7 @@ type Projection<T extends Event["type"]> = (
 
 const withSql = <A>(f: (sql: SqlClient.SqlClient) => Effect.Effect<A, SqlError.SqlError>) => Effect.flatMap(SqlClient.SqlClient, f);
 
-const requestKind = { "approval.requested": "approval", "user-input.requested": "user-input" } as const;
+const requestKind = { "approval.requested": "approval", "user-input.requested": "user-input", "plan.requested": "plan" } as const;
 
 const insertRequest = (e: Extract<Event, { type: keyof typeof requestKind }>, at: string) =>
   withSql(
@@ -44,7 +44,8 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "turn.started": (e, at) =>
     withSql((sql) =>
       Effect.andThen(
-        sql`insert into turns (id, thread_id, text, status, started_at) values (${e.turnId}, ${e.threadId}, ${e.text}, 'running', ${at})`,
+        sql`insert into turns (id, thread_id, text, mode, status, started_at)
+            values (${e.turnId}, ${e.threadId}, ${e.text}, ${e.mode ?? "build"}, 'running', ${at})`,
         sql`update threads set running_turn_id = ${e.turnId} where id = ${e.threadId}`,
       ),
     ),
@@ -59,6 +60,11 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     ),
   "approval.requested": insertRequest,
   "user-input.requested": insertRequest,
+  "plan.requested": (e, at) =>
+    Effect.andThen(
+      addItem(e.turnId, { kind: "plan", text: e.plan, ...(e.filePath === undefined ? {} : { filePath: e.filePath }) }),
+      insertRequest(e, at),
+    ),
   "approval.resolved": (e, at) =>
     withSql(
       (sql) =>
@@ -104,8 +110,8 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
       const [thread] = yield* sql<{ path: string; route: string; session_id: string | null; running_turn_id: string | null }>`
         select p.path, t.route, t.session_id, t.running_turn_id from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
       if (!thread) return null;
-      const turns = yield* sql<{ id: string; text: string; status: TurnView["status"]; error: string | null }>`
-        select id, text, status, error from turns where thread_id = ${threadId} order by started_at, rowid`;
+      const turns = yield* sql<{ id: string; text: string; mode: TurnView["mode"]; status: TurnView["status"]; error: string | null }>`
+        select id, text, mode, status, error from turns where thread_id = ${threadId} order by started_at, rowid`;
       const items = yield* sql<{ turn_id: string; payload: string }>`
         select i.turn_id, i.payload from items i join turns t on t.id = i.turn_id where t.thread_id = ${threadId} order by i.turn_id, i.idx`;
       const itemsByTurn = Map.groupBy(items, (i) => i.turn_id);
@@ -121,6 +127,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
           (t): TurnView => ({
             turnId: t.id as TurnView["turnId"],
             text: t.text,
+            mode: t.mode,
             status: t.status,
             items: (itemsByTurn.get(t.id) ?? []).map((i) => JSON.parse(i.payload) as Item),
             ...(t.error === null ? {} : { error: t.error }),

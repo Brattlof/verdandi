@@ -530,7 +530,7 @@ interface HarnessAdapter {
 - **Transport:** the Claude Agent SDK for TypeScript, in streaming-input mode, with `pathToClaudeCodeExecutable` pointing at **your installed `claude`**. Your authentication, settings, plugins, MCP servers, CLAUDE.md files and skills all apply unchanged, with one exception: claude.ai connectors are switched off (`disableClaudeAiConnectors`), because they attach nondeterministically and would change the tool list between turns (ADR 0001). Raw stream-JSON is kept as a fallback.
 - **Routing controls:**
   - model via `setModel()`;
-  - plan mode and permissions via `setPermissionMode()`;
+  - Ask / Plan / Build via `setPermissionMode()`, between turns: Ask and Plan run in Claude Code's read-only plan mode, Build in the user's own default mode. `ExitPlanMode` becomes a plan approval request;
   - effort per task through the `effort` option; a mid-task change through `applyFlagSettings({ effortLevel })` (ADR 0002);
   - subagents via `agents`, each with its own `model`.
 - **Approvals:** `canUseTool` becomes an approval event. `AskUserQuestion` becomes a user-input request.

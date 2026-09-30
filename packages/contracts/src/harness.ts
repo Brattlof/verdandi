@@ -2,7 +2,7 @@ import { Data, type Effect, Schema, type Stream } from "effect";
 import type { ThreadId, TurnId } from "./ids.ts";
 import { Item, UsageFields } from "./items.ts";
 import { Question, type Resolution } from "./requests.ts";
-import type { HarnessId, Route } from "./route.ts";
+import type { HarnessId, InteractionMode, Route } from "./route.ts";
 
 /** What every harness adapter reports, normalized. */
 export const HarnessEvent = Schema.Union([
@@ -13,6 +13,13 @@ export const HarnessEvent = Schema.Union([
   /** The harness blocks until `respond` answers `requestId`. */
   Schema.Struct({ type: Schema.Literal("approval.requested"), requestId: Schema.String, toolName: Schema.String, input: Schema.Unknown }),
   Schema.Struct({ type: Schema.Literal("user-input.requested"), requestId: Schema.String, questions: Schema.Array(Question) }),
+  /** Allowing it leaves planning: the turn goes on building. Denying it keeps the agent planning. */
+  Schema.Struct({
+    type: Schema.Literal("plan.requested"),
+    requestId: Schema.String,
+    plan: Schema.String,
+    filePath: Schema.optionalKey(Schema.String),
+  }),
   Schema.Struct({
     type: Schema.Literal("turn.finished"),
     status: Schema.Literals(["success", "error"]),
@@ -33,6 +40,13 @@ export type HarnessRunInput = {
   readonly resumeSessionId: string | undefined;
   readonly turnId: TurnId;
   readonly text: string;
+  /**
+   * The turn's interaction mode, applied before its prompt so the cache survives. `ask` and `plan`
+   * must not change the project; a proposed plan becomes a `plan.requested`, and allowing it lets the
+   * turn go on building. Every harness today supports all three (Claude Code, fake); one that can't
+   * must be listed here, and the decider must reject the modes it lacks.
+   */
+  readonly mode: InteractionMode;
   /**
    * Steer messages for this turn, as the user sends them. Deliver each at the next safe point
    * (Claude Code: the next tool boundary, ADR 0003) and keep the turn open until the agent has

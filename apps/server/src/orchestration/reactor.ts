@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CommandId, HarnessAdapter, HarnessEvent, HarnessId, Route, ThreadId, TurnId } from "@verdandi/contracts";
+import type { CommandId, HarnessAdapter, HarnessEvent, HarnessId, InteractionMode, Route, ThreadId, TurnId } from "@verdandi/contracts";
 import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Engine } from "./engine.ts";
@@ -47,7 +47,7 @@ export const ReactorLive = Layer.effect(
     const report = (threadId: ThreadId, turnId: TurnId, event: HarnessEvent) =>
       engine.dispatch({ type: "harness.report", commandId: randomUUID() as CommandId, threadId, turnId, event });
 
-    const runTurn = (threadId: ThreadId, turnId: TurnId, text: string, steers: Stream.Stream<string>) => {
+    const runTurn = (threadId: ThreadId, turnId: TurnId, text: string, mode: InteractionMode, steers: Stream.Stream<string>) => {
       let finished = false;
       const fail = (error: string) => report(threadId, turnId, { type: "turn.finished", status: "error", error });
       return Effect.gen(function* () {
@@ -59,7 +59,7 @@ export const ReactorLive = Layer.effect(
         if (!adapter) return yield* fail(`The ${route.harness} harness is not available in this verdandid. Pick another route.`);
         live.set(threadId, adapter);
         yield* adapter
-          .run({ threadId, cwd: thread.path, route, resumeSessionId: thread.session_id ?? undefined, turnId, text, steers })
+          .run({ threadId, cwd: thread.path, route, resumeSessionId: thread.session_id ?? undefined, turnId, text, mode, steers })
           .pipe(
             Stream.runForEach((event) => {
               if (event.type === "text.delta") return engine.publishDelta(threadId, turnId, event.text);
@@ -88,7 +88,7 @@ export const ReactorLive = Layer.effect(
       { discard: true },
     );
 
-    const startTurn = (threadId: ThreadId, turnId: TurnId, text: string) =>
+    const startTurn = (threadId: ThreadId, turnId: TurnId, text: string, mode: InteractionMode) =>
       Effect.gen(function* () {
         // Registered before the turn forks, so a steer accepted right after turn.started is never lost.
         const queue = yield* Queue.unbounded<string>();
@@ -100,7 +100,10 @@ export const ReactorLive = Layer.effect(
         const previous = latest.get(threadId)?.fiber;
         const fiber = yield* FiberSet.run(
           turns,
-          Effect.andThen(previous ? Fiber.await(previous) : Effect.void, runTurn(threadId, turnId, text, Stream.fromQueue(queue))).pipe(
+          Effect.andThen(
+            previous ? Fiber.await(previous) : Effect.void,
+            runTurn(threadId, turnId, text, mode, Stream.fromQueue(queue)),
+          ).pipe(
             Effect.ensuring(done),
             Effect.ensuring(Effect.sync(() => latest.get(threadId)?.turnId === turnId && latest.delete(threadId))),
           ),
@@ -110,7 +113,7 @@ export const ReactorLive = Layer.effect(
 
     yield* engine.react((stored) => {
       const e = stored.event;
-      if (e.type === "turn.started") return startTurn(e.threadId, e.turnId, e.text);
+      if (e.type === "turn.started") return startTurn(e.threadId, e.turnId, e.text, e.mode ?? "build");
       if (e.type === "turn.steered") {
         const queue = steerQueues.get(e.turnId);
         return queue ? Queue.offer(queue, e.text).pipe(Effect.asVoid) : Effect.void;

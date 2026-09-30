@@ -12,7 +12,7 @@ import {
 } from "@verdandi/contracts";
 import { Result } from "effect";
 
-export type PendingRequest = { readonly requestId: string; readonly turnId: TurnId; readonly kind: "approval" | "user-input" };
+export type PendingRequest = { readonly requestId: string; readonly turnId: TurnId; readonly kind: "approval" | "user-input" | "plan" };
 
 /** What the decider needs to know about the command's thread; `undefined` when it doesn't exist. */
 export type DeciderState = {
@@ -47,6 +47,7 @@ const denyPending = (state: DeciderState, threadId: ThreadId, turnId: TurnId, re
 const fits: Record<PendingRequest["kind"], readonly Resolution["decision"][]> = {
   approval: ["allow", "deny"],
   "user-input": ["answer", "deny"],
+  plan: ["allow", "deny"],
 };
 
 type Handler<T extends Command["type"]> = (state: DeciderState, command: Extract<Command, { type: T }>) => Decision;
@@ -68,6 +69,8 @@ const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, ev
     case "approval.requested":
       return accept({ ...event, v: 1, threadId, turnId });
     case "user-input.requested":
+      return accept({ ...event, v: 1, threadId, turnId });
+    case "plan.requested":
       return accept({ ...event, v: 1, threadId, turnId });
     case "turn.finished":
       return accept(...denyPending(state, threadId, turnId, "The turn ended before this was answered."), {
@@ -96,7 +99,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
   "turn.send": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     if (state.thread.runningTurnId) return reject("ThreadBusy", "A turn is already running in this thread. Wait for it to finish.");
-    return accept({ type: "turn.started", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text });
+    return accept({ type: "turn.started", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text, mode: c.mode });
   },
   "thread.route.set": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);

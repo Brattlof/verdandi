@@ -11,6 +11,7 @@ const samples: Event[] = [
   { type: "thread.created", v: 1, threadId, projectId: "p1" as never, projectPath: "C:/Users/a b/repo", route },
   { type: "thread.route.changed", v: 1, threadId, from: route, to: { ...route, model: "fake-2" }, by: "user" },
   { type: "turn.started", v: 1, threadId, turnId, text: "hi" },
+  { type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "plan" },
   { type: "harness.session.bound", v: 1, threadId, sessionId: "s1", harnessVersion: "2.1.284" },
   { type: "turn.item.added", v: 1, threadId, turnId, item: { kind: "assistant.message", text: "hello" } },
   {
@@ -21,6 +22,7 @@ const samples: Event[] = [
     item: { kind: "tool.call", toolUseId: "t1", name: "Read", input: { file_path: "x" } },
   },
   { type: "turn.item.added", v: 1, threadId, turnId, item: { kind: "tool.result", toolUseId: "t1", isError: false, content: "ok" } },
+  { type: "turn.item.added", v: 1, threadId, turnId, item: { kind: "plan", text: "1. Edit", filePath: "C:/Users/a b/.claude/plans/p.md" } },
   { type: "turn.steered", v: 1, threadId, turnId, text: "go left" },
   {
     type: "turn.usage.recorded",
@@ -44,7 +46,9 @@ const samples: Event[] = [
     requestId: "r2",
     questions: [{ question: "Which?", header: "Pick", options: [{ label: "A", description: "a" }], multiSelect: false }],
   },
+  { type: "plan.requested", v: 1, threadId, turnId, requestId: "r4", plan: "1. Edit", filePath: "C:/Users/a b/.claude/plans/p.md" },
   { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r1", resolution: { decision: "allow" } },
+  { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r4", resolution: { decision: "deny", feedback: "smaller" } },
   { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r2", resolution: { decision: "answer", answers: { "Which?": "A" } } },
   { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r3", resolution: { decision: "deny" }, reason: "turn ended" },
   { type: "turn.completed", v: 1, threadId, turnId, status: "error", error: "boom" },
