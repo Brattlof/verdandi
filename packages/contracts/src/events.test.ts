@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { decodeStoredEvent, type Event, encodeEvent } from "./events.ts";
-import type { ThreadId, TurnId } from "./ids.ts";
+import type { TaskId, ThreadId, TurnId } from "./ids.ts";
 
 const threadId = "3f1c2b1e-0000-4000-8000-000000000001" as ThreadId;
 const turnId = "3f1c2b1e-0000-4000-8000-000000000002" as TurnId;
@@ -10,6 +10,7 @@ const route = { harness: "fake", model: "fake", effort: "low" } as const;
 const samples: Event[] = [
   { type: "thread.created", v: 1, threadId, projectId: "p1" as never, projectPath: "C:/Users/a b/repo", route },
   { type: "thread.route.changed", v: 1, threadId, from: route, to: { ...route, model: "fake-2" }, by: "user" },
+  { type: "task.started", v: 1, threadId, taskId: turnId as string as TaskId, route },
   { type: "turn.started", v: 1, threadId, turnId, text: "hi" },
   { type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "plan" },
   { type: "harness.session.bound", v: 1, threadId, sessionId: "s1", harnessVersion: "2.1.284" },

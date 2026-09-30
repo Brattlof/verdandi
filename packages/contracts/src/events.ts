@@ -1,5 +1,5 @@
 import { Data, Effect, Schema } from "effect";
-import { ProjectId, ThreadId, TurnId } from "./ids.ts";
+import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields } from "./items.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
@@ -25,6 +25,17 @@ export const ThreadRouteChanged = Schema.Struct({
   from: Route,
   to: Route,
   by: Schema.Literal("user"),
+});
+/**
+ * A task (DESIGN §7) starts with the turn `taskId` names: a thread's first turn, and the first after a route
+ * change. Committed right before that turn's `turn.started`; its turns run on `route`.
+ */
+export const TaskStarted = Schema.Struct({
+  type: Schema.Literal("task.started"),
+  v: v1,
+  threadId: ThreadId,
+  taskId: TaskId,
+  route: Route,
 });
 export const TurnStarted = Schema.Struct({
   type: Schema.Literal("turn.started"),
@@ -127,6 +138,7 @@ export const TurnCompleted = Schema.Struct({
 export const Event = Schema.Union([
   ThreadCreated,
   ThreadRouteChanged,
+  TaskStarted,
   TurnStarted,
   HarnessSessionBound,
   TurnItemAdded,
@@ -155,6 +167,7 @@ export class EventDecodeError extends Data.TaggedError("EventDecodeError")<{ rea
 const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.created@1": ThreadCreated,
   "thread.route.changed@1": ThreadRouteChanged,
+  "task.started@1": TaskStarted,
   "turn.started@1": TurnStarted,
   "harness.session.bound@1": HarnessSessionBound,
   "turn.item.added@1": TurnItemAdded,

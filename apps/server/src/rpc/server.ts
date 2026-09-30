@@ -9,6 +9,7 @@ import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { AppLayer } from "../orchestration/app.ts";
 import { Engine } from "../orchestration/engine.ts";
 import { HarnessRegistry } from "../orchestration/reactor.ts";
+import { loadTaskCosts } from "../orchestration/task-outcome.ts";
 import { threadDiff } from "../workspace/diff.ts";
 import { resolveProjectPath } from "../workspace/project.ts";
 
@@ -51,6 +52,7 @@ const Handlers = Api.toLayer(
       HarnessesList: () => Effect.succeed(harnesses),
       DiffGet: ({ threadId, turnId }) =>
         threadDiff(threadId, turnId).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
+      TaskCostsList: () => loadTaskCosts.pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
     };
   }),
 );

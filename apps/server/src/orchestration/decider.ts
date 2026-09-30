@@ -7,6 +7,7 @@ import {
   type ProjectId,
   type Resolution,
   type Route,
+  type TaskId,
   type ThreadId,
   type TurnId,
 } from "@verdandi/contracts";
@@ -22,6 +23,8 @@ export type DeciderState = {
         readonly route: Route;
         readonly runningTurnId: string | null;
         readonly sessionId: string | null;
+        /** The task the next turn continues; null before the first turn and after a route change. */
+        readonly taskId: TaskId | null;
         readonly pendingRequests: readonly PendingRequest[];
       }
     | undefined;
@@ -102,7 +105,12 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
   "turn.send": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     if (state.thread.runningTurnId) return reject("ThreadBusy", "A turn is already running in this thread. Wait for it to finish.");
-    return accept({ type: "turn.started", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text, mode: c.mode });
+    const turn: Event = { type: "turn.started", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text, mode: c.mode };
+    if (state.thread.taskId) return accept(turn);
+    return accept(
+      { type: "task.started", v: 1, threadId: c.threadId, taskId: c.turnId as string as TaskId, route: state.thread.route },
+      turn,
+    );
   },
   "thread.route.set": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);

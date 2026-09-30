@@ -39,6 +39,7 @@ type Apply<T extends Event["type"]> = (thread: LiveThread, event: Extract<Event,
 // Mirrors the server's projector, so a live thread matches the snapshot a reload would fetch.
 const apply: { [T in Event["type"]]: Apply<T> } = {
   "thread.created": (thread) => thread,
+  "task.started": (thread) => thread,
   "thread.route.changed": (thread, e, at) => ({
     ...thread,
     route: e.to,

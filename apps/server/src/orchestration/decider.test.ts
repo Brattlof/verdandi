@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Command, CommandId, ThreadId, TurnId } from "@verdandi/contracts";
+import type { Command, CommandId, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
 import { Result } from "effect";
 import { type DeciderState, decide, projectIdFor } from "./decider.ts";
 
@@ -9,14 +9,20 @@ const commandId = "cmd-1" as CommandId;
 const route = { harness: "fake", model: "fake", effort: "low" } as const;
 
 const none: DeciderState = { thread: undefined };
-const idle: DeciderState = { thread: { projectPath: "C:/r", route, runningTurnId: null, sessionId: null, pendingRequests: [] } };
-const running: DeciderState = { thread: { projectPath: "C:/r", route, runningTurnId: turnId, sessionId: "s1", pendingRequests: [] } };
+const taskId = "task-1" as TaskId;
+const idle: DeciderState = {
+  thread: { projectPath: "C:/r", route, runningTurnId: null, sessionId: null, taskId: null, pendingRequests: [] },
+};
+const running: DeciderState = {
+  thread: { projectPath: "C:/r", route, runningTurnId: turnId, sessionId: "s1", taskId, pendingRequests: [] },
+};
 const waiting: DeciderState = {
   thread: {
     projectPath: "C:/r",
     route,
     runningTurnId: turnId,
     sessionId: "s1",
+    taskId,
     pendingRequests: [
       { requestId: "r1", turnId, kind: "approval" },
       { requestId: "r2", turnId, kind: "user-input" },
@@ -55,8 +61,13 @@ describe("decide", () => {
     expect(reason(decide(none, send))).toBe("ThreadNotFound");
   });
 
-  test("starts a turn on an idle thread", () => {
-    expect(events(decide(idle, send))).toEqual([{ type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "plan" }]);
+  test("starts a turn on an idle thread, and a task named after it when none is open", () => {
+    const started = { type: "turn.started", v: 1, threadId, turnId, text: "hi", mode: "plan" } as const;
+    expect(events(decide(idle, send))).toEqual([
+      { type: "task.started", v: 1, threadId, taskId: turnId as string as TaskId, route },
+      started,
+    ]);
+    expect(events(decide({ thread: { ...(idle.thread as NonNullable<DeciderState["thread"]>), taskId } }, send))).toEqual([started]);
   });
 
   test("rejects a second turn while one is running", () => {
@@ -135,6 +146,7 @@ describe("decide", () => {
         route,
         runningTurnId: turnId,
         sessionId: "s1",
+        taskId,
         pendingRequests: [{ requestId: "p1", turnId, kind: "plan" }],
       },
     };

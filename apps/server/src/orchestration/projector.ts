@@ -7,6 +7,7 @@ import type {
   QuotaView,
   Route,
   StoredEvent,
+  TaskId,
   ThreadId,
   ThreadSummary,
   ThreadView,
@@ -50,16 +51,23 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         sql`insert into threads (id, project_id, route, created_at) values (${e.threadId}, ${e.projectId}, ${JSON.stringify(e.route)}, ${at})`,
       ),
     ),
-  // A session belongs to one harness, so switching harness starts a fresh one on the next turn.
+  // A session belongs to one harness, so switching harness starts a fresh one on the next turn. Either way the next turn starts a task.
   "thread.route.changed": (e, at, seq) =>
     withSql((sql) =>
       Effect.andThen(
         e.from.harness === e.to.harness
-          ? sql`update threads set route = ${JSON.stringify(e.to)} where id = ${e.threadId}`
-          : sql`update threads set route = ${JSON.stringify(e.to)}, session_id = null where id = ${e.threadId}`,
+          ? sql`update threads set route = ${JSON.stringify(e.to)}, task_id = null where id = ${e.threadId}`
+          : sql`update threads set route = ${JSON.stringify(e.to)}, session_id = null, task_id = null where id = ${e.threadId}`,
         sql`insert into route_changes (seq, thread_id, from_route, to_route, by, after_turns, at)
             values (${seq}, ${e.threadId}, ${JSON.stringify(e.from)}, ${JSON.stringify(e.to)}, ${e.by},
               (select count(*) from turns where thread_id = ${e.threadId}), ${at})`,
+      ),
+    ),
+  "task.started": (e, at, seq) =>
+    withSql((sql) =>
+      Effect.andThen(
+        sql`insert into tasks (id, thread_id, route, seq, started_at) values (${e.taskId}, ${e.threadId}, ${JSON.stringify(e.route)}, ${seq}, ${at})`,
+        sql`update threads set task_id = ${e.taskId} where id = ${e.threadId}`,
       ),
     ),
   "turn.started": (e, at) =>
@@ -114,8 +122,14 @@ export const project = (stored: StoredEvent) =>
 export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState, SqlError.SqlError, SqlClient.SqlClient> =>
   withSql((sql) =>
     Effect.gen(function* () {
-      const [row] = yield* sql<{ path: string; route: string; running_turn_id: string | null; session_id: string | null }>`
-        select p.path, t.route, t.running_turn_id, t.session_id from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+      const [row] = yield* sql<{
+        path: string;
+        route: string;
+        running_turn_id: string | null;
+        session_id: string | null;
+        task_id: TaskId | null;
+      }>`
+        select p.path, t.route, t.running_turn_id, t.session_id, t.task_id from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
       if (!row) return { thread: undefined };
       const pending = yield* sql<{ id: string; turn_id: string; kind: PendingRequest["kind"] }>`
         select id, turn_id, kind from requests where thread_id = ${threadId} and resolution is null`;
@@ -125,6 +139,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           route: JSON.parse(row.route) as Route,
           runningTurnId: row.running_turn_id,
           sessionId: row.session_id,
+          taskId: row.task_id,
           pendingRequests: pending.map((r) => ({ requestId: r.id, turnId: r.turn_id as TurnId, kind: r.kind })),
         },
       };

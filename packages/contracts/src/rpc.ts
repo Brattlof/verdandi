@@ -5,6 +5,7 @@ import { ApprovalRequested, PlanRequested, StoredEvent, TurnStatus, UserInputReq
 import { CommandId, ProjectId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, Usage } from "./items.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
+import { RouteCost } from "./task.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
   reason: Schema.Literals([
@@ -149,4 +150,6 @@ export class Api extends RpcGroup.make(
     success: DiffView,
     error: DiffUnavailable,
   }),
+  /** Cost per completed task on each route that ran one, most spent first. */
+  Rpc.make("TaskCostsList", { success: Schema.Array(RouteCost) }),
 ) {}

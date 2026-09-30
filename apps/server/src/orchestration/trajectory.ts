@@ -3,6 +3,16 @@ import { buildTrajectory, redact } from "@verdandi/trajectories";
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
+/** An `events` row selected as `seq, event_id, command_id, at, type, v, payload`. */
+export type StoredEventRow = EventRow & { seq: number; event_id: string; command_id: string; at: string };
+
+export const decodeRows = (rows: readonly StoredEventRow[]) =>
+  Effect.forEach(rows, (r) =>
+    decodeStoredEvent(r).pipe(
+      Effect.map((event): StoredEvent => ({ seq: r.seq, eventId: r.event_id, commandId: r.command_id, at: r.at, event })),
+    ),
+  );
+
 /**
  * Builds a completed turn's trajectory from its events, redacts it and saves it. A turn that already
  * has one keeps it, so recording twice is harmless.
@@ -10,15 +20,13 @@ import { SqlClient } from "effect/unstable/sql";
 export const recordTrajectory = (threadId: ThreadId, turnId: TurnId) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql<EventRow & { seq: number; event_id: string; command_id: string; at: string }>`
-      select seq, event_id, command_id, at, type, v, payload from events
-      where thread_id = ${threadId}
-        and (type in ('thread.created', 'thread.route.changed', 'harness.session.bound') or json_extract(payload, '$.turnId') = ${turnId})
-      order by seq`;
-    const events = yield* Effect.forEach(rows, (r) =>
-      decodeStoredEvent(r).pipe(
-        Effect.map((event): StoredEvent => ({ seq: r.seq, eventId: r.event_id, commandId: r.command_id, at: r.at, event })),
-      ),
+    const events = yield* decodeRows(
+      yield* sql<StoredEventRow>`
+        select seq, event_id, command_id, at, type, v, payload from events
+        where thread_id = ${threadId}
+          and (type in ('thread.created', 'task.started', 'thread.route.changed', 'harness.session.bound')
+            or json_extract(payload, '$.turnId') = ${turnId})
+        order by seq`,
     );
     const trajectory = buildTrajectory(events, turnId);
     if (!trajectory) return;
