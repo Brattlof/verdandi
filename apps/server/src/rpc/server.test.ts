@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { appendFileSync } from "node:fs";
+import { join } from "node:path";
 import type { CommandId, ProjectsFeed, ThreadFeed, ThreadId, TurnId } from "@verdandi/contracts";
-import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
+import { makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { Reactor } from "../orchestration/reactor.ts";
 import { connect } from "./client.ts";
@@ -245,5 +247,42 @@ describe("rpc server", () => {
       .map((r) => (r._tag === "Success" ? "ok" : JSON.stringify(r.cause).includes("ThreadBusy") ? "busy" : "other"))
       .sort();
     expect(outcomes).toEqual(["busy", "ok"]);
+  });
+
+  test("DiffGet shows exactly what a turn edited, and the whole project without a turn", async () => {
+    const { info, drain } = await startServer();
+    const repo = makeTempRepo({ "a b.txt": "one\r\ntwo\r\n", "mine.txt": "mine\n" });
+    cleanups.push(async () => removeTempHome(repo));
+    appendFileSync(join(repo, "mine.txt"), "the user's own edit\n");
+    const threadId = uuid<ThreadId>();
+    const turnId = uuid<TurnId>();
+    await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        yield* c.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: repo, route });
+        const text = `edit ${join(repo, "a b.txt")}`;
+        yield* c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId, text, mode: "build" });
+      }),
+    );
+    await drain();
+    const [turn, all, missing] = await withClient(info.port, info.token, (c) =>
+      Effect.all([c.DiffGet({ threadId, turnId }), c.DiffGet({ threadId }), Effect.flip(c.DiffGet({ threadId, turnId: uuid<TurnId>() }))]),
+    );
+    const changed = (diff: string) => diff.split("\n").filter((l) => /^[+-](?![+-]{2} )/.test(l));
+    expect(turn.files.map((f) => [f.path, changed(f.diff)])).toEqual([["a b.txt", ["+edited by the fake harness"]]]);
+    expect(all.files.map((f) => f.path)).toEqual(["a b.txt", "mine.txt"]);
+    expect(missing.reason).toBe("TurnNotFound");
+  });
+
+  test("DiffGet names the fix when the project isn't a git repo", async () => {
+    const { info } = await startServer();
+    const threadId = uuid<ThreadId>();
+    const error = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        yield* createThread(c, threadId);
+        return yield* Effect.flip(c.DiffGet({ threadId }));
+      }),
+    );
+    expect(error.reason).toBe("NotAGitRepo");
+    expect(error.message).toContain("does not exist");
   });
 });

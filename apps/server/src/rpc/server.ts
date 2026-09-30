@@ -4,9 +4,10 @@ import { Api, type HarnessAdapter, type HarnessId } from "@verdandi/contracts";
 import { Context, Deferred, Effect, Layer, Stream } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
-import type { SqlError } from "effect/unstable/sql";
+import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { AppLayer } from "../orchestration/app.ts";
 import { Engine } from "../orchestration/engine.ts";
+import { threadDiff } from "../workspace/diff.ts";
 
 /** Where the running server listens, and the token clients must present. */
 export class ServerInfo extends Context.Service<ServerInfo, { readonly port: number; readonly token: string }>()("verdandi/ServerInfo") {}
@@ -14,6 +15,7 @@ export class ServerInfo extends Context.Service<ServerInfo, { readonly port: num
 const Handlers = Api.toLayer(
   Effect.gen(function* () {
     const engine = yield* Engine;
+    const sql = yield* SqlClient.SqlClient;
     const subscriptions = new Map<string, Deferred.Deferred<void>>();
     /** Runs `feed` until `Unsubscribe` names `subscriptionId`: the server ends feeds, clients never stop them early (ADR 0008). */
     const untilUnsubscribed = <A, E>(subscriptionId: string, feed: Stream.Stream<A, E | SqlError.SqlError>) =>
@@ -37,6 +39,8 @@ const Handlers = Api.toLayer(
         const stop = subscriptions.get(subscriptionId);
         return stop ? Deferred.succeed(stop, undefined).pipe(Effect.asVoid) : Effect.void;
       },
+      DiffGet: ({ threadId, turnId }) =>
+        threadDiff(threadId, turnId).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
     };
   }),
 );

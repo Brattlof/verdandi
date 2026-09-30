@@ -11,6 +11,23 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
   message: Schema.String,
 }) {}
 
+/** Why a diff can't be shown. The message names the cause and the fix. */
+export class DiffUnavailable extends Schema.TaggedError<DiffUnavailable>()("DiffUnavailable", {
+  reason: Schema.Literals(["ThreadNotFound", "TurnNotFound", "NotAGitRepo", "GitFailed"]),
+  message: Schema.String,
+}) {}
+
+/** One file's unified diff, `path` relative to the project. `truncated`: `diff` was cut to keep the payload small. */
+export const FileDiff = Schema.Struct({ path: Schema.String, diff: Schema.String, truncated: Schema.Boolean });
+export type FileDiff = typeof FileDiff.Type;
+
+/**
+ * The project's working tree against `HEAD` (ADR 0010). `omittedFiles` counts changed files left out
+ * once the payload hit its size limit.
+ */
+export const DiffView = Schema.Struct({ files: Schema.Array(FileDiff), omittedFiles: Schema.Number });
+export type DiffView = typeof DiffView.Type;
+
 export const Receipt = Schema.Struct({ commandId: CommandId, seq: Schema.Number });
 export type Receipt = typeof Receipt.Type;
 
@@ -89,4 +106,10 @@ export class Api extends RpcGroup.make(
   Rpc.make("ProjectsSubscribe", { payload: { subscriptionId: Schema.String }, success: ProjectsFeed, stream: true }),
   /** Ends the feed started with `subscriptionId`, whichever kind it is. */
   Rpc.make("Unsubscribe", { payload: { subscriptionId: Schema.String } }),
+  /** The thread's project diff; with `turnId`, only the files that turn's file tools touched. */
+  Rpc.make("DiffGet", {
+    payload: { threadId: ThreadId, turnId: Schema.optionalKey(TurnId) },
+    success: DiffView,
+    error: DiffUnavailable,
+  }),
 ) {}

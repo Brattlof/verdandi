@@ -1,11 +1,12 @@
+import { appendFileSync } from "node:fs";
 import type { HarnessAdapter, HarnessEvent, HarnessRunInput, InteractionMode, Resolution, Route } from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
 
 /**
  * A scripted harness for tests. Text "fail" fails the turn, "hang" runs until interrupted, "gate" waits for
  * `release()`, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan, each
- * finishing once `respond` answers, "steer" waits for the first steer and answers it; anything else is
- * echoed back with fixed usage on the route's model. `calls` records every run.
+ * finishing once `respond` answers, "steer" waits for the first steer and answers it, "edit <path>"
+ * appends a line to that file through an Edit tool call; anything else is echoed back with fixed usage on the route's model. `calls` records every run.
  */
 export const makeFakeHarness = () => {
   const calls: { resumeSessionId: string | undefined; route: Route; text: string; mode: InteractionMode }[] = [];
@@ -93,6 +94,17 @@ export const makeFakeHarness = () => {
             r.decision === "allow" ? "built the plan" : `kept planning${r.decision === "deny" && r.feedback ? `: ${r.feedback}` : ""}`,
         );
         return Stream.concat(Stream.fromIterable(start), plan);
+      }
+      if (input.text.startsWith("edit ")) {
+        const path = input.text.slice("edit ".length);
+        const edit = Stream.suspend(() => {
+          appendFileSync(path, "edited by the fake harness\n");
+          return Stream.fromIterable<HarnessEvent>([
+            { type: "item", item: { kind: "tool.call", toolUseId: "fake-edit", name: "Edit", input: { file_path: path } } },
+            { type: "item", item: { kind: "tool.result", toolUseId: "fake-edit", isError: false, content: "ok" } },
+          ]);
+        });
+        return Stream.concat(Stream.fromIterable(start), Stream.concat(edit, reply(input.route.model, `edited ${path}`)));
       }
       if (input.text === "steer") {
         const answer = input.steers.pipe(
