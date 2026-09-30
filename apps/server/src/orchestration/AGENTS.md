@@ -7,7 +7,7 @@ The event-sourced core of verdandid (DESIGN.md §10). Read the root `AGENTS.md` 
 | File | Role | May do |
 |---|---|---|
 | `decider.ts` | `decide(state, command)` returns the events a command causes, or a `CommandRejected`. | Nothing but compute. No I/O, no clock, no random IDs, no Effect services. |
-| `projector.ts` | One projection per event type, applied to the read models (`projects`, `threads`, `turns`, `items`, `requests`, `usage_ledger`). Also loads `DeciderState` and `ThreadView`. | SQL writes to read models, inside the engine's transaction only. |
+| `projector.ts` | One projection per event type, applied to the read models (`projects`, `threads`, `turns`, `items`, `requests`, `usage_ledger`). Also loads `DeciderState`, `ThreadView` and the projects feed's thread summaries. | SQL writes to read models, inside the engine's transaction only. |
 | `engine.ts` | `dispatch`: one transaction that checks the receipt, decides, appends each event and projects it, and writes the receipt. After the commit it publishes to feeds, then runs reactions. | Own the transaction and the feed PubSub. |
 | `reactor.ts` | Side effects, triggered by committed events. Today: run a harness turn on `turn.started`, feed it `turn.steered` messages, pass `approval.resolved` answers to the harness running that thread, interrupt the fiber of a turn the user interrupted, and recover turns left `running` by a previous process. | Anything with side effects, but it only changes state by dispatching commands. |
 | `app.ts` | Wires database, engine, harness registry and reactor into one layer. | |
@@ -29,8 +29,8 @@ The event-sourced core of verdandid (DESIGN.md §10). Read the root `AGENTS.md` 
 
 Effect `4.0.0-rc.115` leaves a WebSocket connection unable to answer further calls if a client stops a server stream early. Until an Effect upgrade passes the early-stop check from spike 008, and in general:
 
-- **Clients never stop a feed stream early.** A feed ends only when the client calls `ThreadUnsubscribe`, and the server halts the stream (`Stream.haltWhen` in `../rpc/server.ts`). Finite streams are read to the end.
+- **Clients never stop a feed stream early.** A feed ends only when the client calls `Unsubscribe`, and the server interrupts the stream (`Stream.interruptWhen` in `../rpc/server.ts`; `haltWhen` would wait for the next event on an idle feed). Finite streams are read to the end.
 - **Make other RPC calls outside the feed consumer.** Awaiting a call inside the `runForEach` that consumes a feed hung a test on macOS CI. Signal out of the consumer instead, the way `../cli/chat.ts` does.
-- **Subscribe before reading the snapshot.** `engine.feed` subscribes to the PubSub first, then reads the snapshot and its `seq` in one transaction, and drops live events at or below that `seq`. Keep that order, or events committed in between are lost or duplicated.
+- **Subscribe before reading the snapshot.** `engine.feed` and `engine.projectsFeed` subscribe to the PubSub first, then read the snapshot and its `seq` in one transaction, and drop live messages at or below that `seq`. Thread summaries are read inside the commit that changed them and carry its `seq`, so the projects feed also drops one older than the summary it last sent. Keep that order, or events committed in between are lost or duplicated.
 
 Each Effect upgrade re-runs the early-stop check. When it passes, drop the first rule here and rule 2 of ADR 0008. The second rule has its own cause, which hasn't been pinned down, so it stays until a test shows it's safe to drop.

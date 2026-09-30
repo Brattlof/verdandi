@@ -1,4 +1,16 @@
-import type { Event, Item, Route, StoredEvent, ThreadId, ThreadView, TurnId, TurnView } from "@verdandi/contracts";
+import type {
+  Event,
+  Item,
+  ProjectId,
+  ProjectSummary,
+  Route,
+  StoredEvent,
+  ThreadId,
+  ThreadSummary,
+  ThreadView,
+  TurnId,
+  TurnView,
+} from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import type { DeciderState, PendingRequest } from "./decider.ts";
@@ -136,4 +148,46 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         pendingRequests: pending.map((r) => JSON.parse(r.payload) as ThreadView["pendingRequests"][number]),
       };
     }),
+  );
+
+/** A thread's title until auto-titling exists: the first line of its first turn, cut to 80 characters. */
+export const titleFrom = (text: string) => {
+  const line = text.trim().split(/\r?\n/, 1)[0] ?? "";
+  return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line;
+};
+
+export const loadProjects: Effect.Effect<ProjectSummary[], SqlError.SqlError, SqlClient.SqlClient> = withSql((sql) =>
+  sql<{ id: string; path: string }>`select id, path from projects order by path`.pipe(
+    Effect.map((rows) => rows.map((r) => ({ projectId: r.id as ProjectId, path: r.path }))),
+  ),
+);
+
+/** Summaries of every thread, most recently active first, or of just `threadId`. */
+export const loadThreadSummaries = (threadId?: ThreadId): Effect.Effect<ThreadSummary[], SqlError.SqlError, SqlClient.SqlClient> =>
+  withSql((sql) =>
+    sql<{
+      id: string;
+      project_id: string;
+      route: string;
+      running_turn_id: string | null;
+      first_text: string | null;
+      last_activity_at: string;
+    }>`
+      select t.id, t.project_id, t.route, t.running_turn_id,
+        (select text from turns where thread_id = t.id order by started_at, rowid limit 1) as first_text,
+        coalesce((select max(coalesce(completed_at, started_at)) from turns where thread_id = t.id), t.created_at) as last_activity_at
+      from threads t
+      where ${threadId ?? null} is null or t.id = ${threadId ?? null}
+      order by last_activity_at desc, t.rowid desc`.pipe(
+      Effect.map((rows) =>
+        rows.map((r) => ({
+          threadId: r.id as ThreadId,
+          projectId: r.project_id as ProjectId,
+          title: titleFrom(r.first_text ?? ""),
+          busy: r.running_turn_id !== null,
+          lastActivityAt: r.last_activity_at,
+          route: JSON.parse(r.route) as Route,
+        })),
+      ),
+    ),
   );
