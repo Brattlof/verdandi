@@ -8,7 +8,7 @@ import { requireBun } from "./config/bun-version.ts";
 import { start } from "./main.ts";
 
 const usage = `Usage:
-  verdandi start [--home <dir>] [--port <n>]      run verdandid in the foreground
+  verdandi start [--home <dir>] [--port <n>] [--host <ip>]   run verdandid in the foreground; --host 0.0.0.0 (or this machine's LAN address) also opens it to your local network on --port, never to the internet
   verdandi open  [--home <dir>]                   open the web UI in your browser
   verdandi doctor [--home <dir>]                  check the setup: Bun, Claude Code, git, the home, the database and verdandid
   verdandi chat  [--home <dir>] [--harness <h>] [--model <m>] [--effort <e> | --auto] [--budget thrifty|balanced|max|policy] [--raise-cap] [--thread <id>]   chat with the thread for this folder, or the one named; route flags pin a route, --auto lets the router pick, --budget sets how it trades cost for strength, --raise-cap raises each reached spend cap for the rest of its period
