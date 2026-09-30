@@ -221,7 +221,7 @@ const link = (href: string, label: ReactNode, key: number) =>
 const marks: Record<string, (g: Groups, key: number, inLink: boolean) => ReactNode> = {
   code: (g, key) => <code key={key}>{g.code}</code>,
   src: (g, key) => (
-    <span key={key} className="image" title="Remote images are not loaded">
+    <span key={key} className="text-muted" title="Remote images are not loaded">
       [image: {g.alt}] {g.src}
     </span>
   ),

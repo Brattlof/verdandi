@@ -88,6 +88,9 @@ describe("rpc server", () => {
     const bundle = await fetch(new URL(script ?? "", `http://127.0.0.1:${info.port}/`));
     expect(bundle.status).toBe(200);
     expect(bundle.headers.get("content-type")).toContain("javascript");
+    const stylesheet = html.match(/<link[^>]+href="([^"]+\.css)"/)?.[1];
+    const css = await (await fetch(new URL(stylesheet ?? "", `http://127.0.0.1:${info.port}/`))).text();
+    expect(css).not.toContain("@tailwind"); // Tailwind ran, rather than Bun inlining its source
   });
 
   test("rejects a connection without the right token", async () => {

@@ -965,7 +965,7 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
 | Credentials | OS keychain through `Bun.secrets`, plus `keyCommand` | No plain-text keys, and no native addon |
 | Decision models | `rules` by default; Laya (ONNX through `onnxruntime-node`) in a worker process where it beats rules (ADR 0009); ollaya for larger local models; the Jev API if turned on | §9.8 |
 | Web UI | React 19 + TanStack Virtual, bundled by Bun from an HTML import and served by verdandid. A router, a state library or the React Compiler are added when a view needs them. | Virtualized long threads, no separate bundler or dev server |
-| UI kit | Tailwind 4, shadcn/ui, Streamdown, Shiki, `@pierre/diffs`, Tiptap | Each is built for its job |
+| UI kit | Tailwind 4 (through `bun-plugin-tailwind`), Base UI used directly for accessible widgets, Streamdown, Shiki, `@pierre/diffs`, Tiptap | Each is built for its job. Base UI is unstyled, so Tailwind styles everything and there is no component layer to copy in (ADR 0012) |
 | Desktop | **Electron** + electron-builder, with auto-update. It runs the compiled verdandid binary as a separate process. | Same Chromium on every OS. VS Code, Cursor, T3 Code and Hermes all ship on it. The server runs independently of the window, which the scheduler and gateway need anyway. |
 | Gateway | Official or leading SDK for each platform, as plugins | — |
 | Local models | Ollama (and any OpenAI-compatible local server) | Free auxiliary and classifier work, and a local agent option |
