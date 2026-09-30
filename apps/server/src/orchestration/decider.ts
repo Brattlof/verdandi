@@ -138,7 +138,23 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     return accept({ type: "turn.steered", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text });
   },
-  "harness.report": (state, c) => fromHarness(state, c.threadId, c.turnId, c.event),
+  "turn.interrupt": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
+    if (state.thread.runningTurnId !== c.turnId)
+      return reject("TurnNotRunning", `Turn ${c.turnId} is not running, so there is nothing to interrupt.`);
+    return accept(...denyPending(state, c.threadId, c.turnId, "The user interrupted the turn."), {
+      type: "turn.completed",
+      v: 1,
+      threadId: c.threadId,
+      turnId: c.turnId,
+      status: "interrupted",
+    });
+  },
+  // An interrupted turn's harness can still report while it winds down; only its session binding still counts.
+  "harness.report": (state, c) =>
+    c.event.type === "session.started" || state.thread?.runningTurnId === c.turnId
+      ? fromHarness(state, c.threadId, c.turnId, c.event)
+      : accept(),
   "turn.recover": (state, c) =>
     state.thread?.runningTurnId === c.turnId
       ? accept(...denyPending(state, c.threadId, c.turnId, "verdandid stopped while this was waiting for an answer."), {

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { HarnessRunInput, Route, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeTempHome, removeTempHome } from "@verdandi/testkit";
-import { Effect, Stream } from "effect";
+import { Effect, Fiber, Stream } from "effect";
 import { makeClaudeCodeAdapter, type QueryFn } from "./adapter.ts";
 import { assistant, init, result, textDelta, turn1Usage, turn2Usage } from "./fixtures.ts";
 
@@ -12,26 +12,34 @@ const U3 = "00000000-0000-4000-8000-000000000003";
 
 /** A fake SDK `query`: answers each prompt with a delta and a result; records what it was given, in order. */
 const stubQuery = (
-  script: (prompt: string, options: Options, message: SDKUserMessage) => SDKMessage[] | AsyncIterable<SDKMessage> = () => [
-    textDelta("ok"),
-    result(turn1Usage),
-  ],
+  script: (
+    prompt: string,
+    options: Options,
+    message: SDKUserMessage,
+    interrupted: Promise<void>,
+  ) => SDKMessage[] | AsyncIterable<SDKMessage> = () => [textDelta("ok"), result(turn1Usage)],
 ) => {
   const spawns: { options: Options; prompts: SDKUserMessage[]; log: string[] }[] = [];
   const query = ((params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
     const record = { options: params.options, prompts: [] as SDKUserMessage[], log: [] as string[] };
     spawns.push(record);
+    const interrupted = Promise.withResolvers<void>();
     const messages = (async function* () {
       yield init;
       for await (const m of params.prompt) {
         record.prompts.push(m);
         record.log.push(`prompt ${m.message.content}`);
-        yield* script(String(m.message.content), params.options, m);
+        yield* script(String(m.message.content), params.options, m, interrupted.promise);
       }
     })();
     return Object.assign(messages, {
       setModel: async (model: string) => void record.log.push(`setModel ${model}`),
       applyFlagSettings: async (settings: object) => void record.log.push(`applyFlagSettings ${JSON.stringify(settings)}`),
+      interrupt: async () => {
+        record.log.push("interrupt");
+        interrupted.resolve();
+      },
+      close: () => void record.log.push("close"),
     });
   }) as unknown as QueryFn;
   return { query, spawns };
@@ -187,6 +195,35 @@ describe("Claude Code adapter", () => {
       await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "good", U2, "sess-1"))));
       expect(spawns).toHaveLength(2);
       expect(spawns[1]?.options.resume).toBe("sess-1");
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("an interrupted turn stops Claude Code; the next turn resumes the session in a fresh process", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery(async function* (prompt, _options, _m, interrupted) {
+        if (prompt === "long") {
+          yield textDelta("working");
+          await interrupted;
+          yield result(turn1Usage, "error_during_execution", ["interrupted"]);
+        } else yield result(turn2Usage);
+      });
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const working = Promise.withResolvers<void>();
+      const running = Effect.runFork(
+        adapter
+          .run(input(home, "long", U1))
+          .pipe(Stream.runForEach((e) => Effect.sync(() => e.type === "text.delta" && working.resolve()))),
+      );
+      await working.promise;
+      await Effect.runPromise(Fiber.interrupt(running));
+      expect(spawns[0]?.log).toEqual(["prompt long", "interrupt", "close"]);
+      const next = Array.from(await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "next", U2, "sess-1")))));
+      expect(spawns).toHaveLength(2);
+      expect(spawns[1]?.options.resume).toBe("sess-1");
+      expect(next.at(-1)).toEqual({ type: "turn.finished", status: "success" });
     } finally {
       removeTempHome(home);
     }

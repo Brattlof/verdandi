@@ -45,7 +45,9 @@ export type HarnessRunInput = {
 
 /**
  * Slice-1 subset of the harness contract (DESIGN §9.2): one `run` per turn. The adapter keeps its
- * live session per thread and resumes by id after a restart. Interrupt comes later.
+ * live session per thread and resumes by id after a restart. Interrupting the fiber that runs the
+ * stream interrupts the turn: the adapter stops the harness and leaves the session resumable. A
+ * thread's next `run` starts only after the previous stream has finished, finalizers included.
  */
 export interface HarnessAdapter {
   readonly id: HarnessId;

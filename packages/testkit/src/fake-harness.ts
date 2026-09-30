@@ -2,7 +2,7 @@ import type { HarnessAdapter, HarnessEvent, HarnessRunInput, Resolution, Route }
 import { Effect, Stream } from "effect";
 
 /**
- * A scripted harness for tests. Text "fail" fails the turn, "hang" never finishes, "gate" waits for
+ * A scripted harness for tests. Text "fail" fails the turn, "hang" runs until interrupted, "gate" waits for
  * `release()`, "approve" asks to edit a file and "ask" asks a question, each finishing once `respond`
  * answers, "steer" waits for the first steer and answers it; anything else is echoed back with fixed
  * usage on the route's model. `calls` records every run.

@@ -150,6 +150,15 @@ export const chat = async (argv: readonly string[]) => {
       ),
     );
 
+  // Ctrl+C interrupts the running turn. A second Ctrl+C before it ends, or one at the prompt, quits.
+  let interrupting: TurnId | undefined;
+  process.on("SIGINT", () => {
+    if (!running || interrupting === running) process.exit(130);
+    interrupting = running;
+    process.stdout.write("\n[interrupting: Ctrl+C again to quit]\n");
+    void dispatch({ type: "turn.interrupt", commandId: uuid<CommandId>(), threadId, turnId: running });
+  });
+
   const noSnapshot = new Error("The thread feed ended before its snapshot arrived. Restart verdandid and try again.");
   feed.then(() => snapshot.reject(noSnapshot), snapshot.reject);
   const thread = await snapshot.promise;
@@ -159,7 +168,7 @@ export const chat = async (argv: readonly string[]) => {
   const changed = change !== "" && (await dispatch({ type: "thread.route.set", commandId: uuid<CommandId>(), threadId, route: wanted }));
   const { harness, model, effort } = changed ? wanted : thread.route;
   process.stdout.write(
-    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${harness} ${model} ${effort}. /exit to quit.\n`,
+    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${harness} ${model} ${effort}. Ctrl+C stops a turn; /exit quits.\n`,
   );
   if (changed) process.stdout.write(`Route changed: ${change}\n`);
   if (running) process.stdout.write("A turn is running; lines you type steer it.\n");
