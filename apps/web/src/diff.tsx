@@ -1,3 +1,4 @@
+import { Tabs } from "@base-ui/react/tabs";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { DiffView, TurnId } from "@verdandi/contracts";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -50,6 +51,15 @@ export const diffRows = (view: DiffView, collapsed: ReadonlySet<string>): DiffRo
 ];
 
 const signs: Partial<Record<LineKind, string>> = { add: "added: ", del: "removed: " };
+const rowClass: Record<LineKind | "file" | "note", string> = {
+  add: "bg-added",
+  del: "bg-removed",
+  hunk: "text-muted",
+  meta: "text-muted",
+  context: "",
+  file: "pt-2",
+  note: "font-sans italic text-muted",
+};
 
 /**
  * The right panel, switchable; only "Diff" exists so far. It fetches when asked, never on its own,
@@ -81,39 +91,41 @@ export const SidePanel = ({
       return next;
     });
   return (
-    <aside ref={aside} className="panel" aria-label="Side panel" tabIndex={-1}>
-      <div className="panel-header">
-        <div role="tablist" aria-label="Panel">
-          <button type="button" role="tab" id={`${id}-tab`} aria-selected="true" aria-controls={`${id}-diff`}>
-            Diff
+    <aside ref={aside} aria-label="Side panel" tabIndex={-1} className="flex w-[min(50%,760px)] min-w-0 border-l border-line">
+      <Tabs.Root defaultValue="diff" className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center justify-between border-b border-line px-2 py-1">
+          <Tabs.List aria-label="Panel">
+            <Tabs.Tab value="diff" className="px-2 py-0 text-xs data-active:border-accent">
+              Diff
+            </Tabs.Tab>
+          </Tabs.List>
+          <button type="button" className="px-2 py-0 text-xs" onClick={onClose}>
+            Close
           </button>
         </div>
-        <button type="button" onClick={onClose}>
-          Close
-        </button>
-      </div>
-      <div role="tabpanel" id={`${id}-diff`} aria-labelledby={`${id}-tab`} className="panel-body">
-        <div className="panel-controls">
-          <fieldset className="modes">
-            <legend className="sr-only">Show</legend>
-            <label>
-              <input type="radio" name={`${id}-scope`} checked={!panel.all} disabled={!turnId} onChange={() => onFetch(turnId, false)} />
-              {turnLabel ?? "Last turn"}
-            </label>
-            <label>
-              <input type="radio" name={`${id}-scope`} checked={panel.all} onChange={() => onFetch(panel.turnId, true)} />
-              All changes
-            </label>
-          </fieldset>
-          <button type="button" onClick={() => onFetch(panel.turnId, panel.all)}>
-            Refresh
-          </button>
-        </div>
-        <p role="status" className={result?.ok === false ? "error" : "muted"}>
-          {statusText(panel)}
-        </p>
-        {rows && <DiffList rows={rows} onToggle={toggle} />}
-      </div>
+        <Tabs.Panel value="diff" className="flex min-h-0 flex-1 flex-col">
+          <div className="flex items-center justify-between px-2 pt-1.5">
+            <fieldset className="mb-1 flex items-center gap-3">
+              <legend className="sr-only">Show</legend>
+              <label>
+                <input type="radio" name={`${id}-scope`} checked={!panel.all} disabled={!turnId} onChange={() => onFetch(turnId, false)} />
+                {turnLabel ?? "Last turn"}
+              </label>
+              <label>
+                <input type="radio" name={`${id}-scope`} checked={panel.all} onChange={() => onFetch(panel.turnId, true)} />
+                All changes
+              </label>
+            </fieldset>
+            <button type="button" onClick={() => onFetch(panel.turnId, panel.all)}>
+              Refresh
+            </button>
+          </div>
+          <p role="status" className={`mx-2 my-1 text-xs ${result?.ok === false ? "text-error" : "text-muted"}`}>
+            {statusText(panel)}
+          </p>
+          {rows && <DiffList rows={rows} onToggle={toggle} />}
+        </Tabs.Panel>
+      </Tabs.Root>
     </aside>
   );
 };
@@ -136,8 +148,13 @@ const DiffList = ({ rows, onToggle }: { rows: readonly DiffRow[]; onToggle: (pat
     getItemKey: (i) => rows[i]?.key ?? i,
   });
   return (
-    // biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll container must be focusable to scroll it with the keyboard.
-    <section ref={scroller} className="diff" tabIndex={0} aria-label="Changed files">
+    <section
+      ref={scroller}
+      className="flex-1 overflow-y-auto whitespace-pre-wrap font-mono text-xs [overflow-wrap:anywhere]"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll container must be focusable to scroll it with the keyboard.
+      tabIndex={0}
+      aria-label="Changed files"
+    >
       <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
         {virtualizer.getVirtualItems().map((item) => {
           const row = rows[item.index];
@@ -147,11 +164,16 @@ const DiffList = ({ rows, onToggle }: { rows: readonly DiffRow[]; onToggle: (pat
               key={item.key}
               data-index={item.index}
               ref={virtualizer.measureElement}
-              className={`row diff-${row.kind === "line" ? row.line : row.kind}`}
+              className={`absolute top-0 left-0 w-full px-2 ${rowClass[row.kind === "line" ? row.line : row.kind]}`}
               style={{ transform: `translateY(${item.start}px)` }}
             >
               {row.kind === "file" ? (
-                <button type="button" aria-expanded={row.expanded} onClick={() => onToggle(row.path)}>
+                <button
+                  type="button"
+                  className="w-full text-left font-semibold"
+                  aria-expanded={row.expanded}
+                  onClick={() => onToggle(row.path)}
+                >
                   <span aria-hidden="true">{row.expanded ? "▾" : "▸"}</span> {row.path}
                 </button>
               ) : row.kind === "note" ? (

@@ -82,10 +82,10 @@ export const Composer = ({
   // Only a message that starts a routed task gets a preview: one that continues a task keeps its route.
   const preview = !running && !thread.pinned && thread.task === null;
   return (
-    <div className="composer">
+    <div className="mx-auto w-full max-w-[860px] px-4 pt-2 pb-3">
       <RouteChip connection={connection} thread={thread} />
       <form onSubmit={onSubmit}>
-        <fieldset className="modes">
+        <fieldset className="mb-1 flex items-center gap-3">
           <legend className="sr-only">Mode for the next turn</legend>
           {modes.map((m) => (
             <label key={m.value}>
@@ -93,7 +93,7 @@ export const Composer = ({
               {m.label}
             </label>
           ))}
-          <span className="muted">
+          <span className="text-xs text-muted">
             {hint}
             {running ? "; applies from the next turn" : ""}
           </span>
@@ -107,13 +107,14 @@ export const Composer = ({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
+          className="w-full resize-y"
           placeholder={running ? "Steer the agent: it reads this at its next step" : "Message the agent"}
           aria-describedby={preview ? "route-preview" : undefined}
         />
         {preview && <RoutePreview connection={connection} thread={thread} text={text} mode={mode} />}
-        <div className="actions">
+        <div className="mt-1.5 flex items-center justify-end gap-2">
           {error && (
-            <span role="alert" className="error">
+            <span role="alert" className="mr-auto text-error">
               {error}
             </span>
           )}
@@ -160,12 +161,12 @@ const RoutePreview = ({
   }, [connection, threadId, draft, mode]);
   const decision = routed?.ok ? routed.decision : undefined;
   return (
-    <p id="route-preview" className="route-preview muted" aria-live="polite">
+    <p id="route-preview" className="mt-1 text-xs text-muted" aria-live="polite">
       {!draft || !routed
         ? "The router picks a route when you send."
         : decision
           ? `Routes to ${decision.target.model} · ${decision.effort} on ${decision.target.harness}: ${decision.reason}`
-          : !routed.ok && <span className="error">{routed.message}</span>}
+          : !routed.ok && <span className="text-error">{routed.message}</span>}
     </p>
   );
 };
@@ -185,7 +186,7 @@ export const Requests = ({
   onPlanApproved: () => void;
 }) =>
   requests.length === 0 ? null : (
-    <section className="requests" aria-label="Waiting for your answer">
+    <section className="max-h-[45vh] overflow-y-auto border-t border-line" aria-label="Waiting for your answer">
       {requests.map((r) => (
         <RequestCard key={r.requestId} connection={connection} threadId={threadId} request={r} onPlanApproved={onPlanApproved} />
       ))}
@@ -220,12 +221,12 @@ const RequestCard = ({
     else if (request.type === "plan.requested" && resolution.decision === "allow") onPlanApproved();
   };
   return (
-    <div className="request">
+    <div className="mx-auto max-w-[860px] px-4 py-2">
       {request.type === "approval.requested" && <Approval request={request} sending={sending} respond={respond} />}
       {request.type === "user-input.requested" && <Questions request={request} sending={sending} respond={respond} />}
       {request.type === "plan.requested" && <PlanApproval request={request} sending={sending} respond={respond} />}
       {error && (
-        <p role="alert" className="error">
+        <p role="alert" className="text-error">
           {error}
         </p>
       )}
@@ -241,9 +242,9 @@ type CardProps<T extends Request["type"]> = {
 
 const Approval = ({ request, sending, respond }: CardProps<"approval.requested">) => (
   <>
-    <h3>Allow {request.toolName}?</h3>
+    <h3 className="my-1 font-bold">Allow {request.toolName}?</h3>
     <pre>{JSON.stringify(request.input, null, 2)}</pre>
-    <div className="actions">
+    <div className="mt-1.5 flex items-center justify-end gap-2">
       <button type="button" disabled={sending} onClick={() => respond({ decision: "deny" })}>
         Deny
       </button>
@@ -259,11 +260,11 @@ const PlanApproval = ({ request, sending, respond }: CardProps<"plan.requested">
   const id = useId();
   return (
     <>
-      <h3>Approve the plan above and build it?</h3>
-      {request.filePath && <p className="muted">{request.filePath}</p>}
+      <h3 className="my-1 font-bold">Approve the plan above and build it?</h3>
+      {request.filePath && <p className="text-muted">{request.filePath}</p>}
       <label htmlFor={id}>Feedback if you keep planning (optional)</label>
-      <textarea id={id} rows={2} value={feedback} onChange={(e) => setFeedback(e.target.value)} />
-      <div className="actions">
+      <textarea id={id} rows={2} className="w-full" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+      <div className="mt-1.5 flex items-center justify-end gap-2">
         <button
           type="button"
           disabled={sending}
@@ -299,22 +300,22 @@ const Questions = ({ request, sending, respond }: CardProps<"user-input.requeste
   return (
     <form onSubmit={onSubmit}>
       {request.questions.map((q) => (
-        <fieldset key={q.question}>
+        <fieldset key={q.question} className="my-1 rounded border border-line px-3 pt-1 pb-2">
           <legend>
             <strong>{q.header}</strong> {q.question}
           </legend>
           {q.options.map((o) => (
-            <label key={o.label} className="option">
+            <label key={o.label} className="my-0.5 block">
               <input
                 type={q.multiSelect ? "checkbox" : "radio"}
                 name={q.question}
                 checked={(picked[q.question] ?? []).includes(o.label)}
                 onChange={() => toggle(q, o.label)}
               />
-              {o.label} <span className="muted">{o.description}</span>
+              {o.label} <span className="text-muted">{o.description}</span>
             </label>
           ))}
-          <label className="option">
+          <label className="my-0.5 block">
             Or your own answer{" "}
             <input
               type="text"
@@ -324,7 +325,7 @@ const Questions = ({ request, sending, respond }: CardProps<"user-input.requeste
           </label>
         </fieldset>
       ))}
-      <div className="actions">
+      <div className="mt-1.5 flex items-center justify-end gap-2">
         <button type="button" disabled={sending} onClick={() => respond({ decision: "deny" })}>
           Skip
         </button>

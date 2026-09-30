@@ -40,13 +40,16 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
   const lastFinished = thread.turns.findLast((t) => t.status !== "running");
   const turnIndex = panel.open ? thread.turns.findIndex((t) => t.turnId === panel.turnId) : -1;
   return (
-    <div className="thread">
-      <div className="thread-column">
-        <header className="thread-header">
-          <span title={thread.projectPath}>{thread.projectPath}</span>
-          <span className="header-end">
+    <div className="flex min-h-0 flex-1">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex justify-between gap-4 whitespace-nowrap border-b border-line px-4 py-2 text-muted">
+          <span title={thread.projectPath} className="truncate">
+            {thread.projectPath}
+          </span>
+          <span className="flex items-center gap-2">
             <button
               type="button"
+              className="px-2 py-0 text-xs"
               aria-pressed={panel.open}
               onClick={() => (panel.open ? setPanel({ type: "close" }) : fetchDiff(lastFinished?.turnId, true))}
             >
@@ -108,7 +111,8 @@ const Conversation = ({
   return (
     <section
       ref={scroller}
-      className="conversation"
+      // No scroll anchoring: the virtualizer keeps the scroll position itself.
+      className="flex-1 overflow-y-auto [overflow-anchor:none]"
       aria-label="Conversation"
       // biome-ignore lint/a11y/noNoninteractiveTabindex: a scroll container must be focusable to scroll it with the keyboard.
       tabIndex={0}
@@ -117,7 +121,7 @@ const Conversation = ({
         atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
       }}
     >
-      {turns.length === 0 && <p className="empty">No turns yet. Send a message below.</p>}
+      {turns.length === 0 && <p className="p-6 text-muted">No turns yet. Send a message below.</p>}
       <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
         {virtualizer.getVirtualItems().map((row) => {
           const turn = turns[row.index];
@@ -127,7 +131,7 @@ const Conversation = ({
                 key={row.key}
                 data-index={row.index}
                 ref={virtualizer.measureElement}
-                className="row"
+                className="absolute top-0 left-0 w-full"
                 style={{ transform: `translateY(${row.start}px)` }}
               >
                 <RouteMarkers changes={changesBefore.get(row.index)} />
@@ -143,16 +147,22 @@ const Conversation = ({
 };
 
 const statusText: Record<LiveTurn["status"], string> = { running: "Working", success: "Done", error: "Failed", interrupted: "Stopped" };
+const statusColor: Record<LiveTurn["status"], string> = {
+  running: "text-accent",
+  success: "",
+  error: "text-error",
+  interrupted: "text-error",
+};
 
 const Turn = memo(({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => (
-  <article className="turn">
-    <div className="user">
-      <span className="who">You{turn.mode === "build" ? "" : ` · ${turn.mode}`}</span>
+  <article className="turn mx-auto max-w-[860px] px-4 py-3">
+    <div className="mb-2 rounded-md bg-user px-2.5 py-1.5">
+      <span className="text-xs text-muted">You{turn.mode === "build" ? "" : ` · ${turn.mode}`}</span>
       <p>{turn.text}</p>
     </div>
     <Items items={turn.items} />
     {turn.streaming && (
-      <div className="assistant">
+      <div>
         <Markdown text={turn.streaming} />
       </div>
     )}
@@ -161,14 +171,14 @@ const Turn = memo(({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: Tu
 ));
 
 const TurnStatus = ({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => (
-  <footer className="turn-status">
-    <span className={`status ${turn.status}`}>{statusText[turn.status]}</span>
+  <footer className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+    <span className={statusColor[turn.status]}>{statusText[turn.status]}</span>
     {turn.status !== "running" && (
-      <button type="button" className="link" onClick={() => onChanges(turn.turnId)}>
+      <button type="button" className="border-0 bg-transparent p-0 text-accent underline" onClick={() => onChanges(turn.turnId)}>
         Changes
       </button>
     )}
-    {turn.error && <span className="error">{turn.error}</span>}
+    {turn.error && <span className="text-error">{turn.error}</span>}
     {turn.usage.map((u) => (
       <span key={u.model} title={`cache read ${u.cacheReadTokens} · cache write ${u.cacheWriteTokens} tokens`}>
         {u.model} · {u.inputTokens}→{u.outputTokens} tok · ${u.costUsd.toFixed(4)} · {u.accessMode}
@@ -219,19 +229,19 @@ const summarize = (input: unknown) => {
 
 const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K }>; tree: Tree }) => ReactNode } = {
   "assistant.message": ({ item }) => (
-    <div className="assistant">
+    <div>
       <Markdown text={item.text} />
     </div>
   ),
   "user.steer": ({ item }) => (
-    <div className="user steer">
-      <span className="who">You, while it worked</span>
+    <div className="my-2 rounded-md bg-user px-2.5 py-1.5">
+      <span className="text-xs text-muted">You, while it worked</span>
       <p>{item.text}</p>
     </div>
   ),
   plan: ({ item }) => (
-    <div className="plan">
-      <span className="who">Plan{item.filePath ? ` · ${item.filePath}` : ""}</span>
+    <div className="my-2 rounded-md border border-accent px-2.5 py-1.5">
+      <span className="text-xs text-muted">Plan{item.filePath ? ` · ${item.filePath}` : ""}</span>
       <Markdown text={item.text} />
     </div>
   ),
@@ -239,20 +249,20 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
     const result = tree.results.get(item.toolUseId);
     const steps = tree.children.get(item.toolUseId);
     return (
-      <details className="tool">
-        <summary>
-          {item.name} <span className="muted">{summarize(item.input)}</span>
-          {result?.isError && <span className="error"> failed</span>}
+      <details className="my-1">
+        <summary className="cursor-pointer font-mono text-[13px]">
+          {item.name} <span className="text-muted">{summarize(item.input)}</span>
+          {result?.isError && <span className="text-error"> failed</span>}
         </summary>
         <pre>{clip(JSON.stringify(item.input, null, 2) ?? "")}</pre>
         {steps && (
-          <div className="subagent">
+          <div className="my-1 border-l-2 border-line pl-3">
             <ItemList items={steps} tree={tree} />
           </div>
         )}
-        {result && <pre className={result.isError ? "error" : undefined}>{clip(result.content)}</pre>}
+        {result && <pre className={result.isError ? "text-error" : undefined}>{clip(result.content)}</pre>}
       </details>
     );
   },
-  "tool.result": ({ item }) => <pre className={item.isError ? "error" : undefined}>{clip(item.content)}</pre>,
+  "tool.result": ({ item }) => <pre className={item.isError ? "text-error" : undefined}>{clip(item.content)}</pre>,
 };

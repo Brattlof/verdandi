@@ -3,3 +3,7 @@
 minimumReleaseAge = 1209600
 exact = true
 linker = "isolated"
+
+# The web UI's stylesheet is Tailwind, compiled when verdandid first bundles apps/web.
+[serve.static]
+plugins = ["bun-plugin-tailwind"]

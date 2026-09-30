@@ -36,22 +36,22 @@ export const App = ({ connection }: { connection: Connection }) => {
     [connection, sidebar],
   );
   return (
-    <div className="app">
+    <div className="grid h-screen grid-cols-[260px_1fr]">
       {lost && (
-        <div role="alert" className="banner">
+        <div role="alert" className="fixed inset-x-0 top-0 z-10 bg-error px-4 py-2 text-bg">
           Lost the connection to verdandid.{" "}
-          <button type="button" onClick={() => location.reload()}>
+          <button type="button" className="mx-1" onClick={() => location.reload()}>
             Reconnect
           </button>{" "}
           If verdandid restarted, run <code>verdandi open</code> again.
         </div>
       )}
       <Sidebar connection={connection} data={useStore(sidebar)} current={threadId} />
-      <main className="main">
+      <main className="flex min-h-0 min-w-0 flex-col">
         {threadId ? (
           <ThreadPane key={threadId} connection={connection} threadId={threadId} />
         ) : (
-          <p className="empty">Pick a thread on the left.</p>
+          <p className="p-6 text-muted">Pick a thread on the left.</p>
         )}
       </main>
     </div>
@@ -61,18 +61,18 @@ export const App = ({ connection }: { connection: Connection }) => {
 const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
 
 const Sidebar = ({ connection, data, current }: { connection: Connection; data: SidebarData | undefined; current: ThreadId | null }) => {
-  if (!data) return <nav aria-label="Projects and threads" className="sidebar" />;
+  if (!data) return <nav aria-label="Projects and threads" className="overflow-y-auto border-r border-line bg-panel p-2" />;
   // Projects with the most recent activity first; `data.threads` is already in that order.
   const byProject = Map.groupBy(data.threads, (t) => t.projectId);
   const projects = data.projects.toSorted(
     (a, b) => data.threads.findIndex((t) => t.projectId === a.projectId) - data.threads.findIndex((t) => t.projectId === b.projectId),
   );
   return (
-    <nav aria-label="Projects and threads" className="sidebar">
+    <nav aria-label="Projects and threads" className="overflow-y-auto border-r border-line bg-panel p-2">
       <Quotas quotas={data.quotas} />
       <OpenFolder connection={connection} />
       {projects.length === 0 && (
-        <p className="muted">
+        <p className="m-1 text-muted">
           No threads yet. Open a project folder above, or run <code>verdandi chat</code> in one.
         </p>
       )}
@@ -93,9 +93,12 @@ const resetTime = (iso: string) => new Date(iso).toLocaleString([], { weekday: "
 
 /** Each harness's subscription window, as it last reported it. A live region, so a switch to extra usage is announced. */
 const Quotas = ({ quotas }: { quotas: readonly QuotaView[] }) => (
-  <div role="status" className="quotas">
+  <div role="status">
     {quotas.map((q) => (
-      <p key={q.harness} className={q.quota.usingOverage || q.quota.status !== "allowed" ? "quota warn" : "quota"}>
+      <p
+        key={q.harness}
+        className={`mx-1 mb-2 text-xs ${q.quota.usingOverage || q.quota.status !== "allowed" ? "text-error" : "text-muted"}`}
+      >
         {describeQuota(q, resetTime)}
       </p>
     ))}
@@ -118,9 +121,11 @@ const OpenFolder = ({ connection }: { connection: Connection }) => {
     openThread(threadId);
   };
   return (
-    <form className="open-folder" onSubmit={open}>
-      <label htmlFor="open-folder-path">Open folder</label>
-      <div>
+    <form onSubmit={open}>
+      <label htmlFor="open-folder-path" className="mx-1 mb-1 block text-xs text-muted">
+        Open folder
+      </label>
+      <div className="flex gap-1">
         <input
           id="open-folder-path"
           type="text"
@@ -129,13 +134,14 @@ const OpenFolder = ({ connection }: { connection: Connection }) => {
           required
           autoComplete="off"
           spellCheck={false}
+          className="min-w-0 flex-1"
           aria-invalid={error !== undefined}
           aria-describedby={error ? "open-folder-error" : undefined}
         />
         <button type="submit">Open</button>
       </div>
       {error && (
-        <p id="open-folder-error" role="alert" className="error">
+        <p id="open-folder-error" role="alert" className="m-1 text-error [overflow-wrap:anywhere]">
           {error}
         </p>
       )}
@@ -165,24 +171,28 @@ const Project = ({
   const headingId = `project-${project.projectId}`;
   return (
     <section aria-labelledby={headingId}>
-      <div className="project">
-        <h2 id={headingId} title={project.path}>
+      <div className="mt-3 flex items-center justify-between">
+        <h2 id={headingId} title={project.path} className="mx-1 truncate text-xs font-bold uppercase tracking-[0.04em] text-muted">
           {basename(project.path)}
         </h2>
-        <button type="button" onClick={newThread} aria-label={`New thread in ${basename(project.path)}`}>
+        <button type="button" className="px-2 py-0 text-xs" onClick={newThread} aria-label={`New thread in ${basename(project.path)}`}>
           New
         </button>
       </div>
       {error && <p role="alert">{error}</p>}
-      <ul>
+      <ul className="my-1">
         {threads.map((t) => (
           <li key={t.threadId}>
-            <a href={`#thread=${t.threadId}`} aria-current={t.threadId === current ? "page" : undefined}>
-              <span className="title">{t.title || "New thread"}</span>
-              {t.busy && <span className="busy">working</span>}
+            <a
+              href={`#thread=${t.threadId}`}
+              aria-current={t.threadId === current ? "page" : undefined}
+              className="flex flex-wrap items-baseline gap-2 rounded px-2 py-1 hover:bg-line aria-[current=page]:bg-user"
+            >
+              <span className="flex-1 truncate">{t.title || "New thread"}</span>
+              {t.busy && <span className="text-xs text-accent">working</span>}
               {describeCost(t.cost) && (
                 <span
-                  className="thread-cost"
+                  className="basis-full text-xs text-muted"
                   title="Paid: metered usage. On plan: subscription usage valued at API prices, covered by your plan."
                 >
                   {describeCost(t.cost)}

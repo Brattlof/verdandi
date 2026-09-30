@@ -26,7 +26,7 @@ createRoot(root).render(
   token ? (
     <App connection={connect(token)} />
   ) : (
-    <p className="empty">
+    <p className="p-6 text-muted">
       Open Verdandi with <code>verdandi open</code>: it passes this page the token it needs.
     </p>
   ),

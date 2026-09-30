@@ -42,14 +42,16 @@ export const RouteChip = ({ connection, thread }: { connection: Connection; thre
   const auto = !thread.pinned && thread.task === null;
   const reason = thread.task?.reason;
   return (
-    <details className="route" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary ref={summary}>
+    <details className="mb-1.5 text-xs" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary ref={summary} className="inline-block cursor-pointer rounded-[10px] border border-line px-2">
         <span className="sr-only">Route: </span>
         {auto ? "Auto" : `${harness} · ${model} · ${effort}`}
-        <span className="muted">· {thread.pinned ? "pinned by you" : auto ? "the router picks when you send" : (reason ?? "routed")}</span>
+        <span className="ml-[0.3em] inline-block max-w-[60ch] truncate align-bottom text-muted">
+          · {thread.pinned ? "pinned by you" : auto ? "the router picks when you send" : (reason ?? "routed")}
+        </span>
       </summary>
       {open && (
-        <div className="route-panel">
+        <div>
           {thread.task?.source === "policy" && reason && <Why connection={connection} taskId={thread.task.taskId} reason={reason} />}
           <RouteForm connection={connection} thread={thread} close={close} />
         </div>
@@ -68,15 +70,15 @@ const Why = ({ connection, taskId, reason }: { connection: Connection; taskId: T
     setLoading(false);
   };
   return (
-    <div className="route-why">
-      <p className="route-reason">{reason}</p>
+    <div className="mt-1.5">
+      <p className="mb-1">{reason}</p>
       {!trace && (
         <button type="button" onClick={show} disabled={loading}>
           Show routing trace
         </button>
       )}
       {trace?.ok === true && (
-        <ol className="trace" aria-label="Routing trace">
+        <ol className="mt-1 list-decimal pl-5" aria-label="Routing trace">
           {trace.decision.trace.map((t, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: a stored trace never changes.
             <li key={i}>
@@ -86,7 +88,7 @@ const Why = ({ connection, taskId, reason }: { connection: Connection; taskId: T
         </ol>
       )}
       {trace?.ok === false && (
-        <p role="alert" className="error">
+        <p role="alert" className="text-error">
           {trace.message}
         </p>
       )}
@@ -136,7 +138,7 @@ const RouteForm = ({ connection, thread, close }: { connection: Connection; thre
     else setError(result.message);
   };
   return (
-    <form className="route-form" onSubmit={onSubmit}>
+    <form className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-md border border-line p-2" onSubmit={onSubmit}>
       <label>
         Harness{" "}
         <select value={draft.harness} disabled={thread.busy} onChange={(e) => setDraft({ ...draft, harness: e.target.value as HarnessId })}>
@@ -165,18 +167,18 @@ const RouteForm = ({ connection, thread, close }: { connection: Connection; thre
           ))}
         </select>
       </label>
-      <p className="muted">
+      <p className="basis-full text-muted">
         {thread.busy ? "Applies from the next turn. Change the harness when this one finishes." : "Applies from the next turn."}{" "}
         {thread.pinned ? "The router won't pick until you let it again." : "Picking a route pins it: the router stops picking."}
       </p>
       {cost && (
-        <p id={`${id}-cost`} className="cost">
+        <p id={`${id}-cost`} className="basis-full text-accent">
           {cost}
         </p>
       )}
-      <div className="actions">
+      <div className="flex basis-full items-center justify-end gap-2">
         {error && (
-          <span role="alert" className="error">
+          <span role="alert" className="mr-auto text-error">
             {error}
           </span>
         )}
@@ -200,7 +202,7 @@ const RouteForm = ({ connection, thread, close }: { connection: Connection; thre
 export const RouteMarkers = ({ changes }: { changes: readonly RouteChange[] | undefined }) =>
   changes?.map((c, i) => (
     // biome-ignore lint/suspicious/noArrayIndexKey: route changes only ever append, so the index is stable.
-    <p key={i} className="route-change">
+    <p key={i} className="mx-auto max-w-[860px] px-4 py-1 text-center text-xs text-muted">
       {describeRouteChange(c.from, c.to)
         ? `Route changed by you: ${describeRouteChange(c.from, c.to)}`
         : `Route pinned by you: ${c.to.model} · ${c.to.effort}`}{" "}
