@@ -20,6 +20,7 @@ import { loadDeciderState } from "../orchestration/projector.ts";
 import { HarnessRegistry } from "../orchestration/reactor.ts";
 import { loadSpendState } from "../orchestration/spend.ts";
 import { loadTaskCosts } from "../orchestration/task-outcome.ts";
+import { loadUsageReport } from "../orchestration/usage.ts";
 import { loadRoutingMemory } from "../routing/memory.ts";
 import { decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { threadDiff } from "../workspace/diff.ts";
@@ -76,6 +77,11 @@ const Handlers = (home: string) =>
             if (Result.isFailure(spend)) return yield* new SpendCapsUnavailable({ reason: "InvalidSpendCaps", message: spend.failure });
             return spend.success.caps;
           }).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
+        UsageQuery: (filter) =>
+          loadUsageReport(filter, new Date()).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.catchTag("SqlError", Effect.die),
+          ),
         TaskCostsList: () => loadTaskCosts.pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
         RoutingExplain: ({ taskId }) =>
           sql<{ payload: string }>`select payload from route_decisions where task_id = ${taskId}`.pipe(

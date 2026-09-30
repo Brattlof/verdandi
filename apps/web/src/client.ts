@@ -13,6 +13,8 @@ import {
   type TaskId,
   type ThreadId,
   type TurnId,
+  type UsageFilter,
+  type UsageReport,
 } from "@verdandi/contracts";
 import { Cause, Context, Effect, Exit, Layer, ManagedRuntime, Stream } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
@@ -129,6 +131,14 @@ export const connect = (token: string) => {
     return unavailable ? { ok: false, message: unavailable.message } : disconnected;
   };
 
+  /** The spend dashboard's totals; undefined once the connection is lost. */
+  const usage = async (filter: UsageFilter): Promise<UsageReport | undefined> => {
+    const exit = await run((rpc) => rpc.UsageQuery(filter));
+    if (Exit.isSuccess(exit)) return exit.value;
+    lost.set(true); // it has no errors of its own
+    return undefined;
+  };
+
   /**
    * Follows a feed until the returned function is called. It never stops the stream itself: it asks
    * the server to end it (ADR 0008), once the first message shows the server has registered it.
@@ -170,6 +180,6 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, explain, simulate, spendCaps, follow, harnesses, lost };
+  return { dispatch, diff, explain, simulate, spendCaps, usage, follow, harnesses, lost };
 };
 export type Connection = ReturnType<typeof connect>;

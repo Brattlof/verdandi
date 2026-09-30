@@ -3,9 +3,9 @@ import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { ClientCommand } from "./commands.ts";
 import { ApprovalRequested, PlanRequested, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
 import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
-import { Item, Quota, Usage } from "./items.ts";
+import { AccessMode, Item, Quota, Usage } from "./items.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
-import { BudgetMode, RouteDecision } from "./routing.ts";
+import { BudgetMode, RouteDecision, TaskClass } from "./routing.ts";
 import { SpendCap } from "./spend.ts";
 import { RouteCost } from "./task.ts";
 
@@ -148,6 +148,69 @@ export type ThreadSummary = typeof ThreadSummary.Type;
 export const QuotaView = Schema.Struct({ harness: HarnessId, quota: Quota, at: Schema.String });
 export type QuotaView = typeof QuotaView.Type;
 
+/** Usage in USD kept apart by access mode, never summed: metered was paid, subscription is what the plan covered, at API prices. */
+export const SpendSplit = Schema.Struct({ meteredUsd: Schema.Number, subscriptionUsd: Schema.Number });
+export type SpendSplit = typeof SpendSplit.Type;
+
+/** What `UsageQuery` covers: one project or all, over the last `days` local days including today, or all time. */
+export const UsageFilter = Schema.Struct({
+  projectId: Schema.optionalKey(ProjectId),
+  days: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+});
+export type UsageFilter = typeof UsageFilter.Type;
+
+/**
+ * The spend dashboard's totals (DESIGN §8.9, §12), computed by verdandid so the payload stays small. Spend
+ * counts usage recorded in the period; task figures count tasks started in it.
+ */
+export const UsageReport = Schema.Struct({
+  /** When the period began (ISO), or null for all time. */
+  since: Schema.NullOr(Schema.String),
+  spend: SpendSplit,
+  /** One entry per local day (`2026-09-30`) that had usage, oldest first. */
+  daily: Schema.Array(Schema.Struct({ day: Schema.String, ...SpendSplit.fields })),
+  /** Each harness's subscription window as it last reported it. */
+  quotas: Schema.Array(QuotaView),
+  /** Cost per completed task by class, most spent first. `taskClass` is null for tasks from before routing. */
+  byClass: Schema.Array(
+    Schema.Struct({
+      taskClass: Schema.NullOr(TaskClass),
+      tasks: Schema.Int,
+      completed: Schema.Int,
+      /** Every task's cost, failed ones included, so dividing by `completed` gives cost per completed task. */
+      cost: SpendSplit,
+    }),
+  ),
+  /** How usage splits across models and access modes, most spent first. */
+  byTarget: Schema.Array(
+    Schema.Struct({
+      model: Schema.String,
+      accessMode: AccessMode,
+      inputTokens: Schema.Number,
+      outputTokens: Schema.Number,
+      cacheReadTokens: Schema.Number,
+      cacheWriteTokens: Schema.Number,
+      costUsd: Schema.Number,
+    }),
+  ),
+  /** Tasks the user moved to another route, and tasks the router escalated. */
+  rates: Schema.Struct({ tasks: Schema.Int, overridden: Schema.Int, escalated: Schema.Int }),
+  /**
+   * An estimate, never a measurement: the same tasks' recorded tokens priced at `baseline`'s list price,
+   * against what they were recorded as costing (subscription usage valued at API prices). Positive `savedUsd` is saved.
+   */
+  savings: Schema.Struct({
+    estimate: Schema.Literal(true),
+    baseline: Schema.String,
+    tasks: Schema.Int,
+    completed: Schema.Int,
+    actualUsd: Schema.Number,
+    baselineUsd: Schema.Number,
+    savedUsd: Schema.Number,
+  }),
+});
+export type UsageReport = typeof UsageReport.Type;
+
 export const ProjectsFeed = Schema.Union([
   /** Threads most recently active first. `seq` is the last event the snapshot includes. */
   Schema.Struct({
@@ -199,6 +262,8 @@ export class Api extends RpcGroup.make(
   }),
   /** Cost per completed task on each route that ran one, most spent first. */
   Rpc.make("TaskCostsList", { success: Schema.Array(RouteCost) }),
+  /** The spend dashboard's totals for one project or all, over a period. */
+  Rpc.make("UsageQuery", { payload: UsageFilter, success: UsageReport }),
   /** The spend caps over the thread's project and profile, with what they've spent this period; empty when none are set. */
   Rpc.make("SpendCapsGet", { payload: { threadId: ThreadId }, success: Schema.Array(SpendCap), error: SpendCapsUnavailable }),
   /** A task's routing decision: its reason, trace and the classification behind it. */

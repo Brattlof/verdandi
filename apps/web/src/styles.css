@@ -17,6 +17,9 @@
   --color-user: light-dark(#e9eefb, #243049);
   --color-added: light-dark(#e3f4e6, #1c3322);
   --color-removed: light-dark(#fbe7e6, #3d2222);
+  /* Chart series, in this order: subscription use, then metered spend. Checked for colour-vision deficiency on bg in both modes. */
+  --color-plan: light-dark(#2a78d6, #3987e5);
+  --color-paid: light-dark(#eb6834, #d95926);
   --font-sans: system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --text-xs--line-height: 1.5;
