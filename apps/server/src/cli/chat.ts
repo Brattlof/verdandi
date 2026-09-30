@@ -17,7 +17,7 @@ import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { flag, readServerFile, resolveHome } from "../config/home.ts";
 import { connect } from "../rpc/client.ts";
 import { approvalPrompt, type PendingRequest, parseAnswer, planPrompt, questionPrompt } from "./requests.ts";
-import { picksRoute, routeFromFlags } from "./route-flags.ts";
+import { budgetFromFlags, picksRoute, routeFromFlags } from "./route-flags.ts";
 import { threadList } from "./thread-list.ts";
 
 class Client extends Context.Service<Client, Effect.Success<ReturnType<typeof connect>>>()("verdandi/cli/Client") {}
@@ -77,6 +77,7 @@ export const chat = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
   const server = readServerFile(home);
   const route = routeFromFlags(argv); // also rejects bad flags before connecting
+  const budget = budgetFromFlags(argv);
   if (argv.includes("--auto") && picksRoute(argv)) {
     throw new Error("--auto lets the router pick each task's route, so leave out --harness, --model and --effort.");
   }
@@ -278,6 +279,14 @@ export const chat = async (argv: readonly string[]) => {
   );
   if (changed) process.stdout.write(change ? `Route changed: ${change}\n` : `Route pinned: ${harness} ${model} ${effort}\n`);
   if (unpinned) process.stdout.write("Route unpinned: the router picks the next task's route.\n");
+  if (budget !== undefined && budget !== thread.budgetMode) {
+    await dispatch({ type: "thread.budget.set", commandId: uuid<CommandId>(), threadId, mode: budget });
+    const which = budget === null ? "the routing policy's" : budget;
+    const pinnedNow = (thread.pinned && !unpinned) || changed;
+    process.stdout.write(
+      `Budget mode: ${which}, ${pinnedNow ? "once the router picks again (--auto)" : "from the next turn, which starts a new task"}.\n`,
+    );
+  }
   if (running) process.stdout.write("A turn is running; lines you type steer it.\n");
   else prompt();
   showRequest();

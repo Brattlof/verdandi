@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Catalog, HarnessId, InteractionMode, Route, RouteDecision, RouteTarget } from "@verdandi/contracts";
+import type { BudgetMode, Catalog, HarnessId, InteractionMode, Route, RouteDecision, RouteTarget } from "@verdandi/contracts";
 import { builtInCatalog, loadPolicy, PolicyError, type ResolvedPolicy, RouterError, route, rules } from "@verdandi/router";
 import { fakeCatalog } from "@verdandi/testkit";
 import { Effect, Result } from "effect";
@@ -14,10 +14,14 @@ export type RoutingContext = {
   readonly harnesses: readonly HarnessId[];
 };
 
-/** The thread facts routing reads. `cachedTokens` sizes its warm session for the switch-cost gate. */
+/**
+ * The thread facts routing reads. `cachedTokens` sizes its warm session for the switch-cost gate, and
+ * `budgetMode`, the user's pick, replaces the policy's mode when set.
+ */
 export type RoutingThread = {
   readonly route: Route;
   readonly pinned: boolean;
+  readonly budgetMode: BudgetMode | null;
   readonly sessionId: string | null;
   readonly cachedTokens: number;
 };
@@ -70,7 +74,8 @@ export const decideRoute = (
   mode: InteractionMode,
 ): Result.Result<RouteDecision, RoutingFailure> => {
   if (Result.isFailure(routing.policy) && !thread.pinned) return Result.fail({ reason: "InvalidPolicy", message: routing.policy.failure });
-  const policy = Result.getOrElse(routing.policy, () => routing.builtIn);
+  const layered = Result.getOrElse(routing.policy, () => routing.builtIn);
+  const policy = thread.budgetMode ? { ...layered, mode: thread.budgetMode } : layered;
   const current = { target: targetOf(thread.route, policy.catalog), effort: thread.route.effort };
   try {
     return Result.succeed(

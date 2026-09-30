@@ -2,11 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  type BudgetMode,
   type Command,
   type CommandId,
   type CommandRejected,
   describeRouteChange,
   type Route,
+  type RouteDecision,
   type TaskId,
   type TaskOutcome,
   type ThreadId,
@@ -189,6 +191,64 @@ describe("routing each new task", () => {
     );
     expect(v?.task?.source).toBe("policy");
     expect(fake.calls.map((c) => c.route)).toEqual([pinned, { harness: "fake", model: "fake-large", effort: "high" }]);
+  });
+
+  test("the thread's budget mode routes its next task, the running turn keeps its route, and clearing it restores the policy's", async () => {
+    const { projectPath, fake, run } = setup(`${policy}  ask.search: { prefer: [small], effort: low, max: { prefer: [large] } }
+fallback: { prefer: [small], effort: low }
+`);
+    const budget = (mode: BudgetMode | null): Command => ({ type: "thread.budget.set", commandId: id<CommandId>(), threadId, mode });
+    const decision = (taskId: TurnId) =>
+      Effect.gen(function* () {
+        const [row] = yield* (yield* SqlClient.SqlClient)<{
+          payload: string;
+        }>`select payload from route_decisions where task_id = ${taskId}`;
+        return JSON.parse(row?.payload ?? "{}") as RouteDecision;
+      });
+    const maxTurn = id<TurnId>();
+    const clearedTurn = id<TurnId>();
+    const { during, routed, cleared, v } = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath));
+        yield* dispatch(send("gate"));
+        yield* dispatch(budget("max"));
+        const during = yield* view;
+        fake.release();
+        yield* drain;
+        yield* dispatch(send(SEARCH, maxTurn));
+        yield* drain;
+        yield* dispatch(budget(null));
+        yield* dispatch(send(SEARCH, clearedTurn));
+        yield* drain;
+        return { during, routed: yield* decision(maxTurn), cleared: yield* decision(clearedTurn), v: yield* view };
+      }),
+    );
+    // Set mid-turn: the running turn keeps its route, and the next turn starts a task routed under it.
+    expect(during).toMatchObject({ budgetMode: "max", task: null, busy: true });
+    expect(fake.calls.map((c) => c.route.model)).toEqual(["fake-small", "fake-large", "fake-large"]);
+    expect(routed.reason).toBe("Looks like ask.search, so in max mode it runs on fake-large at low effort.");
+    expect(v?.budgetMode).toBeNull();
+    expect(cleared.trace.find((t) => t.stage === "policy")?.note).toContain("in balanced mode");
+  });
+
+  test("a pinned thread keeps its task when the budget mode changes, and routes under it once unpinned", async () => {
+    const { projectPath, run } = setup();
+    const v = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath, pinned));
+        yield* dispatch(send(SEARCH));
+        yield* drain;
+        yield* dispatch({ type: "thread.budget.set", commandId: id<CommandId>(), threadId, mode: "thrifty" });
+        const kept = yield* view;
+        expect(kept?.task?.source).toBe("pin");
+        expect(kept?.budgetMode).toBe("thrifty");
+        yield* dispatch({ type: "thread.route.unpin", commandId: id<CommandId>(), threadId });
+        yield* dispatch(send(SEARCH));
+        yield* drain;
+        return yield* view;
+      }),
+    );
+    expect(v?.task?.source).toBe("policy");
   });
 
   test("a broken project policy rejects a routed task, naming the file and key, but not a pinned one", async () => {

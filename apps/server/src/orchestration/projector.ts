@@ -1,4 +1,5 @@
 import type {
+  BudgetMode,
   Event,
   Item,
   ProjectId,
@@ -79,6 +80,11 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       }),
     ),
   "thread.route.unpinned": (e) => withSql((sql) => sql`update threads set pinned = 0, task_id = null where id = ${e.threadId}`),
+  // A routed thread's task ends, so the next turn is routed under the new mode; a pinned thread's task keeps its pin.
+  "thread.budget.changed": (e) =>
+    withSql(
+      (sql) => sql`update threads set budget_mode = ${e.mode}, task_id = case when pinned = 1 then task_id end where id = ${e.threadId}`,
+    ),
   "turn.started": (e, at) =>
     withSql((sql) =>
       Effect.andThen(
@@ -138,9 +144,10 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         session_id: string | null;
         task_id: TaskId | null;
         pinned: number;
+        budget_mode: BudgetMode | null;
         cached_tokens: number;
       }>`
-        select p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned,
+        select p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned, t.budget_mode,
           -- ponytail: the context a warm session has cached, read as every token the thread wrote to cache. Harnesses
           -- report usage summed over a turn's model calls, not the context size; upgrade once one reports that.
           (select coalesce(sum(u.cache_write_tokens), 0) from usage_ledger u join turns n on n.id = u.turn_id where n.thread_id = t.id)
@@ -157,6 +164,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           sessionId: row.session_id,
           taskId: row.task_id,
           pinned: row.pinned === 1,
+          budgetMode: row.budget_mode,
           cachedTokens: row.cached_tokens,
           pendingRequests: pending.map((r) => ({ requestId: r.id, turnId: r.turn_id as TurnId, kind: r.kind })),
         },
@@ -173,11 +181,12 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         session_id: string | null;
         running_turn_id: string | null;
         pinned: number;
+        budget_mode: BudgetMode | null;
         task_id: TaskId | null;
         source: RouteDecision["source"] | null;
         reason: string | null;
       }>`
-        select p.path, t.route, t.session_id, t.running_turn_id, t.pinned, t.task_id, d.source, d.reason
+        select p.path, t.route, t.session_id, t.running_turn_id, t.pinned, t.budget_mode, t.task_id, d.source, d.reason
         from threads t join projects p on p.id = t.project_id left join route_decisions d on d.task_id = t.task_id
         where t.id = ${threadId}`;
       if (!thread) return null;
@@ -207,6 +216,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         projectPath: thread.path,
         route: JSON.parse(thread.route) as Route,
         pinned: thread.pinned === 1,
+        budgetMode: thread.budget_mode,
         task:
           thread.task_id === null
             ? null

@@ -48,6 +48,8 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   }),
   // A pick pins the route and ends the task; unpinning ends it too, so the next turn starts a routed one.
   "thread.route.unpinned": (thread) => ({ ...thread, pinned: false, task: null }),
+  // Ends a routed thread's task, so the next turn is routed under the new mode.
+  "thread.budget.changed": (thread, e) => ({ ...thread, budgetMode: e.mode, task: thread.pinned ? thread.task : null }),
   "thread.route.changed": (thread, e, at) => ({
     ...thread,
     route: e.to,

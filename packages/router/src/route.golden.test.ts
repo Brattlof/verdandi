@@ -95,6 +95,10 @@ for (const g of GOLDENS) {
       expect(`${d.target.model} ${d.effort}`).toBe(g.routes[mode]);
       expect(d.source).toBe("policy");
       expect(d.reason).toStartWith(`Looks like ${g.taskClass}`);
+      // The mode is named exactly when it moved the route off the balanced one.
+      const moved = g.routes[mode] !== g.routes.balanced;
+      expect(d.reason.includes(`so in ${mode} mode it runs on ${g.routes[mode].replace(" ", " at ")} effort.`)).toBe(moved);
+      if (!moved) expect(d.reason).toEndWith(`so it runs on ${g.routes[mode].replace(" ", " at ")} effort.`);
     });
   }
 }

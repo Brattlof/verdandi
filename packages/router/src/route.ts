@@ -155,13 +155,16 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const lead = unsure
     ? `Not sure what kind of task this is (best guess ${c.taskClass}, confidence ${c.confidence.toFixed(2)})`
     : `Looks like ${c.taskClass}${planning ? " in plan mode" : ""}`;
+  // Named only when it moved the route off the balanced one, so the reason says why a task ran cheaper or stronger.
+  const balanced = resolveSpec(rule, "balanced", planning);
+  const byMode = balanced.effort !== spec.effort || balanced.prefer?.join() !== spec.prefer?.join() ? `in ${policy.mode} mode ` : "";
   trace.push({
     stage: "policy",
     note: `${unsure ? "fallback" : c.taskClass}${planning ? " (plan)" : ""} in ${policy.mode} mode accepts ${accepted.join(", ") || "nothing"} at ${effort}; picked ${pick.model}, ~${kTokens(tokens)} tokens for ${dollars(cost(pick))}`,
   });
   let reason =
     preferred.length > 0
-      ? `${lead}, so it runs on ${unsure ? `the ${policy.mode} default, ` : ""}${describe(pick, effort)}.`
+      ? `${lead}, so ${unsure ? `it runs on the ${policy.mode} default, ` : `${byMode}it runs on `}${describe(pick, effort)}.`
       : `${lead}, but ${accepted.map((n) => policy.targets.get(n)?.model ?? n).join(" and ")} ${accepted.length === 1 ? "is" : "are"} unavailable, so it runs on ${describe(pick, effort)}, the ${above.length > 0 ? "cheapest capable" : "strongest"} target left.`;
 
   // Stage 5: switch-cost gate. Leave a warm session only for a more capable target, or when the savings beat re-reading the cached context.
