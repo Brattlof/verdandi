@@ -9,6 +9,7 @@ import {
   type InteractionMode,
   type Route,
   type RouteDecision,
+  type RouteInputs,
   type RouteStats,
   type RouteTarget,
 } from "@verdandi/contracts";
@@ -45,6 +46,32 @@ export type RoutingThread = {
   readonly sessionId: string | null;
   readonly cachedTokens: number;
 };
+
+/** What `decideRoute` reads about the thread and the running verdandid, recorded on `task.started` for offline replay. */
+export const routeInputs = (thread: RoutingThread, routing: RoutingContext): RouteInputs => ({
+  route: thread.route,
+  pinned: thread.pinned,
+  budgetMode: thread.budgetMode,
+  warm: thread.sessionId !== null,
+  cachedTokens: thread.cachedTokens,
+  harnesses: routing.harnesses,
+  ...(routing.memory && { memory: routing.memory }),
+});
+
+/** The inverse of `routeInputs`: the thread and routing context a recorded task was decided with, under `policy` now. */
+export const replayed = (
+  inputs: RouteInputs,
+  policy: Pick<RoutingContext, "policy" | "builtIn">,
+): { readonly thread: RoutingThread; readonly routing: RoutingContext } => ({
+  thread: {
+    route: inputs.route,
+    pinned: inputs.pinned,
+    budgetMode: inputs.budgetMode,
+    sessionId: inputs.warm ? "recorded session" : null,
+    cachedTokens: inputs.cachedTokens,
+  },
+  routing: { ...policy, harnesses: inputs.harnesses, ...(inputs.memory && { memory: inputs.memory }) },
+});
 
 export type RoutingFailure = { readonly reason: "InvalidPolicy" | "NoRoute"; readonly message: string };
 

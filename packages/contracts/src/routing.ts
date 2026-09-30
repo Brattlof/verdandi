@@ -149,6 +149,26 @@ export const RouteStats = Schema.Struct({
 });
 export type RouteStats = typeof RouteStats.Type;
 
+/**
+ * What the router read about a new task besides its text and mode (kept in its `turn.started`), so offline
+ * replay (DESIGN §8.8 level 2) can route it again exactly. Provider health and quota aren't router inputs yet.
+ */
+export const RouteInputs = Schema.Struct({
+  /** The thread's route when the task started: the pin, or the warm session's. */
+  route: Route,
+  pinned: Schema.Boolean,
+  /** The user's budget mode for the thread; null when the policy's applied. */
+  budgetMode: Schema.NullOr(BudgetMode),
+  /** Whether the thread had a warm harness session, and how much context it had cached. */
+  warm: Schema.Boolean,
+  cachedTokens: Schema.Number,
+  /** The harnesses verdandid ran. */
+  harnesses: Schema.Array(HarnessId),
+  /** The project's routing memory, when the router consulted it. */
+  memory: Schema.optionalKey(Schema.Array(RouteStats)),
+});
+export type RouteInputs = typeof RouteInputs.Type;
+
 /** One step of how the router reached a decision, shown when the user opens the route's trace. */
 export const RuleTrace = Schema.Struct({
   stage: Schema.Literals(["pin", "candidates", "signals", "classify", "policy", "memory", "switch", "subagents"]),

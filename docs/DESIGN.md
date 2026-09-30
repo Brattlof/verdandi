@@ -466,7 +466,7 @@ Outcomes are recorded from M1 on, before the router exists, so the always-defaul
 
 These outcomes are used at three levels:
 1. **Routing memory per project** (M2), e.g. "debug tasks on Sonnet escalated 7 times out of 10, so start on Opus".
-2. **Offline replay:** re-run the router over saved tasks to see how a policy change would have routed them.
+2. **Offline replay:** re-run the router over saved tasks to see how a policy change would have routed them (`verdandi routing replay`). Each `task.started` keeps the router's inputs, so a replay routes a task exactly as it was routed, and prices its recorded tokens on the new target as an estimate.
 3. **A learned router** (M6). Recorded outcomes become fine-tuning data for a Laya decision model in `lab/`. The fine-tuned model is exported to ONNX and runs in a decision worker process through `onnxruntime-node` (ADR 0009); the composer's live routing preview asks verdandid. The learned router is adopted only if it beats `rules` on the eval set.
 
 ### 8.9 Budgets

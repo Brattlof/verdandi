@@ -3,6 +3,7 @@ import { chat } from "./cli/chat.ts";
 import { costs } from "./cli/costs.ts";
 import { doctor } from "./cli/doctor.ts";
 import { open } from "./cli/open.ts";
+import { routing } from "./cli/routing.ts";
 import { requireBun } from "./config/bun-version.ts";
 import { start } from "./main.ts";
 
@@ -13,9 +14,10 @@ const usage = `Usage:
   verdandi chat  [--home <dir>] [--harness <h>] [--model <m>] [--effort <e> | --auto] [--budget thrifty|balanced|max|policy] [--raise-cap] [--thread <id>]   chat with the thread for this folder, or the one named; route flags pin a route, --auto lets the router pick, --budget sets how it trades cost for strength, --raise-cap raises each reached spend cap for the rest of its period
   verdandi chat  --list [--archived] [--home <dir>]  list every thread by project; --archived includes archived ones
   verdandi chat  --archive <thread> | --unarchive <thread> [--home <dir>]   put a thread away, or bring it back
-  verdandi costs [--home <dir>] [--days <n>] [--project <path>]   cost per completed task on each route, then spend, cost by task class, usage by model, override rate and estimated savings vs always-Opus`;
+  verdandi costs [--home <dir>] [--days <n>] [--project <path>]   cost per completed task on each route, then spend, cost by task class, usage by model, override rate and estimated savings vs always-Opus
+  verdandi routing replay [--policy <file>] [--project <path>] [--home <dir>]   how saved tasks would route under a proposed policy (or each project's current one), with the estimated cost change; reads the database read-only`;
 
-const commands: Record<string, (argv: readonly string[]) => Promise<void>> = { start, open, chat, doctor, costs };
+const commands: Record<string, (argv: readonly string[]) => Promise<void>> = { start, open, chat, doctor, costs, routing };
 
 const [name, ...argv] = Bun.argv.slice(2);
 const command = name === undefined ? undefined : commands[name];
