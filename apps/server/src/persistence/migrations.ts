@@ -140,6 +140,23 @@ const tasks = Effect.gen(function* () {
   )`;
 });
 
+/**
+ * Routing (DESIGN §8.4): each task's decision, and whether the user pinned the thread's route. Threads
+ * from before routing always ran on the route the user sent, so they stay pinned.
+ */
+const routeDecisions = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table route_decisions (
+    task_id text primary key references tasks (id),
+    source text not null,
+    task_class text not null,
+    reason text not null,
+    payload text not null,
+    decided_at text not null
+  )`;
+  yield* sql`alter table threads add column pinned integer not null default 1`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -148,4 +165,5 @@ export const migrations = {
   "5_route_changes": routeChanges,
   "6_quota": quota,
   "7_tasks": tasks,
+  "8_route_decisions": routeDecisions,
 };

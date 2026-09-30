@@ -14,6 +14,7 @@ import {
 } from "@verdandi/contracts";
 import { Context, Effect, Layer, PubSub, Result, Stream } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
+import type { RoutingContext } from "../routing/routing.ts";
 import { decide } from "./decider.ts";
 import { loadDeciderState, loadProjects, loadQuotas, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
 
@@ -22,7 +23,13 @@ type ThreadChange = Extract<ProjectsFeed, { kind: "thread" }>;
 type ProjectsChange = Exclude<ProjectsFeed, { kind: "snapshot" }>;
 
 /** Events that change a thread's summary in the projects feed. */
-const summaryEvents: ReadonlySet<Event["type"]> = new Set(["thread.created", "thread.route.changed", "turn.started", "turn.completed"]);
+const summaryEvents: ReadonlySet<Event["type"]> = new Set([
+  "thread.created",
+  "thread.route.changed",
+  "task.started",
+  "turn.started",
+  "turn.completed",
+]);
 
 /** Runs after each commit with the new events. Must not block: fork long work. */
 export type Reaction = (stored: StoredEvent) => Effect.Effect<void>;
@@ -44,7 +51,13 @@ export class Engine extends Context.Service<
   }
 >()("verdandi/Engine") {}
 
-export const EngineLive = (options: { readonly project?: Projector } = {}) =>
+export type EngineOptions = {
+  readonly project?: Projector;
+  /** Loads what routing a new task needs for a project. Without it tasks keep the thread's route, unexplained. */
+  readonly routing?: (projectPath: string) => Effect.Effect<RoutingContext>;
+};
+
+export const EngineLive = (options: EngineOptions = {}) =>
   Layer.effect(
     Engine,
     Effect.gen(function* () {
@@ -78,7 +91,13 @@ export const EngineLive = (options: { readonly project?: Projector } = {}) =>
                 stored: [] as StoredEvent[],
                 published: [] as ProjectsChange[],
               };
-            const decision = decide(yield* loadDeciderState(command.threadId), command);
+            const state = yield* loadDeciderState(command.threadId);
+            // Routing reads the project's policy file, so only when this command may start a task.
+            const starts = command.type === "turn.send" && state.thread?.taskId === null && options.routing;
+            const decision = decide(
+              starts && state.thread ? { ...state, routing: yield* starts(state.thread.projectPath) } : state,
+              command,
+            );
             if (Result.isFailure(decision)) return yield* Effect.fail(decision.failure);
             const stored = yield* Effect.forEach(decision.success, (event) => append(command, event));
             const [last] = yield* sql<{ seq: number }>`select coalesce(max(seq), 0) as seq from events`;

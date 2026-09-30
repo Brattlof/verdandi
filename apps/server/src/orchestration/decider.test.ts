@@ -11,15 +11,35 @@ const route = { harness: "fake", model: "fake", effort: "low" } as const;
 const none: DeciderState = { thread: undefined };
 const taskId = "task-1" as TaskId;
 const idle: DeciderState = {
-  thread: { projectPath: "C:/r", route, runningTurnId: null, sessionId: null, taskId: null, pendingRequests: [] },
+  thread: {
+    projectPath: "C:/r",
+    route,
+    pinned: true,
+    cachedTokens: 0,
+    runningTurnId: null,
+    sessionId: null,
+    taskId: null,
+    pendingRequests: [],
+  },
 };
 const running: DeciderState = {
-  thread: { projectPath: "C:/r", route, runningTurnId: turnId, sessionId: "s1", taskId, pendingRequests: [] },
+  thread: {
+    projectPath: "C:/r",
+    route,
+    pinned: true,
+    cachedTokens: 0,
+    runningTurnId: turnId,
+    sessionId: "s1",
+    taskId,
+    pendingRequests: [],
+  },
 };
 const waiting: DeciderState = {
   thread: {
     projectPath: "C:/r",
     route,
+    pinned: true,
+    cachedTokens: 0,
     runningTurnId: turnId,
     sessionId: "s1",
     taskId,
@@ -144,6 +164,8 @@ describe("decide", () => {
       thread: {
         projectPath: "C:/r",
         route,
+        pinned: true,
+        cachedTokens: 0,
         runningTurnId: turnId,
         sessionId: "s1",
         taskId,

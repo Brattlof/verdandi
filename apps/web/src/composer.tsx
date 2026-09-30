@@ -1,6 +1,6 @@
 import type { CommandId, InteractionMode, Question, Resolution, ThreadId, ThreadView, TurnId } from "@verdandi/contracts";
-import { type FormEvent, type KeyboardEvent, useId, useState } from "react";
-import { type Connection, uuid } from "./client.ts";
+import { type FormEvent, type KeyboardEvent, useEffect, useId, useState } from "react";
+import { type Connection, type Routed, uuid } from "./client.ts";
 import { RouteChip } from "./route.tsx";
 import type { LiveThread } from "./state.ts";
 
@@ -79,6 +79,8 @@ export const Composer = ({
     }
   };
   const hint = modes.find((m) => m.value === mode)?.hint;
+  // Only a message that starts a routed task gets a preview: one that continues a task keeps its route.
+  const preview = !running && !thread.pinned && thread.task === null;
   return (
     <div className="composer">
       <RouteChip connection={connection} thread={thread} />
@@ -106,7 +108,9 @@ export const Composer = ({
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={running ? "Steer the agent: it reads this at its next step" : "Message the agent"}
+          aria-describedby={preview ? "route-preview" : undefined}
         />
+        {preview && <RoutePreview connection={connection} thread={thread} text={text} mode={mode} />}
         <div className="actions">
           {error && (
             <span role="alert" className="error">
@@ -124,6 +128,45 @@ export const Composer = ({
         </div>
       </form>
     </div>
+  );
+};
+
+/**
+ * What the router would pick if this draft were sent now (DESIGN §12), asked once typing pauses. A
+ * slower answer for an older draft never replaces a newer one.
+ */
+const RoutePreview = ({
+  connection,
+  thread,
+  text,
+  mode,
+}: {
+  connection: Connection;
+  thread: LiveThread;
+  text: string;
+  mode: InteractionMode;
+}) => {
+  const [routed, setRouted] = useState<Routed>();
+  const draft = text.trim();
+  const { threadId } = thread;
+  useEffect(() => {
+    if (!draft) return setRouted(undefined);
+    let current = true;
+    const timer = setTimeout(() => void connection.simulate(threadId, draft, mode).then((r) => current && setRouted(r)), 300);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [connection, threadId, draft, mode]);
+  const decision = routed?.ok ? routed.decision : undefined;
+  return (
+    <p id="route-preview" className="route-preview muted" aria-live="polite">
+      {!draft || !routed
+        ? "The router picks a route when you send."
+        : decision
+          ? `Routes to ${decision.target.model} · ${decision.effort} on ${decision.target.harness}: ${decision.reason}`
+          : !routed.ok && <span className="error">{routed.message}</span>}
+    </p>
   );
 };
 

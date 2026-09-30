@@ -1,11 +1,9 @@
 import {
   type CommandId,
-  defaultRoute,
   describeCost,
   describeQuota,
   type ProjectSummary,
   type QuotaView,
-  type Route,
   type ThreadId,
   type ThreadSummary,
 } from "@verdandi/contracts";
@@ -72,7 +70,7 @@ const Sidebar = ({ connection, data, current }: { connection: Connection; data: 
   return (
     <nav aria-label="Projects and threads" className="sidebar">
       <Quotas quotas={data.quotas} />
-      <OpenFolder connection={connection} route={data.threads[0]?.route ?? defaultRoute} />
+      <OpenFolder connection={connection} />
       {projects.length === 0 && (
         <p className="muted">
           No threads yet. Open a project folder above, or run <code>verdandi chat</code> in one.
@@ -105,7 +103,7 @@ const Quotas = ({ quotas }: { quotas: readonly QuotaView[] }) => (
 );
 
 /** Starts a thread in any folder; verdandid checks the path and resolves it, so a known folder gets a new thread, not a new project. */
-const OpenFolder = ({ connection, route }: { connection: Connection; route: Route }) => {
+const OpenFolder = ({ connection }: { connection: Connection }) => {
   const [error, setError] = useState<string>();
   const open = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -113,7 +111,7 @@ const OpenFolder = ({ connection, route }: { connection: Connection; route: Rout
     const projectPath = String(new FormData(form).get("path")).trim();
     if (!projectPath) return;
     const threadId = uuid<ThreadId>();
-    const result = await connection.dispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath, route });
+    const result = await connection.dispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath });
     setError(result.ok ? undefined : result.message);
     if (!result.ok) return;
     form.reset();
@@ -157,18 +155,10 @@ const Project = ({
   current: ThreadId | null;
 }) => {
   const [error, setError] = useState<string>();
-  const latest = threads[0];
-  // A new thread starts on the route of the project's latest one, like `verdandi chat` does per folder.
+  // Without a route, the router picks one for each task of the new thread.
   const newThread = async () => {
-    if (!latest) return;
     const threadId = uuid<ThreadId>();
-    const result = await connection.dispatch({
-      type: "thread.create",
-      commandId: uuid<CommandId>(),
-      threadId,
-      projectPath: project.path,
-      route: latest.route,
-    });
+    const result = await connection.dispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: project.path });
     if (result.ok) openThread(threadId);
     else setError(result.message);
   };
@@ -179,7 +169,7 @@ const Project = ({
         <h2 id={headingId} title={project.path}>
           {basename(project.path)}
         </h2>
-        <button type="button" onClick={newThread} disabled={!latest} aria-label={`New thread in ${basename(project.path)}`}>
+        <button type="button" onClick={newThread} aria-label={`New thread in ${basename(project.path)}`}>
           New
         </button>
       </div>

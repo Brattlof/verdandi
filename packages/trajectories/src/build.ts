@@ -29,9 +29,15 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
       continue;
     }
     if (e.type === "task.started") {
-      if (!turn) taskId = e.taskId;
+      // The router may pick another route for the task, and a new harness means a new session.
+      if (!turn) {
+        taskId = e.taskId;
+        if (thread && thread.route.harness !== e.route.harness) session = undefined;
+        if (thread) thread = { ...thread, route: e.route };
+      }
       continue;
     }
+    if (e.type === "thread.route.unpinned") continue;
     if (e.type === "harness.session.bound") {
       session = e;
       continue;

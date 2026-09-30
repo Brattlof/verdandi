@@ -9,7 +9,8 @@ export const ThreadCreate = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   projectPath: Schema.String,
-  route: Route,
+  /** The user's pick, which pins the thread to it. Left out, the router picks a route for each new task. */
+  route: Schema.optionalKey(Route),
 });
 export const TurnSend = Schema.Struct({
   type: Schema.Literal("turn.send"),
@@ -50,6 +51,13 @@ export const ThreadRouteSet = Schema.Struct({
   route: Route,
 });
 
+/** Lets the router pick the thread's route again, from its next task on: the way back from a pin. */
+export const ThreadRouteUnpin = Schema.Struct({
+  type: Schema.Literal("thread.route.unpin"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
   type: Schema.Literal("harness.report"),
@@ -67,7 +75,15 @@ export const TurnRecover = Schema.Struct({
 });
 
 /** What clients may send over RPC. */
-export const ClientCommand = Schema.Union([ThreadCreate, TurnSend, TurnSteer, TurnInterrupt, ThreadRouteSet, ApprovalRespond]);
+export const ClientCommand = Schema.Union([
+  ThreadCreate,
+  TurnSend,
+  TurnSteer,
+  TurnInterrupt,
+  ThreadRouteSet,
+  ThreadRouteUnpin,
+  ApprovalRespond,
+]);
 export type ClientCommand = typeof ClientCommand.Type;
 
 export const Command = Schema.Union([
@@ -76,6 +92,7 @@ export const Command = Schema.Union([
   TurnSteer,
   TurnInterrupt,
   ThreadRouteSet,
+  ThreadRouteUnpin,
   ApprovalRespond,
   HarnessReport,
   TurnRecover,

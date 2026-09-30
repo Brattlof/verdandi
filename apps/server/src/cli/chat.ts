@@ -17,7 +17,7 @@ import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { flag, readServerFile, resolveHome } from "../config/home.ts";
 import { connect } from "../rpc/client.ts";
 import { approvalPrompt, type PendingRequest, parseAnswer, planPrompt, questionPrompt } from "./requests.ts";
-import { routeFromFlags } from "./route-flags.ts";
+import { picksRoute, routeFromFlags } from "./route-flags.ts";
 import { threadList } from "./thread-list.ts";
 
 class Client extends Context.Service<Client, Effect.Success<ReturnType<typeof connect>>>()("verdandi/cli/Client") {}
@@ -77,6 +77,9 @@ export const chat = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
   const server = readServerFile(home);
   const route = routeFromFlags(argv); // also rejects bad flags before connecting
+  if (argv.includes("--auto") && picksRoute(argv)) {
+    throw new Error("--auto lets the router pick each task's route, so leave out --harness, --model and --effort.");
+  }
   const picked = flag(argv, "--thread") as ThreadId | undefined;
 
   const runtime = ManagedRuntime.make(Layer.effect(Client)(connect(server)));
@@ -95,7 +98,13 @@ export const chat = async (argv: readonly string[]) => {
   if (!threadId) {
     threadId = uuid<ThreadId>();
     await runtime.runPromise(
-      client.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: cwd, route }),
+      client.CommandDispatch({
+        type: "thread.create",
+        commandId: uuid<CommandId>(),
+        threadId,
+        projectPath: cwd,
+        ...(picksRoute(argv) ? { route } : {}),
+      }),
     );
     writeFileSync(threadsFile(home), JSON.stringify({ ...threads, [cwd]: threadId }, null, 2));
   }
@@ -161,6 +170,9 @@ export const chat = async (argv: readonly string[]) => {
           if (f.kind === "delta") process.stdout.write(f.text);
           if (f.kind !== "event") return;
           const e = f.stored.event;
+          if (e.type === "task.started" && e.decision?.source === "policy") {
+            process.stdout.write(`[routed to ${e.route.model} ${e.route.effort} on ${e.route.harness}: ${e.decision.reason}]\n`);
+          }
           if (e.type === "turn.started") running = lastTurn = e.turnId;
           if (e.type === "approval.requested" || e.type === "user-input.requested" || e.type === "plan.requested") addRequest(e);
           if (e.type === "approval.resolved") removeRequest(e.requestId);
@@ -247,15 +259,25 @@ export const chat = async (argv: readonly string[]) => {
   feed.then(() => snapshot.reject(noSnapshot), snapshot.reject);
   const thread = await snapshot.promise;
   mode = thread.turns.at(-1)?.mode ?? "build";
-  // Flags that differ from the thread's route change it, from the next turn on.
+  // Route flags pin the thread to their route from the next turn on; --auto hands it back to the router.
   const wanted = routeFromFlags(argv, thread.route);
   const change = describeRouteChange(thread.route, wanted);
-  const changed = change !== "" && (await dispatch({ type: "thread.route.set", commandId: uuid<CommandId>(), threadId, route: wanted }));
+  const pin = picksRoute(argv) && (change !== "" || !thread.pinned);
+  const changed = pin && (await dispatch({ type: "thread.route.set", commandId: uuid<CommandId>(), threadId, route: wanted }));
+  const unpinned =
+    argv.includes("--auto") && thread.pinned && (await dispatch({ type: "thread.route.unpin", commandId: uuid<CommandId>(), threadId }));
   const { harness, model, effort } = changed ? wanted : thread.route;
+  const on =
+    changed || (thread.pinned && !unpinned)
+      ? `${harness} ${model} ${effort} (pinned; --auto lets the router pick)`
+      : thread.task && !unpinned
+        ? `${harness} ${model} ${effort} (routed; --model or --effort pins a route)`
+        : "the route the router picks for the next task";
   process.stdout.write(
-    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${harness} ${model} ${effort}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; Ctrl+C stops a turn; /exit quits.\n`,
+    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; Ctrl+C stops a turn; /exit quits.\n`,
   );
-  if (changed) process.stdout.write(`Route changed: ${change}\n`);
+  if (changed) process.stdout.write(change ? `Route changed: ${change}\n` : `Route pinned: ${harness} ${model} ${effort}\n`);
+  if (unpinned) process.stdout.write("Route unpinned: the router picks the next task's route.\n");
   if (running) process.stdout.write("A turn is running; lines you type steer it.\n");
   else prompt();
   showRequest();

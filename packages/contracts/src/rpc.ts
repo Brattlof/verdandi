@@ -2,9 +2,10 @@ import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { ClientCommand } from "./commands.ts";
 import { ApprovalRequested, PlanRequested, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
-import { CommandId, ProjectId, ThreadId, TurnId } from "./ids.ts";
+import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, Usage } from "./items.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
+import { RouteDecision } from "./routing.ts";
 import { RouteCost } from "./task.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
@@ -16,7 +17,15 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "RequestNotPending",
     "InvalidResolution",
     "InvalidProjectPath",
+    "InvalidPolicy",
+    "NoRoute",
   ]),
+  message: Schema.String,
+}) {}
+
+/** Why routing can't be explained or simulated. The message names the cause and the fix. */
+export class RoutingUnavailable extends Schema.TaggedError<RoutingUnavailable>()("RoutingUnavailable", {
+  reason: Schema.Literals(["ThreadNotFound", "TaskNotFound", "InvalidPolicy", "NoRoute"]),
   message: Schema.String,
 }) {}
 
@@ -66,6 +75,19 @@ export const ThreadView = Schema.Struct({
   threadId: ThreadId,
   projectPath: Schema.String,
   route: Route,
+  /** True when the user picked the route; false when the router picks each new task's. */
+  pinned: Schema.Boolean,
+  /**
+   * The task the next turn continues, and why it runs on `route`; null when the next turn starts a new
+   * one. `source` and `reason` are absent on tasks from before routing.
+   */
+  task: Schema.NullOr(
+    Schema.Struct({
+      taskId: TaskId,
+      source: Schema.optionalKey(RouteDecision.fields.source),
+      reason: Schema.optionalKey(Schema.String),
+    }),
+  ),
   sessionId: Schema.NullOr(Schema.String),
   busy: Schema.Boolean,
   turns: Schema.Array(TurnView),
@@ -152,4 +174,15 @@ export class Api extends RpcGroup.make(
   }),
   /** Cost per completed task on each route that ran one, most spent first. */
   Rpc.make("TaskCostsList", { success: Schema.Array(RouteCost) }),
+  /** A task's routing decision: its reason, trace and the classification behind it. */
+  Rpc.make("RoutingExplain", { payload: { taskId: TaskId }, success: RouteDecision, error: RoutingUnavailable }),
+  /**
+   * What the router would pick if `text` started a new task in the thread, for the composer's live preview.
+   * Pure and stores nothing; a pinned thread gets its pin back.
+   */
+  Rpc.make("RoutingSimulate", {
+    payload: { threadId: ThreadId, text: Schema.String, mode: InteractionMode },
+    success: RouteDecision,
+    error: RoutingUnavailable,
+  }),
 ) {}

@@ -523,3 +523,23 @@ button.link {
   color: var(--muted);
   text-align: center;
 }
+.route summary .muted {
+  display: inline-block;
+  margin-left: 0.3em;
+  max-width: 60ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.route-reason {
+  margin: 0 0 4px;
+}
+.trace {
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+.route-preview {
+  margin: 4px 0 0;
+  font-size: 12px;
+}

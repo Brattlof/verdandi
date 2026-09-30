@@ -3,6 +3,7 @@ import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields } from "./items.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
+import { RouteDecision } from "./routing.ts";
 
 // Events are append-only and must stay readable forever. To change one, add a v2 schema
 // next to v1 and upgrade v1 to v2 when it is read; never edit or delete a published version.
@@ -15,9 +16,15 @@ export const ThreadCreated = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   projectPath: Schema.String,
+  /** A placeholder until the first task is routed when `pinned` is false. */
   route: Route,
+  /** False when the router picks each new task's route. Absent on threads from before routing: their route was always the user's. */
+  pinned: Schema.optionalKey(Schema.Boolean),
 });
-/** `by` records who changed the route, so overrides can be counted (DESIGN §8.8). */
+/**
+ * The user picked a route, which pins the thread to it from the next turn on. `by` records who changed
+ * it, so overrides can be counted (DESIGN §8.8). `from` equals `to` when the user pins the routed route.
+ */
 export const ThreadRouteChanged = Schema.Struct({
   type: Schema.Literal("thread.route.changed"),
   v: v1,
@@ -36,6 +43,14 @@ export const TaskStarted = Schema.Struct({
   threadId: ThreadId,
   taskId: TaskId,
   route: Route,
+  /** Why the task runs on `route`: the router's pick or the user's pin. Absent on tasks from before routing. */
+  decision: Schema.optionalKey(RouteDecision),
+});
+/** The user let the router pick again: the thread's next turn starts a routed task. */
+export const ThreadRouteUnpinned = Schema.Struct({
+  type: Schema.Literal("thread.route.unpinned"),
+  v: v1,
+  threadId: ThreadId,
 });
 export const TurnStarted = Schema.Struct({
   type: Schema.Literal("turn.started"),
@@ -138,6 +153,7 @@ export const TurnCompleted = Schema.Struct({
 export const Event = Schema.Union([
   ThreadCreated,
   ThreadRouteChanged,
+  ThreadRouteUnpinned,
   TaskStarted,
   TurnStarted,
   HarnessSessionBound,
@@ -167,6 +183,7 @@ export class EventDecodeError extends Data.TaggedError("EventDecodeError")<{ rea
 const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.created@1": ThreadCreated,
   "thread.route.changed@1": ThreadRouteChanged,
+  "thread.route.unpinned@1": ThreadRouteUnpinned,
   "task.started@1": TaskStarted,
   "turn.started@1": TurnStarted,
   "harness.session.bound@1": HarnessSessionBound,

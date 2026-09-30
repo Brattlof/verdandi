@@ -10,7 +10,8 @@
     "@verdandi/harness-claude-code": "workspace:*",
     "@verdandi/testkit": "workspace:*",
     "@verdandi/trajectories": "workspace:*",
-    "@verdandi/web": "workspace:*"
+    "@verdandi/web": "workspace:*",
+    "@verdandi/router": "workspace:*"
   },
   "bin": {
     "verdandi": "./src/bin.ts"

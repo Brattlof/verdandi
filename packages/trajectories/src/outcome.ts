@@ -1,4 +1,14 @@
-import type { Event, Route, StoredEvent, TaskId, TaskOutcome, TaskStatus, ThreadId, Usage } from "@verdandi/contracts";
+import {
+  describeRouteChange,
+  type Event,
+  type Route,
+  type StoredEvent,
+  type TaskId,
+  type TaskOutcome,
+  type TaskStatus,
+  type ThreadId,
+  type Usage,
+} from "@verdandi/contracts";
 
 type TurnStatus = Extract<Event, { type: "turn.completed" }>["status"];
 
@@ -34,7 +44,8 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
     if (!task) continue;
     switch (e.type) {
       case "thread.route.changed":
-        task.override = { from: task.route, to: e.to };
+        // Pinning the route the router picked keeps the task's route: nothing was overridden.
+        if (describeRouteChange(e.from, e.to) !== "") task.override = { from: task.route, to: e.to };
         break;
       case "turn.started":
         task.turns++;

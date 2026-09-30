@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { describeRouteChange, type Route } from "@verdandi/contracts";
-import { routeFromFlags } from "./route-flags.ts";
+import { picksRoute, routeFromFlags } from "./route-flags.ts";
 
 const opusHigh: Route = { harness: "claude-code", model: "opus", effort: "high" };
 
@@ -16,6 +16,11 @@ describe("chat route flags", () => {
     const wanted = routeFromFlags(["chat"], opusHigh);
     expect(wanted).toEqual(opusHigh);
     expect(describeRouteChange(opusHigh, wanted)).toBe("");
+  });
+
+  test("only route flags pick a route; without them the router picks", () => {
+    expect(picksRoute(["chat", "--effort", "high"])).toBe(true);
+    expect(picksRoute(["chat", "--thread", "t1", "--auto"])).toBe(false);
   });
 
   test("an unknown effort fails loudly", () => {

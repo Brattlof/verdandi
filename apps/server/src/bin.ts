@@ -10,7 +10,7 @@ const usage = `Usage:
   verdandi start [--home <dir>] [--port <n>]      run verdandid in the foreground
   verdandi open  [--home <dir>]                   open the web UI in your browser
   verdandi doctor [--home <dir>]                  check the setup: Bun, Claude Code, git, the home, the database and verdandid
-  verdandi chat  [--home <dir>] [--model <m>] [--effort <e>] [--thread <id>]   chat with the thread for this folder, or the one named
+  verdandi chat  [--home <dir>] [--harness <h>] [--model <m>] [--effort <e> | --auto] [--thread <id>]   chat with the thread for this folder, or the one named; route flags pin a route, --auto lets the router pick
   verdandi chat  --list [--home <dir>]              list every thread by project
   verdandi costs [--home <dir>]                   cost per completed task on each route`;
 

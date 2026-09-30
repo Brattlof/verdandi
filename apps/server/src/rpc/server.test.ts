@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { appendFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
-import type { CommandId, ProjectsFeed, ThreadFeed, ThreadId, TurnId } from "@verdandi/contracts";
+import type { CommandId, ProjectsFeed, TaskId, ThreadFeed, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -361,6 +361,51 @@ describe("rpc server", () => {
     await drain();
     const costs = await withClient(info.port, info.token, (c) => c.TaskCostsList());
     expect(costs).toEqual([{ route, tasks: 1, completed: 1, costUsd: 0.01, costPerCompletedUsd: 0.01 }]);
+  });
+
+  test("RoutingSimulate previews a draft without storing it, and RoutingExplain returns a task's decision", async () => {
+    const { info, drain } = await startServer();
+    const project = makeTempHome();
+    cleanups.push(async () => removeTempHome(project));
+    mkdirSync(join(project, ".verdandi"));
+    writeFileSync(
+      join(project, ".verdandi", "routing.yaml"),
+      "targets:\n  small: { harness: fake, provider: fake, model: fake-small }\nroutes:\n  ask.search: { prefer: [small], effort: low }\n",
+    );
+    const threadId = uuid<ThreadId>();
+    const turnId = uuid<TurnId>();
+    const text = "Where is the auth middleware?";
+    const { preview, before, decision, missing } = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        yield* c.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: project });
+        const preview = yield* c.RoutingSimulate({ threadId, text, mode: "build" });
+        const before = yield* c.TaskCostsList();
+        yield* c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId, text, mode: "build" });
+        yield* Effect.promise(drain);
+        const decision = yield* c.RoutingExplain({ taskId: turnId as string as TaskId });
+        const missing = yield* Effect.flip(c.RoutingExplain({ taskId: uuid<TaskId>() }));
+        return { preview, before, decision, missing };
+      }),
+    );
+    expect(preview.reason).toBe("Looks like ask.search, so it runs on fake-small at low effort.");
+    expect(before).toEqual([]);
+    expect(decision).toEqual(preview);
+    expect(decision.trace.map((t) => t.stage)).toContain("classify");
+    expect(missing.reason).toBe("TaskNotFound");
+  });
+
+  test("RoutingSimulate says how to fix a thread with nothing to route to", async () => {
+    const { info } = await startServer();
+    const threadId = uuid<ThreadId>();
+    const failure = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        yield* c.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: folder });
+        return yield* Effect.flip(c.RoutingSimulate({ threadId, text: "hi", mode: "build" }));
+      }),
+    );
+    expect(failure.reason).toBe("NoRoute");
+    expect(failure.message).toContain("the claude-code harness isn't running");
+    expect(failure.message).toContain("Pick a route for this thread");
   });
 
   test("thread.create resolves the folder, so two spellings of one folder are one project", async () => {

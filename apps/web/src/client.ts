@@ -5,6 +5,10 @@ import {
   DiffUnavailable,
   type DiffView,
   type HarnessId,
+  type InteractionMode,
+  type RouteDecision,
+  RoutingUnavailable,
+  type TaskId,
   type ThreadId,
   type TurnId,
 } from "@verdandi/contracts";
@@ -44,6 +48,9 @@ export const uuid = <T>() => crypto.randomUUID() as T;
 const makeClient = RpcClient.make(Api);
 class Client extends Context.Service<Client, Effect.Success<typeof makeClient>>()("verdandi/web/Client") {}
 type Rpc = Client["Service"];
+
+/** A routing decision, or why verdandid couldn't route. */
+export type Routed = { readonly ok: true; readonly decision: RouteDecision } | { readonly ok: false; readonly message: string };
 
 export type Dispatched =
   | { readonly ok: true }
@@ -99,6 +106,17 @@ export const connect = (token: string) => {
     return unavailable ? { ok: false, message: unavailable.message } : disconnected;
   };
 
+  const routed = (exit: Exit.Exit<RouteDecision, unknown>): Routed => {
+    if (Exit.isSuccess(exit)) return { ok: true, decision: exit.value };
+    const unavailable = failure(exit.cause, RoutingUnavailable);
+    return unavailable ? { ok: false, message: unavailable.message } : disconnected;
+  };
+  /** A task's routing decision, with its trace. */
+  const explain = async (taskId: TaskId) => routed(await run((rpc) => rpc.RoutingExplain({ taskId })));
+  /** What the router would pick if `text` started a new task in the thread. Stores nothing. */
+  const simulate = async (threadId: ThreadId, text: string, mode: InteractionMode) =>
+    routed(await run((rpc) => rpc.RoutingSimulate({ threadId, text, mode })));
+
   /**
    * Follows a feed until the returned function is called. It never stops the stream itself: it asks
    * the server to end it (ADR 0008), once the first message shows the server has registered it.
@@ -140,6 +158,6 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, follow, harnesses, lost };
+  return { dispatch, diff, explain, simulate, follow, harnesses, lost };
 };
 export type Connection = ReturnType<typeof connect>;
