@@ -1,7 +1,7 @@
-import type { Event, Item, Route, StoredEvent, ThreadId, ThreadView, TurnView } from "@verdandi/contracts";
+import type { Event, Item, Route, StoredEvent, ThreadId, ThreadView, TurnId, TurnView } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
-import type { DeciderState } from "./decider.ts";
+import type { DeciderState, PendingRequest } from "./decider.ts";
 
 type Projection<T extends Event["type"]> = (
   event: Extract<Event, { type: T }>,
@@ -9,6 +9,15 @@ type Projection<T extends Event["type"]> = (
 ) => Effect.Effect<unknown, SqlError.SqlError, SqlClient.SqlClient>;
 
 const withSql = <A>(f: (sql: SqlClient.SqlClient) => Effect.Effect<A, SqlError.SqlError>) => Effect.flatMap(SqlClient.SqlClient, f);
+
+const requestKind = { "approval.requested": "approval", "user-input.requested": "user-input" } as const;
+
+const insertRequest = (e: Extract<Event, { type: keyof typeof requestKind }>, at: string) =>
+  withSql(
+    (sql) =>
+      sql`insert into requests (id, thread_id, turn_id, kind, payload, requested_at)
+          values (${e.requestId}, ${e.threadId}, ${e.turnId}, ${requestKind[e.type]}, ${JSON.stringify(e)}, ${at})`,
+  );
 
 const projections: { [T in Event["type"]]: Projection<T> } = {
   "thread.created": (e, at) =>
@@ -38,6 +47,14 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         sql`insert into usage_ledger (turn_id, model, access_mode, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, at)
             values (${e.turnId}, ${e.model}, ${e.accessMode}, ${e.inputTokens}, ${e.outputTokens}, ${e.cacheReadTokens}, ${e.cacheWriteTokens}, ${e.costUsd}, ${at})`,
     ),
+  "approval.requested": insertRequest,
+  "user-input.requested": insertRequest,
+  "approval.resolved": (e, at) =>
+    withSql(
+      (sql) =>
+        sql`update requests set resolution = ${JSON.stringify(e.resolution)}, reason = ${e.reason ?? null}, resolved_at = ${at}
+            where id = ${e.requestId}`,
+    ),
   "turn.completed": (e, at) =>
     withSql((sql) =>
       Effect.andThen(
@@ -53,12 +70,21 @@ export const project = (stored: StoredEvent) =>
 
 export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState, SqlError.SqlError, SqlClient.SqlClient> =>
   withSql((sql) =>
-    sql<{ path: string; running_turn_id: string | null; session_id: string | null }>`
-      select p.path, t.running_turn_id, t.session_id from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`.pipe(
-      Effect.map(([row]) => ({
-        thread: row && { projectPath: row.path, runningTurnId: row.running_turn_id, sessionId: row.session_id },
-      })),
-    ),
+    Effect.gen(function* () {
+      const [row] = yield* sql<{ path: string; running_turn_id: string | null; session_id: string | null }>`
+        select p.path, t.running_turn_id, t.session_id from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+      if (!row) return { thread: undefined };
+      const pending = yield* sql<{ id: string; turn_id: string; kind: PendingRequest["kind"] }>`
+        select id, turn_id, kind from requests where thread_id = ${threadId} and resolution is null`;
+      return {
+        thread: {
+          projectPath: row.path,
+          runningTurnId: row.running_turn_id,
+          sessionId: row.session_id,
+          pendingRequests: pending.map((r) => ({ requestId: r.id, turnId: r.turn_id as TurnId, kind: r.kind })),
+        },
+      };
+    }),
   );
 
 export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | null, SqlError.SqlError, SqlClient.SqlClient> =>
@@ -72,6 +98,8 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
       const items = yield* sql<{ turn_id: string; payload: string }>`
         select i.turn_id, i.payload from items i join turns t on t.id = i.turn_id where t.thread_id = ${threadId} order by i.turn_id, i.idx`;
       const itemsByTurn = Map.groupBy(items, (i) => i.turn_id);
+      const pending = yield* sql<{ payload: string }>`
+        select payload from requests where thread_id = ${threadId} and resolution is null order by requested_at, rowid`;
       return {
         threadId,
         projectPath: thread.path,
@@ -87,6 +115,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
             ...(t.error === null ? {} : { error: t.error }),
           }),
         ),
+        pendingRequests: pending.map((r) => JSON.parse(r.payload) as ThreadView["pendingRequests"][number]),
       };
     }),
   );

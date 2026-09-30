@@ -1,6 +1,7 @@
-import { Data, Schema, type Stream } from "effect";
+import { Data, type Effect, Schema, type Stream } from "effect";
 import type { ThreadId, TurnId } from "./ids.ts";
 import { Item, UsageFields } from "./items.ts";
+import { Question, type Resolution } from "./requests.ts";
 import type { HarnessId, Route } from "./route.ts";
 
 /** What every harness adapter reports, normalized. */
@@ -9,6 +10,9 @@ export const HarnessEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text.delta"), text: Schema.String }),
   Schema.Struct({ type: Schema.Literal("item"), item: Item }),
   Schema.Struct({ type: Schema.Literal("usage"), ...UsageFields }),
+  /** The harness blocks until `respond` answers `requestId`. */
+  Schema.Struct({ type: Schema.Literal("approval.requested"), requestId: Schema.String, toolName: Schema.String, input: Schema.Unknown }),
+  Schema.Struct({ type: Schema.Literal("user-input.requested"), requestId: Schema.String, questions: Schema.Array(Question) }),
   Schema.Struct({
     type: Schema.Literal("turn.finished"),
     status: Schema.Literals(["success", "error"]),
@@ -32,9 +36,11 @@ export type HarnessRunInput = {
 
 /**
  * Slice-1 subset of the harness contract (DESIGN §9.2): one `run` per turn. The adapter keeps its
- * live session per thread and resumes by id after a restart. Steer, interrupt and respond come later.
+ * live session per thread and resumes by id after a restart. Steer and interrupt come later.
  */
 export interface HarnessAdapter {
   readonly id: HarnessId;
   run(input: HarnessRunInput): Stream.Stream<HarnessEvent, HarnessError>;
+  /** Answers a request the running turn raised. Unknown ids are ignored: their turn has ended. */
+  respond(threadId: ThreadId, requestId: string, resolution: Resolution): Effect.Effect<void>;
 }

@@ -10,7 +10,9 @@ const U1 = "00000000-0000-4000-8000-000000000001";
 const U2 = "00000000-0000-4000-8000-000000000002";
 
 /** A fake SDK `query`: answers each prompt with a delta and a result; records what it was given. */
-const stubQuery = (script: (prompt: string) => SDKMessage[] = () => [textDelta("ok"), result(turn1Usage)]) => {
+const stubQuery = (
+  script: (prompt: string, options: Options) => SDKMessage[] | AsyncIterable<SDKMessage> = () => [textDelta("ok"), result(turn1Usage)],
+) => {
   const spawns: { options: Options; prompts: SDKUserMessage[] }[] = [];
   const query = ((params: { prompt: AsyncIterable<SDKUserMessage>; options: Options }) => {
     const record = { options: params.options, prompts: [] as SDKUserMessage[] };
@@ -19,15 +21,17 @@ const stubQuery = (script: (prompt: string) => SDKMessage[] = () => [textDelta("
       yield init;
       for await (const m of params.prompt) {
         record.prompts.push(m);
-        yield* script(String(m.message.content));
+        yield* script(String(m.message.content), params.options);
       }
     })();
   }) as unknown as QueryFn;
   return { query, spawns };
 };
 
+const threadId = "thread-1" as ThreadId;
+
 const input = (cwd: string, text: string, turnId: string, resumeSessionId?: string): HarnessRunInput => ({
-  threadId: "thread-1" as ThreadId,
+  threadId,
   cwd,
   route: { harness: "claude-code", model: "haiku", effort: "low" },
   resumeSessionId,
@@ -52,8 +56,9 @@ describe("Claude Code adapter", () => {
       const { query, spawns } = stubQuery();
       const adapter = makeClaudeCodeAdapter({ claudePath: "C:\\bin\\claude.exe", query });
       const first = await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "one", U1))));
-      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "two", U2))));
+      const second = await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "two", U2))));
       expect(Array.from(first).map((e) => e.type)).toEqual(["session.started", "text.delta", "usage", "usage", "turn.finished"]);
+      expect(Array.from(second).map((e) => e.type)).toEqual(["text.delta", "turn.finished"]);
       expect(spawns).toHaveLength(1);
       expect(spawns[0]?.prompts.map((p) => p.uuid)).toEqual([U1, U2] as never);
       expect(spawns[0]?.options).toMatchObject({
@@ -64,6 +69,53 @@ describe("Claude Code adapter", () => {
         includePartialMessages: true,
         settings: { disableClaudeAiConnectors: true },
       });
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("canUseTool raises a request and waits for its answer", async () => {
+    const home = makeTempHome();
+    try {
+      const questions = [
+        {
+          question: "Which?",
+          header: "Pick",
+          options: [
+            { label: "A", description: "a" },
+            { label: "B", description: "b" },
+          ],
+          multiSelect: false,
+        },
+      ];
+      const decisions: unknown[] = [];
+      const { query } = stubQuery(async function* (_prompt, options) {
+        const ask = (tool: string, toolInput: Record<string, unknown>) =>
+          options.canUseTool?.(tool, toolInput, { signal: new AbortController().signal, toolUseID: "toolu_1", requestId: "c1" });
+        decisions.push(await ask("Edit", { file_path: "a.txt" }));
+        decisions.push(await ask("AskUserQuestion", { questions }));
+        yield result(turn1Usage);
+      });
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const seen: string[] = [];
+      await Effect.runPromise(
+        adapter.run(input(home, "edit", U1)).pipe(
+          Stream.runForEach((e) => {
+            seen.push(e.type);
+            if (e.type === "approval.requested") return adapter.respond(threadId, e.requestId, { decision: "deny" });
+            if (e.type === "user-input.requested") {
+              expect(e.questions).toEqual(questions);
+              return adapter.respond(threadId, e.requestId, { decision: "answer", answers: { "Which?": "B" } });
+            }
+            return Effect.void;
+          }),
+        ),
+      );
+      expect(seen).toEqual(["session.started", "approval.requested", "user-input.requested", "usage", "usage", "turn.finished"]);
+      expect(decisions).toEqual([
+        { behavior: "deny", message: "The user denied this." },
+        { behavior: "allow", updatedInput: { questions, answers: { "Which?": "B" } } },
+      ]);
     } finally {
       removeTempHome(home);
     }

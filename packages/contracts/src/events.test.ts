@@ -33,6 +33,18 @@ const samples: Event[] = [
     cacheWriteTokens: 4,
     costUsd: 0.01,
   },
+  { type: "approval.requested", v: 1, threadId, turnId, requestId: "r1", toolName: "Edit", input: { file_path: "C:/a b/x.ts" } },
+  {
+    type: "user-input.requested",
+    v: 1,
+    threadId,
+    turnId,
+    requestId: "r2",
+    questions: [{ question: "Which?", header: "Pick", options: [{ label: "A", description: "a" }], multiSelect: false }],
+  },
+  { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r1", resolution: { decision: "allow" } },
+  { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r2", resolution: { decision: "answer", answers: { "Which?": "A" } } },
+  { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r3", resolution: { decision: "deny" }, reason: "turn ended" },
   { type: "turn.completed", v: 1, threadId, turnId, status: "error", error: "boom" },
 ];
 

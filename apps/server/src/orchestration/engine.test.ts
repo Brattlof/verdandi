@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Command, CommandId, StoredEvent, ThreadId, TurnId } from "@verdandi/contracts";
+import type { Command, CommandId, Resolution, StoredEvent, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
-import { Effect, Fiber, Layer, ManagedRuntime } from "effect";
+import { Deferred, Effect, Fiber, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { SqlLive } from "../persistence/db.ts";
 import { AppLayer } from "./app.ts";
@@ -42,6 +42,32 @@ const drain = Effect.gen(function* () {
 const view = loadThreadView(threadId);
 const create: Command = { type: "thread.create", commandId: id<CommandId>(), threadId, projectPath: "C:/Users/a b/repo", route };
 const send = (text: string, turnId = id<TurnId>()): Command => ({ type: "turn.send", commandId: id<CommandId>(), threadId, turnId, text });
+
+/** Completes with the id of the next request a harness raises, once it is committed. */
+const nextRequest = Effect.gen(function* () {
+  const raised = yield* Deferred.make<string>();
+  yield* (yield* Engine).react((s) =>
+    s.event.type === "approval.requested" || s.event.type === "user-input.requested"
+      ? Deferred.succeed(raised, s.event.requestId).pipe(Effect.asVoid)
+      : Effect.void,
+  );
+  return raised;
+});
+
+/** Sends `text`, answers the request it raises with `resolution`, and returns the view while pending and after. */
+const answerTurn = (text: string, resolution: Resolution) =>
+  Effect.gen(function* () {
+    yield* dispatch(create);
+    const raised = yield* nextRequest;
+    yield* dispatch(send(text));
+    const requestId = yield* Deferred.await(raised);
+    const pending = yield* view;
+    yield* dispatch({ type: "approval.respond", commandId: id<CommandId>(), threadId, requestId, resolution });
+    yield* drain;
+    return { pending: pending?.pendingRequests.map((r) => r.requestId), after: yield* view, requestId };
+  });
+
+const lastItem = (v: Effect.Success<typeof view>) => v?.turns.at(-1)?.items.at(-1);
 
 describe("engine", () => {
   test("a sent turn completes and persists", async () => {
@@ -152,6 +178,55 @@ describe("engine", () => {
       }),
     );
     expect(v?.turns.map((t) => t.status)).toEqual(["interrupted", "success"]);
+  });
+
+  test("an allowed request lets the turn go on", async () => {
+    const { runtime } = start(newHome());
+    const { pending, after, requestId } = await runtime.runPromise(answerTurn("approve", { decision: "allow" }));
+    expect(pending).toEqual([requestId]);
+    expect(after?.pendingRequests).toEqual([]);
+    expect(lastItem(after)).toEqual({ kind: "assistant.message", text: "edited a.txt" });
+    expect(after?.turns.at(-1)?.status).toBe("success");
+  });
+
+  test("a denied request reaches the harness as a deny", async () => {
+    const { runtime } = start(newHome());
+    const { after } = await runtime.runPromise(answerTurn("approve", { decision: "deny" }));
+    expect(after?.pendingRequests).toEqual([]);
+    expect(lastItem(after)).toEqual({ kind: "assistant.message", text: "left a.txt alone" });
+  });
+
+  test("a user-input request is answered", async () => {
+    const { runtime } = start(newHome());
+    const { after } = await runtime.runPromise(answerTurn("ask", { decision: "answer", answers: { "Which color?": "Blue" } }));
+    expect(lastItem(after)).toEqual({ kind: "assistant.message", text: "you picked Blue" });
+  });
+
+  test("a request pending when verdandid stops is denied on restart, and that is recorded", async () => {
+    const home = newHome();
+    const first = start(home).runtime;
+    await first.runPromise(
+      Effect.gen(function* () {
+        yield* dispatch(create);
+        const raised = yield* nextRequest;
+        yield* dispatch(send("approve"));
+        yield* Deferred.await(raised);
+      }),
+    );
+    await first.dispose();
+    const second = start(home).runtime;
+    const [v, resolved] = await second.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sql<{ payload: string }>`select payload from events where type = 'approval.resolved'`;
+        return [yield* view, rows.map((r) => JSON.parse(r.payload))] as const;
+      }),
+    );
+    expect(v?.turns.map((t) => t.status)).toEqual(["interrupted"]);
+    expect(v?.pendingRequests).toEqual([]);
+    expect(resolved).toMatchObject([
+      { resolution: { decision: "deny" }, reason: "verdandid stopped while this was waiting for an answer." },
+    ]);
   });
 
   test("a dispatch interrupted after its commit still starts the turn", async () => {

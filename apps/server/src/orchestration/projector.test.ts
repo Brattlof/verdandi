@@ -74,6 +74,7 @@ test("projects a full turn into the thread view", async () => {
     sessionId: "s1",
     busy: false,
     turns: [{ turnId, text: "hi", status: "success", items: [{ kind: "assistant.message", text: "echo: hi" }] }],
+    pendingRequests: [],
   });
   const usage = await run(
     home,

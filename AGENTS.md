@@ -164,7 +164,8 @@ The most common defect is a change that works on the path you tested and is miss
 What runs today (M1, in progress):
 
 - **Commands and events:** clients send typed RPC (`packages/contracts/src/rpc.ts`) over a WebSocket on `127.0.0.1`, authenticated with the token in the profile's `server.json`. `CommandDispatch` hands a command to the engine, a pure *decider* turns it into *events*, and *projectors* update the read models in the same SQLite transaction. The receipt returns once that transaction commits.
-- **Side effects:** after a commit, *reactors* run the side effects. The only one today runs a harness turn on `turn.started` and reports what the harness does back as `harness.report` commands.
+- **Side effects:** after a commit, *reactors* run the side effects. Today they run a harness turn on `turn.started` and report what the harness does back as `harness.report` commands, and pass `approval.resolved` answers back to the harness.
+- **Approvals:** a harness that needs the user raises `approval.requested` or `user-input.requested`. It shows in `ThreadView.pendingRequests` until a client answers with `approval.respond`. A turn that ends first, including one cut off by a restart, denies its open requests and records why.
 - **Feeds:** `ThreadSubscribe` streams a snapshot of the thread, then its events and unstored text deltas. Clients end it with `ThreadUnsubscribe` (ADR 0008).
 - **Harnesses:** Claude Code runs through the Agent SDK behind the `HarnessAdapter` contract. The route (harness, model, effort) is set when a thread is created; there is no router yet.
 

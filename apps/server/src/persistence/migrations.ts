@@ -50,4 +50,21 @@ const init = Effect.gen(function* () {
   )`;
 });
 
-export const migrations = { "1_init": init };
+/** Approval and user-input requests; `resolution` is null while one is pending. */
+const requests = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table requests (
+    id text primary key,
+    thread_id text not null references threads (id),
+    turn_id text not null references turns (id),
+    kind text not null,
+    payload text not null,
+    resolution text,
+    reason text,
+    requested_at text not null,
+    resolved_at text
+  )`;
+  yield* sql`create index requests_pending on requests (thread_id) where resolution is null`;
+});
+
+export const migrations = { "1_init": init, "2_requests": requests };
