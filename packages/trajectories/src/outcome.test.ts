@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Event, ProjectId, Resolution, StoredEvent, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
+import type { Event, ProjectId, Resolution, Route, StoredEvent, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
 import { buildTaskOutcomes } from "./outcome.ts";
 
 const threadId = "t1" as ThreadId;
@@ -132,4 +132,26 @@ test("a follow-up the decision layer calls a correction counts against the task 
     [u1, -1],
     [u4, 1],
   ]);
+});
+
+test("only the user's last route pick counts, and changing back to the task's own route overrides nothing", () => {
+  const routed = { ...sonnet, subagents: { explorer: { model: "haiku", effort: "low" } } } as const;
+  const haiku = { ...sonnet, model: "haiku" } as const;
+  const picked = (...picks: Route[]) =>
+    buildTaskOutcomes(
+      stored([
+        [0, { type: "task.started", v: 2, threadId, taskId: u1 as string as TaskId, route: routed }],
+        [0, started(u1)],
+        [1, completed(u1, "success")],
+        ...picks.map((to, i): [number, Event] => [
+          2 + i,
+          { type: "thread.route.changed", v: 1, threadId, from: picks[i - 1] ?? routed, to, by: "user" },
+        ]),
+      ]),
+    )[0];
+  // Same harness, model and effort is the task's own route, whatever its subagents.
+  expect(picked(opus, sonnet)).toMatchObject({ implicitSatisfaction: 1 });
+  expect(picked(opus, sonnet)?.userOverride).toBeUndefined();
+  expect(picked(opus, haiku)).toMatchObject({ implicitSatisfaction: 0, userOverride: { from: routed, to: haiku } });
+  expect(picked(opus, { ...sonnet, effort: "low" })?.userOverride).toEqual({ from: routed, to: { ...sonnet, effort: "low" } });
 });
