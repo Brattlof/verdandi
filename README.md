@@ -30,14 +30,14 @@ It also remembers across sessions, writes and improves its own skills, runs on a
 
 ## Status
 
-Verdandi is early. The design is in [`docs/DESIGN.md`](docs/DESIGN.md), the M0 spike results are recorded as [ADRs](docs/decisions), and the M1 core loop is being built: `verdandid`, an event store and the Claude Code harness, with a terminal chat for now. Nothing is released yet.
+Verdandi is early. The design is in [`docs/DESIGN.md`](docs/DESIGN.md), the M0 spike results are recorded as [ADRs](docs/decisions), and the M1 core loop is being built: `verdandid`, an event store, the Claude Code harness, a terminal chat and a web UI. Parts of M2 and M3 are in too, such as the router, worktrees, checkpoints, verifiers and memory. Nothing is released yet.
 
 | Milestone | Scope |
 | --- | --- |
 | **M0 · Spike** | Agent SDK under Bun on Windows, effort and model switching, hooks, `bun:sqlite` FTS5, Effect 4, PTY host. Done, see [ADRs](docs/decisions). |
 | **M1 · Core loop** | verdandid and the web UI on Claude Code: threads, streaming, approvals, plan mode, diffs, resume, the usage ledger, trajectory recording. *In progress.* |
-| **M2 · Router v1** | Rules classifier, policy files, pins, switch-cost gate, decision records, plan→execute split, budget modes, spend dashboard. |
-| **M3 · Memory, skills, safe autonomy** | Worktrees, checkpoints, verifiers and escalation, memory, session search, the skill lifecycle, injection scanning. |
+| **M2 · Router v1** | Rules classifier, policy files, pins, switch-cost gate, decision records, plan→execute split, budget modes, spend dashboard. *In progress.* |
+| **M3 · Memory, skills, safe autonomy** | Worktrees, checkpoints, verifiers and escalation, memory, session search, the skill lifecycle, injection scanning. *In progress.* |
 | **M4 · Native harness and providers** | Verdandi's own agent loop; Anthropic, OpenAI-compatible and Gemini providers; routing and hand-off across harnesses. |
 | **M5 · Always-on** | Scheduler, messaging gateway, webhooks, profiles, desktop app, approvals from your phone. |
 | **M6 · Learn and reach** | Learned router, batch runs, execution backends, plugins, more harnesses, OpenAI-compatible API, ACP and MCP servers. |
@@ -87,7 +87,7 @@ Policy lives in plain files (`<repo>/.verdandi/routing.yaml`), so you can read, 
 
 | Surface | What it's for | Available |
 | --- | --- | --- |
-| **CLI** (`verdandi`) | `start`, `chat` today; `open`, `doctor`, headless `run "<task>"` and `batch` later. | Now |
+| **CLI** (`verdandi`) | `start`, `open`, `chat`, `doctor`, `costs`, `search`, `routing replay` and `batch` today; headless `run "<task>"` later. | Now |
 | **Web UI** | The main workspace. | M1 |
 | **Desktop app** | Tray, notifications, auto-update, manages the server. | M5 |
 | **Messaging gateway** | Start, steer and approve tasks from chat apps. | M5 |
