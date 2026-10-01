@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git, makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
-import { estimateBatch, loadEvalSet, parseBatchRoute, runBatch, summarize } from "./batch.ts";
+import { checkout, estimateBatch, loadEvalSet, parseBatchRoute, runBatch, summarize } from "./batch.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -108,6 +108,24 @@ test(
   },
   SLOW,
 );
+
+test("a task's copy shows its agent nothing past the task's commit", () => {
+  const { repo, file } = evalSet();
+  const [task] = loadEvalSet(file);
+  if (!task) throw new Error("the eval set has no tasks");
+  // Later history that may hold the answer: a commit on the branch, another branch and a tag.
+  git(repo, "commit", "-q", "--allow-empty", "-m", "the fix");
+  const later = git(repo, "rev-parse", "HEAD").trim();
+  git(repo, "branch", "fixed");
+  git(repo, "tag", "-m", "release", "v2");
+  const copy = track(checkout(task));
+  expect(git(copy, "rev-parse", "HEAD").trim()).toBe(task.commit);
+  expect(git(copy, "for-each-ref")).toBe("");
+  expect(git(copy, "remote")).toBe("");
+  const reachable = git(copy, "rev-list", "--all", "--reflog");
+  expect(reachable).toContain(task.commit);
+  expect(reachable).not.toContain(later);
+});
 
 test("a dry run estimates each task on each route without running anything", async () => {
   const { file } = evalSet();
