@@ -149,8 +149,8 @@ export const applyProjectsFeed = (sidebar: Sidebar | undefined, feed: ProjectsFe
 };
 
 /**
- * The right panel. Open, it shows a diff: the files `turnId` touched, or with `all` the whole project
- * against `HEAD`. `turnId` is kept while `all` is on, so switching back shows the same turn. Each fetch
+ * The right panel. Open, it shows a diff: what `turnId` changed, or with `all` everything since
+ * the thread's first turn. `turnId` is kept while `all` is on, so switching back shows the same turn. Each fetch
  * has its own `request`, and a result for any other request is dropped, so a slow answer never
  * replaces a newer one.
  */

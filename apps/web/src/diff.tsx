@@ -158,8 +158,8 @@ const statusText = ({ all, result }: Extract<DiffPanel, { open: true }>) => {
   if (result === undefined) return "Loading…";
   if (!result.ok) return result.message;
   const count = result.view.files.length + result.view.omittedFiles;
-  if (count === 0) return all ? "No changes against HEAD." : "The files this turn touched have no changes against HEAD.";
-  return `${count} changed ${count === 1 ? "file" : "files"}${all ? " against HEAD" : ", as they differ from HEAD now"}.`;
+  if (count === 0) return all ? "No changes since the thread's first turn." : "This turn changed no files.";
+  return `${count} changed ${count === 1 ? "file" : "files"}${all ? " since the thread's first turn" : " in this turn"}.`;
 };
 
 const DiffList = ({ rows, onToggle }: { rows: readonly DiffRow[]; onToggle: (path: string) => void }) => {

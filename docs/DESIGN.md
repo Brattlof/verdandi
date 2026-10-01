@@ -678,7 +678,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
   | Group | Tables |
   |---|---|
   | Log and receipts | `events`, `command_receipts` |
-  | Projections | `projects`, `threads`, `tasks`, `turns`, `items`, `requests` (approvals and questions), `checkpoints` |
+  | Projections | `projects`, `threads`, `tasks`, `turns`, `items`, `requests` (approvals and questions) |
   | Routing | `route_decisions`, `task_outcomes`, `routing_memory` |
   | Usage and providers | `usage_ledger`, `quota`, `provider_health` |
   | Learning | `memories` (+ FTS5), `session_index` (FTS5, including a trigram index for Chinese, Japanese and Korean text and for substring search), `skills`, `skill_runs`, `trajectories` |
@@ -739,7 +739,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 ## 13. Workspaces and execution
 
 - **Worktrees (per thread, optional):** `git worktree add` under `~/.verdandi/worktrees/<repo>/<branch>`. Setup scripts run when a worktree is created, and a cleanup policy removes old ones.
-- **Checkpoints:** at the end of each turn, the tree is saved to hidden refs `refs/verdandi/checkpoints/<thread>/<turn>`, using a temporary index so your branch and staging area are never touched.
+- **Checkpoints:** at the start and end of each turn, the tree is saved to hidden refs `refs/verdandi/checkpoints/<thread>/<turn>/start` and `…/end`, using a temporary index so your branch, staging area and stash are never touched (ADR 0015). A turn's diff is its end against its start, so your own edits between turns never show in it.
 - **Revert:** the conversation only, or the conversation and the files.
 - **Terminal:** PTYs run in a separate **PTY host** process that verdandid supervises, the same design VS Code uses. That way a crash in native terminal code can't take down the server. The host uses ConPTY on Windows. The UI renders terminals with xterm.js, and a terminal survives UI reloads.
 - **Execution backends** decide where the native harness runs commands, set per project:

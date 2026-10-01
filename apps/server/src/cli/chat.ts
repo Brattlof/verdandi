@@ -268,7 +268,7 @@ export const chat = async (argv: readonly string[]) => {
       ),
     );
 
-  /** `/diff` shows what the last turn edited; `/diff all` everything that differs from HEAD in the project. */
+  /** `/diff` shows what the last turn changed; `/diff all` everything since the thread's first turn. */
   const showDiff = async (all: boolean, projectPath: string) => {
     if (!all && !lastTurn) return process.stdout.write("[no turns yet: /diff all shows the project's changes]\n");
     const text = await runtime.runPromise(

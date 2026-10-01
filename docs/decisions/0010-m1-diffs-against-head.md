@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (issue #14, 2026-09-30). Superseded in part when checkpoints land (M3).
+Superseded by ADR 0015 (checkpoints, 2026-10-01). Accepted (issue #14, 2026-09-30).
 
 ## Context
 

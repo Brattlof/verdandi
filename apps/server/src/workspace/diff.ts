@@ -2,8 +2,9 @@ import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DiffUnavailable, type DiffView, type FileDiff, type Item, type ThreadId, type TurnId } from "@verdandi/contracts";
 import { Effect } from "effect";
-import type { SqlClient, SqlError } from "effect/unstable/sql";
-import { loadThreadView } from "../orchestration/projector.ts";
+import { SqlClient, type SqlError } from "effect/unstable/sql";
+import { checkpointRef, listCheckpoints, snapshot } from "./checkpoint.ts";
+import { type GitError, git, gitFailed, notARepo } from "./git.ts";
 
 /** Payload limits: one file's diff, and the whole response. */
 export const limits = { fileBytes: 64 * 1024, totalBytes: 512 * 1024 };
@@ -21,7 +22,10 @@ const real = (path: string): string => {
   }
 };
 
-/** The project-relative paths, `/`-separated, a turn's file tools touched. Paths outside the project are dropped. */
+/**
+ * The project-relative paths, `/`-separated, a turn's file tools touched; paths outside the project are
+ * dropped. Verifiers run when this is non-empty, which works in folders outside git too.
+ */
 export const editedPaths = (projectPath: string, items: readonly Item[]) => {
   const root = real(projectPath);
   const paths = new Set<string>();
@@ -36,34 +40,7 @@ export const editedPaths = (projectPath: string, items: readonly Item[]) => {
   return [...paths];
 };
 
-const gitMissing = new DiffUnavailable({
-  reason: "GitFailed",
-  message: "Could not run git. Install git, put it on PATH and restart verdandid.",
-});
-
-/**
- * Runs git read-only: no optional locks, so it never refreshes the user's index; literal pathspecs, so
- * `[id].tsx` is a file name, not a glob; fixed `a/` `b/` prefixes whatever the user's diff config says.
- */
-const git = (cwd: string, args: readonly string[]) =>
-  Effect.tryPromise({
-    try: async () => {
-      const proc = Bun.spawn(["git", "--no-optional-locks", "--literal-pathspecs", "-c", "core.quotePath=false", ...args], {
-        cwd,
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
-      return { stdout, stderr, code };
-    },
-    catch: () => gitMissing,
-  });
-
 const diffFlags = ["--no-color", "--no-ext-diff", "--no-renames", "--src-prefix=a/", "--dst-prefix=b/"];
-
-const failed = (what: string, stderr: string) =>
-  new DiffUnavailable({ reason: "GitFailed", message: `git ${what} failed: ${stderr.trim() || "no output"}` });
 
 /** `diff --git a/X b/X` names X twice (renames are off), so X is the first half. Quoted names stay quoted. */
 const headerPath = (chunk: string) => {
@@ -80,76 +57,99 @@ const cut = (diff: string, max: number) => {
   return { diff: diff.slice(0, end > 0 ? end + 1 : 0), truncated: true };
 };
 
+const gitFailedDiff = (e: GitError) => new DiffUnavailable({ reason: "GitFailed", message: e.message });
+
 /**
- * The working tree of `projectPath` against `HEAD`, one unified diff per file, new untracked files
- * included (ignored ones are not). `paths` narrows it to those project-relative files.
+ * `head` against `base` (commits or trees), one unified diff per file under `cwd`, paths relative to it.
+ * Each file is cut at `limits.fileBytes` and the files past `limits.totalBytes` are only counted.
  */
-export const diffProject = (projectPath: string, paths?: readonly string[]): Effect.Effect<DiffView, DiffUnavailable> =>
+export const diffTrees = (cwd: string, base: string, head: string): Effect.Effect<DiffView, DiffUnavailable> =>
   Effect.gen(function* () {
-    if (paths?.length === 0) return { files: [], omittedFiles: 0 };
-    if (!existsSync(projectPath)) {
-      return yield* new DiffUnavailable({ reason: "NotAGitRepo", message: `The project folder ${projectPath} does not exist.` });
-    }
-    const head = yield* git(projectPath, ["rev-parse", "--verify", "--quiet", "HEAD"]);
-    if (head.code !== 0 && /not a git repository/i.test(head.stderr)) {
-      return yield* new DiffUnavailable({
-        reason: "NotAGitRepo",
-        message: `${projectPath} is not a git repository, so there is nothing to diff against. Run \`git init\` there and commit, then try again.`,
-      });
-    }
-    if (head.code === 1) {
-      return yield* new DiffUnavailable({
-        reason: "GitFailed",
-        message: `${projectPath} has no commits yet, so there is nothing to diff against. Commit once, then try again.`,
-      });
-    }
-    if (head.code !== 0) return yield* failed("rev-parse", head.stderr);
-
-    const spec = ["--", ...(paths ?? [])];
-    const tracked = yield* git(projectPath, ["diff", "HEAD", "--relative", ...diffFlags, ...spec]);
-    if (tracked.code !== 0) return yield* failed("diff", tracked.stderr);
-    const listed = yield* git(projectPath, ["ls-files", "-z", "--others", "--exclude-standard", ...spec]);
-    if (listed.code !== 0) return yield* failed("ls-files", listed.stderr);
-
-    const chunks = tracked.stdout.split(/^(?=diff --git )/m).filter((c) => c.startsWith("diff --git "));
-    const changed = [
-      ...chunks.map((chunk) => ({ path: headerPath(chunk), diff: Effect.succeed(chunk) })),
-      ...listed.stdout
-        .split("\0")
-        .filter(Boolean)
-        .map((path) => ({
-          path,
-          // Exit code 1 means "differs", which a new file always does.
-          diff: git(projectPath, ["diff", "--no-index", ...diffFlags, "--", "/dev/null", path]).pipe(
-            Effect.flatMap((r) => (r.code <= 1 ? Effect.succeed(r.stdout) : Effect.fail(failed("diff --no-index", r.stderr)))),
-          ),
-        })),
-    ].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-
-    // ponytail: one git process per untracked file, and each diff is read whole before it's cut; fine for
-    // an agent's edits. Upgrade to a temporary index (`GIT_INDEX_FILE` + `add -N`) and a streamed read when
-    // threads with thousands of new files or huge generated files show up.
+    const r = yield* git(cwd, ["diff", ...diffFlags, "--relative", base, head, "--"]);
+    if (r.code !== 0) return yield* gitFailed("diff", r);
+    const chunks = r.stdout
+      .split(/^(?=diff --git )/m)
+      .filter((c) => c.startsWith("diff --git "))
+      .map((chunk) => ({ path: headerPath(chunk), chunk }))
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    // ponytail: the whole diff is read before it's cut; fine for an agent's edits. Upgrade to a streamed
+    // read when huge generated files show up.
     const files: FileDiff[] = [];
     let budget = limits.totalBytes;
-    for (const [i, file] of changed.entries()) {
-      if (budget <= 0) return { files, omittedFiles: changed.length - i };
-      const { diff, truncated } = cut(yield* file.diff, Math.min(limits.fileBytes, budget));
-      budget -= diff.length + file.path.length;
-      files.push({ path: file.path, diff, truncated });
+    for (const [i, { path, chunk }] of chunks.entries()) {
+      if (budget <= 0) return { files, omittedFiles: chunks.length - i };
+      const { diff, truncated } = cut(chunk, Math.min(limits.fileBytes, budget));
+      budget -= diff.length + path.length;
+      files.push({ path, diff, truncated });
     }
     return { files, omittedFiles: 0 };
+  }).pipe(Effect.catchTag("GitError", (e) => Effect.fail(gitFailedDiff(e))));
+
+const notGit = (cwd: string) =>
+  new DiffUnavailable({
+    reason: "NotAGitRepo",
+    message: `${cwd} is not a git repository, so Verdandi can't checkpoint or diff it. Run \`git init\` there, then start a new turn.`,
   });
 
-/** `DiffGet`: the thread's project diff, or with `turnId` only the files that turn edited. */
+/** The checkpoints `threadId` has in the repo holding `cwd`, or why there can be none: the folder is gone or isn't in a git repo. */
+const checkpointsIn = (cwd: string, threadId: ThreadId) =>
+  Effect.gen(function* () {
+    if (!existsSync(cwd)) {
+      return yield* new DiffUnavailable({ reason: "NotAGitRepo", message: `The project folder ${cwd} does not exist.` });
+    }
+    const repo = yield* git(cwd, ["rev-parse", "--git-dir"]);
+    if (repo.code !== 0) return yield* notARepo(repo.stderr) ? notGit(cwd) : gitFailed("rev-parse", repo);
+    return yield* listCheckpoints(cwd, threadId);
+  }).pipe(Effect.catchTag("GitError", (e) => Effect.fail(gitFailedDiff(e))));
+
+/** The working tree now, as a tree. */
+const workingTree = (cwd: string) =>
+  snapshot(cwd).pipe(
+    Effect.catchTag("GitError", (e) => Effect.fail(gitFailedDiff(e))),
+    Effect.flatMap((tree) => (tree === undefined ? Effect.fail(notGit(cwd)) : Effect.succeed(tree))),
+  );
+
+/**
+ * `DiffGet` (ADR 0015). With `turnId`: what that turn changed, its end checkpoint against its start (a
+ * running turn's end is the working tree now), so the user's own edits between turns never show. Without:
+ * the working tree against the thread's first checkpoint, or `HEAD` for a thread from before checkpoints.
+ */
 export const threadDiff = (
   threadId: ThreadId,
   turnId: TurnId | undefined,
 ): Effect.Effect<DiffView, DiffUnavailable | SqlError.SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
-    const thread = yield* loadThreadView(threadId);
+    const sql = yield* SqlClient.SqlClient;
+    const [thread] = yield* sql<{ cwd: string }>`
+      select p.path as cwd from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
     if (!thread) return yield* new DiffUnavailable({ reason: "ThreadNotFound", message: `Thread ${threadId} does not exist.` });
-    if (turnId === undefined) return yield* diffProject(thread.projectPath);
-    const turn = thread.turns.find((t) => t.turnId === turnId);
+    const turns = yield* sql<{ id: TurnId; status: string }>`
+      select id, status from turns where thread_id = ${threadId} order by started_at, rowid`;
+    const { cwd } = thread;
+    const saved = yield* checkpointsIn(cwd, threadId);
+    if (turnId === undefined) {
+      const first = turns.map((t) => checkpointRef(threadId, t.id, "start")).find((ref) => saved.has(ref));
+      if (first) return yield* diffTrees(cwd, first, yield* workingTree(cwd));
+      const head = yield* git(cwd, ["rev-parse", "--verify", "--quiet", "HEAD"]).pipe(
+        Effect.catchTag("GitError", (e) => Effect.fail(gitFailedDiff(e))),
+      );
+      if (head.code !== 0) {
+        return yield* new DiffUnavailable({
+          reason: "NoCheckpoint",
+          message: `${cwd} has no commits and this thread no checkpoints yet, so there is nothing to diff against. Send a turn or commit once, then try again.`,
+        });
+      }
+      return yield* diffTrees(cwd, "HEAD", yield* workingTree(cwd));
+    }
+    const turn = turns.find((t) => t.id === turnId);
     if (!turn) return yield* new DiffUnavailable({ reason: "TurnNotFound", message: `Turn ${turnId} is not in thread ${threadId}.` });
-    return yield* diffProject(thread.projectPath, editedPaths(thread.projectPath, turn.items));
+    const start = checkpointRef(threadId, turnId, "start");
+    const end = checkpointRef(threadId, turnId, "end");
+    if (!saved.has(start) || (turn.status !== "running" && !saved.has(end))) {
+      return yield* new DiffUnavailable({
+        reason: "NoCheckpoint",
+        message: `Turn ${turnId} has no checkpoint: it ran before Verdandi saved them, or saving one failed (verdandid's log says why). The thread's whole diff still works.`,
+      });
+    }
+    return yield* diffTrees(cwd, start, turn.status === "running" ? yield* workingTree(cwd) : end);
   });

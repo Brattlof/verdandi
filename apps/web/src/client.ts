@@ -109,7 +109,7 @@ export const connect = (token: string) => {
     return rejected ? { ok: false, reason: rejected.reason, message: rejected.message } : disconnected;
   };
 
-  /** The thread's project diff, or only the files `turnId` touched. A `DiffUnavailable` message names the fix. */
+  /** What `turnId` changed, or everything since the thread's first turn. A `DiffUnavailable` message names the fix. */
   const diff = async (
     threadId: ThreadId,
     turnId: TurnId | undefined,

@@ -44,7 +44,7 @@ export class RoutingUnavailable extends Schema.TaggedError<RoutingUnavailable>()
 
 /** Why a diff can't be shown. The message names the cause and the fix. */
 export class DiffUnavailable extends Schema.TaggedError<DiffUnavailable>()("DiffUnavailable", {
-  reason: Schema.Literals(["ThreadNotFound", "TurnNotFound", "NotAGitRepo", "GitFailed"]),
+  reason: Schema.Literals(["ThreadNotFound", "TurnNotFound", "NotAGitRepo", "NoCheckpoint", "GitFailed"]),
   message: Schema.String,
 }) {}
 
@@ -53,8 +53,8 @@ export const FileDiff = Schema.Struct({ path: Schema.String, diff: Schema.String
 export type FileDiff = typeof FileDiff.Type;
 
 /**
- * The project's working tree against `HEAD` (ADR 0010). `omittedFiles` counts changed files left out
- * once the payload hit its size limit.
+ * Changed files between two checkpoints of the project, or a checkpoint and the working tree (ADR 0015).
+ * `omittedFiles` counts changed files left out once the payload hit its size limit.
  */
 export const DiffView = Schema.Struct({ files: Schema.Array(FileDiff), omittedFiles: Schema.Number });
 export type DiffView = typeof DiffView.Type;
@@ -258,7 +258,7 @@ export class Api extends RpcGroup.make(
   Rpc.make("Unsubscribe", { payload: { subscriptionId: Schema.String } }),
   /** The harnesses this verdandid runs, so clients offer only those. */
   Rpc.make("HarnessesList", { success: Schema.Array(HarnessId) }),
-  /** The thread's project diff; with `turnId`, only the files that turn's file tools touched. */
+  /** What `turnId` changed in the project, or without it, everything since the thread's first turn. */
   Rpc.make("DiffGet", {
     payload: { threadId: ThreadId, turnId: Schema.optionalKey(TurnId) },
     success: DiffView,

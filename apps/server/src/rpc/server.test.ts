@@ -505,27 +505,50 @@ describe("rpc server", () => {
     expect(outcomes).toEqual(["busy", "ok"]);
   });
 
-  test("DiffGet shows exactly what a turn edited, and the whole project without a turn", async () => {
+  test("DiffGet shows what each turn changed from its checkpoints, never the user's edits between turns", async () => {
     const { info, drain } = await startServer();
     const repo = makeTempRepo({ "a b.txt": "one\r\ntwo\r\n", "mine.txt": "mine\n" });
     cleanups.push(async () => removeTempHome(repo));
-    appendFileSync(join(repo, "mine.txt"), "the user's own edit\n");
+    appendFileSync(join(repo, "mine.txt"), "the user's edit before the thread\n");
     const threadId = uuid<ThreadId>();
-    const turnId = uuid<TurnId>();
+    const [first, second] = [uuid<TurnId>(), uuid<TurnId>()];
+    const turn = (turnId: TurnId) =>
+      withClient(info.port, info.token, (c) =>
+        c.CommandDispatch({
+          type: "turn.send",
+          commandId: uuid<CommandId>(),
+          threadId,
+          turnId,
+          text: `edit ${join(repo, "a b.txt")}`,
+          mode: "build",
+        }),
+      );
     await withClient(info.port, info.token, (c) =>
-      Effect.gen(function* () {
-        yield* c.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: repo, route });
-        const text = `edit ${join(repo, "a b.txt")}`;
-        yield* c.CommandDispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId, text, mode: "build" });
-      }),
+      c.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: repo, route }),
     );
+    await turn(first);
     await drain();
-    const [turn, all, missing] = await withClient(info.port, info.token, (c) =>
-      Effect.all([c.DiffGet({ threadId, turnId }), c.DiffGet({ threadId }), Effect.flip(c.DiffGet({ threadId, turnId: uuid<TurnId>() }))]),
+    appendFileSync(join(repo, "mine.txt"), "the user's edit between turns\n");
+    writeFileSync(join(repo, "new.txt"), "untracked\n");
+    await turn(second);
+    await drain();
+    const [one, two, all, missing] = await withClient(info.port, info.token, (c) =>
+      Effect.all([
+        c.DiffGet({ threadId, turnId: first }),
+        c.DiffGet({ threadId, turnId: second }),
+        c.DiffGet({ threadId }),
+        Effect.flip(c.DiffGet({ threadId, turnId: uuid<TurnId>() })),
+      ]),
     );
     const changed = (diff: string) => diff.split("\n").filter((l) => /^[+-](?![+-]{2} )/.test(l));
-    expect(turn.files.map((f) => [f.path, changed(f.diff)])).toEqual([["a b.txt", ["+edited by the fake harness"]]]);
-    expect(all.files.map((f) => f.path)).toEqual(["a b.txt", "mine.txt"]);
+    expect(one.files.map((f) => [f.path, changed(f.diff)])).toEqual([["a b.txt", ["+edited by the fake harness"]]]);
+    expect(two.files.map((f) => [f.path, changed(f.diff)])).toEqual([["a b.txt", ["+edited by the fake harness"]]]);
+    // Since the thread's first checkpoint: both turns' edits and the user's since, not the user's edit from before.
+    expect(all.files.map((f) => [f.path, changed(f.diff).length])).toEqual([
+      ["a b.txt", 2],
+      ["mine.txt", 1],
+      ["new.txt", 1],
+    ]);
     expect(missing.reason).toBe("TurnNotFound");
   });
 
