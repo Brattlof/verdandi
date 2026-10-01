@@ -12,7 +12,8 @@ import { AttachmentsDir, HarnessRegistry, ProjectVerifiers, ReactorLive, Worktre
 export const AppLayer = (
   home: string,
   harnesses: Partial<Record<HarnessId, HarnessAdapter>>,
-  options: { readonly project?: Projector } = {},
+  /** `spendCapsHome`: the home whose `spend-caps.yaml` applies, when not `home` (a batch run's own home). */
+  options: { readonly project?: Projector; readonly spendCapsHome?: string } = {},
 ) => {
   const routing = routingFor(harnesses);
   // A broken policy runs no verifiers; it already rejects the next routed turn, naming the file and key.
@@ -23,7 +24,7 @@ export const AppLayer = (
         : Effect.as(Effect.logWarning(`Skipped the project's verifiers: ${policy.failure}`), []),
     );
   return ReactorLive.pipe(
-    Layer.provideMerge(EngineLive({ ...options, routing, spendCaps: loadSpendCaps(home) })),
+    Layer.provideMerge(EngineLive({ ...options, routing, spendCaps: loadSpendCaps(options.spendCapsHome ?? home) })),
     Layer.provideMerge(Layer.succeed(ProjectVerifiers, verifiers)),
     Layer.provideMerge(Layer.succeed(HarnessRegistry, harnesses)),
     Layer.provideMerge(Layer.succeed(AttachmentsDir, attachmentsDir(home))),

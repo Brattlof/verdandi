@@ -9,7 +9,7 @@ const usd = (n: number | null) => (n === null ? "-" : `$${n.toFixed(4)}`);
 const percent = (part: number, whole: number) => (whole === 0 ? "-" : `${Math.round((part / whole) * 100)}%`);
 
 /** Rows in aligned columns, the first row being the header. */
-const columns = (lines: readonly (readonly string[])[]) => {
+export const columns = (lines: readonly (readonly string[])[]) => {
   const widths = lines[0]?.map((_, i) => Math.max(...lines.map((l) => l[i]?.length ?? 0))) ?? [];
   return lines
     .map(
