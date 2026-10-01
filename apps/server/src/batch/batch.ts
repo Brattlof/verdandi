@@ -53,20 +53,30 @@ export const parseBatchRoute = (spec: string): Route | "auto" => {
 /** DESIGN §8.10's baselines (a) and (b), against the router. */
 export const defaultBatchRoutes = ["auto", "claude-code/opus/medium", "claude-code/sonnet/high"];
 
-const git = (cwd: string, ...args: string[]) => {
-  const r = Bun.spawnSync(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+const git = (cwd: string, args: string[], input = "") => {
+  const r = Bun.spawnSync(["git", ...args], { cwd, stdin: Buffer.from(input), stdout: "pipe", stderr: "pipe" });
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${r.stderr.toString().trim()}`);
+  return r.stdout.toString();
 };
 
 /**
  * A throwaway copy of the task's repository at its commit. `--shared` borrows the repository's objects, so it's fast
- * and never writes to it. The task's `verify` becomes the copy's project verifier, so a routed run can escalate, unless
- * its policy names verifiers of its own.
+ * and never writes to it. The copy keeps only its detached `HEAD`: every other ref, the `origin` remote and the reflog
+ * (which records where the cloned branch pointed) are dropped, so `git log --all`, `git branch -a`, `git tag` and
+ * `git fetch` show the agent nothing past the task's commit, such as the commits that fixed what it asks for.
+ * ponytail: later commits' objects are still borrowed through `.git/objects/info/alternates`, so an agent that lists
+ * every object (`git fsck --lost-found`) can find them. Upgrade: fetch only the task's commit into an empty repository
+ * when an eval needs a sealed copy.
+ * The task's `verify` becomes the copy's project verifier, so a routed run can escalate, unless its policy names
+ * verifiers of its own.
  */
-const checkout = (task: LoadedTask) => {
+export const checkout = (task: LoadedTask) => {
   const dir = mkdtempSync(join(tmpdir(), "verdandi batch "));
-  git(dir, "clone", "--quiet", "--no-checkout", "--shared", task.repoPath, ".");
-  git(dir, "checkout", "--quiet", "--detach", task.commit);
+  git(dir, ["clone", "--quiet", "--no-checkout", "--shared", task.repoPath, "."]);
+  git(dir, ["checkout", "--quiet", "--detach", task.commit]);
+  git(dir, ["remote", "remove", "origin"]);
+  git(dir, ["update-ref", "--no-deref", "--stdin"], git(dir, ["for-each-ref", "--format=delete %(refname)"]));
+  git(dir, ["reflog", "expire", "--expire=now", "--all"]);
   const file = join(dir, ".verdandi", "routing.yaml");
   const tracked = existsSync(file);
   const policy = tracked ? ((Bun.YAML.parse(readFileSync(file, "utf8")) ?? {}) as Record<string, unknown>) : {};
