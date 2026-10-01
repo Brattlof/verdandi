@@ -85,6 +85,8 @@ export const rules: Classifier = (s) => {
   for (const [cls, points, re] of RULES) {
     for (const phrase of new Set(Array.from(s.text.matchAll(re), (m) => m[0]))) add(cls, points, `"${phrase}"`);
   }
+  // Signals blank file names out of the text, but a README or changelog is the docs it names.
+  if (s.files.some((f) => /(^|\/)(readme|changelog)\.\w+$/i.test(f))) add("docs.write", 2, "a readme or changelog");
   if (s.stackTrace) add("debug.investigate", 2, "stack trace");
   if (s.files.length >= 4) add("code.refactor.large", 1, `${s.files.length} files`);
   const ranked = [...scores].sort((a, b) => b[1] - a[1]);

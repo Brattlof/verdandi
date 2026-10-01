@@ -2,7 +2,7 @@ import type { InteractionMode } from "@verdandi/contracts";
 
 /** Stage 2 (DESIGN §8.4): cheap, local facts about a task that classifiers read. */
 export type Signals = {
-  /** Lowercased task text. */
+  /** Lowercased task text, with its file references and URLs blanked out: they're names, not intent words. */
   readonly text: string;
   readonly mode: InteractionMode;
   /** Paths and file names the text mentions. */
@@ -31,12 +31,16 @@ export const signals = (text: string, mode: InteractionMode): Signals => {
         .filter((w) => !w.includes("://") && (FILE_EXT.test(w) || PATH.test(w))),
     ),
   ];
+  // The text without its file references and URLs, token by token as above: `docs/DESIGN.md` asks for no design.
+  const words = text
+    .replace(/[^\s`'"()[\]<>,;]+/g, (w) => (w.includes("://") || files.some((f) => w.startsWith(f)) ? " " : w))
+    .toLowerCase();
   return {
-    text: lower,
+    text: words,
     mode,
     files,
     stackTrace: STACK_TRACE.test(lower),
-    depth: DEEP.test(lower) ? "deep" : QUICK.test(lower) ? "quick" : undefined,
+    depth: DEEP.test(words) ? "deep" : QUICK.test(words) ? "quick" : undefined,
   };
 };
 
