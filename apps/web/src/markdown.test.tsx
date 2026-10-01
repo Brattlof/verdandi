@@ -56,3 +56,20 @@ test("a streaming reply keeps its finished blocks unchanged and shows an unclose
   expect(splitBlocks(reply).slice(0, done.length)).toEqual(done);
   expect(render(partial)).toContain('<pre><code data-language="ts">const a = 1;\n\n</code></pre>');
 });
+
+test("a one-character bold, italic or struck span closes at its own marker, not the next span's", () => {
+  expect(render("Press **Y** to confirm, or **N** to cancel.")).toBe(
+    "<p>Press <strong>Y</strong> to confirm, or <strong>N</strong> to cancel.</p>",
+  );
+  expect(render("*a* or *b*, _c_ or _d_, __e__ or __f__, ~~g~~ or ~~h~~")).toBe(
+    "<p><em>a</em> or <em>b</em>, <em>c</em> or <em>d</em>, <strong>e</strong> or <strong>f</strong>, <del>g</del> or <del>h</del></p>",
+  );
+});
+
+test("a bare URL keeps a closing parenthesis that matches one inside it, and leaves one that closes the prose", () => {
+  const a = (url: string) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+  const wiki = "https://en.wikipedia.org/wiki/Markdown_(language)";
+  expect(render(`See ${wiki}, or (${wiki}) or (https://example.com/a).`)).toBe(
+    `<p>See ${a(wiki)}, or (${a(wiki)}) or (${a("https://example.com/a")}).</p>`,
+  );
+});
