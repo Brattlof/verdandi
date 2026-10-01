@@ -4,13 +4,10 @@ import type { BatchReport, HarnessAdapter, HarnessId } from "@verdandi/contracts
 import { findClaude, makeClaudeCodeAdapter } from "@verdandi/harness-claude-code";
 import { makeFakeHarness } from "@verdandi/testkit";
 import { defaultBatchRoutes, estimateBatch, loadEvalSet, parseBatchRoute, runBatch, summarize } from "../batch/batch.ts";
-import { flag, resolveHome } from "../config/home.ts";
+import { flag, flags, resolveHome } from "../config/home.ts";
 import { columns } from "./costs.ts";
 
 const usd = (n: number | null) => (n === null ? "-" : `$${n.toFixed(4)}`);
-
-/** Every value of a flag that may repeat, e.g. `--route auto --route claude-code/opus/medium`. */
-const flags = (argv: readonly string[], name: string) => argv.flatMap((a, i) => (a === name && argv[i + 1] ? [argv[i + 1] as string] : []));
 
 /**
  * `verdandi batch <evalset.yaml>`: runs each task of an eval set on each route in a throwaway copy of its repository,

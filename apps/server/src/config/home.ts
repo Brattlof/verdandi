@@ -2,17 +2,23 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-/** The value after `name` in argv, or undefined when the flag is absent. Fails when the value is missing. */
-export const flag = (argv: readonly string[], name: string): string | undefined => {
-  const i = argv.indexOf(name);
-  if (i === -1) return undefined;
-  const value = argv[i + 1];
-  if (value === undefined || value.startsWith("--")) throw new Error(`${name} needs a value, e.g. ${name} <value>.`);
-  return value;
-};
+/**
+ * Every value of a flag that may repeat (`--route auto --route claude-code/opus/medium`), each written `--name value`
+ * or `--name=value`, where the value is everything after the first `=`. Fails when one is missing.
+ */
+export const flags = (argv: readonly string[], name: string): string[] =>
+  argv.flatMap((arg, i) => {
+    if (arg !== name && !arg.startsWith(`${name}=`)) return [];
+    const value = arg === name ? argv[i + 1] : arg.slice(name.length + 1);
+    if (!value || (arg === name && value.startsWith("--"))) throw new Error(`${name} needs a value, e.g. ${name} <value>.`);
+    return [value];
+  });
+
+/** The value of `name` in argv (`--name value` or `--name=value`), or undefined when the flag is absent. Fails when the value is missing. */
+export const flag = (argv: readonly string[], name: string): string | undefined => flags(argv, name)[0];
 
 /**
- * The Verdandi home to use: `--home <dir>`, else the default profile. Dev servers pass
+ * The Verdandi home to use: `--home <dir>` (or `--home=<dir>`), else the default profile. Dev servers pass
  * `--home ./.verdandi-dev` so they never touch the real `~/.verdandi`.
  */
 export const resolveHome = (argv: readonly string[]): string => {
