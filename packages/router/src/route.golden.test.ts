@@ -153,3 +153,23 @@ test("a feature routed with an explorer on Haiku keeps its main route in every m
     expect(d.subagents).toEqual({ explorer: { model: "haiku", effort: "low" } });
   }
 });
+
+// DESIGN §8.4 stage 1: a restriction applies to a file the task names, however the text cites it.
+test("a restricted file cited with a line, a column or closing punctuation still lifts the task to tier L", () => {
+  const policy = loadPolicy([{ source: "test", data: { restrictions: [{ match: "src/auth/**", minTier: "L" }] } }]);
+  const routed = (text: string) => {
+    const d = route({ text, mode: "build" }, policy, rules);
+    return [text, `${d.target.model} ${d.effort}`, d.trace.find((t) => t.stage === "signals")?.note, d.reason];
+  };
+  const lifted =
+    "Looks like code.edit.local, but sonnet is unavailable, so it runs on opus at medium effort, the cheapest capable target left.";
+  const kept = "Looks like code.edit.local, so it runs on sonnet at medium effort.";
+  for (const cite of ["", ".", ":42", ":42.", ":42:7!", ":42?", ":42: it"]) {
+    const text = `Fix the expired-session bug in src/auth/session.ts${cite}`;
+    expect(routed(text)).toEqual([text, "opus medium", "build mode, 1 file reference", lifted]);
+  }
+  const billing = "Fix the expired-card bug in src/billing/invoice.ts:42.";
+  expect(routed(billing)).toEqual([billing, "sonnet medium", "build mode, 1 file reference", kept]);
+  const prose = "Fix the bug with async/await and/or callbacks, see https://example.com/src/auth/a.ts.";
+  expect(routed(prose)).toEqual([prose, "sonnet medium", "build mode, 0 file references", kept]);
+});

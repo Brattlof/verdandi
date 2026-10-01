@@ -26,7 +26,8 @@ export const signals = (text: string, mode: InteractionMode): Signals => {
     ...new Set(
       text
         .split(/[\s`'"()[\]<>,;]+/)
-        .map((w) => w.replace(/(:\d+)+$|[.:!?]+$/, ""))
+        // A line and column, then the sentence's punctuation: `src/a.ts:12:5.` is `src/a.ts`.
+        .map((w) => w.replace(/(:\d+)*[.:!?]*$/, ""))
         .filter((w) => !w.includes("://") && (FILE_EXT.test(w) || PATH.test(w))),
     ),
   ];
