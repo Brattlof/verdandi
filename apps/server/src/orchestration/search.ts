@@ -1,4 +1,4 @@
-import type { ProjectId, SessionHit, SessionQuery, ThreadId, TurnId } from "@verdandi/contracts";
+import { codePointStart, type ProjectId, type SessionHit, type SessionQuery, type ThreadId, type TurnId } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { titleFrom } from "./projector.ts";
@@ -23,6 +23,7 @@ export const contextParts = (marked: string): SessionHit["parts"] => {
   let to = Math.min((last < 0 ? first : last) + context, marked.length);
   if (from > 0) from = marked.indexOf(" ", from) + 1 || from;
   if (to < marked.length) to = marked.lastIndexOf(" ", to) > last ? marked.lastIndexOf(" ", to) : to;
+  [from, to] = [codePointStart(marked, from), codePointStart(marked, to)]; // never half an emoji at either end
   const window = `${from > 0 ? "…" : ""}${marked.slice(from, to)}${to < marked.length ? "…" : ""}`;
   // Text and matches alternate, split at the markers; a match cut by the window keeps its half.
   return window

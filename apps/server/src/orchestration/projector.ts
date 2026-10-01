@@ -23,7 +23,7 @@ import type {
   Usage,
   WorktreeView,
 } from "@verdandi/contracts";
-import { nextWorktree } from "@verdandi/contracts";
+import { clip, nextWorktree } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import type { DeciderState, PendingRequest } from "./decider.ts";
@@ -522,10 +522,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
   );
 
 /** A thread's title until auto-titling exists: the first line of its first turn, cut to 80 characters. */
-export const titleFrom = (text: string) => {
-  const line = text.trim().split(/\r?\n/, 1)[0] ?? "";
-  return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line;
-};
+export const titleFrom = (text: string) => clip(text.trim().split(/\r?\n/, 1)[0] ?? "", 80);
 
 export const loadProjects: Effect.Effect<ProjectSummary[], SqlError.SqlError, SqlClient.SqlClient> = withSql((sql) =>
   sql<{ id: string; path: string }>`select id, path from projects order by path`.pipe(

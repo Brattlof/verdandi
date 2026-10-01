@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { describeRouteChange, type Route } from "@verdandi/contracts";
+import { clip, describeRouteChange, type Route } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { flag, resolveHome } from "../config/home.ts";
 import { projectIdFor } from "../orchestration/decider.ts";
@@ -9,10 +9,7 @@ import { resolveProjectPath } from "../workspace/project.ts";
 const usd = (n: number) => `$${n.toFixed(4)}`;
 const signed = (n: number) => `${n < 0 ? "-" : "+"}${usd(Math.abs(n))}`;
 const describe = (r: Route) => `${r.harness} ${r.model} ${r.effort}`;
-const line = (text: string) => {
-  const first = text.trim().split(/\r?\n/, 1)[0] ?? "";
-  return first.length > 60 ? `${first.slice(0, 59)}…` : first;
-};
+const line = (text: string) => clip(text.trim().split(/\r?\n/, 1)[0] ?? "", 60);
 
 /** A replay as text: what would route differently and to what, the estimated cost change, and what was assumed. */
 export const replayText = (r: Replay) => {
