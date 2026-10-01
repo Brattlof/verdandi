@@ -74,6 +74,13 @@ export const TaskLimits = Schema.Struct({
 });
 export type TaskLimits = typeof TaskLimits.Type;
 
+/**
+ * A step of the escalation ladder (DESIGN §8.7): `effort` raises the task's effort one level, `model` moves it to a
+ * stronger model on the same harness, `ask` stops and leaves the next move to the user.
+ */
+export const EscalationStep = Schema.Literals(["effort", "model", "ask"]);
+export type EscalationStep = typeof EscalationStep.Type;
+
 /** A partial route: layers merge key by key, so a later layer can change only the effort. */
 export const RouteSpec = Schema.Struct({
   /** Acceptable targets by name; the router picks the cheapest available one, ties going to the earlier. */
@@ -126,7 +133,15 @@ export const Policy = Schema.Struct({
    * How a task's work is checked (DESIGN §8.7). `verifiers` are shell commands, e.g. `bun test`, run in order in the project
    * folder after a turn whose agent changed files, until one fails. Its exit code says whether the work holds up.
    */
-  escalation: Schema.optionalKey(Schema.Struct({ verifiers: Schema.optionalKey(Schema.Array(Schema.String)) })),
+  escalation: Schema.optionalKey(
+    Schema.Struct({
+      verifiers: Schema.optionalKey(Schema.Array(Schema.String)),
+      /** What a routed task tries after a verifier fails, one step per failure (default `[effort, model, ask]`). */
+      ladder: Schema.optionalKey(Schema.NonEmptyArray(EscalationStep)),
+      /** How many steps a task takes without asking the user (default 1); then it stops and leaves the next one to the user. */
+      maxAutoEscalations: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+    }),
+  ),
   /** When a task touches a path matching `match` (a glob), drop targets with a forbidden access mode or below `minTier`. */
   restrictions: Schema.optionalKey(
     Schema.Array(

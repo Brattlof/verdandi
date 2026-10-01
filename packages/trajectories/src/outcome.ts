@@ -30,6 +30,7 @@ type Draft = {
   corrections: number;
   override: { readonly from: Route; readonly to: Route } | undefined;
   readonly verifierRuns: { command: string; passed: boolean }[];
+  escalations: number;
   readonly usage: Map<string, Usage>;
 };
 
@@ -58,6 +59,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         corrections: 0,
         override: undefined,
         verifierRuns: [],
+        escalations: 0,
         usage: new Map(),
       });
       continue;
@@ -71,6 +73,13 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         break;
       case "task.rerouted":
         task.current = e.to;
+        break;
+      // At `ask` nothing moved.
+      case "task.escalated":
+        if (e.to) {
+          task.current = e.to;
+          task.escalations++;
+        }
         break;
       case "turn.started":
         current = task;
@@ -134,7 +143,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         implicitSatisfaction: Math.max(-1, 1 - corrections),
         ...(t.override ? { userOverride: t.override } : {}),
         verifierRuns: t.verifierRuns,
-        escalations: 0, // nothing escalates until the router does (DESIGN §8.7)
+        escalations: t.escalations,
         usage: [...t.usage.values()],
         wallMs: t.wallMs,
       },

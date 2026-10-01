@@ -46,6 +46,11 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
       e.type === "thread.unarchived"
     )
       continue;
+    // An escalation moves the task's next turns; the turn it escalated from has already completed.
+    if (e.type === "task.escalated") {
+      if (thread && !turn && e.to) thread = { ...thread, route: e.to };
+      continue;
+    }
     if (e.type === "harness.session.bound") {
       session = e;
       continue;

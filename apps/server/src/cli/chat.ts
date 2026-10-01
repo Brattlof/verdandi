@@ -207,6 +207,10 @@ export const chat = async (argv: readonly string[]) => {
             const tail = e.passed ? "" : `${e.output.trimEnd().split(/\r?\n/).slice(-10).join("\n")}\n`;
             process.stdout.write(`\n[verifier ${e.command} ${result} in ${(e.durationMs / 1000).toFixed(1)}s]\n${tail}`);
           }
+          if (e.type === "task.escalated") {
+            const moved = e.to ? `escalated to ${e.to.model} ${e.to.effort}` : "not escalated";
+            process.stdout.write(`[${moved}: ${e.reason}]\n`);
+          }
           if (e.type === "turn.started") running = lastTurn = e.turnId;
           if (e.type === "approval.requested" || e.type === "user-input.requested" || e.type === "plan.requested") addRequest(e);
           if (e.type === "approval.resolved") removeRequest(e.requestId);

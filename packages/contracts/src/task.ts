@@ -6,7 +6,8 @@ import { Route } from "./route.ts";
 // Persisted: like events, a published version is never edited. A change is a v2 plus an upgrade on read.
 
 /**
- * `reverted` and `escalated` wait for checkpoints and the router (DESIGN §8.7); nothing records them yet.
+ * `reverted` waits for checkpoints. `escalated` isn't written: a task's status is how it ended, and `escalations` counts
+ * the steps it took (DESIGN §8.7); routing memory counts an escalated task against the route it started on.
  * `limit`: a budget guard (`maxCost` or `maxTurns`) stopped the task.
  */
 export const TaskStatus = Schema.Literals(["completed", "abandoned", "reverted", "escalated", "failed", "limit"]);

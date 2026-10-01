@@ -89,14 +89,18 @@ export const ReactorLive = Layer.effect(
         Effect.provideService(SqlClient.SqlClient, sql),
       );
 
-    /** Runs the project's verifiers in order until one fails, recording each on the turn before it completes (DESIGN §8.7). */
+    /**
+     * Runs the project's verifiers in order until one fails, recording each on the turn before it completes (DESIGN §8.7).
+     * Returns the run that failed, if one did.
+     */
     const verify = (threadId: ThreadId, turnId: TurnId, projectPath: string) =>
       Effect.gen(function* () {
         for (const command of yield* projectVerifiers(projectPath)) {
           const run = yield* runVerifier(command, projectPath);
           yield* engine.dispatch({ type: "verifier.report", commandId: randomUUID() as CommandId, threadId, turnId, run });
-          if (!run.passed) return;
+          if (!run.passed) return run;
         }
+        return undefined;
       });
 
     /** Saves the thread's tree as turn `turnId`'s start or end checkpoint (DESIGN §13). A failure is logged, never the turn's. */
@@ -165,12 +169,26 @@ export const ReactorLive = Layer.effect(
               if (event.type !== "turn.finished") return report(threadId, turnId, event);
               finished = true;
               // ponytail: a steer sent while verifiers run is recorded but never reaches the agent, which has finished.
-              // Upgrade: hand it to the next turn, once escalation starts one (DESIGN §8.7).
-              const verified =
-                event.status === "success" && editedPaths(thread.path, calls).length > 0
-                  ? verify(threadId, turnId, thread.path)
-                  : Effect.void;
-              return Effect.andThen(verified, report(threadId, turnId, event));
+              // Upgrade: hand it to the escalation's follow-up turn, or show it as unsent.
+              return Effect.gen(function* () {
+                const failed =
+                  event.status === "success" && editedPaths(thread.path, calls).length > 0
+                    ? yield* verify(threadId, turnId, thread.path)
+                    : undefined;
+                yield* report(threadId, turnId, event);
+                // Once the turn has completed, a failed verifier may escalate its task (DESIGN §8.7); the decider decides whether.
+                if (failed) {
+                  const nextTurnId = randomUUID() as TurnId;
+                  yield* engine.dispatch({
+                    type: "task.escalate",
+                    commandId: randomUUID() as CommandId,
+                    threadId,
+                    turnId,
+                    nextTurnId,
+                    run: failed,
+                  });
+                }
+              });
             }),
           );
         if (!finished) yield* fail("The harness stopped without finishing the turn.");

@@ -5,7 +5,7 @@ import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields, VerifierRun } from "./items.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
-import { BudgetMode, RouteDecision, RouteInputs } from "./routing.ts";
+import { BudgetMode, EscalationStep, RouteDecision, RouteInputs } from "./routing.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 
 // Events are append-only and must stay readable forever. To change one, add a v2 schema
@@ -246,6 +246,23 @@ export const VerifierRan = Schema.Struct({
   turnId: TurnId,
   ...VerifierRun.fields,
 });
+/**
+ * A verifier failed after turn `turnId` of routed task `taskId`, and Verdandi took one step of the escalation ladder
+ * (DESIGN §8.7). At `effort` and `model` the task goes on at `to` with the turn `nextTurnId`, committed right after
+ * this, which hands the agent the failure; at `ask` it stops and the user decides. Projected as an `escalation` item of `turnId`.
+ */
+export const TaskEscalated = Schema.Struct({
+  type: Schema.Literal("task.escalated"),
+  v: v1,
+  threadId: ThreadId,
+  taskId: TaskId,
+  turnId: TurnId,
+  step: EscalationStep,
+  from: Route,
+  to: Schema.optionalKey(Route),
+  nextTurnId: Schema.optionalKey(TurnId),
+  reason: Schema.String,
+});
 /** `limit`: a budget guard of the task (its `maxCost` or `maxTurns`) stopped the turn, which ends the task. */
 export const TurnStatus = Schema.Literals(["success", "error", "interrupted", "limit"]);
 export const TurnCompleted = Schema.Struct({
@@ -281,6 +298,7 @@ export const Event = Schema.Union([
   DecisionRecorded,
   SpendCapRaised,
   VerifierRan,
+  TaskEscalated,
 ]);
 export type Event = typeof Event.Type;
 
@@ -327,6 +345,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "decision.recorded@1": DecisionRecorded,
   "spend.cap.raised@1": SpendCapRaised,
   "verifier.ran@1": VerifierRan,
+  "task.escalated@1": TaskEscalated,
 };
 
 /** The row shape an event is stored as. */

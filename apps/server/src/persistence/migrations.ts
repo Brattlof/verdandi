@@ -224,6 +224,12 @@ const turnAttachments = Effect.gen(function* () {
   yield* sql`alter table turns add column attachments text not null default '[]'`;
 });
 
+/** How many escalation steps each task has taken (DESIGN §8.7). */
+const taskEscalations = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table tasks add column escalations integer not null default 0`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -239,4 +245,5 @@ export const migrations = {
   "12_routing_memory": routingMemory,
   "13_thread_archive": threadArchive,
   "14_turn_attachments": turnAttachments,
+  "15_task_escalations": taskEscalations,
 };

@@ -132,6 +132,18 @@ export const VerifierReport = Schema.Struct({
   turnId: TurnId,
   run: VerifierRun,
 });
+/**
+ * Internal: the reactor asking to escalate the task of turn `turnId`, whose verifier `run` failed (DESIGN §8.7).
+ * A follow-up turn, if the ladder takes a step, gets `nextTurnId`. Clients cannot send it.
+ */
+export const TaskEscalate = Schema.Struct({
+  type: Schema.Literal("task.escalate"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  nextTurnId: TurnId,
+  run: VerifierRun,
+});
 /** Internal: marks a turn left running by a previous verdandid as interrupted. */
 export const TurnRecover = Schema.Struct({
   type: Schema.Literal("turn.recover"),
@@ -172,6 +184,7 @@ export const Command = Schema.Union([
   ApprovalRespond,
   HarnessReport,
   VerifierReport,
+  TaskEscalate,
   TurnRecover,
 ]);
 export type Command = typeof Command.Type;
