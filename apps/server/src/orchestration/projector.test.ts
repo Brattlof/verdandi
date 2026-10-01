@@ -4,7 +4,7 @@ import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect } from "effect";
 import type { SqlClient } from "effect/unstable/sql";
 import { SqlLive } from "../persistence/db.ts";
-import { loadThreadView, project } from "./projector.ts";
+import { loadThreadView, project, titleFrom } from "./projector.ts";
 
 const homes: string[] = [];
 const tempHome = () => {
@@ -124,4 +124,12 @@ test("migrations are idempotent", async () => {
   await run(home, project(stored(turn[0] as Event)));
   const view = await run(home, loadThreadView(threadId));
   expect(view?.threadId).toBe(threadId);
+});
+
+test("a title is cut at 80 code points, so an emoji at the cut is kept whole", () => {
+  const a = (n: number) => "a".repeat(n);
+  expect(titleFrom(`${a(78)}😀${"b".repeat(10)}`)).toBe(`${a(78)}😀…`);
+  expect(titleFrom("🚀".repeat(80))).toBe("🚀".repeat(80)); // 160 UTF-16 units, 80 code points
+  expect(titleFrom("🚀".repeat(100))).toBe(`${"🚀".repeat(79)}…`);
+  expect(titleFrom(`${a(70)}${" ".repeat(20)}b\nmore`)).toBe(`${a(70)}…`);
 });

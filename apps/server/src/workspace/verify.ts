@@ -1,4 +1,4 @@
-import type { VerifierRun } from "@verdandi/contracts";
+import { codePointStart, type VerifierRun } from "@verdandi/contracts";
 import { Effect, Option } from "effect";
 
 /** How much of a verifier's output is kept: the end, where test runners print failures and totals. */
@@ -39,7 +39,7 @@ const collect = (streams: readonly ReadableStream<Uint8Array>[]) => {
         const chunk = await reader.read().catch(() => ({ done: true as const, value: undefined }));
         if (chunk.done) return;
         text += decoder.decode(chunk.value, { stream: true });
-        if (text.length > 2 * TAIL) text = text.slice(-TAIL);
+        if (text.length > 2 * TAIL) text = text.slice(codePointStart(text, text.length - TAIL));
       }
     }),
   );
@@ -47,7 +47,7 @@ const collect = (streams: readonly ReadableStream<Uint8Array>[]) => {
     // A background process the command started can hold the pipes open after it exits.
     await Promise.race([done, Bun.sleep(graceMs)]);
     for (const reader of readers) reader.cancel().catch(() => {});
-    return text.length > TAIL ? `…${text.slice(-TAIL)}` : text;
+    return text.length > TAIL ? `…${text.slice(codePointStart(text, text.length - TAIL))}` : text;
   };
 };
 

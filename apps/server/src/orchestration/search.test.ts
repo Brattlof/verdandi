@@ -78,3 +78,13 @@ test("a long message is cut to a little context either side of its match", () =>
   expect(text.endsWith("…")).toBe(true);
   expect(text.length).toBeLessThan(200);
 });
+
+test("a cut that falls inside an emoji keeps it whole", () => {
+  const emoji = "😀".repeat(50);
+  const text = contextParts(`${emoji}x\u0001needle\u0002${emoji}`)
+    .map((p) => p.text)
+    .join("");
+  expect(text.isWellFormed()).toBe(true);
+  expect(text).toStartWith("…😀");
+  expect(text).toEndWith("😀…");
+});

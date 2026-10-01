@@ -1,6 +1,8 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   type CommandId,
+  clip,
+  codePointStart,
   describeRouteChange,
   type InteractionMode,
   type Item,
@@ -411,7 +413,11 @@ const ItemList = ({ items, tree }: { items: readonly Item[]; tree: Tree }) => (
   </>
 );
 
-const clip = (text: string, max = 4000) => (text.length > max ? `${text.slice(0, max)}\n… ${text.length - max} more characters` : text);
+/** Long output cut to keep rendering cheap: about `max` characters, never half an emoji. */
+const clipOutput = (text: string, max = 4000) => {
+  const end = codePointStart(text, max);
+  return text.length > max ? `${text.slice(0, end)}\n… ${text.length - end} more characters` : text;
+};
 
 /** The one input field that says what a tool call is about, e.g. the file or the command. */
 const summarize = (input: unknown) => {
@@ -420,7 +426,7 @@ const summarize = (input: unknown) => {
   const value = ["file_path", "command", "pattern", "path", "url", "description", "prompt"]
     .map((k) => record[k])
     .find((v) => typeof v === "string");
-  return typeof value === "string" ? (value.length > 80 ? `${value.slice(0, 79)}…` : value) : "";
+  return typeof value === "string" ? clip(value, 80) : "";
 };
 
 const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K }>; tree: Tree }) => ReactNode } = {
@@ -489,7 +495,7 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
         )}
       </summary>
       <div className="border-t border-line px-2 py-1">
-        <pre className={item.passed ? undefined : "text-error"}>{clip(item.output) || "(no output)"}</pre>
+        <pre className={item.passed ? undefined : "text-error"}>{clipOutput(item.output) || "(no output)"}</pre>
       </div>
     </details>
   ),
@@ -505,18 +511,18 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
           {result?.isError && <span className="shrink-0 rounded bg-removed px-1.5 text-error">failed</span>}
         </summary>
         <div className="border-t border-line px-2 py-1">
-          <pre>{clip(JSON.stringify(item.input, null, 2) ?? "")}</pre>
+          <pre>{clipOutput(JSON.stringify(item.input, null, 2) ?? "")}</pre>
           {steps && (
             <div className="my-1 border-l-2 border-line pl-3">
               <ItemList items={steps} tree={tree} />
             </div>
           )}
-          {result && <pre className={result.isError ? "text-error" : undefined}>{clip(result.content)}</pre>}
+          {result && <pre className={result.isError ? "text-error" : undefined}>{clipOutput(result.content)}</pre>}
         </div>
       </details>
     );
   },
-  "tool.result": ({ item }) => <pre className={item.isError ? "text-error" : undefined}>{clip(item.content)}</pre>,
+  "tool.result": ({ item }) => <pre className={item.isError ? "text-error" : undefined}>{clipOutput(item.content)}</pre>,
 };
 
 /** The thread's latest revert, until its next turn: what was reverted, and Undo while nothing has run since. */

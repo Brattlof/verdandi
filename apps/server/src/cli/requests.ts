@@ -1,16 +1,14 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Question, ThreadView } from "@verdandi/contracts";
+import { clip, type Question, type ThreadView } from "@verdandi/contracts";
 import { shell } from "../workspace/verify.ts";
 
 export type PendingRequest = ThreadView["pendingRequests"][number];
 
-const clip = (text: string, max = 400) => (text.length > max ? `${text.slice(0, max)}…` : text);
-
 /** The approval prompt: the tool and its input, since the SDK's own title is often absent (ADR 0003). */
 export const approvalPrompt = (r: Extract<PendingRequest, { type: "approval.requested" }>) =>
-  `\n[approval] ${r.toolName} ${clip(JSON.stringify(r.input))}\nAllow? [y/n] `;
+  `\n[approval] ${r.toolName} ${clip(JSON.stringify(r.input), 400)}\nAllow? [y/n] `;
 
 /** A plan prints in full: the user approves what they read. */
 /** A plan and, when approving it moves the build to another route, where and why. */
