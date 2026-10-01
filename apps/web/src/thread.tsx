@@ -1,5 +1,13 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { describeRouteChange, type InteractionMode, type Item, type ThreadId, type TurnId, type TurnView } from "@verdandi/contracts";
+import {
+  type CommandId,
+  describeRouteChange,
+  type InteractionMode,
+  type Item,
+  type ThreadId,
+  type TurnId,
+  type TurnView,
+} from "@verdandi/contracts";
 import { memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ArchiveButton } from "./archive.tsx";
 import { TurnAttachments } from "./attachments.tsx";
@@ -39,6 +47,14 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
     [connection, threadId],
   );
   const showTurnDiff = useCallback((turnId: TurnId) => fetchDiff(turnId, false), [fetchDiff]);
+  const [revertError, setRevertError] = useState<string>();
+  const revert = useCallback(
+    (toTurnId: TurnId, files: boolean) =>
+      void connection
+        .dispatch({ type: "thread.revert", commandId: uuid<CommandId>(), threadId, toTurnId, files })
+        .then((r) => setRevertError(r.ok ? undefined : r.message)),
+    [connection, threadId],
+  );
   if (error)
     return (
       <p role="alert" className="p-6 text-error">
@@ -88,7 +104,17 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
             {archiveError ?? "This thread is archived: it's hidden from the thread list and takes no turns until you unarchive it."}
           </p>
         )}
-        <Conversation connection={connection} turns={thread.turns} routeChanges={thread.routeChanges} onChanges={showTurnDiff} />
+        {(thread.revert || revertError) && (
+          <RevertBar connection={connection} threadId={threadId} thread={thread} error={revertError} onError={setRevertError} />
+        )}
+        <Conversation
+          connection={connection}
+          turns={thread.turns}
+          routeChanges={thread.routeChanges}
+          busy={thread.busy}
+          onChanges={showTurnDiff}
+          onRevert={revert}
+        />
         <Requests connection={connection} threadId={threadId} requests={thread.pendingRequests} onPlanApproved={() => setMode("build")} />
         <Composer connection={connection} thread={thread} mode={mode ?? last?.mode ?? "build"} onMode={setMode} />
         <div role="status" className="sr-only">
@@ -122,13 +148,19 @@ const Conversation = ({
   connection,
   turns,
   routeChanges,
+  busy,
   onChanges,
+  onRevert,
 }: {
   connection: Connection;
   turns: readonly LiveTurn[];
   routeChanges: LiveThread["routeChanges"];
+  busy: boolean;
   onChanges: (turnId: TurnId) => void;
+  onRevert: (turnId: TurnId, files: boolean) => void;
 }) => {
+  // Any shown turn but the latest can be reverted to, while no turn runs.
+  const lastShown = turns.findLast((t) => !t.reverted)?.turnId;
   const scroller = useRef<HTMLElement>(null);
   const atBottom = useRef(true);
   const changesBefore = useMemo(() => Map.groupBy(routeChanges, (c) => c.afterTurns), [routeChanges]);
@@ -183,7 +215,14 @@ const Conversation = ({
                 style={{ transform: `translateY(${row.start}px)` }}
               >
                 <RouteMarkers changes={changesBefore.get(row.index)} />
-                <Turn connection={connection} turn={turn} byVerdandi={escalations.has(turn.turnId)} onChanges={onChanges} />
+                <Turn
+                  connection={connection}
+                  turn={turn}
+                  byVerdandi={escalations.has(turn.turnId)}
+                  revertable={!busy && !turn.reverted && turn.turnId !== lastShown}
+                  onChanges={onChanges}
+                  onRevert={onRevert}
+                />
               </div>
             )
           );
@@ -218,19 +257,19 @@ const UserBubble = ({ label, children }: { label: string; children: ReactNode })
   </div>
 );
 
-const Turn = memo(
-  ({
-    connection,
-    turn,
-    byVerdandi,
-    onChanges,
-  }: {
-    connection: Connection;
-    turn: LiveTurn;
-    byVerdandi: boolean;
-    onChanges: (turnId: TurnId) => void;
-  }) => (
-    <article className="turn mx-auto max-w-[860px] px-4 py-3">
+type TurnProps = {
+  connection: Connection;
+  turn: LiveTurn;
+  byVerdandi: boolean;
+  revertable: boolean;
+  onChanges: (turnId: TurnId) => void;
+  onRevert: (turnId: TurnId, files: boolean) => void;
+};
+
+const Turn = memo((props: TurnProps) => {
+  const { connection, turn, byVerdandi } = props;
+  const body = (
+    <>
       <UserBubble label={byVerdandi ? "Verdandi, escalating" : `You${turn.mode === "build" ? "" : ` · ${turn.mode}`}`}>
         <p className="mt-0.5 mb-0">{turn.text}</p>
         <TurnAttachments connection={connection} attachments={turn.attachments} />
@@ -241,13 +280,27 @@ const Turn = memo(
           <Markdown text={turn.streaming} />
         </div>
       )}
-      <TurnStatus turn={turn} onChanges={onChanges} />
-    </article>
-  ),
-);
+      <TurnStatus {...props} />
+    </>
+  );
+  // A reverted turn stays in the log, folded away and out of the conversation.
+  return turn.reverted ? (
+    <details className="turn mx-auto max-w-[860px] px-4 py-1 text-muted">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs [&::-webkit-details-marker]:hidden">
+        <ChevronIcon className="size-3.5 [details[open]>summary>&]:rotate-90" />
+        <span className="shrink-0 font-medium">Reverted</span>
+        <span className="min-w-0 truncate">{turn.text.split("\n", 1)[0]}</span>
+      </summary>
+      <div className="opacity-70">{body}</div>
+    </details>
+  ) : (
+    <article className="turn mx-auto max-w-[860px] px-4 py-3">{body}</article>
+  );
+});
 
-const TurnStatus = ({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => {
+const TurnStatus = ({ turn, revertable, onChanges, onRevert }: TurnProps) => {
   const [text, dot] = statusColor[turn.status];
+  const [reverting, setReverting] = useState(false);
   return (
     <footer className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-xs text-muted">
       <span className={`flex items-center gap-1.5 font-medium ${text}`}>
@@ -262,6 +315,30 @@ const TurnStatus = ({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: T
         >
           Changes
         </button>
+      )}
+      {revertable && !reverting && (
+        <button
+          type="button"
+          className="border-0 bg-transparent p-0 font-normal text-accent underline underline-offset-2 hover:bg-transparent"
+          onClick={() => setReverting(true)}
+        >
+          Revert to here
+        </button>
+      )}
+      {revertable && reverting && (
+        // biome-ignore lint/a11y/useSemanticElements: a group of buttons, not a form field set.
+        <span role="group" aria-label="Revert the thread to the end of this turn" className="flex items-center gap-1.5">
+          <span>Revert</span>
+          <button type="button" className="px-2 text-xs" onClick={() => onRevert(turn.turnId, false)}>
+            Conversation
+          </button>
+          <button type="button" className="px-2 text-xs" onClick={() => onRevert(turn.turnId, true)}>
+            Conversation and files
+          </button>
+          <button type="button" className="px-2 text-xs" onClick={() => setReverting(false)}>
+            Cancel
+          </button>
+        </span>
       )}
       {turn.error && <span className="text-error">{turn.error}</span>}
       {turn.usage.map((u) => (
@@ -351,6 +428,11 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
       </span>
     </p>
   ),
+  notice: ({ item }) => (
+    <p role="note" className="my-2 rounded-md border border-line bg-panel px-2 py-1 text-xs text-warn">
+      {item.text}
+    </p>
+  ),
   verifier: ({ item }) => (
     <details className="my-1.5 rounded-md border border-line bg-panel">
       <summary className="flex list-none items-center gap-2 rounded-md px-2 py-1 font-mono text-xs hover:bg-hover [&::-webkit-details-marker]:hidden">
@@ -395,4 +477,49 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
     );
   },
   "tool.result": ({ item }) => <pre className={item.isError ? "text-error" : undefined}>{clip(item.content)}</pre>,
+};
+
+/** The thread's latest revert, until its next turn: what was reverted, and Undo while nothing has run since. */
+const RevertBar = ({
+  connection,
+  threadId,
+  thread,
+  error,
+  onError,
+}: {
+  connection: Connection;
+  threadId: ThreadId;
+  thread: LiveThread;
+  error: string | undefined;
+  onError: (message: string | undefined) => void;
+}) => {
+  const { revert } = thread;
+  const number = revert ? thread.turns.findIndex((t) => t.turnId === revert.toTurnId) + 1 : 0;
+  const what = revert?.files ? "the conversation and files" : "the conversation";
+  const message =
+    error ??
+    (revert?.undone
+      ? "Revert undone."
+      : revert &&
+        `Reverted ${what} to the end of turn ${number}. The next turn continues from there.${revert.filesError ? ` The files weren't restored: ${revert.filesError}` : ""}`);
+  return (
+    <div className="flex items-center gap-3 border-b border-line bg-panel px-4 py-1.5 text-xs">
+      <p role="status" className={`min-w-0 flex-1 ${error || revert?.filesError ? "text-error" : "text-muted"}`}>
+        {message}
+      </p>
+      {revert && !revert.undone && !thread.busy && (
+        <button
+          type="button"
+          className="px-2 text-xs"
+          onClick={() =>
+            void connection
+              .dispatch({ type: "thread.revert.undo", commandId: uuid<CommandId>(), threadId })
+              .then((r) => onError(r.ok ? undefined : r.message))
+          }
+        >
+          Undo
+        </button>
+      )}
+    </div>
+  );
 };

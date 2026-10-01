@@ -236,6 +236,23 @@ const threadWorktree = Effect.gen(function* () {
   yield* sql`alter table threads add column worktree text`;
 });
 
+/**
+ * Reverting a thread (DESIGN §13, ADR 0004). `turns.reverted`: 0 shown, 1 reverted but still in the harness
+ * session, 2 forked away. On threads: the fork the next turn makes, the turn the current session started
+ * with (null: the whole thread), the session's transcript, and the latest revert as JSON until the next turn.
+ */
+const revert = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table turns add column reverted integer not null default 0`;
+  yield* sql`alter table threads add column pending_fork text`;
+  yield* sql`alter table threads add column session_first_turn text`;
+  yield* sql`alter table threads add column transcript_path text`;
+  yield* sql`alter table threads add column revert text`;
+  yield* sql`update threads set transcript_path = (
+    select json_extract(e.payload, '$.transcriptPath') from events e
+    where e.thread_id = threads.id and e.type = 'harness.session.bound' order by e.seq desc limit 1)`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -253,4 +270,5 @@ export const migrations = {
   "14_turn_attachments": turnAttachments,
   "15_task_escalations": taskEscalations,
   "16_thread_worktree": threadWorktree,
+  "17_revert": revert,
 };

@@ -10,6 +10,7 @@ import type {
   Resolution,
   Route,
   ThreadId,
+  TurnId,
 } from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
 
@@ -21,6 +22,7 @@ import { Effect, Stream } from "effect";
  * project's verifier …") edits the thread's last edited file again, the way an agent fixing it would; "subagent" delegates a read to a subagent whose
  * steps carry `parentToolUseId`, "background" does the same in a background subagent that reports after the main
  * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back, with its attachments' names, kinds and sizes, and fixed usage on the route's model.
+ * A turn with a `fork` starts a new session holding the old one's turns up to the fork; `history` keeps each session's turns.
  * Every reply costs $0.01. Like Claude Code, it checks the task's `maxCost` after the call: when the task's
  * spend then exceeds it, the turn ends with status `limit`. `calls` records every run.
  */
@@ -31,6 +33,7 @@ export const makeFakeHarness = () => {
     text: string;
     mode: InteractionMode;
     attachments: HarnessRunInput["attachments"];
+    fork: HarnessRunInput["fork"];
   }[] = [];
   /** Every `reroute`, in order. A rerouted turn answers on its new route's model. */
   const reroutes: { threadId: ThreadId; route: Route }[] = [];
@@ -40,6 +43,8 @@ export const makeFakeHarness = () => {
   const routeOf = (input: HarnessRunInput) => routes.get(input.threadId) ?? input.route;
   const waiting = new Map<string, (resolution: Resolution) => void>();
   let sessions = 0;
+  /** Each session's turns, as the agent would remember them. */
+  const history = new Map<string, { turnId: TurnId; text: string }[]>();
   let requests = 0;
   let release = () => {};
   const gate = new Promise<void>((resolve) => (release = resolve));
@@ -79,12 +84,16 @@ export const makeFakeHarness = () => {
       text: input.text,
       mode: input.mode,
       attachments: input.attachments,
+      fork: input.fork,
     });
     routes.set(input.threadId, input.route);
-    const start: HarnessEvent[] =
-      input.resumeSessionId === undefined
-        ? [{ type: "session.started", sessionId: `fake-session-${++sessions}`, harnessVersion: "fake" }]
-        : [];
+    // A fork starts a new session holding the old one's turns up to `atTurnId`, like Claude Code's (ADR 0004).
+    const fresh = input.resumeSessionId === undefined || input.fork !== undefined;
+    const sessionId = fresh ? `fake-session-${++sessions}` : (input.resumeSessionId ?? "");
+    const kept = input.fork ? (history.get(input.resumeSessionId ?? "") ?? []) : (history.get(sessionId) ?? []);
+    const upTo = input.fork ? kept.findIndex((t) => t.turnId === input.fork?.atTurnId) + 1 : kept.length;
+    history.set(sessionId, [...kept.slice(0, upTo), { turnId: input.turnId, text: input.text }]);
+    const start: HarnessEvent[] = fresh ? [{ type: "session.started", sessionId, harnessVersion: "fake" }] : [];
     if (input.text === "hang") return Stream.concat(Stream.fromIterable(start), Stream.never);
     if (input.text === "fail") return Stream.fromIterable([...start, { type: "turn.finished", status: "error", error: "fake failure" }]);
     if (input.text === "overage") {
@@ -194,9 +203,10 @@ export const makeFakeHarness = () => {
     return Stream.concat(Stream.fromIterable(start), waitForGate);
   };
 
-  const adapter: HarnessAdapter & { calls: typeof calls; reroutes: typeof reroutes; release: () => void } = {
+  const adapter: HarnessAdapter & { calls: typeof calls; reroutes: typeof reroutes; history: typeof history; release: () => void } = {
     id: "fake",
     calls,
+    history,
     reroutes,
     release: () => release(),
     run(input: HarnessRunInput) {

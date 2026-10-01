@@ -29,6 +29,8 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "ThreadArchived",
     "InvalidAttachment",
     "WorktreeUnavailable",
+    "TurnNotFound",
+    "InvalidRevert",
   ]),
   message: Schema.String,
 }) {}
@@ -72,6 +74,8 @@ export const TurnView = Schema.Struct({
   /** Sent with the turn; fetch an image's bytes from `/attachments/<id>`. */
   attachments: Schema.Array(AttachmentRef),
   status: Schema.Literals(["running", ...TurnStatus.literals]),
+  /** The user reverted the thread to an earlier turn: this one stays in the log, out of the conversation. */
+  reverted: Schema.Boolean,
   items: Schema.Array(Item),
   /** One entry per model the turn used, in the order they were recorded. */
   usage: Schema.Array(Usage),
@@ -111,6 +115,18 @@ export const ThreadView = Schema.Struct({
     }),
   ),
   sessionId: Schema.NullOr(Schema.String),
+  /**
+   * The thread's latest revert, until its next turn starts: `undone` once the user undid it. `files` says
+   * whether the files were reverted too; `filesError` why restoring them failed.
+   */
+  revert: Schema.NullOr(
+    Schema.Struct({
+      toTurnId: TurnId,
+      files: Schema.Boolean,
+      undone: Schema.Boolean,
+      filesError: Schema.optionalKey(Schema.String),
+    }),
+  ),
   /** The git worktree the thread runs in; null when it runs in the project folder itself. */
   worktree: Schema.NullOr(WorktreeView),
   busy: Schema.Boolean,

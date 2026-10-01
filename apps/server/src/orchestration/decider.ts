@@ -33,6 +33,7 @@ import {
   routeOf,
 } from "../routing/routing.ts";
 import { worktreeBranch } from "../workspace/refs.ts";
+import type { StoredRevert } from "./projector.ts";
 import type { SpendState } from "./spend.ts";
 
 export type PendingRequest = {
@@ -59,6 +60,14 @@ export type DeciderState = {
         /** How many turns the thread has had, and the latest one's id. */
         readonly turns: number;
         readonly lastTurnId: TurnId | null;
+        /** Every turn in order, and whether it is reverted: 0 shown, 1 reverted but still in the session, 2 forked away. */
+        readonly turnList: readonly { readonly turnId: TurnId; readonly reverted: 0 | 1 | 2 }[];
+        /** A revert's fork waits for the next turn. */
+        readonly pendingFork: boolean;
+        /** The turn the harness session started with; null when it's the thread's first, or unknown. */
+        readonly sessionFirstTurn: TurnId | null;
+        /** The latest revert, until the next turn starts. */
+        readonly revert: StoredRevert | null;
         /** How many escalation steps the current task has taken (DESIGN §8.7). */
         readonly taskEscalations: number;
         /** Why that task runs on its route, and whether it started in plan mode. Null without a task, or one from before routing. */
@@ -156,7 +165,10 @@ type Handler<T extends Command["type"]> = (state: DeciderState, command: Extract
 const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, event: HarnessEvent): Decision => {
   switch (event.type) {
     case "session.started":
-      return event.sessionId === state.thread?.sessionId ? accept() : accept({ ...event, type: "harness.session.bound", v: 1, threadId });
+      // A revert's fork is bound even when the harness fell back to resuming the same session, which ends the wait for it.
+      return event.sessionId === state.thread?.sessionId && !state.thread.pendingFork
+        ? accept()
+        : accept({ ...event, type: "harness.session.bound", v: 1, threadId });
     case "text.delta":
       return accept(); // broadcast by the reactor, never persisted
     case "item":
@@ -311,6 +323,53 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     return accept({ type: "thread.worktree.removal.requested", v: 1, threadId: c.threadId, force: c.force });
   },
+  "thread.revert": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    const { runningTurnId, turnList, sessionFirstTurn, worktree } = state.thread;
+    if (runningTurnId) {
+      return reject("ThreadBusy", "A turn is running in this thread. Interrupt it or let it finish, then revert.");
+    }
+    const shown = turnList.filter((t) => t.reverted === 0);
+    const at = shown.findIndex((t) => t.turnId === c.toTurnId);
+    if (at < 0) return reject("TurnNotFound", `Turn ${c.toTurnId} isn't a turn of this thread, or it's already reverted.`);
+    if (at === shown.length - 1) return reject("InvalidRevert", "That's the thread's latest turn, so there's nothing after it to revert.");
+    // The harness can only fork the session it's in; a harness switch started a new one.
+    const first = sessionFirstTurn ? turnList.findIndex((t) => t.turnId === sessionFirstTurn) : -1;
+    if (turnList.findIndex((t) => t.turnId === c.toTurnId) < first) {
+      return reject(
+        "InvalidRevert",
+        "That turn ran in an earlier harness session, which this thread can't fork back to. Revert to a turn since the last harness switch.",
+      );
+    }
+    const unavailable = c.files ? worktreeProblem(c.threadId, worktree) : undefined;
+    if (unavailable) return reject("WorktreeUnavailable", unavailable);
+    const turnIds = shown.slice(at + 1).map((t) => t.turnId);
+    return accept({ type: "thread.reverted", v: 1, threadId: c.threadId, toTurnId: c.toTurnId, turnIds, files: c.files });
+  },
+  "thread.revert.undo": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    const { revert, runningTurnId } = state.thread;
+    if (runningTurnId || !revert || revert.undone) {
+      return reject(
+        "InvalidRevert",
+        "There's no revert to undo: a turn has run since the thread's latest revert, or it was undone already.",
+      );
+    }
+    // Files are put back only from the checkpoint saved before the revert; without one they were never changed.
+    const restore = revert.files && revert.saved ? { restore: revert.saved } : {};
+    return accept({ type: "thread.revert.undone", v: 1, threadId: c.threadId, turnIds: revert.turnIds, ...restore });
+  },
+  "files.report": (state, c) =>
+    state.thread
+      ? accept({
+          type: "thread.files.restored",
+          v: 1,
+          threadId: c.threadId,
+          from: c.from,
+          ...(c.saved === undefined ? {} : { saved: c.saved }),
+          ...(c.error === undefined ? {} : { error: c.error }),
+        })
+      : accept(),
   "worktree.report": (state, c) => {
     if (!state.thread) return accept();
     const { report } = c;

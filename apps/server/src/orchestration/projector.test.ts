@@ -74,6 +74,7 @@ test("projects a full turn into the thread view", async () => {
     pinned: true,
     archived: false,
     worktree: null,
+    revert: null,
     budgetMode: null,
     task: null,
     sessionId: "s1",
@@ -85,6 +86,7 @@ test("projects a full turn into the thread view", async () => {
         mode: "build",
         attachments: [],
         status: "success",
+        reverted: false,
         items: [{ kind: "assistant.message", text: "echo: hi" }],
         usage: [
           {

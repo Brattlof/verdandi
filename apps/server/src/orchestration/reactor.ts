@@ -7,6 +7,7 @@ import type {
   HarnessAdapter,
   HarnessEvent,
   HarnessId,
+  HarnessRunInput,
   InteractionMode,
   Item,
   Route,
@@ -19,10 +20,10 @@ import type {
 } from "@verdandi/contracts";
 import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { checkpoint, checkpointRef } from "../workspace/checkpoint.ts";
+import { checkpoint, checkpointRef, restore, revertRef } from "../workspace/checkpoint.ts";
 import { editedPaths } from "../workspace/diff.ts";
 import { runVerifier } from "../workspace/verify.ts";
-import { addWorktree, removeWorktree, threadFolder, worktreeSetup } from "../workspace/worktree.ts";
+import { addWorktree, loadThreadFolder, removeWorktree, threadFolder, worktreeSetup } from "../workspace/worktree.ts";
 import { Engine } from "./engine.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "./task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "./trajectory.ts";
@@ -154,11 +155,13 @@ export const ReactorLive = Layer.effect(
           session_id: string | null;
           path: string;
           worktree: string | null;
+          pending_fork: string | null;
+          transcript_path: string | null;
           task_id: TaskId | null;
           limits: string | null;
           spent_usd: number;
         }>`
-          select t.route, t.session_id, p.path, t.worktree, t.task_id, json_extract(d.payload, '$.limits') as limits,
+          select t.route, t.session_id, p.path, t.worktree, t.pending_fork, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
             (select total(u.cost_usd) from usage_ledger u join turns n on n.id = u.turn_id
               where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId}) as spent_usd
           from threads t join projects p on p.id = t.project_id
@@ -193,6 +196,13 @@ export const ReactorLive = Layer.effect(
             ...(attachments.length > 0 && { attachments: attachments.map((a) => ({ ...a, path: join(attachmentsDir, a.id) })) }),
             steers,
             ...(limits && { limits }),
+            // A revert waits to fork the conversation until this turn (ADR 0004).
+            ...(thread.pending_fork && {
+              fork: {
+                ...(JSON.parse(thread.pending_fork) as NonNullable<HarnessRunInput["fork"]>),
+                ...(thread.transcript_path && { transcriptPath: thread.transcript_path }),
+              },
+            }),
           })
           .pipe(
             Stream.runForEach((event) => {
@@ -290,6 +300,26 @@ export const ReactorLive = Layer.effect(
         if (run) yield* reportWorktree(threadId, { type: "setup", run });
       }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not add the worktree of thread ${threadId}.`, cause)));
 
+    /**
+     * Restores the thread's files from checkpoint `from`, after saving them as `save` so the revert can be undone,
+     * and reports how it went (DESIGN §13).
+     */
+    const restoreFiles = (threadId: ThreadId, from: string, save?: string) =>
+      Effect.gen(function* () {
+        const cwd = yield* loadThreadFolder(threadId).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+        if (!cwd) return;
+        const saved = save ? Effect.asVoid(checkpoint(cwd, save)) : Effect.void;
+        const done = yield* Effect.result(Effect.andThen(saved, restore(cwd, from)));
+        yield* engine.dispatch({
+          type: "files.report",
+          commandId: randomUUID() as CommandId,
+          threadId,
+          from,
+          ...(save && Result.isSuccess(done) && { saved: save }),
+          ...(Result.isFailure(done) && { error: done.failure.message }),
+        });
+      }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not restore the files of thread ${threadId}.`, cause)));
+
     /** Removes the thread's worktree, keeping its branch; git keeps one with uncommitted changes unless `force`. */
     const dropWorktree = (threadId: ThreadId, force: boolean) =>
       Effect.gen(function* () {
@@ -327,6 +357,16 @@ export const ReactorLive = Layer.effect(
       if (e.type === "thread.worktree.removal.requested") return enqueue(e.threadId, dropWorktree(e.threadId, e.force));
       // A route change is an override of the running task, and ends it.
       if (e.type === "thread.route.changed") return FiberSet.run(turns, recordOutcomes(e.threadId)).pipe(Effect.asVoid);
+      // Queued like turns, so the next turn starts on the restored files. A revert changes its tasks' outcomes.
+      if (e.type === "thread.reverted" || e.type === "thread.revert.undone") {
+        const files =
+          e.type === "thread.reverted"
+            ? e.files && restoreFiles(e.threadId, checkpointRef(e.threadId, e.toTurnId, "end"), revertRef(e.threadId, stored.seq))
+            : e.restore && restoreFiles(e.threadId, e.restore);
+        return Effect.andThen(files ? enqueue(e.threadId, files) : Effect.void, FiberSet.run(turns, recordOutcomes(e.threadId))).pipe(
+          Effect.asVoid,
+        );
+      }
       return Effect.void;
     });
 
