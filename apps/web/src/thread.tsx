@@ -117,6 +117,11 @@ const Conversation = ({
   const scroller = useRef<HTMLElement>(null);
   const atBottom = useRef(true);
   const changesBefore = useMemo(() => Map.groupBy(routeChanges, (c) => c.afterTurns), [routeChanges]);
+  // Turns Verdandi sent itself, escalating a task whose verifier failed.
+  const escalations = useMemo(
+    () => new Set(turns.flatMap((t) => t.items.flatMap((i) => (i.kind === "escalation" && i.nextTurnId ? [i.nextTurnId] : [])))),
+    [turns],
+  );
   const virtualizer = useVirtualizer({
     count: turns.length,
     getScrollElement: () => scroller.current,
@@ -163,7 +168,7 @@ const Conversation = ({
                 style={{ transform: `translateY(${row.start}px)` }}
               >
                 <RouteMarkers changes={changesBefore.get(row.index)} />
-                <Turn connection={connection} turn={turn} onChanges={onChanges} />
+                <Turn connection={connection} turn={turn} byVerdandi={escalations.has(turn.turnId)} onChanges={onChanges} />
               </div>
             )
           );
@@ -198,21 +203,33 @@ const UserBubble = ({ label, children }: { label: string; children: ReactNode })
   </div>
 );
 
-const Turn = memo(({ connection, turn, onChanges }: { connection: Connection; turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => (
-  <article className="turn mx-auto max-w-[860px] px-4 py-3">
-    <UserBubble label={`You${turn.mode === "build" ? "" : ` · ${turn.mode}`}`}>
-      <p className="mt-0.5 mb-0">{turn.text}</p>
-      <TurnAttachments connection={connection} attachments={turn.attachments} />
-    </UserBubble>
-    <Items items={turn.items} />
-    {turn.streaming && (
-      <div>
-        <Markdown text={turn.streaming} />
-      </div>
-    )}
-    <TurnStatus turn={turn} onChanges={onChanges} />
-  </article>
-));
+const Turn = memo(
+  ({
+    connection,
+    turn,
+    byVerdandi,
+    onChanges,
+  }: {
+    connection: Connection;
+    turn: LiveTurn;
+    byVerdandi: boolean;
+    onChanges: (turnId: TurnId) => void;
+  }) => (
+    <article className="turn mx-auto max-w-[860px] px-4 py-3">
+      <UserBubble label={byVerdandi ? "Verdandi, escalating" : `You${turn.mode === "build" ? "" : ` · ${turn.mode}`}`}>
+        <p className="mt-0.5 mb-0">{turn.text}</p>
+        <TurnAttachments connection={connection} attachments={turn.attachments} />
+      </UserBubble>
+      <Items items={turn.items} />
+      {turn.streaming && (
+        <div>
+          <Markdown text={turn.streaming} />
+        </div>
+      )}
+      <TurnStatus turn={turn} onChanges={onChanges} />
+    </article>
+  ),
+);
 
 const TurnStatus = ({ turn, onChanges }: { turn: LiveTurn; onChanges: (turnId: TurnId) => void }) => {
   const [text, dot] = statusColor[turn.status];
@@ -308,6 +325,14 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
     <p className="my-3 flex items-center gap-3 text-xs text-muted before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">
       <span className="max-w-[80%] text-center">
         Route changed by the router: {describeRouteChange(item.from, item.to)}. {item.reason}
+      </span>
+    </p>
+  ),
+  escalation: ({ item }) => (
+    <p className="my-3 flex items-center gap-3 text-xs text-muted before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">
+      <span className="max-w-[80%] text-center">
+        {item.to ? `Escalated: ${describeRouteChange(item.from, item.to)}. ` : "Not escalated. "}
+        {item.reason}
       </span>
     </p>
   ),

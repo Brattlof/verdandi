@@ -410,7 +410,7 @@ restrictions:
 fallback: { prefer: [cc-sonnet], effort: medium, max: { prefer: [cc-opus] }, maxCost: 5 }   # safe default below minConfidence; maxCost/maxTurns apply to classes that set none (§8.9)
 ```
 
-A class's route is its Balanced route. `thrifty` and `max` change only the keys they set for those modes, and `plan` does the same for tasks started in plan mode. Layers merge key by key, except `restrictions`, which add up, so a project can't lift a profile's restriction. Unknown keys are errors that name the file and the key. `subagents` routes a class's subagent profiles, `explorer` and `reviewer`, each to the cheapest available target it prefers on the main route's harness, at its own effort or the task's. A harness session keeps the subagents it started with, so a new policy reaches a thread at its next fresh session (ADR 0014). `escalation.verifiers` run after a turn whose agent changed files (§8.7); `effortBand`, `quota` and the rest of `escalation` are rejected until the features behind them land (§8.7, §8.9).
+A class's route is its Balanced route. `thrifty` and `max` change only the keys they set for those modes, and `plan` does the same for tasks started in plan mode. Layers merge key by key, except `restrictions`, which add up, so a project can't lift a profile's restriction. Unknown keys are errors that name the file and the key. `subagents` routes a class's subagent profiles, `explorer` and `reviewer`, each to the cheapest available target it prefers on the main route's harness, at its own effort or the task's. A harness session keeps the subagents it started with, so a new policy reaches a thread at its next fresh session (ADR 0014). `escalation.verifiers` run after a turn whose agent changed files, and `escalation.ladder` and `maxAutoEscalations` set what a routed task tries when one fails (§8.7); `effortBand` and `quota` are rejected until the features behind them land (§8.7, §8.9).
 
 ### 8.7 Escalation and de-escalation while a task runs
 
@@ -424,10 +424,10 @@ Research shows that turn count alone is barely better than chance at predicting 
 
 **The escalation ladder:**
 1. raise effort one step,
-2. then move to a stronger target, which starts a new task with a handoff,
+2. then move to a stronger model on the same harness,
 3. then ask you.
 
-By default, at most one step happens per task without asking you.
+By default, at most one step happens per task without asking you. A step changes the running task's route and Verdandi sends the next turn itself, handing the agent the failed verifier's output as data; the task stays one task, so routing memory counts the escalation against the route it started on (ADR 0015). Only routed tasks escalate: a pinned route is yours. Built so far: trigger 1, on the project's `escalation.verifiers`.
 
 **De-escalation** happens after you approve a plan, and after the verifiers pass when only mechanical work is left.
 
@@ -463,7 +463,7 @@ interface TaskOutcome {
 }
 ```
 
-Outcomes are recorded from M1 on, before the router exists, so the always-default baseline is measured on real work (`packages/contracts/src/task.ts`). The status is the task's last turn's, except that a task whose last verifier run failed is `failed`; satisfaction counts only the corrections Verdandi sees (steers, interrupts, rejected plans, a route override, and follow-ups the decision layer judges to be correcting the agent); `verifierRuns` lists the project's verifiers as they ran; and `escalations`, quota units and `rating` stay empty until escalation and ratings exist. `verdandi costs` shows cost per completed task by route.
+Outcomes are recorded from M1 on, before the router exists, so the always-default baseline is measured on real work (`packages/contracts/src/task.ts`). The status is the task's last turn's, except that a task whose last verifier run failed is `failed`; satisfaction counts only the corrections Verdandi sees (steers, interrupts, rejected plans, a route override, and follow-ups the decision layer judges to be correcting the agent); `verifierRuns` lists the project's verifiers as they ran; `escalations` counts the task's escalation steps, and quota units and `rating` stay empty until ratings exist. `verdandi costs` shows cost per completed task by route.
 
 These outcomes are used at three levels:
 1. **Routing memory per project** (M2), e.g. "debug tasks on Sonnet escalated 7 times out of 10, so start on Opus".

@@ -14,7 +14,18 @@ import {
   type RouteTarget,
 } from "@verdandi/contracts";
 import { classificationOf, followUpRules, makeDecide, routingQuestions, routingRules, rulesBackend } from "@verdandi/decisions";
-import { builtInCatalog, loadPolicy, PolicyError, type ResolvedPolicy, RouterError, route, rules, signals } from "@verdandi/router";
+import {
+  builtInCatalog,
+  type Escalation,
+  escalate,
+  loadPolicy,
+  PolicyError,
+  type ResolvedPolicy,
+  RouterError,
+  route,
+  rules,
+  signals,
+} from "@verdandi/router";
 import { fakeCatalog } from "@verdandi/testkit";
 import { Effect, Result } from "effect";
 
@@ -203,4 +214,20 @@ export const decideRoute = (
       message: `${e.message} Pick a route for this thread, or add an available target to .verdandi/routing.yaml.`,
     });
   }
+};
+
+/**
+ * Pure: the escalation ladder's next step for a routed task in `thread` that has taken `escalations` steps, after
+ * `failure` (DESIGN §8.7). Undefined when the project's policy is broken: then nothing escalates.
+ */
+export const decideEscalation = (
+  thread: RoutingThread,
+  routing: RoutingContext,
+  escalations: number,
+  failure: string,
+): Escalation | undefined => {
+  if (Result.isFailure(routing.policy)) return undefined;
+  const policy = thread.budgetMode ? { ...routing.policy.success, mode: thread.budgetMode } : routing.policy.success;
+  const target = targetOf(thread.route, policy.catalog);
+  return escalate({ target, effort: thread.route.effort, escalations, failure, harnesses: routing.harnesses }, policy);
 };

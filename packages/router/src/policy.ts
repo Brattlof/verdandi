@@ -4,6 +4,7 @@ import {
   type CatalogEntry,
   decodeCatalog,
   decodePolicy,
+  type EscalationStep,
   type Policy,
   type RouteRule,
 } from "@verdandi/contracts";
@@ -31,6 +32,8 @@ export type ResolvedPolicy = {
   readonly restrictions: NonNullable<Policy["restrictions"]>;
   /** Commands that check a task's work, run in order after a turn that changed files (DESIGN §8.7). */
   readonly verifiers: readonly string[];
+  /** What a routed task tries when a verifier fails, and how many steps it takes before asking the user (DESIGN §8.7). */
+  readonly escalation: { readonly ladder: readonly EscalationStep[]; readonly maxAutoEscalations: number };
   readonly catalog: Catalog;
 };
 
@@ -105,6 +108,10 @@ export const loadPolicy = (layers: readonly PolicyLayer[] = [], catalog: Catalog
     fallback: merged.fallback ?? {},
     restrictions: merged.restrictions ?? [],
     verifiers: merged.escalation?.verifiers ?? [],
+    escalation: {
+      ladder: merged.escalation?.ladder ?? ["effort", "model", "ask"],
+      maxAutoEscalations: merged.escalation?.maxAutoEscalations ?? 1,
+    },
     catalog,
   };
 };

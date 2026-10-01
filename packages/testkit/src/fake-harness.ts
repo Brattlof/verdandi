@@ -16,7 +16,8 @@ import { Effect, Stream } from "effect";
  * A scripted harness for tests. Text "fail" fails the turn, "hang" runs until interrupted, "gate" waits for
  * `release()`, "overage" reports a used-up subscription window and answers on metered usage, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan, each
  * finishing once `respond` answers on the model of the route `reroute` last moved the turn to, "steer" waits for the first steer and answers it, "edit <path>"
- * appends a line to that file through an Edit tool call, "subagent" delegates a read to a subagent whose
+ * appends a line to that file through an Edit tool call, and a turn Verdandi sends to escalate a failed verifier ("Verdandi ran the
+ * project's verifier …") edits the thread's last edited file again, the way an agent fixing it would; "subagent" delegates a read to a subagent whose
  * steps carry `parentToolUseId`, "background" does the same in a background subagent that reports after the main
  * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back, with its attachments' names, kinds and sizes, and fixed usage on the route's model.
  * Every reply costs $0.01. Like Claude Code, it checks the task's `maxCost` after the call: when the task's
@@ -33,6 +34,8 @@ export const makeFakeHarness = () => {
   /** Every `reroute`, in order. A rerouted turn answers on its new route's model. */
   const reroutes: { threadId: ThreadId; route: Route }[] = [];
   const routes = new Map<ThreadId, Route>();
+  /** Each thread's last `edit` path, which an escalation's handoff turn edits again. */
+  const edited = new Map<ThreadId, string>();
   const routeOf = (input: HarnessRunInput) => routes.get(input.threadId) ?? input.route;
   const waiting = new Map<string, (resolution: Resolution) => void>();
   let sessions = 0;
@@ -129,8 +132,10 @@ export const makeFakeHarness = () => {
       );
       return Stream.concat(Stream.fromIterable(start), plan);
     }
-    if (input.text.startsWith("edit ")) {
-      const path = input.text.slice("edit ".length);
+    const fixing = input.text.startsWith("Verdandi ran the project's verifier") ? edited.get(input.threadId) : undefined;
+    if (input.text.startsWith("edit ") || fixing) {
+      const path = fixing ?? input.text.slice("edit ".length);
+      edited.set(input.threadId, path);
       const edit = Stream.suspend(() => {
         appendFileSync(path, "edited by the fake harness\n");
         return Stream.fromIterable<HarnessEvent>([

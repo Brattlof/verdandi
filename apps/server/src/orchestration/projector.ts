@@ -137,6 +137,29 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       ),
       addItem(e.turnId, { kind: "route.switch", from: e.from, to: e.to, reason: e.decision.reason }),
     ),
+  // The task goes on at `to`, on the same harness, so the session carries over; at `ask` nothing moves.
+  "task.escalated": (e) =>
+    Effect.andThen(
+      e.to
+        ? withSql((sql) =>
+            Effect.andThen(
+              sql`update threads set route = ${JSON.stringify(e.to)} where id = ${e.threadId}`,
+              sql`update tasks set escalations = escalations + 1 where id = ${e.taskId}`,
+            ).pipe(
+              // The route chip explains the route the task runs on now; the decision itself stays as routed.
+              Effect.andThen(sql`update route_decisions set reason = ${e.reason} where task_id = ${e.taskId}`),
+            ),
+          )
+        : Effect.void,
+      addItem(e.turnId, {
+        kind: "escalation",
+        step: e.step,
+        from: e.from,
+        ...(e.to && { to: e.to }),
+        ...(e.nextTurnId && { nextTurnId: e.nextTurnId }),
+        reason: e.reason,
+      }),
+    ),
   "verifier.ran": ({ type: _, v: _v, threadId: _t, turnId, ...run }) => addItem(turnId, { kind: "verifier", ...run }),
   "approval.resolved": (e, at) =>
     withSql(
@@ -190,6 +213,8 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         archived: number;
         budget_mode: BudgetMode | null;
         turns: number;
+        last_turn_id: TurnId | null;
+        task_escalations: number;
         task_decision: string | null;
         task_mode: string | null;
         cached_tokens: number;
@@ -197,6 +222,8 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         select t.project_id, p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned, t.budget_mode,
           t.archived_at is not null as archived,
           (select count(*) from turns n where n.thread_id = t.id) as turns,
+          (select id from turns n where n.thread_id = t.id order by started_at desc, rowid desc limit 1) as last_turn_id,
+          coalesce((select escalations from tasks where id = t.task_id), 0) as task_escalations,
           (select payload from route_decisions where task_id = t.task_id) as task_decision,
           (select mode from turns where id = t.task_id) as task_mode,
           -- ponytail: the context a warm session has cached, read as every token the thread wrote to cache. Harnesses
@@ -217,6 +244,8 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           sessionId: row.session_id,
           taskId: row.task_id,
           turns: row.turns,
+          lastTurnId: row.last_turn_id,
+          taskEscalations: row.task_escalations,
           pinned: row.pinned === 1,
           archived: row.archived === 1,
           budgetMode: row.budget_mode,

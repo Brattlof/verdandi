@@ -1,5 +1,7 @@
 import { Schema } from "effect";
+import { TurnId } from "./ids.ts";
 import { Route } from "./route.ts";
+import { EscalationStep } from "./routing.ts";
 
 /** Set on a subagent's steps: the tool call that started the subagent. Absent on the main agent's. */
 const parentToolUseId = Schema.optionalKey(Schema.String);
@@ -40,6 +42,18 @@ export const Item = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("plan"), text: Schema.String, filePath: Schema.optionalKey(Schema.String) }),
   /** The router moved the rest of the turn to another route when the user approved its plan (DESIGN §8.2 lever 3). */
   Schema.Struct({ kind: Schema.Literal("route.switch"), from: Route, to: Route, reason: Schema.String }),
+  /**
+   * A verifier failed on a routed task, and Verdandi escalated it (DESIGN §8.7): the task goes on at `to`, starting
+   * with the turn `nextTurnId` Verdandi sent, or, at `ask`, stops for the user. Both absent at `ask`.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("escalation"),
+    step: EscalationStep,
+    from: Route,
+    to: Schema.optionalKey(Route),
+    nextTurnId: Schema.optionalKey(TurnId),
+    reason: Schema.String,
+  }),
   /** Verdandi ran a project verifier after the agent finished changing files. */
   Schema.Struct({ kind: Schema.Literal("verifier"), ...VerifierRun.fields }),
 ]);

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Command, CommandId, ProjectId, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
+import { builtInCatalog, loadPolicy } from "@verdandi/router";
+import { fakeCatalog } from "@verdandi/testkit";
 import { Result } from "effect";
 import { type DeciderState, decide, projectIdFor } from "./decider.ts";
 
@@ -22,6 +24,8 @@ const idle: DeciderState = {
     taskPlanned: false,
     cachedTokens: 0,
     turns: 0,
+    lastTurnId: null,
+    taskEscalations: 0,
     runningTurnId: null,
     sessionId: null,
     taskId: null,
@@ -40,6 +44,8 @@ const running: DeciderState = {
     taskPlanned: false,
     cachedTokens: 0,
     turns: 0,
+    lastTurnId: null,
+    taskEscalations: 0,
     runningTurnId: turnId,
     sessionId: "s1",
     taskId,
@@ -58,6 +64,8 @@ const waiting: DeciderState = {
     taskPlanned: false,
     cachedTokens: 0,
     turns: 0,
+    lastTurnId: null,
+    taskEscalations: 0,
     runningTurnId: turnId,
     sessionId: "s1",
     taskId,
@@ -207,6 +215,8 @@ describe("decide", () => {
         taskPlanned: false,
         cachedTokens: 0,
         turns: 0,
+        lastTurnId: null,
+        taskEscalations: 0,
         runningTurnId: turnId,
         sessionId: "s1",
         taskId,
@@ -347,5 +357,38 @@ describe("spend caps", () => {
       "The profile has no daily spend cap to raise. Set daily in C:/home/spend-caps.yaml to add one.",
     );
     expect(reason(decide({ ...idle, spend: Result.fail("spend-caps.yaml: bad") }, send))).toBe("InvalidSpendCaps");
+  });
+});
+
+describe("task.escalate", () => {
+  const policy = loadPolicy([], [...builtInCatalog, ...fakeCatalog]);
+  const routing = { policy: Result.succeed(policy), builtIn: policy, harnesses: ["fake"] as const };
+  const thread = { ...(idle.thread as NonNullable<DeciderState["thread"]>), pinned: false, taskId, lastTurnId: turnId };
+  const escalate: Command = {
+    type: "task.escalate",
+    commandId,
+    threadId,
+    turnId,
+    nextTurnId: "turn-2" as TurnId,
+    run: { command: "bun test", passed: false, exitCode: 1, durationMs: 5, output: "1 fail ``` not a fence" },
+  };
+
+  test("a routed task's latest turn escalates, handing the next turn the output inside a fence it can't close", () => {
+    const [escalated, next] = events(decide({ thread, routing }, escalate));
+    expect(escalated).toMatchObject({ type: "task.escalated", step: "effort", to: { effort: "medium" }, nextTurnId: "turn-2" });
+    expect(next).toMatchObject({ type: "turn.started", turnId: "turn-2", mode: "build" });
+    expect(next?.type === "turn.started" && next.text).toContain("````\n1 fail ``` not a fence\n````");
+  });
+
+  test("nothing escalates once another turn started, the thread is busy, or the user pinned it", () => {
+    expect(events(decide({ thread: { ...thread, lastTurnId: "turn-9" as TurnId }, routing }, escalate))).toEqual([]);
+    expect(events(decide({ thread: { ...thread, runningTurnId: "turn-9" }, routing }, escalate))).toEqual([]);
+    expect(events(decide({ thread: { ...thread, pinned: true }, routing }, escalate))).toEqual([]);
+  });
+
+  test("a reached spend cap stops the ladder and asks instead", () => {
+    const cap = { scope: "project", period: "day", periodKey: "2026-09-30", baseUsd: 5, limitUsd: 5, spentUsd: 5 } as const;
+    const spent = { thread, routing, spend: Result.succeed({ file: "C:/home/spend-caps.yaml", caps: [cap] }) };
+    expect(events(decide(spent, escalate))).toMatchObject([{ type: "task.escalated", step: "ask" }]);
   });
 });

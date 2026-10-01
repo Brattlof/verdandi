@@ -107,7 +107,10 @@ export const EngineLive = (options: EngineOptions = {}) =>
               };
             const loaded = yield* loadDeciderState(command.threadId);
             // Caps are read on each turn and raise, so an edit to the caps file applies to the next one.
-            const capped = (command.type === "turn.send" || command.type === "spend.cap.raise") && loaded.thread && options.spendCaps;
+            const capped =
+              (command.type === "turn.send" || command.type === "spend.cap.raise" || command.type === "task.escalate") &&
+              loaded.thread &&
+              options.spendCaps;
             const state = capped
               ? { ...loaded, spend: yield* loadSpendState(capped, loaded.thread?.projectPath ?? "", new Date()) }
               : loaded;
@@ -119,9 +122,11 @@ export const EngineLive = (options: EngineOptions = {}) =>
               command.event.type === "plan.requested" &&
               current?.pinned === false &&
               current.taskPlanned;
-            // Routing reads the project's policy file, so only when this command starts a task or routes a planned task's build.
+            // An escalation's next step comes from the project's policy too.
+            const escalates = command.type === "task.escalate" && current?.pinned === false;
+            // Routing reads the project's policy file, so only when this command starts a task, routes a planned task's build or escalates.
             const routing =
-              current && ((send && current.taskId === null) || plans) && options.routing
+              current && ((send && current.taskId === null) || plans || escalates) && options.routing
                 ? {
                     ...(yield* options.routing(current.projectPath)),
                     // Routing memory moves where a task starts, not an approved plan's build.
