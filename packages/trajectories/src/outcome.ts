@@ -29,6 +29,7 @@ type Draft = {
   wallMs: number;
   corrections: number;
   override: { readonly from: Route; readonly to: Route } | undefined;
+  readonly verifierRuns: { command: string; passed: boolean }[];
   readonly usage: Map<string, Usage>;
 };
 
@@ -56,6 +57,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         wallMs: 0,
         corrections: 0,
         override: undefined,
+        verifierRuns: [],
         usage: new Map(),
       });
       continue;
@@ -78,6 +80,9 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         break;
       case "turn.steered":
         task.corrections++;
+        break;
+      case "verifier.ran":
+        task.verifierRuns.push({ command: e.command, passed: e.passed });
         break;
       case "decision.recorded":
         if (current && e.answers.some(corrects)) current.corrections++;
@@ -114,20 +119,21 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
   return tasks.flatMap((t): TaskOutcome[] => {
     if (t.last === undefined) return [];
     // ponytail: satisfaction counts the corrections Verdandi sees (steers, interrupts, rejected plans, a route
-    // override, follow-ups the decision layer calls corrections), and status is the last turn's. Upgrade: read
-    // verifier results once verifiers (M3) exist.
+    // override, follow-ups the decision layer calls corrections). Upgrade: add explicit ratings (DESIGN §8.8).
     const corrections = t.corrections + (t.override ? 1 : 0);
+    // A task whose agent finished but whose last verifier run failed didn't get its work right.
+    const status = t.last === "success" && t.verifierRuns.at(-1)?.passed === false ? "failed" : taskStatus[t.last];
     return [
       {
         v: 1,
         taskId: t.taskId,
         threadId: t.threadId,
         route: t.route,
-        status: taskStatus[t.last],
+        status,
         turns: t.turns,
         implicitSatisfaction: Math.max(-1, 1 - corrections),
         ...(t.override ? { userOverride: t.override } : {}),
-        verifierRuns: [],
+        verifierRuns: t.verifierRuns,
         escalations: 0, // nothing escalates until the router does (DESIGN §8.7)
         usage: [...t.usage.values()],
         wallMs: t.wallMs,

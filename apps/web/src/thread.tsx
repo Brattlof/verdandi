@@ -311,6 +311,26 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
       </span>
     </p>
   ),
+  verifier: ({ item }) => (
+    <details className="my-1.5 rounded-md border border-line bg-panel">
+      <summary className="flex list-none items-center gap-2 rounded-md px-2 py-1 font-mono text-xs hover:bg-hover [&::-webkit-details-marker]:hidden">
+        <ChevronIcon className="size-3.5 text-muted [details[open]>summary>&]:rotate-90" />
+        <span className="font-semibold">Verifier</span>
+        <span className="min-w-0 flex-1 truncate text-muted">{item.command}</span>
+        <span className="shrink-0 tabular-nums text-muted">{(item.durationMs / 1000).toFixed(1)}s</span>
+        {item.passed ? (
+          <span className="shrink-0 rounded bg-added px-1.5 text-ok">passed</span>
+        ) : (
+          <span className="shrink-0 rounded bg-removed px-1.5 text-error">
+            failed{item.exitCode === null ? "" : ` · exit ${item.exitCode}`}
+          </span>
+        )}
+      </summary>
+      <div className="border-t border-line px-2 py-1">
+        <pre className={item.passed ? undefined : "text-error"}>{clip(item.output) || "(no output)"}</pre>
+      </div>
+    </details>
+  ),
   "tool.call": ({ item, tree }) => {
     const result = tree.results.get(item.toolUseId);
     const steps = tree.children.get(item.toolUseId);

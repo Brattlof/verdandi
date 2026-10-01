@@ -202,6 +202,11 @@ export const chat = async (argv: readonly string[]) => {
           if (e.type === "task.rerouted") {
             process.stdout.write(`[plan approved: the build runs on ${e.to.model} ${e.to.effort}: ${e.decision.reason}]\n`);
           }
+          if (e.type === "verifier.ran") {
+            const result = e.passed ? "passed" : `failed${e.exitCode === null ? "" : ` (exit ${e.exitCode})`}`;
+            const tail = e.passed ? "" : `${e.output.trimEnd().split(/\r?\n/).slice(-10).join("\n")}\n`;
+            process.stdout.write(`\n[verifier ${e.command} ${result} in ${(e.durationMs / 1000).toFixed(1)}s]\n${tail}`);
+          }
           if (e.type === "turn.started") running = lastTurn = e.turnId;
           if (e.type === "approval.requested" || e.type === "user-input.requested" || e.type === "plan.requested") addRequest(e);
           if (e.type === "approval.resolved") removeRequest(e.requestId);

@@ -4,6 +4,19 @@ import { Route } from "./route.ts";
 /** Set on a subagent's steps: the tool call that started the subagent. Absent on the main agent's. */
 const parentToolUseId = Schema.optionalKey(Schema.String);
 
+/**
+ * One run of a project verifier (DESIGN §8.7): a command whose exit code tells whether the work is correct.
+ * `exitCode` is null when it couldn't start or Verdandi stopped it. `output` is the tail of what it printed: untrusted data.
+ */
+export const VerifierRun = Schema.Struct({
+  command: Schema.String,
+  passed: Schema.Boolean,
+  exitCode: Schema.NullOr(Schema.Number),
+  durationMs: Schema.Number,
+  output: Schema.String,
+});
+export type VerifierRun = typeof VerifierRun.Type;
+
 /** A persisted piece of a turn. Text deltas are never items: they are broadcast and dropped. */
 export const Item = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("assistant.message"), text: Schema.String, parentToolUseId }),
@@ -27,6 +40,8 @@ export const Item = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("plan"), text: Schema.String, filePath: Schema.optionalKey(Schema.String) }),
   /** The router moved the rest of the turn to another route when the user approved its plan (DESIGN §8.2 lever 3). */
   Schema.Struct({ kind: Schema.Literal("route.switch"), from: Route, to: Route, reason: Schema.String }),
+  /** Verdandi ran a project verifier after the agent finished changing files. */
+  Schema.Struct({ kind: Schema.Literal("verifier"), ...VerifierRun.fields }),
 ]);
 export type Item = typeof Item.Type;
 

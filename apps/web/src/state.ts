@@ -112,6 +112,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     ...(e.status === "limit" ? { task: null } : {}),
   }),
   "spend.cap.raised": (thread) => thread, // the caps are fetched with SpendCapsGet
+  "verifier.ran": (thread, { type: _, v: _v, threadId: _t, turnId, ...run }) => addItem(thread, turnId, { kind: "verifier", ...run }),
 };
 
 /** Folds one thread-feed message into the thread. Before the snapshot arrives there is nothing to fold into. */

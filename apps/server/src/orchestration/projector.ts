@@ -137,6 +137,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       ),
       addItem(e.turnId, { kind: "route.switch", from: e.from, to: e.to, reason: e.decision.reason }),
     ),
+  "verifier.ran": ({ type: _, v: _v, threadId: _t, turnId, ...run }) => addItem(turnId, { kind: "verifier", ...run }),
   "approval.resolved": (e, at) =>
     withSql(
       (sql) =>

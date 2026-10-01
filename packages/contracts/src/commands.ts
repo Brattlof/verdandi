@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { AttachmentRef, AttachmentUpload } from "./attachments.ts";
 import { HarnessEvent } from "./harness.ts";
 import { CommandId, ThreadId, TurnId } from "./ids.ts";
+import { VerifierRun } from "./items.ts";
 import { Resolution } from "./requests.ts";
 import { InteractionMode, Route } from "./route.ts";
 import { BudgetMode } from "./routing.ts";
@@ -123,6 +124,14 @@ export const HarnessReport = Schema.Struct({
   turnId: TurnId,
   event: HarnessEvent,
 });
+/** Internal: the reactor reporting a verifier it ran for the running turn `turnId`. Clients cannot send it. */
+export const VerifierReport = Schema.Struct({
+  type: Schema.Literal("verifier.report"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  run: VerifierRun,
+});
 /** Internal: marks a turn left running by a previous verdandid as interrupted. */
 export const TurnRecover = Schema.Struct({
   type: Schema.Literal("turn.recover"),
@@ -162,6 +171,7 @@ export const Command = Schema.Union([
   ThreadUnarchive,
   ApprovalRespond,
   HarnessReport,
+  VerifierReport,
   TurnRecover,
 ]);
 export type Command = typeof Command.Type;
