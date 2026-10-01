@@ -231,11 +231,20 @@ export const makeFakeHarness = () => {
     return Stream.concat(Stream.fromIterable(start), waitForGate);
   };
 
-  const adapter: HarnessAdapter & { calls: typeof calls; reroutes: typeof reroutes; history: typeof history; release: () => void } = {
+  /** Every `close`, in order: a thread's id, or undefined for all of them. */
+  const closes: (ThreadId | undefined)[] = [];
+  const adapter: HarnessAdapter & {
+    calls: typeof calls;
+    reroutes: typeof reroutes;
+    history: typeof history;
+    closes: typeof closes;
+    release: () => void;
+  } = {
     id: "fake",
     calls,
     history,
     reroutes,
+    closes,
     release: () => release(),
     run(input: HarnessRunInput) {
       const maxCost = input.limits?.maxCost;
@@ -253,6 +262,7 @@ export const makeFakeHarness = () => {
         reroutes.push({ threadId, route });
         if (routes.has(threadId)) routes.set(threadId, route);
       }),
+    close: (threadId) => Effect.sync(() => void closes.push(threadId)),
   };
   return adapter;
 };

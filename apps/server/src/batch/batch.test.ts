@@ -52,12 +52,13 @@ test(
   async () => {
     const { repo, file } = evalSet();
     const home = track(makeTempHome());
+    const fake = makeFakeHarness();
     const { results, stopped } = await runBatch({
       tasks: loadEvalSet(file),
       routes: ["auto", "fake/fake/medium"],
       home,
       runHome: join(home, "batch", "run"),
-      harnesses: { fake: makeFakeHarness() },
+      harnesses: { fake },
       approve: false,
       taskTimeoutMs: 60_000,
       keep: false,
@@ -78,6 +79,9 @@ test(
       { route: "auto", tasks: 3, passed: 2, escalations: 1 },
       { route: "fake/fake/medium", tasks: 3, passed: 1, escalations: 0 },
     ]);
+    // Each task's harness session closes when it's done, and the rest when the run ends, so no harness process outlives it.
+    expect(new Set(fake.closes.slice(0, -1).filter(Boolean)).size).toBe(results.length);
+    expect(fake.closes.at(-1)).toBeUndefined();
     // The repository itself is untouched: every run worked in a copy.
     expect(existsSync(join(repo, "a.txt"))).toBe(false);
     expect(git(repo, "status", "--porcelain").trim()).toBe("?? evals.yaml");

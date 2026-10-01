@@ -143,4 +143,10 @@ export interface HarnessAdapter {
    * the decider must not reroute its threads. A thread with no running turn is ignored.
    */
   reroute(threadId: ThreadId, route: Route): Effect.Effect<void>;
+  /**
+   * Closes the session the harness keeps warm between a thread's turns (Claude Code: its CLI process), or every one
+   * without `threadId`; the thread's next turn resumes it in a fresh one. Verdandi calls it when it's done with a
+   * thread (a batch task) and when it stops, so no harness process outlives it.
+   */
+  close(threadId?: ThreadId): Effect.Effect<void>;
 }
