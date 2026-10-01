@@ -184,7 +184,6 @@ export const connect = (token: string) => {
     return unavailable ? { ok: false, message: unavailable.message } : disconnected;
   };
 
-  /** The spend dashboard's totals; undefined once the connection is lost. */
   /** What Verdandi remembers for the thread's user and project; undefined when it can't be read. */
   const memory = async (threadId: ThreadId): Promise<MemoryView | undefined> => {
     const exit = await run((rpc) => rpc.MemoryList({ threadId }));
@@ -201,6 +200,7 @@ export const connect = (token: string) => {
     return undefined;
   };
 
+  /** The spend dashboard's totals; undefined once the connection is lost. */
   const usage = async (filter: UsageFilter): Promise<UsageReport | undefined> => {
     const exit = await run((rpc) => rpc.UsageQuery(filter));
     if (Exit.isSuccess(exit)) return exit.value;

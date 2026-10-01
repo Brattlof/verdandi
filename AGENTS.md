@@ -4,7 +4,7 @@ Verdandi is a local-first workspace and personal agent platform for coding agent
 
 The design lives in `docs/DESIGN.md`. Read the section that covers what you're changing before you change it.
 
-**Status:** M1 (core loop) in progress. `verdandid`, the event store, the Claude Code harness, a terminal chat and a first web UI exist, and M2 has begun: the pure router routes each new task; everything after them does not yet. Packages are created when their milestone starts (DESIGN.md §20–21), not before.
+**Status:** M1 (core loop) in progress, with much of M2 (routing) and M3 (worktrees, checkpoints, verifiers and escalation, memory, session search) built alongside it. "How it works" below lists what exists; what it doesn't name, such as skills, the native harness and the gateway, doesn't exist yet. Packages are created when their milestone starts (DESIGN.md §20–21), not before.
 
 ## What we never compromise on
 

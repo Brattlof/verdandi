@@ -829,7 +829,7 @@ With the native harness, the review can be a *fork* of the session that keeps th
   - **Parquet**, for analysis.
 
   Secrets are masked on export, and you can exclude projects.
-- **Batch runner:** `verdandi batch tasks.yaml --routes a,b,c` runs task lists headless across routes in temporary worktrees. It's used for evals, router training data, and generating trajectories on purpose.
+- **Batch runner:** `verdandi batch tasks.yaml --route a --route b` runs task lists headless on each route, each task in a throwaway `git clone --shared` of its repository (§8.10). It's used for evals, router training data, and generating trajectories on purpose.
 - **RL environments (M6+):** the native harness can be wrapped as an environment for RL frameworks from `lab/`.
 
 ### 14.7 The lab (Python, offline)
