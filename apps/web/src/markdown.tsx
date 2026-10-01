@@ -186,19 +186,21 @@ const blocks = (lines: readonly string[]) => {
 
 type Groups = Readonly<Record<string, string | undefined>>;
 
-// Tried left to right at each position. Link URLs may hold one level of parentheses. Underscores mark emphasis only outside words, so snake_case stays.
+// Tried left to right at each position. Link URLs may hold one level of parentheses; a bare URL ends in `)` only when
+// it closes a `(` inside the URL. Underscores mark emphasis only outside words, so snake_case stays. An emphasis span's
+// tail is lazy (`??`), so a one-character span like **Y** closes at its own marker, not the next span's.
 const inlinePattern = new RegExp(
   [
     /(?<tick>`+)(?<code>[\s\S]+?)\k<tick>(?!`)/u,
     /!\[(?<alt>[^\]]*)\]\((?<src>(?:[^\s()]|\([^\s()]*\))*)[^)]*\)/u,
     /\[(?<label>[^\]]+)\]\((?<href>(?:[^\s()]|\([^\s()]*\))*)[^)]*\)/u,
     /<(?<auto>https?:\/\/[^\s>]+)>/u,
-    /(?<bare>https?:\/\/[^\s<>]*[^\s<>.,;:!?'")\]*_~])/u,
-    /\*\*(?<strong>[^\s*](?:[\s\S]*?\S)?)\*\*/u,
-    /(?<![\p{L}\p{N}_])__(?<strong_>[^\s_](?:[\s\S]*?\S)?)__(?![\p{L}\p{N}_])/u,
-    /~~(?<del>[^\s~](?:[\s\S]*?\S)?)~~/u,
-    /\*(?<em>[^\s*](?:[\s\S]*?[^\s*])?)\*/u,
-    /(?<![\p{L}\p{N}_])_(?<em_>[^\s_](?:[\s\S]*?[^\s_])?)_(?![\p{L}\p{N}_])/u,
+    /(?<bare>https?:\/\/[^\s<>]*(?:[^\s<>.,;:!?'")\]*_~]|\)(?<=:\/\/[^\s<>]*\([^\s<>()]*\))))/u,
+    /\*\*(?<strong>[^\s*](?:[\s\S]*?\S)??)\*\*/u,
+    /(?<![\p{L}\p{N}_])__(?<strong_>[^\s_](?:[\s\S]*?\S)??)__(?![\p{L}\p{N}_])/u,
+    /~~(?<del>[^\s~](?:[\s\S]*?\S)??)~~/u,
+    /\*(?<em>[^\s*](?:[\s\S]*?[^\s*])??)\*/u,
+    /(?<![\p{L}\p{N}_])_(?<em_>[^\s_](?:[\s\S]*?[^\s_])??)_(?![\p{L}\p{N}_])/u,
     /\\(?<escaped>[!-/:-@[-`{-~])/u,
   ]
     .map((part) => part.source)
