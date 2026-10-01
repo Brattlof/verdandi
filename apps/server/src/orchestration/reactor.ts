@@ -14,12 +14,15 @@ import type {
   TaskLimits,
   ThreadId,
   TurnId,
+  WorktreeReport,
+  WorktreeView,
 } from "@verdandi/contracts";
-import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Stream } from "effect";
+import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { checkpoint, checkpointRef } from "../workspace/checkpoint.ts";
 import { editedPaths } from "../workspace/diff.ts";
 import { runVerifier } from "../workspace/verify.ts";
+import { addWorktree, removeWorktree, threadFolder, worktreeSetup } from "../workspace/worktree.ts";
 import { Engine } from "./engine.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "./task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "./trajectory.ts";
@@ -27,6 +30,9 @@ import { recordTrajectory, unrecordedTurns } from "./trajectory.ts";
 export class HarnessRegistry extends Context.Service<HarnessRegistry, Partial<Record<HarnessId, HarnessAdapter>>>()(
   "verdandi/HarnessRegistry",
 ) {}
+
+/** Where the profile keeps threads' git worktrees, as `<repo>/<branch>` (DESIGN §13). */
+export class WorktreesDir extends Context.Service<WorktreesDir, string>()("verdandi/WorktreesDir") {}
 
 /** Where the profile keeps attachments' bytes, which harness turns read by path. */
 export class AttachmentsDir extends Context.Service<AttachmentsDir, string>()("verdandi/AttachmentsDir") {}
@@ -63,6 +69,7 @@ export const ReactorLive = Layer.effect(
     const engine = yield* Engine;
     const registry = yield* HarnessRegistry;
     const attachmentsDir = yield* AttachmentsDir;
+    const worktreesDir = yield* WorktreesDir;
     const projectVerifiers = yield* ProjectVerifiers;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
@@ -71,8 +78,25 @@ export const ReactorLive = Layer.effect(
     // ponytail: a steer accepted in the moment between the harness finishing and turn.completed
     // committing is recorded but never delivered, since its turn is over. Upgrade: have the harness report delivery.
     const steerQueues = new Map<TurnId, Queue.Queue<string>>();
-    /** Each thread's latest turn fiber: an interrupt stops it, and the thread's next turn waits for it to wind down. */
-    const latest = new Map<ThreadId, { readonly turnId: TurnId; readonly fiber: Fiber.Fiber<void> }>();
+    /**
+     * Each thread's latest work: a turn, or adding or removing its worktree. An interrupt of the turn stops it,
+     * and the thread's next work waits for it to wind down.
+     */
+    const latest = new Map<ThreadId, { readonly key: object; readonly turnId?: TurnId; readonly fiber: Fiber.Fiber<void> }>();
+
+    /** Runs `work` once everything queued for the thread before it has finished, finalizers included. */
+    const enqueue = (threadId: ThreadId, work: Effect.Effect<void>, turnId?: TurnId) =>
+      Effect.gen(function* () {
+        const key = {};
+        const previous = latest.get(threadId)?.fiber;
+        const fiber = yield* FiberSet.run(
+          turns,
+          Effect.andThen(previous ? Fiber.await(previous) : Effect.void, work).pipe(
+            Effect.ensuring(Effect.sync(() => latest.get(threadId)?.key === key && latest.delete(threadId))),
+          ),
+        );
+        latest.set(threadId, { key, fiber, ...(turnId && { turnId }) });
+      });
 
     const report = (threadId: ThreadId, turnId: TurnId, event: HarnessEvent) =>
       engine.dispatch({ type: "harness.report", commandId: randomUUID() as CommandId, threadId, turnId, event });
@@ -93,10 +117,10 @@ export const ReactorLive = Layer.effect(
      * Runs the project's verifiers in order until one fails, recording each on the turn before it completes (DESIGN §8.7).
      * Returns the run that failed, if one did.
      */
-    const verify = (threadId: ThreadId, turnId: TurnId, projectPath: string) =>
+    const verify = (threadId: ThreadId, turnId: TurnId, projectPath: string, cwd: string) =>
       Effect.gen(function* () {
         for (const command of yield* projectVerifiers(projectPath)) {
-          const run = yield* runVerifier(command, projectPath);
+          const run = yield* runVerifier(command, cwd);
           yield* engine.dispatch({ type: "verifier.report", commandId: randomUUID() as CommandId, threadId, turnId, run });
           if (!run.passed) return run;
         }
@@ -106,10 +130,11 @@ export const ReactorLive = Layer.effect(
     /** Saves the thread's tree as turn `turnId`'s start or end checkpoint (DESIGN §13). A failure is logged, never the turn's. */
     const saveCheckpoint = (threadId: ThreadId, turnId: TurnId, at: "start" | "end") =>
       Effect.gen(function* () {
-        const [thread] = yield* sql<{ cwd: string }>`
-          select p.path as cwd from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+        const [thread] = yield* sql<{ path: string; worktree: string | null }>`
+          select p.path, t.worktree from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+        const cwd = thread && threadFolder(thread.path, thread.worktree);
         // A folder outside git has no checkpoints, and `checkpoint` skips it.
-        if (thread && existsSync(thread.cwd)) yield* checkpoint(thread.cwd, checkpointRef(threadId, turnId, at));
+        if (cwd && existsSync(cwd)) yield* checkpoint(cwd, checkpointRef(threadId, turnId, at));
       }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not save the ${at} checkpoint of turn ${turnId}.`, cause)));
 
     const runTurn = (
@@ -128,17 +153,24 @@ export const ReactorLive = Layer.effect(
           route: string;
           session_id: string | null;
           path: string;
+          worktree: string | null;
           task_id: TaskId | null;
           limits: string | null;
           spent_usd: number;
         }>`
-          select t.route, t.session_id, p.path, t.task_id, json_extract(d.payload, '$.limits') as limits,
+          select t.route, t.session_id, p.path, t.worktree, t.task_id, json_extract(d.payload, '$.limits') as limits,
             (select total(u.cost_usd) from usage_ledger u join turns n on n.id = u.turn_id
               where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId}) as spent_usd
           from threads t join projects p on p.id = t.project_id
             left join tasks k on k.id = t.task_id left join route_decisions d on d.task_id = t.task_id
           where t.id = ${threadId}`;
         if (!thread) return yield* fail(`Thread ${threadId} disappeared before its turn ran.`);
+        // The turn waited for its worktree to be added; adding it may have failed meanwhile.
+        const worktree = thread.worktree === null ? null : (JSON.parse(thread.worktree) as WorktreeView);
+        if (worktree && worktree.state !== "ready") {
+          return yield* fail(`This thread's worktree isn't ready (${worktree.state}): ${worktree.error ?? "see the thread"}`);
+        }
+        const cwd = threadFolder(thread.path, thread.worktree);
         const route = JSON.parse(thread.route) as Route;
         const adapter = registry[route.harness];
         if (!adapter) return yield* fail(`The ${route.harness} harness is not available in this verdandid. Pick another route.`);
@@ -152,7 +184,7 @@ export const ReactorLive = Layer.effect(
         yield* adapter
           .run({
             threadId,
-            cwd: thread.path,
+            cwd,
             route,
             resumeSessionId: thread.session_id ?? undefined,
             turnId,
@@ -172,8 +204,8 @@ export const ReactorLive = Layer.effect(
               // Upgrade: hand it to the escalation's follow-up turn, or show it as unsent.
               return Effect.gen(function* () {
                 const failed =
-                  event.status === "success" && editedPaths(thread.path, calls).length > 0
-                    ? yield* verify(threadId, turnId, thread.path)
+                  event.status === "success" && editedPaths(cwd, calls).length > 0
+                    ? yield* verify(threadId, turnId, thread.path, cwd)
                     : undefined;
                 yield* report(threadId, turnId, event);
                 // Once the turn has completed, a failed verifier may escalate its task (DESIGN §8.7); the decider decides whether.
@@ -221,23 +253,55 @@ export const ReactorLive = Layer.effect(
           Effect.sync(() => steerQueues.delete(turnId)),
           Queue.shutdown(queue),
         );
-        const previous = latest.get(threadId)?.fiber;
-        const fiber = yield* FiberSet.run(
-          turns,
+        // The end checkpoint waits for the harness to stop, even an interrupted one, and the next turn waits for it.
+        yield* enqueue(
+          threadId,
           Effect.andThen(
-            previous ? Fiber.await(previous) : Effect.void,
-            // The end checkpoint waits for the harness to stop, even an interrupted one, and the next turn waits for it.
-            Effect.andThen(
-              saveCheckpoint(threadId, turnId, "start"),
-              runTurn(threadId, turnId, text, mode, attachments, Stream.fromQueue(queue)),
-            ).pipe(Effect.ensuring(saveCheckpoint(threadId, turnId, "end"))),
-          ).pipe(
-            Effect.ensuring(done),
-            Effect.ensuring(Effect.sync(() => latest.get(threadId)?.turnId === turnId && latest.delete(threadId))),
-          ),
+            saveCheckpoint(threadId, turnId, "start"),
+            runTurn(threadId, turnId, text, mode, attachments, Stream.fromQueue(queue)),
+          ).pipe(Effect.ensuring(saveCheckpoint(threadId, turnId, "end")), Effect.ensuring(done)),
+          turnId,
         );
-        latest.set(threadId, { turnId, fiber });
       });
+
+    const reportWorktree = (threadId: ThreadId, report: WorktreeReport) =>
+      engine.dispatch({ type: "worktree.report", commandId: randomUUID() as CommandId, threadId, report });
+    const worktreeOf = (threadId: ThreadId) =>
+      Effect.map(
+        sql<{ path: string; worktree: string | null }>`
+          select p.path, t.worktree from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`,
+        ([row]) => (row?.worktree ? { projectPath: row.path, worktree: JSON.parse(row.worktree) as WorktreeView } : undefined),
+      );
+
+    /** Adds the thread's requested worktree, then runs the project's setup command in it (DESIGN §13). */
+    const createWorktree = (threadId: ThreadId) =>
+      Effect.gen(function* () {
+        const found = yield* worktreeOf(threadId);
+        if (found?.worktree.state !== "creating") return;
+        const { projectPath, worktree } = found;
+        const added = yield* Effect.result(addWorktree(projectPath, worktreesDir, worktree.branch, worktree.root));
+        if (Result.isFailure(added))
+          return yield* reportWorktree(threadId, { type: "failed", action: "create", error: added.failure.message });
+        yield* reportWorktree(threadId, { type: "created", ...added.success });
+        const setup = worktreeSetup(projectPath);
+        const run = Result.isFailure(setup)
+          ? { command: "setup", passed: false, exitCode: null, durationMs: 0, output: setup.failure }
+          : setup.success && (yield* runVerifier(setup.success, added.success.path));
+        if (run) yield* reportWorktree(threadId, { type: "setup", run });
+      }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not add the worktree of thread ${threadId}.`, cause)));
+
+    /** Removes the thread's worktree, keeping its branch; git keeps one with uncommitted changes unless `force`. */
+    const dropWorktree = (threadId: ThreadId, force: boolean) =>
+      Effect.gen(function* () {
+        const found = yield* worktreeOf(threadId);
+        if (found?.worktree.state !== "removing") return;
+        const { root } = found.worktree;
+        const removed = root ? yield* Effect.result(removeWorktree(found.projectPath, root, force)) : Result.succeed(undefined);
+        yield* reportWorktree(
+          threadId,
+          Result.isFailure(removed) ? { type: "failed", action: "remove", error: removed.failure.message } : { type: "removed" },
+        );
+      }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not remove the worktree of thread ${threadId}.`, cause)));
 
     yield* engine.react((stored) => {
       const e = stored.event;
@@ -258,9 +322,19 @@ export const ReactorLive = Layer.effect(
           Effect.asVoid,
         );
       }
+      // Queued like turns: a turn sent while its worktree is being added waits for it.
+      if (e.type === "thread.worktree.requested") return enqueue(e.threadId, createWorktree(e.threadId));
+      if (e.type === "thread.worktree.removal.requested") return enqueue(e.threadId, dropWorktree(e.threadId, e.force));
       // A route change is an override of the running task, and ends it.
       if (e.type === "thread.route.changed") return FiberSet.run(turns, recordOutcomes(e.threadId)).pipe(Effect.asVoid);
       return Effect.void;
+    });
+
+    // Worktrees a stopped verdandid was adding or removing. Adding again reuses a worktree it had finished adding.
+    const unfinished = yield* sql<{ id: ThreadId; state: WorktreeView["state"] }>`
+      select id, json_extract(worktree, '$.state') as state from threads where json_extract(worktree, '$.state') in ('creating', 'removing')`;
+    yield* Effect.forEach(unfinished, (t) => enqueue(t.id, t.state === "creating" ? createWorktree(t.id) : dropWorktree(t.id, false)), {
+      discard: true,
     });
 
     // Turns that completed while nothing was listening: before a crash, in the recovery above, or before trajectories existed.

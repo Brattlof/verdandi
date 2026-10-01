@@ -55,7 +55,8 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
       session = e;
       continue;
     }
-    if (e.turnId !== turnId) continue;
+    // The rest of the thread's own events (its worktree's) aren't part of any turn.
+    if (!("turnId" in e) || e.turnId !== turnId) continue;
     switch (e.type) {
       case "turn.started":
         turn = { text: e.text, mode: e.mode ?? "build", startedAt: at };

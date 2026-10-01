@@ -5,16 +5,7 @@ import { join, resolve } from "node:path";
 import type { ThreadId, TurnId } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { git, gitFailed, gitOk, notARepo } from "./git.ts";
-
-/**
- * One part of a ref name for any id: bytes outside `[A-Za-z0-9_-]` are %-escaped, so no id can make an
- * invalid ref (`..`, spaces, `.lock`) or another id's.
- */
-export const refPart = (id: string) =>
-  Array.from(Buffer.from(id, "utf8"), (b) => {
-    const c = String.fromCharCode(b);
-    return /[A-Za-z0-9_-]/.test(c) ? c : `%${b.toString(16).padStart(2, "0")}`;
-  }).join("");
+import { refPart } from "./refs.ts";
 
 /** Where a thread's checkpoints live: shared by every worktree of the repo, and never on a branch. */
 export const threadCheckpoints = (threadId: ThreadId) => `refs/verdandi/checkpoints/${refPart(threadId)}/`;

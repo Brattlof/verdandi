@@ -263,6 +263,49 @@ export const TaskEscalated = Schema.Struct({
   nextTurnId: Schema.optionalKey(TurnId),
   reason: Schema.String,
 });
+/** The thread asked for a worktree on `branch`: the reactor adds it, and the thread's next turn waits until it has. */
+export const ThreadWorktreeRequested = Schema.Struct({
+  type: Schema.Literal("thread.worktree.requested"),
+  v: v1,
+  threadId: ThreadId,
+  branch: Schema.String,
+});
+/** The thread's worktree exists at `root`; its turns run in `path`, the project's folder inside it. */
+export const ThreadWorktreeCreated = Schema.Struct({
+  type: Schema.Literal("thread.worktree.created"),
+  v: v1,
+  threadId: ThreadId,
+  root: Schema.String,
+  path: Schema.String,
+});
+/** Adding (`create`) or removing (`remove`) the thread's worktree failed. A failed removal leaves it in place. */
+export const ThreadWorktreeFailed = Schema.Struct({
+  type: Schema.Literal("thread.worktree.failed"),
+  v: v1,
+  threadId: ThreadId,
+  action: Schema.Literals(["create", "remove"]),
+  error: Schema.String,
+});
+/** The project's setup command ran in the thread's new worktree. Its output is untrusted data. */
+export const ThreadWorktreeSetupRan = Schema.Struct({
+  type: Schema.Literal("thread.worktree.setup.ran"),
+  v: v1,
+  threadId: ThreadId,
+  ...VerifierRun.fields,
+});
+/** The user asked to remove the thread's worktree, or archived the thread. `force` removes it even with uncommitted changes. */
+export const ThreadWorktreeRemovalRequested = Schema.Struct({
+  type: Schema.Literal("thread.worktree.removal.requested"),
+  v: v1,
+  threadId: ThreadId,
+  force: Schema.Boolean,
+});
+/** The thread's worktree is gone; its branch is kept. */
+export const ThreadWorktreeRemoved = Schema.Struct({
+  type: Schema.Literal("thread.worktree.removed"),
+  v: v1,
+  threadId: ThreadId,
+});
 /** `limit`: a budget guard of the task (its `maxCost` or `maxTurns`) stopped the turn, which ends the task. */
 export const TurnStatus = Schema.Literals(["success", "error", "interrupted", "limit"]);
 export const TurnCompleted = Schema.Struct({
@@ -299,6 +342,12 @@ export const Event = Schema.Union([
   SpendCapRaised,
   VerifierRan,
   TaskEscalated,
+  ThreadWorktreeRequested,
+  ThreadWorktreeCreated,
+  ThreadWorktreeFailed,
+  ThreadWorktreeSetupRan,
+  ThreadWorktreeRemovalRequested,
+  ThreadWorktreeRemoved,
 ]);
 export type Event = typeof Event.Type;
 
@@ -346,6 +395,12 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "spend.cap.raised@1": SpendCapRaised,
   "verifier.ran@1": VerifierRan,
   "task.escalated@1": TaskEscalated,
+  "thread.worktree.requested@1": ThreadWorktreeRequested,
+  "thread.worktree.created@1": ThreadWorktreeCreated,
+  "thread.worktree.failed@1": ThreadWorktreeFailed,
+  "thread.worktree.setup.ran@1": ThreadWorktreeSetupRan,
+  "thread.worktree.removal.requested@1": ThreadWorktreeRemovalRequested,
+  "thread.worktree.removed@1": ThreadWorktreeRemoved,
 };
 
 /** The row shape an event is stored as. */

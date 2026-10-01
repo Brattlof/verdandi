@@ -5,6 +5,7 @@ import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { checkpointRef, listCheckpoints, snapshot } from "./checkpoint.ts";
 import { type GitError, git, gitFailed, notARepo } from "./git.ts";
+import { threadFolder } from "./worktree.ts";
 
 /** Payload limits: one file's diff, and the whole response. */
 export const limits = { fileBytes: 64 * 1024, totalBytes: 512 * 1024 };
@@ -120,12 +121,13 @@ export const threadDiff = (
 ): Effect.Effect<DiffView, DiffUnavailable | SqlError.SqlError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const [thread] = yield* sql<{ cwd: string }>`
-      select p.path as cwd from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+    const [thread] = yield* sql<{ path: string; worktree: string | null }>`
+      select p.path, t.worktree from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
     if (!thread) return yield* new DiffUnavailable({ reason: "ThreadNotFound", message: `Thread ${threadId} does not exist.` });
     const turns = yield* sql<{ id: TurnId; status: string }>`
       select id, status from turns where thread_id = ${threadId} order by started_at, rowid`;
-    const { cwd } = thread;
+    // A worktree shares its repo's refs, so its turns' checkpoints still diff from the project folder once it's removed.
+    const cwd = turnId === undefined ? threadFolder(thread.path, thread.worktree) : thread.path;
     const saved = yield* checkpointsIn(cwd, threadId);
     if (turnId === undefined) {
       const first = turns.map((t) => checkpointRef(threadId, t.id, "start")).find((ref) => saved.has(ref));
@@ -151,5 +153,5 @@ export const threadDiff = (
         message: `Turn ${turnId} has no checkpoint: it ran before Verdandi saved them, or saving one failed (verdandid's log says why). The thread's whole diff still works.`,
       });
     }
-    return yield* diffTrees(cwd, start, turn.status === "running" ? yield* workingTree(cwd) : end);
+    return yield* diffTrees(cwd, start, turn.status === "running" ? yield* workingTree(threadFolder(thread.path, thread.worktree)) : end);
   });

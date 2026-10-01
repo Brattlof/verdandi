@@ -738,7 +738,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 
 ## 13. Workspaces and execution
 
-- **Worktrees (per thread, optional):** `git worktree add` under `~/.verdandi/worktrees/<repo>/<branch>`. Setup scripts run when a worktree is created, and a cleanup policy removes old ones.
+- **Worktrees (per thread, optional):** `git worktree add` on a new branch `verdandi/<thread>` from `HEAD`, under the profile's `worktrees/<repo>/<branch>`. The project's setup command (`setup` in `<repo>/.verdandi/worktree.yaml`, e.g. `bun install`) runs once in each new worktree, and the thread shows its result. Removing a worktree, or archiving its thread, keeps the branch and refuses while it has uncommitted changes unless you confirm; it can be recreated on its branch. A thread's folder never changes after its first turn, because the harness keeps its session there. A cleanup policy will remove old ones.
 - **Checkpoints:** at the start and end of each turn, the tree is saved to hidden refs `refs/verdandi/checkpoints/<thread>/<turn>/start` and `…/end`, using a temporary index so your branch, staging area and stash are never touched (ADR 0015). A turn's diff is its end against its start, so your own edits between turns never show in it.
 - **Revert:** the conversation only, or the conversation and the files.
 - **Terminal:** PTYs run in a separate **PTY host** process that verdandid supervises, the same design VS Code uses. That way a crash in native terminal code can't take down the server. The host uses ConPTY on Windows. The UI renders terminals with xterm.js, and a terminal survives UI reloads.

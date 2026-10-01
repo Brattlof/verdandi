@@ -14,3 +14,4 @@ export * from "./rpc.ts";
 export * from "./spend.ts";
 export * from "./task.ts";
 export * from "./trajectory.ts";
+export * from "./worktree.ts";

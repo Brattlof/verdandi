@@ -73,6 +73,7 @@ test("projects a full turn into the thread view", async () => {
     route: { harness: "fake", model: "fake", effort: "low" },
     pinned: true,
     archived: false,
+    worktree: null,
     budgetMode: null,
     task: null,
     sessionId: "s1",

@@ -14,6 +14,7 @@ const usage = `Usage:
   verdandi chat  [--home <dir>] [--harness <h>] [--model <m>] [--effort <e> | --auto] [--budget thrifty|balanced|max|policy] [--raise-cap] [--thread <id>]   chat with the thread for this folder, or the one named; route flags pin a route, --auto lets the router pick, --budget sets how it trades cost for strength, --raise-cap raises each reached spend cap for the rest of its period
   verdandi chat  --list [--archived] [--home <dir>]  list every thread by project; --archived includes archived ones
   verdandi chat  --archive <thread> | --unarchive <thread> [--home <dir>]   put a thread away, or bring it back
+  verdandi chat  --worktree [--thread <id>] | --remove-worktree [--force]   start a new thread in a git worktree of its own (with --thread, recreate that thread's removed worktree), or remove the thread's worktree and keep its branch
   verdandi costs [--home <dir>] [--days <n>] [--project <path>]   cost per completed task on each route, then spend, cost by task class, usage by model, override rate and estimated savings vs always-Opus
   verdandi routing replay [--policy <file>] [--project <path>] [--home <dir>]   how saved tasks would route under a proposed policy (or each project's current one), with the estimated cost change; reads the database read-only`;
 

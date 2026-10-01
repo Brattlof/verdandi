@@ -11,6 +11,7 @@ import type {
   TurnId,
   TurnView,
 } from "@verdandi/contracts";
+import { nextWorktree } from "@verdandi/contracts";
 
 /** A turn as the UI shows it: the stored view plus the main agent's text streamed since its last message. */
 export type LiveTurn = TurnView & { readonly streaming: string };
@@ -117,6 +118,12 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     ...addItem(thread, turnId, { kind: "escalation", step, from, ...(to && { to }), ...(nextTurnId && { nextTurnId }), reason }),
     ...(to && { route: to, task: thread.task && { ...thread.task, reason } }),
   }),
+  "thread.worktree.requested": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
+  "thread.worktree.created": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
+  "thread.worktree.failed": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
+  "thread.worktree.setup.ran": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
+  "thread.worktree.removal.requested": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
+  "thread.worktree.removed": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
   "verifier.ran": (thread, { type: _, v: _v, threadId: _t, turnId, ...run }) => addItem(thread, turnId, { kind: "verifier", ...run }),
 };
 
