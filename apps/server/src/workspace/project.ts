@@ -4,6 +4,9 @@ import { isAbsolute } from "node:path";
 import { CommandRejected } from "@verdandi/contracts";
 import { Effect } from "effect";
 
+/** `path` with a leading `~`, alone or before `/` or `\`, as the user's home folder; `~name` stays as written. */
+export const expandHome = (path: string) => path.replace(/^~(?=$|[\\/])/, homedir());
+
 const invalid = (message: string) => Effect.fail(new CommandRejected({ reason: "InvalidProjectPath", message }));
 
 /**
@@ -12,7 +15,7 @@ const invalid = (message: string) => Effect.fail(new CommandRejected({ reason: "
  * exist and be a folder; it need not be a git repo.
  */
 export const resolveProjectPath = (path: string): Effect.Effect<string, CommandRejected> => {
-  const expanded = path.replace(/^~(?=$|[\\/])/, homedir());
+  const expanded = expandHome(path);
   if (!isAbsolute(expanded)) return invalid(`${path} is not an absolute path. Give the folder's full path, starting from the root.`);
   let real: string;
   try {
