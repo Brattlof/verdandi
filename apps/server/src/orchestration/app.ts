@@ -1,12 +1,13 @@
 import { join } from "node:path";
 import type { HarnessAdapter, HarnessId } from "@verdandi/contracts";
 import { Effect, Layer, Result } from "effect";
+import { loadMemorySettings } from "../config/memory.ts";
 import { loadSpendCaps } from "../config/spend-caps.ts";
 import { SqlLive } from "../persistence/db.ts";
 import { routingFor } from "../routing/routing.ts";
 import { attachmentsDir } from "../workspace/attachments.ts";
 import { EngineLive, type Projector } from "./engine.ts";
-import { AttachmentsDir, HarnessRegistry, ProjectVerifiers, ReactorLive, WorktreesDir } from "./reactor.ts";
+import { AttachmentsDir, HarnessRegistry, ProjectVerifiers, ReactorLive, ToolSettings, WorktreesDir } from "./reactor.ts";
 
 /** verdandid's core: database, engine and reactor, with the given harness adapters, which new tasks are routed over. */
 export const AppLayer = (
@@ -29,6 +30,7 @@ export const AppLayer = (
     Layer.provideMerge(Layer.succeed(HarnessRegistry, harnesses)),
     Layer.provideMerge(Layer.succeed(AttachmentsDir, attachmentsDir(home))),
     Layer.provideMerge(Layer.succeed(WorktreesDir, join(home, "worktrees"))),
+    Layer.provideMerge(Layer.sync(ToolSettings, () => ({ approveMemorySaves: loadMemorySettings(home).approveSaves }))),
     Layer.provideMerge(SqlLive(home)),
   );
 };

@@ -13,6 +13,7 @@ import {
   type Event,
   formatUsd,
   type HarnessEvent,
+  type MemoryView,
   type ProjectId,
   type Resolution,
   type RouteDecision,
@@ -23,6 +24,7 @@ import {
   type WorktreeView,
 } from "@verdandi/contracts";
 import { Result } from "effect";
+import { memorySnapshot, overCap, sameAs, scanMemory } from "../memory/memory.ts";
 import {
   decideEscalation,
   decideExecuteRoute,
@@ -85,6 +87,8 @@ export type DeciderState = {
   readonly decisions?: { readonly questions: readonly DecisionQuestion[]; readonly answers: readonly DecisionAnswer[] };
   /** The spend caps over the thread, loaded for `turn.send` and `spend.cap.raise`. Without it nothing is capped. */
   readonly spend?: SpendState;
+  /** The thread's user and project memory, loaded for `memory.*` commands and for a turn that starts a new session. */
+  readonly memory?: MemoryView;
 };
 
 type Decision = Result.Result<Event[], CommandRejected>;
@@ -159,6 +163,8 @@ const worktreeProblem = (threadId: ThreadId, worktree: WorktreeView | null): str
   if (worktree.state === "removing") return "This thread's worktree is being removed. Wait for it, then recreate it to send a turn.";
   return `This thread's worktree was removed; its branch ${worktree.branch} is kept. ${again}`;
 };
+
+const memoryEntries = (memory: MemoryView) => [...memory.user, ...memory.project];
 
 type Handler<T extends Command["type"]> = (state: DeciderState, command: Extract<Command, { type: T }>) => Decision;
 
@@ -239,19 +245,33 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     const stop = capped(state.spend);
     if (stop) return stop;
     const attachments = c.attachments?.length ? { attachments: c.attachments } : {};
-    const turn: Event = { type: "turn.started", v: 2, threadId: c.threadId, turnId: c.turnId, text: c.text, mode: c.mode, ...attachments };
+    const started: Event = {
+      type: "turn.started",
+      v: 2,
+      threadId: c.threadId,
+      turnId: c.turnId,
+      text: c.text,
+      mode: c.mode,
+      ...attachments,
+    };
+    // A new harness session starts with what Verdandi remembers now; the session keeps it (DESIGN §14.2).
+    const snapshot =
+      state.memory && state.thread.sessionId === null ? memorySnapshot(memoryEntries(state.memory), state.memory.projectPath) : "";
+    const turn: Event[] = snapshot
+      ? [{ type: "memory.snapshot.taken", v: 1, threadId: c.threadId, turnId: c.turnId, text: snapshot }, started]
+      : [started];
     // First: the reactor starts the turn on turn.started, and a later event of this commit could reach feeds after the turn ends.
     const recorded: Event[] = state.decisions
       ? [{ type: "decision.recorded", v: 1, threadId: c.threadId, turnId: c.turnId, ...state.decisions }]
       : [];
-    if (state.thread.taskId) return accept(...recorded, turn);
+    if (state.thread.taskId) return accept(...recorded, ...turn);
     const task = { type: "task.started", v: 2, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
-    if (!state.routing) return accept(...recorded, { ...task, route: state.thread.route }, turn);
+    if (!state.routing) return accept(...recorded, { ...task, route: state.thread.route }, ...turn);
     const images = c.attachments?.filter((a) => a.kind === "image").length ?? 0;
     const decided = decideRoute(state.thread, state.routing, c.text, c.mode, state.decisions?.answers ?? [], images);
     if (Result.isFailure(decided)) return reject(decided.failure.reason, decided.failure.message);
     const inputs = routeInputs(state.thread, state.routing);
-    return accept(...recorded, { ...task, route: routeOf(decided.success), decision: decided.success, inputs }, turn);
+    return accept(...recorded, { ...task, route: routeOf(decided.success), decision: decided.success, inputs }, ...turn);
   },
   "thread.route.set": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
@@ -364,6 +384,48 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       return reject("TurnNotRunning", `Turn ${c.turnId} isn't running, so there's no task to report blocked.`);
     }
     return accept({ type: "task.blocked", v: 1, threadId: c.threadId, taskId: state.thread.taskId, turnId: c.turnId, reason: c.reason });
+  },
+  "memory.save": (state, c) => {
+    if (!state.thread || !state.memory) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    const entries = memoryEntries(state.memory);
+    const text = c.text.trim();
+    const replaces = c.replaces ?? [];
+    const missing = replaces.find((id) => !entries.some((e) => e.entryId === id));
+    if (missing) return reject("MemoryNotFound", `There's no memory entry ${missing} to replace. Search memory for the entries' ids.`);
+    const refused = scanMemory(text);
+    if (refused) return reject("MemoryRejected", `Not remembered. ${refused}`);
+    const same = sameAs(entries, c.scope, text);
+    const full = overCap(entries, c.scope, text, same ? [...replaces, same.entryId] : replaces);
+    if (full) return reject("MemoryFull", full);
+    return accept({
+      type: "memory.saved",
+      v: 1,
+      threadId: c.threadId,
+      entryId: same?.entryId ?? c.commandId,
+      scope: c.scope,
+      ...(c.scope === "project" && { projectId: state.thread.projectId }),
+      text,
+      ...(c.turnId && { turnId: c.turnId }),
+      replaces,
+    });
+  },
+  "memory.edit": (state, c) => {
+    if (!state.thread || !state.memory) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    const entries = memoryEntries(state.memory);
+    const entry = entries.find((e) => e.entryId === c.entryId);
+    if (!entry) return reject("MemoryNotFound", `Memory entry ${c.entryId} doesn't exist: it was deleted or replaced.`);
+    const text = c.text.trim();
+    const refused = scanMemory(text);
+    if (refused) return reject("MemoryRejected", `Not saved. ${refused}`);
+    const full = overCap(entries, entry.scope, text, [entry.entryId]);
+    if (full) return reject("MemoryFull", full);
+    return accept({ type: "memory.edited", v: 1, threadId: c.threadId, entryId: c.entryId, text });
+  },
+  "memory.delete": (state, c) => {
+    if (!state.thread || !state.memory) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    return memoryEntries(state.memory).some((e) => e.entryId === c.entryId)
+      ? accept({ type: "memory.deleted", v: 1, threadId: c.threadId, entryId: c.entryId })
+      : accept();
   },
   "files.report": (state, c) =>
     state.thread

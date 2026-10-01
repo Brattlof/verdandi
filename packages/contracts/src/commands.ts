@@ -3,6 +3,7 @@ import { AttachmentRef, AttachmentUpload } from "./attachments.ts";
 import { HarnessEvent } from "./harness.ts";
 import { CommandId, ThreadId, TurnId } from "./ids.ts";
 import { VerifierRun } from "./items.ts";
+import { MemoryScope } from "./memory.ts";
 import { Resolution } from "./requests.ts";
 import { InteractionMode, Route } from "./route.ts";
 import { BudgetMode } from "./routing.ts";
@@ -187,6 +188,38 @@ export const TaskBlock = Schema.Struct({
   reason: Schema.String,
 });
 
+/**
+ * Remembers `text` in the thread's user or project memory (DESIGN §14.2), replacing the entries `replaces`
+ * names: that is how a full store is consolidated. The agent's `memory_save` sends it with its `turnId`; the
+ * Memory panel without. Scanned for secrets, injection and exfiltration first; refused over the store's cap.
+ */
+export const MemorySave = Schema.Struct({
+  type: Schema.Literal("memory.save"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  scope: MemoryScope,
+  text: Schema.String,
+  replaces: Schema.optionalKey(Schema.Array(Schema.String)),
+  turnId: Schema.optionalKey(TurnId),
+});
+
+/** The user rewrites a remembered fact from the Memory panel. Scanned and capped like a save. */
+export const MemoryEdit = Schema.Struct({
+  type: Schema.Literal("memory.edit"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  entryId: Schema.String,
+  text: Schema.String,
+});
+
+/** The user forgets a remembered fact from the Memory panel. */
+export const MemoryDelete = Schema.Struct({
+  type: Schema.Literal("memory.delete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  entryId: Schema.String,
+});
+
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
   type: Schema.Literal("harness.report"),
@@ -240,6 +273,9 @@ export const ClientCommand = Schema.Union([
   ThreadWorktreeRemove,
   ThreadRevert,
   ThreadRevertUndo,
+  MemorySave,
+  MemoryEdit,
+  MemoryDelete,
   ApprovalRespond,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
@@ -260,6 +296,9 @@ export const Command = Schema.Union([
   ThreadWorktreeRemove,
   ThreadRevert,
   ThreadRevertUndo,
+  MemorySave,
+  MemoryEdit,
+  MemoryDelete,
   ApprovalRespond,
   HarnessReport,
   FilesReport,

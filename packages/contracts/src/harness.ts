@@ -115,6 +115,12 @@ export type HarnessRunInput = {
    * (Claude Code: one in-process MCP server in `mcpServers`, ADR 0005). Absent when there are none.
    */
   readonly tools?: readonly HarnessTool[];
+  /**
+   * What Verdandi remembers (DESIGN §14.2), given on a new session's first turn only: put it at the head of the
+   * turn's message, marked as data, so it stays fixed in the session's history (Claude Code: a text block before
+   * the turn's own). Absent when there's nothing to remember, and on every later turn.
+   */
+  readonly memory?: string;
   readonly fork?: { readonly atTurnId: TurnId; readonly dropTurnIds: readonly TurnId[]; readonly transcriptPath?: string };
 };
 

@@ -101,10 +101,18 @@ export const ThreadPane = ({
             type="button"
             className="px-2 text-xs aria-pressed:border-accent aria-pressed:text-accent"
             aria-pressed={panel.open && panel.tab === "terminal"}
-            onClick={() => setPanel({ type: panel.open && panel.tab === "terminal" ? "close" : "terminal" })}
+            onClick={() => setPanel(panel.open && panel.tab === "terminal" ? { type: "close" } : { type: "tab", tab: "terminal" })}
           >
             <TerminalIcon className="size-3.5" />
             Terminal
+          </button>
+          <button
+            type="button"
+            className="px-2 text-xs aria-pressed:border-accent aria-pressed:text-accent"
+            aria-pressed={panel.open && panel.tab === "memory"}
+            onClick={() => setPanel(panel.open && panel.tab === "memory" ? { type: "close" } : { type: "tab", tab: "memory" })}
+          >
+            Memory
           </button>
         </header>
         {thread.worktree && <WorktreeBar connection={connection} threadId={threadId} worktree={thread.worktree} busy={thread.busy} />}
@@ -142,7 +150,7 @@ export const ThreadPane = ({
           panel={panel}
           turnLabel={turnIndex >= 0 ? `Turn ${turnIndex + 1}` : undefined}
           onFetch={fetchDiff}
-          onTerminal={() => setPanel({ type: "terminal" })}
+          onTab={(tab) => setPanel({ type: "tab", tab })}
           onClose={() => setPanel({ type: "close" })}
         />
       )}

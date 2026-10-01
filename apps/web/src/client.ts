@@ -6,6 +6,7 @@ import {
   type DiffView,
   type HarnessId,
   type InteractionMode,
+  type MemoryView,
   type RouteDecision,
   RoutingUnavailable,
   type SessionHit,
@@ -183,6 +184,14 @@ export const connect = (token: string) => {
   };
 
   /** The spend dashboard's totals; undefined once the connection is lost. */
+  /** What Verdandi remembers for the thread's user and project; undefined when it can't be read. */
+  const memory = async (threadId: ThreadId): Promise<MemoryView | undefined> => {
+    const exit = await run((rpc) => rpc.MemoryList({ threadId }));
+    if (Exit.isSuccess(exit)) return exit.value;
+    failure(exit.cause, CommandRejected);
+    return undefined;
+  };
+
   /** Past sessions' messages containing `query`, newest first. Under 3 characters, none. */
   const search = async (query: SessionQuery): Promise<readonly SessionHit[] | undefined> => {
     const exit = await run((rpc) => rpc.SessionSearch(query));
@@ -241,6 +250,6 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, search, terminals, follow, harnesses, lost };
+  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, search, memory, terminals, follow, harnesses, lost };
 };
 export type Connection = ReturnType<typeof connect>;

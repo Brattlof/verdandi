@@ -8,7 +8,7 @@ import { migrations } from "../persistence/migrations.ts";
 import { AppLayer } from "./app.ts";
 import { Engine, EngineLive } from "./engine.ts";
 import { loadThreadView, project } from "./projector.ts";
-import { AttachmentsDir, HarnessRegistry, ProjectVerifiers, Reactor, ReactorLive, WorktreesDir } from "./reactor.ts";
+import { AttachmentsDir, HarnessRegistry, ProjectVerifiers, Reactor, ReactorLive, ToolSettings, WorktreesDir } from "./reactor.ts";
 
 const homes: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];
@@ -436,6 +436,7 @@ describe("engine", () => {
       Layer.provideMerge(Layer.succeed(HarnessRegistry, { fake: makeFakeHarness() })),
       Layer.provideMerge(Layer.succeed(AttachmentsDir, "unused")),
       Layer.provideMerge(Layer.succeed(WorktreesDir, "unused")),
+      Layer.provideMerge(Layer.succeed(ToolSettings, { approveMemorySaves: false })),
       Layer.provideMerge(Layer.succeed(ProjectVerifiers, () => Effect.succeed([]))),
       Layer.provideMerge(SqlLive(newHome())),
     );

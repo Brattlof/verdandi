@@ -4,6 +4,7 @@ import { BunHttpServer } from "@effect/platform-bun";
 import {
   Api,
   type Command,
+  CommandRejected,
   type HarnessAdapter,
   type HarnessId,
   type RouteDecision,
@@ -19,7 +20,7 @@ import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { loadSpendCaps } from "../config/spend-caps.ts";
 import { AppLayer } from "../orchestration/app.ts";
 import { Engine } from "../orchestration/engine.ts";
-import { loadDeciderState } from "../orchestration/projector.ts";
+import { loadDeciderState, loadMemory } from "../orchestration/projector.ts";
 import { HarnessRegistry } from "../orchestration/reactor.ts";
 import { searchSessions } from "../orchestration/search.ts";
 import { loadSpendState } from "../orchestration/spend.ts";
@@ -100,6 +101,16 @@ const Handlers = (home: string) =>
           loadUsageReport(filter, new Date()).pipe(
             Effect.provideService(SqlClient.SqlClient, sql),
             Effect.catchTag("SqlError", Effect.die),
+          ),
+        MemoryList: ({ threadId }) =>
+          loadMemory(threadId).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.catchTag("SqlError", Effect.die),
+            Effect.flatMap((view) =>
+              view
+                ? Effect.succeed(view)
+                : Effect.fail(new CommandRejected({ reason: "ThreadNotFound", message: `Thread ${threadId} does not exist.` })),
+            ),
           ),
         SessionSearch: (query) =>
           searchSessions(query).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),

@@ -273,6 +273,26 @@ const sessionIndex = Effect.gen(function* () {
     order by seq`;
 });
 
+/**
+ * Memory (DESIGN §14.2): each remembered fact, user-wide (`project_id` null) or a project's, with where it was
+ * saved; and on each thread the snapshot its harness session started with, for that session's first turn.
+ */
+const memory = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table memories (
+    entry_id text primary key,
+    scope text not null,
+    project_id text,
+    text text not null,
+    source_thread text not null,
+    source_turn text,
+    saved_at text not null,
+    confirmed_at text not null
+  )`;
+  yield* sql`create index memories_project on memories (project_id, scope)`;
+  yield* sql`alter table threads add column memory_snapshot text`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -292,4 +312,5 @@ export const migrations = {
   "16_thread_worktree": threadWorktree,
   "17_revert": revert,
   "18_session_index": sessionIndex,
+  "19_memory": memory,
 };

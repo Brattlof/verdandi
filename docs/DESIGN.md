@@ -766,12 +766,12 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 ### 14.2 Memory
 
 - **Built-in stores:** `user` (preferences, conventions) and `project` (architecture facts, gotchas, commands). Each entry records its source (thread and turn) and a last-confirmed date.
-- **Fixed-size snapshot:** a capped snapshot is added to the prompt at session start. The caps are per scope (about 2K characters for project memory and 1.5K for user memory). It doesn't change for the rest of the session, which protects the cache. Anything written during the session shows up in the next session's snapshot. Entries are chosen by relevance first, using a score from the decision layer (§9.8), then by recency.
+- **Fixed-size snapshot:** a capped snapshot leads the first message of each new harness session, so it stays in the session's history (ADR 0016). The caps are per scope (2,000 characters for project memory and 1,500 for user memory), and the stores themselves are capped the same. It doesn't change for the rest of the session, which protects the cache. Anything written during the session shows up in the next session's snapshot. Entries are chosen by recency today; relevance, using a score from the decision layer (§9.8), comes first once that exists.
 - **Lookups:** `memory_search` results are added to the current user turn, never to the system prompt.
 - **Memory is capped on purpose.** When the cap is reached, a save fails and asks the agent to **consolidate**: merge, rewrite or drop older entries.
 - **Periodic nudges:** every *N* turns the agent is prompted to consider saving memory.
 - **Background review** (§14.5) proposes memories after tasks.
-- **Scanning:** every entry is scanned before it's saved, for secrets, prompt injection and data exfiltration. You can require approval for saves. Everything can be seen and edited in the Memory panel.
+- **Scanning:** every entry is scanned before it's saved, for secrets, prompt injection and data exfiltration; a hit is refused with the reason. You can require approval for saves (`approveSaves: true` in the home's `memory.yaml`). Everything can be seen, added, edited and deleted in the Memory panel.
 - **External memory providers (plugins, M6):** a `MemoryProvider` interface with hooks for:
   - adding a block to the system prompt,
   - prefetching,

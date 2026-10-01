@@ -3,6 +3,9 @@ import type {
   BudgetMode,
   Event,
   Item,
+  MemoryEntry,
+  MemoryScope,
+  MemoryView,
   ProjectId,
   ProjectSummary,
   Quota,
@@ -186,6 +189,23 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         sql`update threads set pending_fork = json_extract(revert, '$.prevFork'), revert = json_set(revert, '$.undone', json('true'))
             where id = ${e.threadId}`,
       ),
+    ),
+  // Saving what the store has confirms that entry: same id, new text and time. Consolidation drops what it replaces.
+  "memory.saved": (e, at) =>
+    withSql((sql) =>
+      Effect.andThen(
+        sql`delete from memories where entry_id in (select value from json_each(${JSON.stringify(e.replaces)})) and entry_id != ${e.entryId}`,
+        sql`insert into memories (entry_id, scope, project_id, text, source_thread, source_turn, saved_at, confirmed_at)
+            values (${e.entryId}, ${e.scope}, ${e.projectId ?? null}, ${e.text}, ${e.threadId}, ${e.turnId ?? null}, ${at}, ${at})
+            on conflict (entry_id) do update set text = excluded.text, confirmed_at = excluded.confirmed_at`,
+      ),
+    ),
+  "memory.edited": (e, at) =>
+    withSql((sql) => sql`update memories set text = ${e.text}, confirmed_at = ${at} where entry_id = ${e.entryId}`),
+  "memory.deleted": (e) => withSql((sql) => sql`delete from memories where entry_id = ${e.entryId}`),
+  "memory.snapshot.taken": (e) =>
+    withSql(
+      (sql) => sql`update threads set memory_snapshot = ${JSON.stringify({ turnId: e.turnId, text: e.text })} where id = ${e.threadId}`,
     ),
   "task.blocked": (e) => addItem(e.turnId, { kind: "blocked", reason: e.reason }),
   "thread.files.restored": (e) =>
@@ -542,4 +562,40 @@ export const loadThreadSummaries = (
         })),
       ),
     ),
+  );
+
+/** The thread's user and project memory, most recently confirmed first. */
+export const loadMemory = (threadId: ThreadId): Effect.Effect<MemoryView | null, SqlError.SqlError, SqlClient.SqlClient> =>
+  withSql((sql) =>
+    Effect.gen(function* () {
+      const [thread] = yield* sql<{ project_id: ProjectId; path: string }>`
+        select t.project_id, p.path from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+      if (!thread) return null;
+      const rows = yield* sql<{
+        entry_id: string;
+        scope: MemoryScope;
+        text: string;
+        source_thread: ThreadId;
+        source_turn: TurnId | null;
+        saved_at: string;
+        confirmed_at: string;
+      }>`
+        select entry_id, scope, text, source_thread, source_turn, saved_at, confirmed_at from memories
+        where scope = 'user' or project_id = ${thread.project_id} order by confirmed_at desc, rowid desc`;
+      const entries = rows.map(
+        (r): MemoryEntry => ({
+          entryId: r.entry_id,
+          scope: r.scope,
+          text: r.text,
+          source: { threadId: r.source_thread, ...(r.source_turn === null ? {} : { turnId: r.source_turn }) },
+          savedAt: r.saved_at,
+          confirmedAt: r.confirmed_at,
+        }),
+      );
+      return {
+        projectPath: thread.path,
+        user: entries.filter((e) => e.scope === "user"),
+        project: entries.filter((e) => e.scope === "project"),
+      };
+    }),
   );

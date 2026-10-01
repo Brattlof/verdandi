@@ -19,7 +19,7 @@ import type { SpendCaps } from "../config/spend-caps.ts";
 import { loadRoutingMemory } from "../routing/memory.ts";
 import { type RoutingContext, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { decide } from "./decider.ts";
-import { loadDeciderState, loadProjects, loadQuotas, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
+import { loadDeciderState, loadMemory, loadProjects, loadQuotas, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
 import { loadSpendState } from "./spend.ts";
 
 type FeedMessage = { readonly threadId: ThreadId; readonly feed: ThreadFeed };
@@ -140,7 +140,13 @@ export const EngineLive = (options: EngineOptions = {}) =>
               send && questions.length > 0
                 ? { questions, answers: (yield* decider.decide({ state: send.text, questions })).answers }
                 : undefined;
-            const decision = decide({ ...state, ...(routing && { routing }), ...(decisions && { decisions }) }, command);
+            // Memory: read for memory commands, and for a turn whose new harness session starts with a snapshot of it.
+            const remembers = command.type.startsWith("memory.") || (send !== undefined && current?.sessionId === null);
+            const memory = remembers ? yield* loadMemory(command.threadId) : null;
+            const decision = decide(
+              { ...state, ...(routing && { routing }), ...(decisions && { decisions }), ...(memory && { memory }) },
+              command,
+            );
             if (Result.isFailure(decision)) return yield* Effect.fail(decision.failure);
             const stored = yield* Effect.forEach(decision.success, (event) => append(command, event));
             const [last] = yield* sql<{ seq: number }>`select coalesce(max(seq), 0) as seq from events`;
