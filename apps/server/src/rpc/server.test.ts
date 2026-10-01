@@ -731,6 +731,24 @@ describe("rpc server", () => {
     expect(failure.message).toContain("Pick a route for this thread");
   });
 
+  test("ModelsList names the models an @name can pin, and RoutingSimulate previews the pin where nothing else routes", async () => {
+    const { info } = await startServer();
+    const threadId = uuid<ThreadId>();
+    const { models, pinned, unknown } = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        yield* c.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: folder });
+        const models = yield* c.ModelsList();
+        const pinned = yield* c.RoutingSimulate({ threadId, text: "@fake-large hi", mode: "build" });
+        const unknown = yield* Effect.flip(c.RoutingSimulate({ threadId, text: "@gpt hi", mode: "build" }));
+        return { models, pinned, unknown };
+      }),
+    );
+    expect(models.map((m) => m.model)).toEqual(["fake-small", "fake", "fake-large"]);
+    expect(pinned).toMatchObject({ source: "pin", target: { model: "fake-large" }, reason: "Pinned with @fake-large." });
+    expect(unknown.reason).toBe("InvalidPin");
+    expect(unknown.message).toContain("Use one of @fake-small, @fake, @fake-large.");
+  });
+
   test("thread.create resolves the folder, so two spellings of one folder are one project", async () => {
     const { info, runtime } = await startServer();
     const other = makeTempHome();

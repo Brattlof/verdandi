@@ -1,4 +1,15 @@
-import type { BudgetMode, CommandId, InteractionMode, Question, Resolution, ThreadId, ThreadView, TurnId } from "@verdandi/contracts";
+import {
+  atPin,
+  type BudgetMode,
+  type CommandId,
+  type InteractionMode,
+  type Question,
+  type Resolution,
+  type RouteTarget,
+  type ThreadId,
+  type ThreadView,
+  type TurnId,
+} from "@verdandi/contracts";
 import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, useEffect, useId, useState } from "react";
 import { addFiles, type Pending, PendingList } from "./attachments.tsx";
 import { type Connection, type Routed, uuid } from "./client.ts";
@@ -36,6 +47,7 @@ export const Composer = ({
   const [capRejections, setCapRejections] = useState(0);
   const running = thread.turns.findLast((t) => t.status === "running");
   const { threadId } = thread;
+  const pins = usePinMenu(connection, running ? "" : text, setText);
 
   const attach = async (files: readonly File[]) => {
     if (files.length === 0) return;
@@ -110,14 +122,15 @@ export const Composer = ({
     void send();
   };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (pins.onKeyDown(e)) return;
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void send();
     }
   };
   const hint = modes.find((m) => m.value === mode)?.hint;
-  // Only a message that starts a routed task gets a preview: one that continues a task keeps its route.
-  const preview = !running && !thread.pinned && thread.task === null;
+  // Only a message that starts a routed task gets a preview: one that continues a task keeps its route. A leading `@name` starts one.
+  const preview = !running && ((!thread.pinned && thread.task === null) || atPin(text) !== undefined);
   return (
     <div className="mx-auto w-full max-w-[860px] px-3 pt-2 pb-3 sm:px-4">
       <div className="mb-1.5 flex flex-col gap-1">
@@ -128,8 +141,9 @@ export const Composer = ({
         onSubmit={onSubmit}
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
-        className="rounded-xl border border-line-strong bg-card focus-within:border-accent focus-within:shadow-[0_0_0_1px_var(--color-accent)]"
+        className="relative rounded-xl border border-line-strong bg-card focus-within:border-accent focus-within:shadow-[0_0_0_1px_var(--color-accent)]"
       >
+        {pins.menu}
         <PendingList items={pending} onRemove={detach} />
         <label className="sr-only" htmlFor="message">
           {running ? "Steer the running turn" : "Message"}
@@ -143,14 +157,16 @@ export const Composer = ({
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           className="block max-h-[40vh] w-full resize-y rounded-xl border-0 bg-transparent px-3 pt-2.5 outline-none focus-visible:outline-none"
-          placeholder={running ? "Steer the agent: it reads this at its next step" : "Message the agent"}
+          placeholder={running ? "Steer the agent: it reads this at its next step" : "Message the agent, or @model to pin its task"}
           aria-describedby={preview ? "route-preview" : undefined}
+          {...pins.inputProps}
         />
         {preview && (
           <RoutePreview
             connection={connection}
             thread={thread}
-            text={text}
+            text={pins.open ? "" : text}
+            idle={pins.open ? "Pins the task this message starts to the model you pick." : undefined}
             mode={mode}
             images={pending.filter((p) => p.preview !== undefined).length}
           />
@@ -287,12 +303,15 @@ const RoutePreview = ({
   connection,
   thread,
   text,
+  idle = "The router picks a route when you send.",
   mode,
   images,
 }: {
   connection: Connection;
   thread: LiveThread;
   text: string;
+  /** Shown with no draft to route. */
+  idle?: string | undefined;
   mode: InteractionMode;
   images: number;
 }) => {
@@ -313,12 +332,96 @@ const RoutePreview = ({
   return (
     <p id="route-preview" className="px-3 text-xs text-muted" aria-live="polite">
       {!draft || !routed
-        ? "The router picks a route when you send."
+        ? idle
         : decision
           ? `Routes to ${decision.target.model} · ${decision.effort} on ${decision.target.harness}: ${decision.reason}`
           : !routed.ok && <span className="text-error">{routed.message}</span>}
     </p>
   );
+};
+
+/**
+ * The models a message can pin its task to (DESIGN §12), offered while its first token is a `@name` being typed: an
+ * ARIA listbox the message box drives with `aria-activedescendant`, so focus stays in the box. Arrow keys move,
+ * Enter or Tab picks, Escape closes. Not Base UI's Autocomplete: that treats the whole field as its query, and its
+ * Escape clears the field and its Home and End jump to the field's ends, wrong for a multi-line message.
+ */
+const usePinMenu = (connection: Connection, text: string, setText: (text: string) => void) => {
+  const [models, setModels] = useState<readonly RouteTarget[]>([]);
+  const [active, setActive] = useState(0);
+  const [dismissed, setDismissed] = useState<string>();
+  const id = useId();
+  useEffect(() => {
+    void connection.models().then(setModels);
+  }, [connection]);
+  const typed = /^@(\S*)$/.exec(text)?.[1]?.toLowerCase();
+  const matches =
+    typed === undefined || text === dismissed
+      ? []
+      : models
+          .filter((m) => m.model.toLowerCase().startsWith(typed))
+          // The exact name first, so Enter on a typed name picks it.
+          .toSorted((a, b) => Number(b.model.toLowerCase() === typed) - Number(a.model.toLowerCase() === typed));
+  const open = matches.length > 0;
+  const current = Math.min(active, matches.length - 1);
+  const pick = (m: RouteTarget) => {
+    setText(`@${m.model} `);
+    setActive(0);
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!open || e.nativeEvent.isComposing) return false;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp")
+      setActive((current + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length);
+    else if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+      const m = matches[current];
+      if (m) pick(m);
+    } else if (e.key === "Escape") setDismissed(text);
+    else return false;
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  };
+  const option = (i: number) => `${id}-model-${i}`;
+  const menu = (
+    <>
+      <p role="status" className="sr-only">
+        {open ? `${matches.length} model${matches.length === 1 ? "" : "s"} to pin this task to: arrow keys choose, Enter picks.` : ""}
+      </p>
+      {open && (
+        <div
+          id={`${id}-models`}
+          role="listbox"
+          aria-label="Pin this task to a model"
+          className="absolute bottom-full left-0 z-10 mb-1 min-w-56 rounded-lg border border-line-strong bg-card p-1 text-sm shadow-lg"
+        >
+          {matches.map((m, i) => (
+            // Picked by pointer here; by keyboard from the message box, which keeps focus.
+            // biome-ignore lint/a11y/useKeyWithClickEvents: the message box handles the keys for its listbox (aria-activedescendant).
+            <div
+              key={`${m.harness} ${m.model}`}
+              id={option(i)}
+              role="option"
+              tabIndex={-1}
+              aria-selected={i === current}
+              className="flex cursor-pointer items-center justify-between gap-6 rounded-md px-2 py-1 hover:bg-hover aria-selected:bg-hover"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => pick(m)}
+            >
+              <span className="font-mono">@{m.model}</span>
+              <span className="text-xs text-muted">{m.harness}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+  const inputProps = {
+    "aria-autocomplete": "list",
+    "aria-controls": open ? `${id}-models` : undefined,
+    "aria-activedescendant": open ? option(current) : undefined,
+    onInput: () => setActive(0),
+  } as const;
+  return { open, menu, onKeyDown, inputProps };
 };
 
 type Request = ThreadView["pendingRequests"][number];

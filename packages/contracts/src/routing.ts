@@ -202,6 +202,8 @@ export const RouteInputs = Schema.Struct({
   memory: Schema.optionalKey(Schema.Array(RouteStats)),
   /** The spend cap that was reached, when one was. */
   capped: Schema.optionalKey(SpendCapped),
+  /** The model the task's message named with a leading `@name`, which pinned the task; the stored text is without it. */
+  at: Schema.optionalKey(Schema.String),
 });
 export type RouteInputs = typeof RouteInputs.Type;
 

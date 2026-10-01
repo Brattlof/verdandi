@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  atPin,
   type CapPeriod,
   type CapScope,
   type Catalog,
@@ -263,13 +264,23 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     const unavailable = worktreeProblem(c.threadId, state.thread.worktree);
     if (unavailable) return reject("WorktreeUnavailable", unavailable);
     if (state.spend && Result.isFailure(state.spend)) return reject("InvalidSpendCaps", state.spend.failure);
+    // A leading `@name` pins the task this turn starts to that model (DESIGN §8.4 stage 0); the agent never sees it.
+    const at = atPin(c.text);
+    if (at && !at.text.trim() && !c.attachments?.length) {
+      return reject(
+        "InvalidPin",
+        `@${at.name} pins the task its message starts: write the message after it, e.g. "@${at.name} fix the flaky test".`,
+      );
+    }
+    if (at && !state.routing) return reject("InvalidPin", `@${at.name} can't pin a model: this verdandid has no model catalog.`);
+    const text = at ? at.text : c.text;
     const attachments = c.attachments?.length ? { attachments: c.attachments } : {};
     const started: Event = {
       type: "turn.started",
       v: 2,
       threadId: c.threadId,
       turnId: c.turnId,
-      text: c.text,
+      text,
       mode: c.mode,
       ...attachments,
     };
@@ -285,13 +296,16 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       : [];
     // A reached cap stops only turns that would spend metered dollars; the router routes a new task around it.
     const onRoute = capped(state.spend, targetFor(state, state.thread.route));
-    if (state.thread.taskId) return onRoute ?? accept(...recorded, ...turn);
+    // An `@name` turn starts a task of its own, even while the thread has one open; it neither pins nor unpins the thread.
+    // ponytail: its task.started moves a pinned thread's route too, so a task that starts after a limit or revert ended it stays
+    // on the `@` model. Upgrade: keep a pinned thread's route apart from its running one, if pinning and `@` in one thread is common.
+    if (state.thread.taskId && !at) return onRoute ?? accept(...recorded, ...turn);
     const task = { type: "task.started", v: 2, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
     if (!state.routing) return onRoute ?? accept(...recorded, { ...task, route: state.thread.route }, ...turn);
     const cap = reachedCap(state.spend);
     const routing = cap ? { ...state.routing, capped: cap } : state.routing;
     const images = c.attachments?.filter((a) => a.kind === "image").length ?? 0;
-    const decided = decideRoute(state.thread, routing, c.text, c.mode, state.decisions?.answers ?? [], images);
+    const decided = decideRoute(state.thread, routing, text, c.mode, state.decisions?.answers ?? [], images, at?.name);
     if (Result.isFailure(decided)) {
       // Every target left would spend metered dollars: the cap is what stops the turn.
       const stop = decided.failure.reason === "NoRoute" && cap ? capped(state.spend, undefined) : undefined;
@@ -299,7 +313,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     const stop = capped(state.spend, decided.success.target);
     if (stop) return stop;
-    const inputs = routeInputs(state.thread, routing);
+    const inputs = { ...routeInputs(state.thread, routing), ...(at && { at: at.name }) };
     return accept(...recorded, { ...task, route: routeOf(decided.success), decision: decided.success, inputs }, ...turn);
   },
   "thread.route.set": (state, c) => {
@@ -572,9 +586,18 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       ? accept({ type: "verifier.ran", v: 1, threadId: c.threadId, turnId: c.turnId, ...c.run })
       : accept(),
   // Only the routed task whose latest turn the verifier ran after escalates, and only while nothing else has started since.
+  // A task pinned with `@name` never does: the user chose its target, like a pinned thread's.
   "task.escalate": (state, c) => {
     const thread = state.thread;
-    if (!thread || thread.pinned || thread.archived || !thread.taskId || thread.runningTurnId || thread.lastTurnId !== c.turnId)
+    if (
+      !thread ||
+      thread.pinned ||
+      thread.taskDecision?.source === "pin" ||
+      thread.archived ||
+      !thread.taskId ||
+      thread.runningTurnId ||
+      thread.lastTurnId !== c.turnId
+    )
       return accept();
     const failure = failureOf(c.run);
     const step = state.routing && decideEscalation(thread, state.routing, thread.taskEscalations, failure);

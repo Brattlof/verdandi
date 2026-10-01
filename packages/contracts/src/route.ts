@@ -40,6 +40,15 @@ export type Route = typeof Route.Type;
 /** A new thread's route when nothing else picks one. */
 export const defaultRoute: Route = { harness: "claude-code", model: "sonnet", effort: "medium" };
 
+/**
+ * A message's leading `@name` (DESIGN §12): the model it pins the task it starts to, and the text the agent sees
+ * without it. Undefined when the message doesn't start with one. Whether `name` is a model is the router's call.
+ */
+export const atPin = (text: string) => {
+  const m = /^\s*@(\S+)\s*/.exec(text);
+  return m?.[1] === undefined ? undefined : { name: m[1], text: text.slice(m[0].length) };
+};
+
 /** What differs between two routes, e.g. `model sonnet → opus, effort medium → high`; empty when nothing does. */
 export const describeRouteChange = (from: Route, to: Route) =>
   (["harness", "model", "effort"] as const)

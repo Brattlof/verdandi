@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Command, CommandId, HarnessId, ProjectId, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
-import { builtInCatalog, loadPolicy } from "@verdandi/router";
+import { builtInCatalog, loadPolicy, route as routeTask, rules } from "@verdandi/router";
 import { fakeCatalog } from "@verdandi/testkit";
 import { Result } from "effect";
 import { type DeciderState, decide, projectIdFor } from "./decider.ts";
@@ -503,6 +503,11 @@ describe("task.escalate", () => {
     expect(events(decide({ thread: { ...thread, pinned: true }, routing }, escalate))).toEqual([]);
   });
 
+  test("a task the user pinned with @name never escalates: they chose its target", () => {
+    const taskDecision = routeTask({ text: "Fix the bug", at: "fake", mode: "build", harnesses: ["fake"] }, policy, rules);
+    expect(events(decide({ thread: { ...thread, taskDecision }, routing }, escalate))).toEqual([]);
+  });
+
   test("a reached spend cap stops the ladder and asks instead, when the next step would spend metered dollars", () => {
     const cap = { scope: "project", period: "day", periodKey: "2026-09-30", baseUsd: 5, limitUsd: 5, spentUsd: 5 } as const;
     const spent = (paying: HarnessId[]) => ({
@@ -518,5 +523,36 @@ describe("task.escalate", () => {
       },
     ]);
     expect(events(decide(spent([]), escalate))).toMatchObject([{ type: "task.escalated", step: "effort" }, { type: "turn.started" }]);
+  });
+});
+
+describe("@name pins", () => {
+  const policy = loadPolicy([], [...builtInCatalog, ...fakeCatalog]);
+  const routing = { policy: Result.succeed(policy), builtIn: policy, harnesses: ["fake"] as const };
+  // An unpinned thread whose routed task is still open.
+  const thread = { ...(idle.thread as NonNullable<DeciderState["thread"]>), pinned: false, taskId, turns: 1, sessionId: "s1" };
+  const at = (text: string): Command => ({ type: "turn.send", commandId, threadId, turnId, text, mode: "build" });
+
+  test("starts a task of its own, pinned to the model, with the name stripped from what the agent sees", () => {
+    const [task, turn, ...rest] = events(decide({ thread, routing }, at("@fake-large  why does it crash?")));
+    expect(task).toMatchObject({
+      type: "task.started",
+      taskId: turnId as string as TaskId,
+      route: { harness: "fake", model: "fake-large" },
+      decision: { source: "pin", reason: "Pinned with @fake-large." },
+      inputs: { pinned: false, at: "fake-large" },
+    });
+    expect(turn).toMatchObject({ type: "turn.started", text: "why does it crash?" });
+    expect(rest).toEqual([]);
+  });
+
+  test("an unknown name, a name with no message, or no catalog to check it against is rejected", () => {
+    const unknown = decide({ thread, routing }, at("@gpt fix it"));
+    expect(Result.isFailure(unknown) && unknown.failure).toMatchObject({
+      reason: "InvalidPin",
+      message: "@gpt isn't a model Verdandi can run. Use one of @fake-small, @fake, @fake-large.",
+    });
+    expect(reason(decide({ thread, routing }, at("@fake")))).toBe("InvalidPin");
+    expect(reason(decide({ thread }, at("@fake fix it")))).toBe("InvalidPin");
   });
 });

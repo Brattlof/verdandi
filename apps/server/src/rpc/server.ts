@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { BunHttpServer } from "@effect/platform-bun";
 import {
   Api,
+  atPin,
   type Command,
   CommandRejected,
   type HarnessAdapter,
@@ -28,7 +29,7 @@ import { loadSpendState } from "../orchestration/spend.ts";
 import { loadTaskCosts } from "../orchestration/task-outcome.ts";
 import { loadUsageReport } from "../orchestration/usage.ts";
 import { loadRoutingMemory } from "../routing/memory.ts";
-import { decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
+import { catalogFor, decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { AttachmentSweepLive, attachmentPath, attachmentsDir, storeAttachments } from "../workspace/attachments.ts";
 import { threadDiff } from "../workspace/diff.ts";
 import { resolveProjectPath } from "../workspace/project.ts";
@@ -86,6 +87,12 @@ const Handlers = (home: string) =>
           return stop ? Deferred.succeed(stop, undefined).pipe(Effect.asVoid) : Effect.void;
         },
         HarnessesList: () => Effect.succeed(harnesses),
+        ModelsList: () =>
+          Effect.succeed(
+            catalogFor(registry)
+              .filter((e) => harnesses.includes(e.harness))
+              .map(({ harness, provider, model, access }) => ({ harness, provider, model, access })),
+          ),
         DiffGet: ({ threadId, turnId }) =>
           threadDiff(threadId, turnId).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
         SpendCapsGet: ({ threadId }) =>
@@ -147,8 +154,10 @@ const Handlers = (home: string) =>
             );
             const cap = reachedCap(spend);
             const context = { ...(yield* routing(thread.projectPath)), memory, ...(cap && { capped: cap }) };
-            const { answers } = yield* rulesDecide.decide({ state: text, questions: taskQuestions(context) });
-            const decided = decideRoute(thread, context, text, mode, answers, images);
+            const at = atPin(text);
+            const task = at ? at.text : text;
+            const { answers } = yield* rulesDecide.decide({ state: task, questions: taskQuestions(context) });
+            const decided = decideRoute(thread, context, task, mode, answers, images, at?.name);
             if (Result.isFailure(decided)) return yield* new RoutingUnavailable(decided.failure);
             return decided.success;
           }),

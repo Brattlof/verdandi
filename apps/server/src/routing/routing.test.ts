@@ -459,3 +459,55 @@ describe("subagent routing", () => {
     expect(decision.trace.at(-1)?.note).toContain("kept the warm session's");
   });
 });
+
+// DESIGN §8.4 stage 0 and §12: a leading `@name` pins the task its message starts, and only that task.
+describe("@name pins", () => {
+  test("a leading @name starts a task of its own on that model, without the name in the agent's text, and the thread stays unpinned", async () => {
+    const { projectPath, fake, run } = setup();
+    const [first, second, third] = [id<TurnId>(), id<TurnId>(), id<TurnId>()];
+    const { pinnedTask, kinds, next } = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath));
+        yield* dispatch(send(SEARCH, first));
+        yield* drain;
+        yield* dispatch(send(`@fake-large ${DEBUG}`, second));
+        yield* drain;
+        const pinnedTask = yield* view;
+        // A budget change ends the task, so the next turn starts another, routed by its class again.
+        yield* dispatch({ type: "thread.budget.set", commandId: id<CommandId>(), threadId, mode: "balanced" });
+        yield* dispatch(send(SEARCH, third));
+        yield* drain;
+        const kinds = yield* (yield* SqlClient.SqlClient)<{
+          kind: string;
+        }>`select kind from decisions where turn_id = ${second} order by idx`;
+        return { pinnedTask, kinds: kinds.map((k) => k.kind), next: yield* view };
+      }),
+    );
+    expect(pinnedTask?.pinned).toBe(false);
+    expect(pinnedTask?.task).toEqual({ taskId: second as string as TaskId, source: "pin", reason: "Pinned with @fake-large." });
+    expect(fake.calls.slice(0, 2).map((c) => [c.route.model, c.text])).toEqual([
+      ["fake-small", SEARCH],
+      ["fake-large", DEBUG],
+    ]);
+    // It starts a task, so it's classified like a new one, and asked whether it corrects the agent like any later turn.
+    expect(kinds).toEqual(["routing.task-class", "routing.difficulty", "follow-up.correcting"]);
+    expect(next?.pinned).toBe(false);
+    expect(next?.task).toMatchObject({ taskId: third as string as TaskId, source: "policy" });
+    expect(next?.task?.reason).toStartWith("Looks like ask.search");
+  });
+
+  test("an unknown @name is rejected, naming the models verdandid runs", async () => {
+    const { projectPath, fake, run } = setup();
+    const rejected = await run(
+      Effect.gen(function* () {
+        yield* dispatch(create(projectPath));
+        return yield* Effect.flip(dispatch(send("@gpt fix the flaky test")));
+      }),
+    );
+    expect(rejected).toMatchObject({
+      reason: "InvalidPin",
+      message: "@gpt isn't a model Verdandi can run. Use one of @fake-small, @fake, @fake-large.",
+    });
+    expect(fake.calls).toEqual([]);
+  });
+});

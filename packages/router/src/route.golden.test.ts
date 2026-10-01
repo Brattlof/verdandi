@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { BudgetMode, InteractionMode, TaskClass } from "@verdandi/contracts";
+import { atPin, type BudgetMode, type InteractionMode, type TaskClass } from "@verdandi/contracts";
 import { loadPolicy } from "./policy.ts";
 import { route } from "./route.ts";
 import { rules } from "./rules.ts";
@@ -128,6 +128,21 @@ for (const g of PLANNED) {
     });
   }
 }
+
+// DESIGN §8.4 stage 0: a leading `@name` pins its task, and only its task.
+test("@haiku skips classification-based routing with the pin as the reason, and the next task without it routes by class", () => {
+  const text = "Fix the date parsing bug in src/dates.ts";
+  const at = atPin(`@haiku ${text}`);
+  if (!at) throw new Error("@haiku wasn't read as a pin");
+  expect(at.text).toBe(text);
+  const pinned = route({ text: at.text, at: at.name, mode: "build" }, loadPolicy(), rules);
+  expect(pinned).toMatchObject({ source: "pin", taskClass: "code.edit.local", target: { model: "haiku" }, effort: "medium" });
+  expect(pinned.reason).toBe("Pinned with @haiku.");
+  expect(pinned.trace.map((t) => t.stage)).not.toContain("policy");
+  const next = route({ text, mode: "build" }, loadPolicy(), rules);
+  expect(next).toMatchObject({ source: "policy", target: { model: "sonnet" }, effort: "medium" });
+  expect(next.reason).toStartWith("Looks like code.edit.local");
+});
 
 test("a feature routed with an explorer on Haiku keeps its main route in every mode", () => {
   const subagents = { explorer: { prefer: ["cc-haiku"], effort: "low" } };

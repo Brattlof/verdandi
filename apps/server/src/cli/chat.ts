@@ -202,8 +202,10 @@ export const chat = async (argv: readonly string[]) => {
           if (f.kind === "delta") process.stdout.write(f.text);
           if (f.kind !== "event") return;
           const e = f.stored.event;
-          if (e.type === "task.started" && e.decision && e.decision.source !== "pin") {
-            process.stdout.write(`[routed to ${e.route.model} ${e.route.effort} on ${e.route.harness}: ${e.decision.reason}]\n`);
+          // A pinned thread's tasks need no line; one a message pinned with `@name` gets one.
+          if (e.type === "task.started" && e.decision && (e.decision.source !== "pin" || e.inputs?.at)) {
+            const how = e.decision.source === "pin" ? "pinned" : "routed";
+            process.stdout.write(`[${how} to ${e.route.model} ${e.route.effort} on ${e.route.harness}: ${e.decision.reason}]\n`);
           }
           if (e.type === "task.rerouted") {
             process.stdout.write(`[plan approved: the build runs on ${e.to.model} ${e.to.effort}: ${e.decision.reason}]\n`);
@@ -359,7 +361,7 @@ export const chat = async (argv: readonly string[]) => {
         ? `${harness} ${model} ${effort} (routed; --model or --effort pins a route)`
         : "the route the router picks for the next task";
   process.stdout.write(
-    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
+    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
   );
   const tree = thread.worktree;
   if (tree) {
