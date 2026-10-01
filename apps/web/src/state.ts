@@ -134,6 +134,11 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     ...setReverted(thread, e.turnIds, false),
     revert: thread.revert && { ...thread.revert, undone: true },
   }),
+  // Memory shows in its panel, fetched when opened.
+  "memory.saved": (thread) => thread,
+  "memory.edited": (thread) => thread,
+  "memory.deleted": (thread) => thread,
+  "memory.snapshot.taken": (thread) => thread,
   "task.blocked": (thread, e) => addItem(thread, e.turnId, { kind: "blocked", reason: e.reason }),
   "thread.files.restored": (thread, e) => ({
     ...thread,
@@ -182,16 +187,19 @@ export const applyProjectsFeed = (sidebar: Sidebar | undefined, feed: ProjectsFe
 };
 
 /**
- * The right panel, on its Diff or Terminal tab. The diff is what `turnId` changed, or with `all` everything since
+ * The right panel, on its Diff, Terminal or Memory tab. The diff is what `turnId` changed, or with `all` everything since
  * the thread's first turn. `turnId` is kept while `all` is on, so switching back shows the same turn. Each fetch
  * has its own `request`, and a result for any other request is dropped, so a slow answer never
- * replaces a newer one. Opened on the Terminal tab, no diff is fetched (`request` is empty) until the Diff tab is chosen.
+ * replaces a newer one. Opened on the Terminal or Memory tab, no diff is fetched (`request` is empty) until the Diff tab is chosen.
  */
+/** The panel's tabs that fetch nothing when opened: they load their own content. */
+export type Shelf = "terminal" | "memory";
+
 export type Panel =
   | { readonly open: false }
   | {
       readonly open: true;
-      readonly tab: "diff" | "terminal";
+      readonly tab: "diff" | Shelf;
       readonly turnId: TurnId | undefined;
       readonly all: boolean;
       readonly request: string;
@@ -202,17 +210,17 @@ export type OpenPanel = Extract<Panel, { open: true }>;
 export type PanelAction =
   | { readonly type: "fetch"; readonly turnId: TurnId | undefined; readonly all: boolean; readonly request: string }
   | { readonly type: "result"; readonly request: string; readonly result: NonNullable<OpenPanel["result"]> }
-  | { readonly type: "terminal" }
+  | { readonly type: "tab"; readonly tab: Shelf }
   | { readonly type: "close" };
 
 export const closedPanel: Panel = { open: false };
 
 export const applyPanel = (panel: Panel, action: PanelAction): Panel => {
   if (action.type === "close") return closedPanel;
-  if (action.type === "terminal")
+  if (action.type === "tab")
     return panel.open
-      ? { ...panel, tab: "terminal" }
-      : { open: true, tab: "terminal", turnId: undefined, all: true, request: "", result: undefined };
+      ? { ...panel, tab: action.tab }
+      : { open: true, tab: action.tab, turnId: undefined, all: true, request: "", result: undefined };
   if (action.type === "fetch")
     return {
       open: true,

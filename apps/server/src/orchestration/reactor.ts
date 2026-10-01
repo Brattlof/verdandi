@@ -27,6 +27,7 @@ import { editedPaths } from "../workspace/diff.ts";
 import { runVerifier } from "../workspace/verify.ts";
 import { addWorktree, loadThreadFolder, removeWorktree, threadFolder, worktreeSetup } from "../workspace/worktree.ts";
 import { Engine } from "./engine.ts";
+import { loadMemory } from "./projector.ts";
 import { searchSessions } from "./search.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "./task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "./trajectory.ts";
@@ -34,6 +35,9 @@ import { recordTrajectory, unrecordedTurns } from "./trajectory.ts";
 export class HarnessRegistry extends Context.Service<HarnessRegistry, Partial<Record<HarnessId, HarnessAdapter>>>()(
   "verdandi/HarnessRegistry",
 ) {}
+
+/** How Verdandi's tools behave in this profile: whether the user approves each memory save (`memory.yaml`). */
+export class ToolSettings extends Context.Service<ToolSettings, { readonly approveMemorySaves: boolean }>()("verdandi/ToolSettings") {}
 
 /** Where the profile keeps threads' git worktrees, as `<repo>/<branch>` (DESIGN §13). */
 export class WorktreesDir extends Context.Service<WorktreesDir, string>()("verdandi/WorktreesDir") {}
@@ -53,6 +57,12 @@ export class Reactor extends Context.Service<
     readonly drain: Effect.Effect<void>;
   }
 >()("verdandi/Reactor") {}
+
+/** `{ memory }`: the memory snapshot taken for turn `turnId`, when that turn starts a session; else nothing. */
+const memoryFor = (stored: string | null, turnId: TurnId) => {
+  const snapshot = stored === null ? undefined : (JSON.parse(stored) as { turnId: TurnId; text: string });
+  return snapshot?.turnId === turnId ? { memory: snapshot.text } : {};
+};
 
 const errorMessage = (cause: Cause.Cause<unknown>) => {
   const error = Cause.findErrorOption(cause);
@@ -74,6 +84,7 @@ export const ReactorLive = Layer.effect(
     const registry = yield* HarnessRegistry;
     const attachmentsDir = yield* AttachmentsDir;
     const worktreesDir = yield* WorktreesDir;
+    const toolSettings = yield* ToolSettings;
     const projectVerifiers = yield* ProjectVerifiers;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
@@ -119,6 +130,21 @@ export const ReactorLive = Layer.effect(
           // Only a database failure is a defect; a refusal goes back to the agent as the tool's error.
           Effect.catchTag("SqlError", Effect.die),
         ),
+      memory: {
+        save: (scope, text, replaces, at) =>
+          engine.dispatch({ type: "memory.save", commandId: randomUUID() as CommandId, ...at, scope, text, replaces }).pipe(
+            Effect.asVoid,
+            Effect.catchTag("CommandRejected", (e) => Effect.fail(new ToolFailed({ message: e.message }))),
+            Effect.catchTag("SqlError", Effect.die),
+          ),
+        entries: (at) =>
+          loadMemory(at.threadId).pipe(
+            Effect.map((m) => (m ? [...m.user, ...m.project] : [])),
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.orDie,
+          ),
+      },
+      approveMemorySaves: toolSettings.approveMemorySaves,
     });
 
     // A failed write is retried by the sweep below when verdandid next starts.
@@ -175,12 +201,13 @@ export const ReactorLive = Layer.effect(
           path: string;
           worktree: string | null;
           pending_fork: string | null;
+          memory_snapshot: string | null;
           transcript_path: string | null;
           task_id: TaskId | null;
           limits: string | null;
           spent_usd: number;
         }>`
-          select t.route, t.session_id, p.path, t.worktree, t.pending_fork, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
+          select t.route, t.session_id, p.path, t.worktree, t.pending_fork, t.memory_snapshot, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
             (select total(u.cost_usd) from usage_ledger u join turns n on n.id = u.turn_id
               where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId}) as spent_usd
           from threads t join projects p on p.id = t.project_id
@@ -215,6 +242,8 @@ export const ReactorLive = Layer.effect(
             ...(attachments.length > 0 && { attachments: attachments.map((a) => ({ ...a, path: join(attachmentsDir, a.id) })) }),
             steers,
             tools,
+            // The snapshot a new session starts with goes to its first turn only (DESIGN §14.2).
+            ...memoryFor(thread.memory_snapshot, turnId),
             ...(limits && { limits }),
             // A revert waits to fork the conversation until this turn (ADR 0004).
             ...(thread.pending_fork && {

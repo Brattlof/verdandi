@@ -3,6 +3,7 @@ import { AttachmentRef } from "./attachments.ts";
 import { DecisionAnswer, DecisionQuestion } from "./decisions.ts";
 import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields, VerifierRun } from "./items.ts";
+import { MemoryScope } from "./memory.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, EscalationStep, RouteDecision, RouteInputs } from "./routing.ts";
@@ -348,6 +349,49 @@ export const TaskBlocked = Schema.Struct({
   turnId: TurnId,
   reason: Schema.String,
 });
+/**
+ * A fact was remembered (DESIGN §14.2), from thread `threadId` (and its turn `turnId`, when the agent saved it),
+ * in place of the entries `replaces` names. Saving a fact the store already has confirms that entry instead:
+ * `entryId` is then the existing one's.
+ */
+export const MemorySaved = Schema.Struct({
+  type: Schema.Literal("memory.saved"),
+  v: v1,
+  threadId: ThreadId,
+  entryId: Schema.String,
+  scope: MemoryScope,
+  /** The project a project fact belongs to. */
+  projectId: Schema.optionalKey(ProjectId),
+  text: Schema.String,
+  turnId: Schema.optionalKey(TurnId),
+  replaces: Schema.Array(Schema.String),
+});
+/** The user rewrote remembered fact `entryId`. */
+export const MemoryEdited = Schema.Struct({
+  type: Schema.Literal("memory.edited"),
+  v: v1,
+  threadId: ThreadId,
+  entryId: Schema.String,
+  text: Schema.String,
+});
+/** The user forgot remembered fact `entryId`. */
+export const MemoryDeleted = Schema.Struct({
+  type: Schema.Literal("memory.deleted"),
+  v: v1,
+  threadId: ThreadId,
+  entryId: Schema.String,
+});
+/**
+ * Turn `turnId` starts a new harness session, which sees `text`, what Verdandi remembered then, at the head of
+ * its first message (DESIGN §14.2). It stays the same for the session's life; saves show in the next one.
+ */
+export const MemorySnapshotTaken = Schema.Struct({
+  type: Schema.Literal("memory.snapshot.taken"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  text: Schema.String,
+});
 /** `limit`: a budget guard of the task (its `maxCost` or `maxTurns`) stopped the turn, which ends the task. */
 export const TurnStatus = Schema.Literals(["success", "error", "interrupted", "limit"]);
 export const TurnCompleted = Schema.Struct({
@@ -394,6 +438,10 @@ export const Event = Schema.Union([
   ThreadRevertUndone,
   ThreadFilesRestored,
   TaskBlocked,
+  MemorySaved,
+  MemoryEdited,
+  MemoryDeleted,
+  MemorySnapshotTaken,
 ]);
 export type Event = typeof Event.Type;
 
@@ -451,6 +499,10 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.revert.undone@1": ThreadRevertUndone,
   "thread.files.restored@1": ThreadFilesRestored,
   "task.blocked@1": TaskBlocked,
+  "memory.saved@1": MemorySaved,
+  "memory.edited@1": MemoryEdited,
+  "memory.deleted@1": MemoryDeleted,
+  "memory.snapshot.taken@1": MemorySnapshotTaken,
 };
 
 /** The row shape an event is stored as. */

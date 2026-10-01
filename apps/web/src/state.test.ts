@@ -250,12 +250,12 @@ test("a budget mode change ends a routed thread's task but keeps a pinned one's,
 
 test("the Terminal tab opens the panel without fetching a diff, and a fetch switches back to Diff", () => {
   const panel = (actions: PanelAction[]) => actions.reduce(applyPanel, closedPanel);
-  expect(panel([{ type: "terminal" }])).toMatchObject({ open: true, tab: "terminal", request: "", result: undefined });
+  expect(panel([{ type: "tab", tab: "terminal" }])).toMatchObject({ open: true, tab: "terminal", request: "", result: undefined });
   const view = { files: [], omittedFiles: 0 };
   const fetched = panel([
     { type: "fetch", turnId, all: false, request: "r1" },
     { type: "result", request: "r1", result: { ok: true, view } },
-    { type: "terminal" },
+    { type: "tab", tab: "terminal" },
   ]);
   // The diff's turn and scope stay, so going back to Diff fetches the same one.
   expect(fetched).toMatchObject({ tab: "terminal", turnId, result: { ok: true, view } });

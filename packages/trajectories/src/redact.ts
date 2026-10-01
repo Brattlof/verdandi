@@ -22,6 +22,9 @@ const secretKey = /secret|token|password|passwd|api_?key|authorization|credentia
 
 const redactText = (text: string) => patterns.reduce((s, [pattern, replacement]) => s.replace(pattern, replacement), text);
 
+/** Whether `text` holds something the redactor would mask: memory refuses to save it (DESIGN §14.2). */
+export const containsSecret = (text: string) => redactText(text) !== text;
+
 /** Pure: a copy of `value` with secrets in its strings masked. Run on anything before it is written to a trajectory. */
 export const redact = <T>(value: T): T => {
   const walk = (v: unknown): unknown => {

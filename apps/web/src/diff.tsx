@@ -4,7 +4,8 @@ import type { DiffView, ThreadId, TurnId } from "@verdandi/contracts";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Connection } from "./client.ts";
 import { ChevronIcon, CloseIcon } from "./icons.tsx";
-import type { OpenPanel } from "./state.ts";
+import { MemoryTab } from "./memory.tsx";
+import type { OpenPanel, Shelf } from "./state.ts";
 import { TerminalTab } from "./terminal.tsx";
 
 type LineKind = "add" | "del" | "hunk" | "context" | "meta";
@@ -68,7 +69,7 @@ const tabClass =
   "rounded-none border-0 border-b-2 border-transparent bg-transparent px-1 text-xs text-muted hover:bg-transparent hover:text-fg data-active:border-accent data-active:text-fg";
 
 /**
- * The right panel: the Diff tab and the Terminal tab. The diff is fetched when asked, never on its own,
+ * The right panel: the Diff, Terminal and Memory tabs. The diff is fetched when asked, never on its own,
  * and renders only the rows in view. `turnLabel` names `panel.turnId`. Escape closes the panel, except
  * inside a terminal, where it goes to the shell.
  */
@@ -78,7 +79,7 @@ export const SidePanel = ({
   panel,
   turnLabel,
   onFetch,
-  onTerminal,
+  onTab,
   onClose,
 }: {
   connection: Connection;
@@ -86,7 +87,7 @@ export const SidePanel = ({
   panel: OpenPanel;
   turnLabel: string | undefined;
   onFetch: (turnId: TurnId | undefined, all: boolean) => void;
-  onTerminal: () => void;
+  onTab: (tab: Shelf) => void;
   onClose: () => void;
 }) => {
   const id = useId();
@@ -113,7 +114,7 @@ export const SidePanel = ({
     >
       <Tabs.Root
         value={panel.tab}
-        onValueChange={(tab) => (tab === "terminal" ? onTerminal() : onFetch(panel.turnId, panel.all))}
+        onValueChange={(tab) => (tab === "terminal" || tab === "memory" ? onTab(tab) : onFetch(panel.turnId, panel.all))}
         className="flex min-w-0 flex-1 flex-col"
       >
         <div className="flex min-h-12 items-center justify-between border-b border-line px-3">
@@ -123,6 +124,9 @@ export const SidePanel = ({
             </Tabs.Tab>
             <Tabs.Tab value="terminal" className={tabClass}>
               Terminal
+            </Tabs.Tab>
+            <Tabs.Tab value="memory" className={tabClass}>
+              Memory
             </Tabs.Tab>
           </Tabs.List>
           <button type="button" className="px-2 text-xs" onClick={onClose}>
@@ -167,6 +171,9 @@ export const SidePanel = ({
         </Tabs.Panel>
         <Tabs.Panel value="terminal" className="flex min-h-0 flex-1 flex-col">
           <TerminalTab connection={connection} threadId={threadId} />
+        </Tabs.Panel>
+        <Tabs.Panel value="memory" className="flex min-h-0 flex-1 flex-col">
+          <MemoryTab connection={connection} threadId={threadId} />
         </Tabs.Panel>
       </Tabs.Root>
     </aside>

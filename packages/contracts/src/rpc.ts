@@ -5,6 +5,7 @@ import { ClientCommand } from "./commands.ts";
 import { ApprovalRequested, PlanRequested, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
 import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { AccessMode, Item, Quota, Usage } from "./items.ts";
+import { MemoryView } from "./memory.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, RouteDecision, TaskClass } from "./routing.ts";
 import { SessionHit, SessionQuery } from "./search.ts";
@@ -32,6 +33,9 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "WorktreeUnavailable",
     "TurnNotFound",
     "InvalidRevert",
+    "MemoryRejected",
+    "MemoryFull",
+    "MemoryNotFound",
   ]),
   message: Schema.String,
 }) {}
@@ -303,6 +307,8 @@ export class Api extends RpcGroup.make(
     success: RouteDecision,
     error: RoutingUnavailable,
   }),
+  /** What Verdandi remembers for the thread's user and project, for the Memory panel. */
+  Rpc.make("MemoryList", { payload: { threadId: ThreadId }, success: MemoryView, error: CommandRejected }),
   /**
    * Past sessions' messages containing `query` (DESIGN §14.3, ADR 0006), newest first, at most 50. A query
    * under 3 characters matches nothing.

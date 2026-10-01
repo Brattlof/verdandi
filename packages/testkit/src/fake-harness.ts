@@ -35,6 +35,7 @@ export const makeFakeHarness = () => {
     mode: InteractionMode;
     attachments: HarnessRunInput["attachments"];
     fork: HarnessRunInput["fork"];
+    memory: HarnessRunInput["memory"];
   }[] = [];
   /** Every `reroute`, in order. A rerouted turn answers on its new route's model. */
   const reroutes: { threadId: ThreadId; route: Route }[] = [];
@@ -86,6 +87,7 @@ export const makeFakeHarness = () => {
       mode: input.mode,
       attachments: input.attachments,
       fork: input.fork,
+      memory: input.memory,
     });
     routes.set(input.threadId, input.route);
     // A fork starts a new session holding the old one's turns up to `atTurnId`, like Claude Code's (ADR 0004).
