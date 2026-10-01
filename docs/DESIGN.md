@@ -480,7 +480,7 @@ These outcomes are used at three levels:
 ### 8.10 Evaluation
 
 - **Eval set:** 30–100 real tasks, each with a verifier, in a YAML file of `{ id, repo, commit, prompt, verify, setup?, mode? }`. `verdandi batch <file>` runs each task on each route in a throwaway `git clone --shared` of its repository at the pinned commit, which keeps only its detached `HEAD` (no other refs, no remote, no reflog) so the agent can't read later history, with `verify` as the copy's project verifier (so routed runs escalate), then grades it by running `verify` on the final tree. A run has its own Verdandi home under the profile's `batch/`, so its threads and routing memory stay apart from yours; the profile's spend caps apply, and `--dry-run` prints a rough cost estimate first.
-- **Baselines:**
+- **Baselines** (ADR 0017 records M2's measurement against (a) and (b)):
   - (a) always Opus at default effort,
   - (b) always Sonnet at `high`,
   - (c) the strongest model at lower effort,
