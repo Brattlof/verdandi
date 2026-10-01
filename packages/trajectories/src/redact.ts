@@ -14,7 +14,8 @@ const patterns: readonly [RegExp, string][] = [
   [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, MASK], // JWT
   [/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/g, `$1${MASK}`],
   [/(:\/\/[^/\s:@]+:)[^/\s@]+@/g, `$1${MASK}@`], // credentials in a URL
-  [/\b([A-Za-z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY)[A-Za-z0-9_]*\s*[=:]\s*["']?)[^\s"']{8,}/gi, `$1${MASK}`],
+  // The name may be quoted, as in JSON or a Python dict: `"apiKey": "…"`.
+  [/\b([A-Za-z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|PRIVATE_KEY)[A-Za-z0-9_]*["']?\s*[=:]\s*["']?)[^\s"']{8,}/gi, `$1${MASK}`],
 ];
 
 /** An object key whose string value is a secret, e.g. `{ "apiKey": "…" }` in a tool call's input. */
