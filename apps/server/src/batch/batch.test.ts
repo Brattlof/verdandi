@@ -17,6 +17,9 @@ const track = (d: string) => {
 const linesAtLeast = (lines: number) =>
   `"${process.execPath}" -e "const f = require('fs'); process.exit(f.existsSync('a.txt') && f.readFileSync('a.txt', 'utf8').trim().split('\\n').length >= ${lines} ? 0 : 1)"`;
 
+/** Batch runs spawn git and verifier processes for every task, which takes seconds on Windows. */
+const SLOW = 60_000;
+
 /** A repository whose policy routes every task to the fake model at medium effort, and an eval set of three tasks on it. */
 const evalSet = () => {
   const repo = track(makeTempRepo({ "README.md": "fixture\n" }));
@@ -44,59 +47,67 @@ const evalSet = () => {
   return { repo, file };
 };
 
-test("each task runs on each route in its own copy of the repository, graded by its verifier", async () => {
-  const { repo, file } = evalSet();
-  const home = track(makeTempHome());
-  const { results, stopped } = await runBatch({
-    tasks: loadEvalSet(file),
-    routes: ["auto", "fake/fake/medium"],
-    home,
-    runHome: join(home, "batch", "run"),
-    harnesses: { fake: makeFakeHarness() },
-    approve: false,
-    taskTimeoutMs: 60_000,
-    keep: false,
-  });
-  expect(stopped).toBeUndefined();
-  const outcome = Object.fromEntries(results.map((r) => [`${r.task} ${r.route}`, [r.passed, r.escalations]]));
-  expect(outcome).toEqual({
-    "one-edit auto": [true, 0],
-    "one-edit fake/fake/medium": [true, 0],
-    "no-edit auto": [false, 0],
-    "no-edit fake/fake/medium": [false, 0],
-    // The routed run escalates and fixes it; the pinned baseline doesn't escalate.
-    "two-edits auto": [true, 1],
-    "two-edits fake/fake/medium": [false, 0],
-  });
-  expect(results.find((r) => r.task === "one-edit")?.ran).toEqual({ harness: "fake", model: "fake", effort: "medium" });
-  expect(summarize(results)).toMatchObject([
-    { route: "auto", tasks: 3, passed: 2, escalations: 1 },
-    { route: "fake/fake/medium", tasks: 3, passed: 1, escalations: 0 },
-  ]);
-  // The repository itself is untouched: every run worked in a copy.
-  expect(existsSync(join(repo, "a.txt"))).toBe(false);
-  expect(git(repo, "status", "--porcelain").trim()).toBe("?? evals.yaml");
-});
+test(
+  "each task runs on each route in its own copy of the repository, graded by its verifier",
+  async () => {
+    const { repo, file } = evalSet();
+    const home = track(makeTempHome());
+    const { results, stopped } = await runBatch({
+      tasks: loadEvalSet(file),
+      routes: ["auto", "fake/fake/medium"],
+      home,
+      runHome: join(home, "batch", "run"),
+      harnesses: { fake: makeFakeHarness() },
+      approve: false,
+      taskTimeoutMs: 60_000,
+      keep: false,
+    });
+    expect(stopped).toBeUndefined();
+    const outcome = Object.fromEntries(results.map((r) => [`${r.task} ${r.route}`, [r.passed, r.escalations]]));
+    expect(outcome).toEqual({
+      "one-edit auto": [true, 0],
+      "one-edit fake/fake/medium": [true, 0],
+      "no-edit auto": [false, 0],
+      "no-edit fake/fake/medium": [false, 0],
+      // The routed run escalates and fixes it; the pinned baseline doesn't escalate.
+      "two-edits auto": [true, 1],
+      "two-edits fake/fake/medium": [false, 0],
+    });
+    expect(results.find((r) => r.task === "one-edit")?.ran).toEqual({ harness: "fake", model: "fake", effort: "medium" });
+    expect(summarize(results)).toMatchObject([
+      { route: "auto", tasks: 3, passed: 2, escalations: 1 },
+      { route: "fake/fake/medium", tasks: 3, passed: 1, escalations: 0 },
+    ]);
+    // The repository itself is untouched: every run worked in a copy.
+    expect(existsSync(join(repo, "a.txt"))).toBe(false);
+    expect(git(repo, "status", "--porcelain").trim()).toBe("?? evals.yaml");
+  },
+  SLOW,
+);
 
-test("a reached spend cap stops the run with what it has", async () => {
-  const { file } = evalSet();
-  const home = track(makeTempHome());
-  writeFileSync(join(home, "spend-caps.yaml"), "daily: 0.000001\n");
-  // The fake harness's turns are on its subscription, which caps don't count; `overage` turns are metered.
-  const tasks = loadEvalSet(file).map((t) => ({ ...t, prompt: "overage" }));
-  const { results, stopped } = await runBatch({
-    tasks,
-    routes: ["fake/fake/medium"],
-    home,
-    runHome: join(home, "batch", "run"),
-    harnesses: { fake: makeFakeHarness() },
-    approve: false,
-    taskTimeoutMs: 60_000,
-    keep: false,
-  });
-  expect(results).toHaveLength(1);
-  expect(stopped).toContain("daily cap of metered spend is reached");
-});
+test(
+  "a reached spend cap stops the run with what it has",
+  async () => {
+    const { file } = evalSet();
+    const home = track(makeTempHome());
+    writeFileSync(join(home, "spend-caps.yaml"), "daily: 0.000001\n");
+    // The fake harness's turns are on its subscription, which caps don't count; `overage` turns are metered.
+    const tasks = loadEvalSet(file).map((t) => ({ ...t, prompt: "overage" }));
+    const { results, stopped } = await runBatch({
+      tasks,
+      routes: ["fake/fake/medium"],
+      home,
+      runHome: join(home, "batch", "run"),
+      harnesses: { fake: makeFakeHarness() },
+      approve: false,
+      taskTimeoutMs: 60_000,
+      keep: false,
+    });
+    expect(results).toHaveLength(1);
+    expect(stopped).toContain("daily cap of metered spend is reached");
+  },
+  SLOW,
+);
 
 test("a dry run estimates each task on each route without running anything", async () => {
   const { file } = evalSet();
