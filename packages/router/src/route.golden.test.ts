@@ -107,6 +107,30 @@ test("every taxonomy class has a golden", () => {
   expect(new Set(GOLDENS.map((g) => g.taskClass)).size).toBe(Object.keys(loadPolicy().routes).length);
 });
 
+// Stage 3 reads intent words, not names: `docs/DESIGN.md` or a URL is no cue, so it neither picks a class nor makes one unsure.
+// A README or changelog is the exception: it is the docs it names.
+const NAMED: { text: string; taskClass: TaskClass; route: string }[] = [
+  { text: "Fix the typo in docs/DESIGN.md", taskClass: "code.edit.local", route: "sonnet medium" },
+  { text: "Fix the date parsing bug in src/review/dates.ts:42", taskClass: "code.edit.local", route: "sonnet medium" },
+  {
+    text: "Should we use SQLite or Postgres for the event store? See docs/DESIGN.md",
+    taskClass: "design.architecture",
+    route: "opus high",
+  },
+  { text: "Where is the auth middleware? See https://example.com/docs/design", taskClass: "ask.search", route: "haiku low" },
+  { text: "Update README.md with the new install steps", taskClass: "docs.write", route: "sonnet low" },
+];
+
+for (const g of NAMED) {
+  test(`${g.taskClass}, naming a file or URL: ${g.text}`, () => {
+    const d = route({ text: g.text, mode: "build" }, loadPolicy(), rules);
+    expect([d.taskClass, d.reason]).toEqual([
+      g.taskClass,
+      `Looks like ${g.taskClass}, so it runs on ${g.route.replace(" ", " at ")} effort.`,
+    ]);
+  });
+}
+
 // An approved plan's build (DESIGN §8.2 lever 3): the task's class keeps, and its route drops the `plan` override.
 const PLANNED: { taskClass: TaskClass; routes: Record<BudgetMode, string> }[] = [
   { taskClass: "code.feature", routes: { thrifty: "sonnet low", balanced: "sonnet medium", max: "sonnet high" } },
