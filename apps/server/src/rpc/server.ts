@@ -21,6 +21,7 @@ import { AppLayer } from "../orchestration/app.ts";
 import { Engine } from "../orchestration/engine.ts";
 import { loadDeciderState } from "../orchestration/projector.ts";
 import { HarnessRegistry } from "../orchestration/reactor.ts";
+import { searchSessions } from "../orchestration/search.ts";
 import { loadSpendState } from "../orchestration/spend.ts";
 import { loadTaskCosts } from "../orchestration/task-outcome.ts";
 import { loadUsageReport } from "../orchestration/usage.ts";
@@ -100,6 +101,8 @@ const Handlers = (home: string) =>
             Effect.provideService(SqlClient.SqlClient, sql),
             Effect.catchTag("SqlError", Effect.die),
           ),
+        SessionSearch: (query) =>
+          searchSessions(query).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
         TaskCostsList: () => loadTaskCosts.pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
         RoutingExplain: ({ taskId }) =>
           sql<{ payload: string }>`select payload from route_decisions where task_id = ${taskId}`.pipe(

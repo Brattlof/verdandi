@@ -4,8 +4,10 @@ import {
   describeQuota,
   type ProjectSummary,
   type QuotaView,
+  type SessionHit,
   type ThreadId,
   type ThreadSummary,
+  type TurnId,
 } from "@verdandi/contracts";
 import { type FormEvent, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ArchiveButton } from "./archive.tsx";
@@ -23,6 +25,8 @@ const onHashChange = (listener: () => void) => {
   addEventListener("hashchange", listener);
   return () => removeEventListener("hashchange", listener);
 };
+/** `#thread=<id>&turn=<id>` scrolls the thread to that turn: where a search result points. */
+const hashTurn = () => new URLSearchParams(location.hash.slice(1)).get("turn") as TurnId | null;
 export const openThread = (threadId: ThreadId) => {
   location.hash = `thread=${threadId}`;
 };
@@ -31,6 +35,7 @@ export const App = ({ connection }: { connection: Connection }) => {
   const [sidebar] = useState(() => createStore<SidebarData | undefined>(undefined));
   const threadId = useSyncExternalStore(onHashChange, hashThread);
   const view = useSyncExternalStore(onHashChange, hashView);
+  const turn = useSyncExternalStore(onHashChange, hashTurn);
   const data = useStore(sidebar);
   const lost = useStore(connection.lost);
   // Showing archived threads asks verdandid for a feed that includes them; hiding them goes back to one that doesn't.
@@ -113,7 +118,7 @@ export const App = ({ connection }: { connection: Connection }) => {
         {view === "spend" ? (
           <Dashboard connection={connection} projects={data?.projects ?? []} />
         ) : threadId ? (
-          <ThreadPane key={threadId} connection={connection} threadId={threadId} />
+          <ThreadPane key={threadId} connection={connection} threadId={threadId} focusTurn={turn} />
         ) : (
           <div className="grid flex-1 place-items-center p-6">
             <div className="max-w-sm text-center">
@@ -212,6 +217,7 @@ const SidebarBody = ({
         Spend dashboard
       </a>
       <Quotas quotas={data.quotas} />
+      <SearchSessions connection={connection} />
       <OpenFolder connection={connection} />
       <div className="mt-5 mb-1 flex items-center justify-between gap-2 px-2">
         <h2 className="font-mono text-[11px] font-semibold tracking-wider text-muted uppercase">Projects</h2>
@@ -254,6 +260,81 @@ const Quotas = ({ quotas }: { quotas: readonly QuotaView[] }) => (
     })}
   </div>
 );
+
+const who: Record<SessionHit["kind"], string> = { user: "You", steer: "You, steering", assistant: "Agent" };
+
+/**
+ * Searches past sessions as you type (3 characters or more), across every project, archived threads included.
+ * A result jumps to its turn.
+ */
+const SearchSessions = ({ connection }: { connection: Connection }) => {
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<readonly SessionHit[]>();
+  useEffect(() => {
+    const q = query.trim();
+    if ([...q].length < 3) return setHits(undefined);
+    let current = true;
+    // ponytail: a fixed 250 ms pause before each search. Upgrade: cancel in-flight searches if typing outpaces them.
+    const timer = setTimeout(() => void connection.search({ query: q }).then((found) => current && setHits(found ?? [])), 250);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
+  }, [connection, query]);
+  return (
+    <search className="mt-3 px-2">
+      <label htmlFor="session-search" className="mb-1 block text-xs font-medium text-muted">
+        Search past sessions
+      </label>
+      <input
+        id="session-search"
+        type="search"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+        placeholder="A phrase, file name or error"
+        autoComplete="off"
+        spellCheck={false}
+        className="w-full text-xs"
+        aria-describedby="session-search-status"
+      />
+      <p id="session-search-status" role="status" className="mt-1 text-xs text-muted empty:hidden">
+        {hits === undefined
+          ? ""
+          : hits.length === 0
+            ? "No past messages match."
+            : `${hits.length} ${hits.length === 1 ? "match" : "matches"}`}
+      </p>
+      {hits && hits.length > 0 && (
+        <ul className="mt-1 max-h-80 overflow-y-auto">
+          {hits.map((h) => (
+            <li key={`${h.turnId}-${h.kind}-${h.at}`}>
+              <a href={`#thread=${h.threadId}&turn=${h.turnId}`} className="block rounded-md px-2 py-1.5 text-xs hover:bg-hover">
+                <span className="flex gap-1.5">
+                  <span className="min-w-0 flex-1 truncate font-medium">{h.title || "New thread"}</span>
+                  {h.archived && <span className="shrink-0 text-muted">archived</span>}
+                </span>
+                <span className="block text-muted [overflow-wrap:anywhere]">
+                  {who[h.kind]}:{" "}
+                  {h.parts.map((p, i) =>
+                    p.match ? (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: parts never reorder.
+                      <mark key={i} className="rounded-sm bg-accent/25 text-fg">
+                        {p.text}
+                      </mark>
+                    ) : (
+                      p.text
+                    ),
+                  )}
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </search>
+  );
+};
 
 /** Starts a thread in any folder; verdandid checks the path and resolves it, so a known folder gets a new thread, not a new project. */
 const OpenFolder = ({ connection }: { connection: Connection }) => {

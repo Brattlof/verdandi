@@ -9,6 +9,7 @@ import type {
   QuotaView,
   Route,
   RouteDecision,
+  SessionHit,
   StoredEvent,
   TaskId,
   ThreadId,
@@ -39,6 +40,12 @@ const insertRequest = (e: Extract<Event, { type: keyof typeof requestKind }>, at
     (sql) =>
       sql`insert into requests (id, thread_id, turn_id, kind, payload, requested_at)
           values (${e.requestId}, ${e.threadId}, ${e.turnId}, ${requestKind[e.type]}, ${JSON.stringify(e)}, ${at})`,
+  );
+
+/** Adds a message to session search (DESIGN §14.3). */
+const indexMessage = (threadId: ThreadId, turnId: TurnId, kind: SessionHit["kind"], text: string, at: string) =>
+  withSql(
+    (sql) => sql`insert into session_index (text, thread_id, turn_id, kind, at) values (${text}, ${threadId}, ${turnId}, ${kind}, ${at})`,
   );
 
 const addItem = (turnId: TurnId, item: Item) =>
@@ -127,13 +134,16 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       (sql) => sql`update threads set budget_mode = ${e.mode}, task_id = case when pinned = 1 then task_id end where id = ${e.threadId}`,
     ),
   "turn.started": (e, at) =>
-    withSql((sql) =>
-      Effect.andThen(
-        sql`insert into turns (id, thread_id, text, mode, attachments, status, started_at)
+    Effect.andThen(
+      withSql((sql) =>
+        Effect.andThen(
+          sql`insert into turns (id, thread_id, text, mode, attachments, status, started_at)
             values (${e.turnId}, ${e.threadId}, ${e.text}, ${e.mode ?? "build"}, ${JSON.stringify(e.attachments ?? [])}, 'running', ${at})`,
-        // A new turn closes the latest revert's undo window.
-        sql`update threads set running_turn_id = ${e.turnId}, revert = null where id = ${e.threadId}`,
+          // A new turn closes the latest revert's undo window.
+          sql`update threads set running_turn_id = ${e.turnId}, revert = null where id = ${e.threadId}`,
+        ),
       ),
+      indexMessage(e.threadId, e.turnId, "user", e.text, at),
     ),
   // A revert's fork drops its reverted turns from the session; any other new session starts with the running turn.
   "harness.session.bound": (e) =>
@@ -183,8 +193,16 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         sql`update threads set revert = json_set(revert, '$.saved', ${e.saved ?? null}, '$.filesError', ${e.error ?? null})
             where id = ${e.threadId} and revert is not null`,
     ),
-  "turn.item.added": (e) => addItem(e.turnId, e.item),
-  "turn.steered": (e) => addItem(e.turnId, { kind: "user.steer", text: e.text }),
+  // The main agent's replies are searchable; tool output and subagents' steps aren't (ADR 0006).
+  "turn.item.added": (e, at) =>
+    Effect.andThen(
+      addItem(e.turnId, e.item),
+      e.item.kind === "assistant.message" && e.item.parentToolUseId === undefined
+        ? indexMessage(e.threadId, e.turnId, "assistant", e.item.text, at)
+        : Effect.void,
+    ),
+  "turn.steered": (e, at) =>
+    Effect.andThen(addItem(e.turnId, { kind: "user.steer", text: e.text }), indexMessage(e.threadId, e.turnId, "steer", e.text, at)),
   "turn.usage.recorded": (e, at) =>
     withSql(
       (sql) =>

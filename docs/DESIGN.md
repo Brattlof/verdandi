@@ -786,7 +786,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 
 ### 14.3 Session search
 
-Every turn from every harness goes into an FTS5 index, so past solutions can be recalled across harnesses and projects. Search results are snippets with a few messages of context either side; no LLM call is needed.
+Every turn from every harness goes into an FTS5 trigram index (ADR 0006): the user's messages and steers and the main agent's replies, not tool output, so past solutions can be recalled across harnesses and projects. A query is matched as one phrase, case- and accent-insensitively, anywhere in a word; under 3 characters it matches nothing. Results are newest first, each a little of its message either side of the match, archived threads included and marked; no LLM call is needed. The web sidebar searches as you type and jumps to the turn; `verdandi search <query>` prints the same.
 
 ### 14.4 Skills
 

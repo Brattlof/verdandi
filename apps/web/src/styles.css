@@ -131,14 +131,14 @@
   }
   textarea,
   select,
-  input:is([type="text"], :not([type])) {
+  input:is([type="text"], [type="search"], :not([type])) {
     background: var(--color-bg);
     border: 1px solid var(--color-line-strong);
     border-radius: 6px;
     padding: 3px 8px;
   }
   textarea,
-  input[type="text"] {
+  input:is([type="text"], [type="search"]) {
     padding: 6px 10px;
   }
   ::placeholder {
@@ -154,7 +154,7 @@
     button,
     select,
     summary,
-    input:is([type="text"], :not([type])) {
+    input:is([type="text"], [type="search"], :not([type])) {
       min-height: 44px;
     }
   }

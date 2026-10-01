@@ -20,7 +20,16 @@ import { RouteMarkers } from "./route.tsx";
 import { applyPanel, applyThreadFeed, closedPanel, type LiveThread, type LiveTurn } from "./state.ts";
 import { WorktreeBar } from "./worktree.tsx";
 
-export const ThreadPane = ({ connection, threadId }: { connection: Connection; threadId: ThreadId }) => {
+export const ThreadPane = ({
+  connection,
+  threadId,
+  focusTurn,
+}: {
+  connection: Connection;
+  threadId: ThreadId;
+  /** A turn to scroll to, e.g. a search result's. */
+  focusTurn: TurnId | null;
+}) => {
   const [store] = useState(() => createStore<LiveThread | undefined>(undefined));
   const [error, setError] = useState<string>();
   const [archiveError, setArchiveError] = useState<string>();
@@ -112,6 +121,7 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
           turns={thread.turns}
           routeChanges={thread.routeChanges}
           busy={thread.busy}
+          focus={focusTurn}
           onChanges={showTurnDiff}
           onRevert={revert}
         />
@@ -149,6 +159,7 @@ const Conversation = ({
   turns,
   routeChanges,
   busy,
+  focus,
   onChanges,
   onRevert,
 }: {
@@ -156,6 +167,7 @@ const Conversation = ({
   turns: readonly LiveTurn[];
   routeChanges: LiveThread["routeChanges"];
   busy: boolean;
+  focus: TurnId | null;
   onChanges: (turnId: TurnId) => void;
   onRevert: (turnId: TurnId, files: boolean) => void;
 }) => {
@@ -176,6 +188,15 @@ const Conversation = ({
     overscan: 4,
     getItemKey: (i) => turns[i]?.turnId ?? i,
   });
+  // A turn to show, e.g. a search result's: scrolled to once, as soon as it's loaded.
+  const focused = useRef<TurnId | null>(null);
+  const focusIndex = focus ? turns.findIndex((t) => t.turnId === focus) : -1;
+  useEffect(() => {
+    if (focusIndex < 0 || focused.current === focus) return;
+    focused.current = focus;
+    atBottom.current = false;
+    virtualizer.scrollToIndex(focusIndex, { align: "start" });
+  }, [focus, focusIndex, virtualizer]);
   // Runs after every render, including the virtualizer's own after it measures a turn.
   useLayoutEffect(() => {
     const el = scroller.current;

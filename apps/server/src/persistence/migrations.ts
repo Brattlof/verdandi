@@ -253,6 +253,26 @@ const revert = Effect.gen(function* () {
     where e.thread_id = threads.id and e.type = 'harness.session.bound' order by e.seq desc limit 1)`;
 });
 
+/**
+ * Session search (DESIGN §14.3, ADR 0006): every user message, steer and main-agent reply, by thread and turn,
+ * in an FTS5 trigram index. Filled from the event log; tool output isn't indexed.
+ */
+const sessionIndex = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create virtual table session_index using fts5(
+    text, thread_id unindexed, turn_id unindexed, kind unindexed, at unindexed,
+    tokenize = 'trigram remove_diacritics 1'
+  )`;
+  yield* sql`insert into session_index (text, thread_id, turn_id, kind, at)
+    select coalesce(json_extract(payload, '$.item.text'), json_extract(payload, '$.text')), thread_id, json_extract(payload, '$.turnId'),
+      case type when 'turn.started' then 'user' when 'turn.steered' then 'steer' else 'assistant' end, at
+    from events
+    where type in ('turn.started', 'turn.steered')
+      or (type = 'turn.item.added' and json_extract(payload, '$.item.kind') = 'assistant.message'
+        and json_extract(payload, '$.item.parentToolUseId') is null)
+    order by seq`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -271,4 +291,5 @@ export const migrations = {
   "15_task_escalations": taskEscalations,
   "16_thread_worktree": threadWorktree,
   "17_revert": revert,
+  "18_session_index": sessionIndex,
 };
