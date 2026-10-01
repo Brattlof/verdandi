@@ -42,9 +42,9 @@ export const routingRules = (classify: (text: string) => TaskClassification): Re
   },
 });
 
-/** Phrases that push back on what the agent did. */
+/** Phrases that push back on what the agent did. A polite "no problem" or "no worries" doesn't. */
 const CORRECTING =
-  /^(no|nope|wrong|stop|undo)\b|\b(that'?s (wrong|not (it|right|correct|what i (asked|meant|wanted)))|not what i (asked|meant|wanted)|you (broke|missed|forgot|misunderstood|ignored|deleted|removed)|(still|it) (doesn'?t|does not|isn'?t|is not|won'?t) (work|compile|build|pass)|(didn'?t|did not|doesn'?t|does not) (work|fix|help)|still (fails|failing|broken|wrong|there|happening|crashes|crashing)|try again|revert (that|this|it|your)|roll (it|that|this) back|wrong (file|approach|place|answer|function|thing)|i (said|told you)|why did you)\b/;
+  /^(no(?!\s+(problem|worries|rush)\b)|nope|wrong|stop|undo)\b|\b(that'?s (wrong|not (it|right|correct|what i (asked|meant|wanted)))|not what i (asked|meant|wanted)|you (broke|missed|forgot|misunderstood|ignored|deleted|removed)|(still|it) (doesn'?t|does not|isn'?t|is not|won'?t) (work|compile|build|pass)|(didn'?t|did not|doesn'?t|does not) (work|fix|help)|still (fails|failing|broken|wrong|there|happening|crashes|crashing)|try again|revert (that|this|it|your)|roll (it|that|this) back|wrong (file|approach|place|answer|function|thing)|i (said|told you)|why did you)\b/;
 /** Hints that could be a correction or just the next step, e.g. "actually, also add tests". */
 const HEDGING = /^(but|hmm|actually)\b|\b(instead|rather)\b/;
 

@@ -32,14 +32,23 @@ test("a question no backend answers is a bug that names its kind", async () => {
   expect(String(exit)).toContain("No decision backend answers test.yes");
 });
 
+const followUp = makeDecide([rulesBackend(followUpRules)]);
+/** Whether the follow-up rules call `text` a correction, and whether that answer is unsure. */
+const ask = async (text: string) => {
+  const [a] = (await Effect.runPromise(followUp.decide({ state: text, questions: [correctingQuestion] }))).answers;
+  return a?.type === "noul" && a.kind === decisionKinds.correcting ? { yes: a.probability >= 0.5, low: a.lowConfidence } : undefined;
+};
+
 test("the follow-up rules tell pushback from the next step, and a hedge stays unsure", async () => {
-  const decide = makeDecide([rulesBackend(followUpRules)]);
-  const ask = async (text: string) => {
-    const [a] = (await Effect.runPromise(decide.decide({ state: text, questions: [correctingQuestion] }))).answers;
-    return a?.type === "noul" && a.kind === decisionKinds.correcting ? { yes: a.probability >= 0.5, low: a.lowConfidence } : undefined;
-  };
   expect(await ask("No, that's not what I asked for")).toEqual({ yes: true, low: false });
   expect(await ask("The test still fails after your change")).toEqual({ yes: true, low: false });
   expect(await ask("Great, now add tests for the parser")).toEqual({ yes: false, low: false });
   expect(await ask("Actually, also update the README")).toEqual({ yes: true, low: true });
+});
+
+test("a polite no isn't pushback, but pushback after one still is", async () => {
+  for (const text of ["No worries, that's perfect", "No problem, thanks!", "no rush, whenever you get to it"])
+    expect([text, await ask(text)]).toEqual([text, { yes: false, low: false }]);
+  for (const text of ["Nope", "No. Revert it.", "No worries, but you broke the build"])
+    expect([text, await ask(text)]).toEqual([text, { yes: true, low: false }]);
 });
