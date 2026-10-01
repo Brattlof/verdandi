@@ -24,6 +24,7 @@
         "@verdandi/harness-claude-code": "workspace:*",
         "@verdandi/router": "workspace:*",
         "@verdandi/testkit": "workspace:*",
+        "@verdandi/tools": "workspace:*",
         "@verdandi/trajectories": "workspace:*",
         "@verdandi/web": "workspace:*",
         "effect": "4.0.0-rc.115",
@@ -68,6 +69,7 @@
         "@anthropic-ai/claude-agent-sdk": "0.3.272",
         "@verdandi/contracts": "workspace:*",
         "effect": "4.0.0-rc.115",
+        "zod": "4.6.5",
       },
       "devDependencies": {
         "@verdandi/testkit": "workspace:*",
@@ -81,6 +83,13 @@
     },
     "packages/testkit": {
       "name": "@verdandi/testkit",
+      "dependencies": {
+        "@verdandi/contracts": "workspace:*",
+        "effect": "4.0.0-rc.115",
+      },
+    },
+    "packages/tools": {
+      "name": "@verdandi/tools",
       "dependencies": {
         "@verdandi/contracts": "workspace:*",
         "effect": "4.0.0-rc.115",
@@ -255,6 +264,8 @@
     "@verdandi/server": ["@verdandi/server@workspace:apps/server"],
 
     "@verdandi/testkit": ["@verdandi/testkit@workspace:packages/testkit"],
+
+    "@verdandi/tools": ["@verdandi/tools@workspace:packages/tools"],
 
     "@verdandi/trajectories": ["@verdandi/trajectories@workspace:packages/trajectories"],
 

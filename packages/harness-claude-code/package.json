@@ -8,7 +8,8 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.272",
     "@verdandi/contracts": "workspace:*",
-    "effect": "4.0.0-rc.115"
+    "effect": "4.0.0-rc.115",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@verdandi/testkit": "workspace:*"

@@ -336,6 +336,18 @@ export const ThreadFilesRestored = Schema.Struct({
   saved: Schema.optionalKey(Schema.String),
   error: Schema.optionalKey(Schema.String),
 });
+/**
+ * The agent of turn `turnId` said it can't finish task `taskId` as asked (`report_blocked`, DESIGN §8.7), for
+ * `reason`. The escalation ladder reads it; projected as a `blocked` item of that turn.
+ */
+export const TaskBlocked = Schema.Struct({
+  type: Schema.Literal("task.blocked"),
+  v: v1,
+  threadId: ThreadId,
+  taskId: TaskId,
+  turnId: TurnId,
+  reason: Schema.String,
+});
 /** `limit`: a budget guard of the task (its `maxCost` or `maxTurns`) stopped the turn, which ends the task. */
 export const TurnStatus = Schema.Literals(["success", "error", "interrupted", "limit"]);
 export const TurnCompleted = Schema.Struct({
@@ -381,6 +393,7 @@ export const Event = Schema.Union([
   ThreadReverted,
   ThreadRevertUndone,
   ThreadFilesRestored,
+  TaskBlocked,
 ]);
 export type Event = typeof Event.Type;
 
@@ -437,6 +450,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.reverted@1": ThreadReverted,
   "thread.revert.undone@1": ThreadRevertUndone,
   "thread.files.restored@1": ThreadFilesRestored,
+  "task.blocked@1": TaskBlocked,
 };
 
 /** The row shape an event is stored as. */

@@ -134,6 +134,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     ...setReverted(thread, e.turnIds, false),
     revert: thread.revert && { ...thread.revert, undone: true },
   }),
+  "task.blocked": (thread, e) => addItem(thread, e.turnId, { kind: "blocked", reason: e.reason }),
   "thread.files.restored": (thread, e) => ({
     ...thread,
     revert: thread.revert && (e.error ? { ...thread.revert, filesError: e.error } : thread.revert),

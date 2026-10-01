@@ -39,6 +39,30 @@ export const HarnessEvent = Schema.Union([
 ]);
 export type HarnessEvent = typeof HarnessEvent.Type;
 
+/** One parameter of a Verdandi tool, which the harness shows the agent in its own schema format. */
+export type ToolParam = {
+  readonly type: "string" | "number" | "boolean";
+  readonly description: string;
+  readonly optional?: boolean;
+};
+
+/**
+ * One of Verdandi's own tools as a harness serves it (DESIGN §9.6): defined once in `packages/tools`, over
+ * verdandid's services, the same for every harness. What `call` returns is untrusted data for the agent.
+ */
+export interface HarnessTool {
+  readonly name: string;
+  readonly description: string;
+  readonly params: Readonly<Record<string, ToolParam>>;
+  /** Ask the user before each call, as for the harness's own tools; otherwise it runs without asking. */
+  readonly ask?: boolean;
+  /** Runs the tool for the agent of `threadId`'s running turn `turnId`. Never throws: a failure is a result with `isError`. */
+  readonly call: (
+    args: Readonly<Record<string, unknown>>,
+    at: { readonly threadId: ThreadId; readonly turnId: TurnId },
+  ) => Promise<{ readonly text: string; readonly isError?: boolean }>;
+}
+
 /** The message names the cause and the fix; it is shown to the user as the turn's error. */
 export class HarnessError extends Data.TaggedError("HarnessError")<{ readonly message: string }> {}
 
@@ -85,6 +109,12 @@ export type HarnessRunInput = {
    * turn is dropped, ADR 0004). A harness that can't fork resumes plainly and says why in a `notice` item. Absent
    * unless a revert waits for this turn.
    */
+  /**
+   * Verdandi's own tools (DESIGN §9.6), the same list on every turn. A harness takes them when it starts a
+   * session and keeps that list for the session's life, since the tool list sits in the cached prompt
+   * (Claude Code: one in-process MCP server in `mcpServers`, ADR 0005). Absent when there are none.
+   */
+  readonly tools?: readonly HarnessTool[];
   readonly fork?: { readonly atTurnId: TurnId; readonly dropTurnIds: readonly TurnId[]; readonly transcriptPath?: string };
 };
 

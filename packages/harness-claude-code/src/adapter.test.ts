@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { HarnessRunInput, InteractionMode, Route, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
+import type { HarnessRunInput, HarnessTool, InteractionMode, Route, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Fiber, Stream } from "effect";
 import { makeClaudeCodeAdapter, type QueryFn } from "./adapter.ts";
@@ -637,5 +637,43 @@ describe("Claude Code adapter", () => {
         removeTempHome(home);
       }
     });
+  });
+
+  test("Verdandi's tools are one in-process MCP server at spawn, the same list on every turn of the session", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery();
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const calls: { args: unknown; turnId: string }[] = [];
+      const tools: HarnessTool[] = [
+        {
+          name: "session_search",
+          description: "search",
+          params: { query: { type: "string", description: "what" } },
+          call: async (args, at) => {
+            calls.push({ args, turnId: at.turnId });
+            return { text: "found it" };
+          },
+        },
+        { name: "memory_save", description: "save", params: {}, ask: true, call: async () => ({ text: "saved" }) },
+      ];
+      await Effect.runPromise(Stream.runCollect(adapter.run({ ...input(home, "one", U1), tools })));
+      // A later turn's list never reaches the session: it keeps the one it started with.
+      await Effect.runPromise(Stream.runCollect(adapter.run({ ...input(home, "two", U2, "sess-1"), tools: tools.slice(0, 1) })));
+      expect(spawns).toHaveLength(1);
+      const server = spawns[0]?.options.mcpServers?.verdandi as { type: string; name: string; instance: unknown };
+      expect(server.type).toBe("sdk");
+      expect(server.name).toBe("verdandi");
+      expect(spawns[0]?.options.allowedTools).toEqual(["mcp__verdandi__session_search"]); // memory_save asks first
+      // Reaches into the MCP server to call a handler without a transport: it acts for the turn running now.
+      const registered = (server.instance as { _registeredTools: Record<string, { handler: (a: object, e: unknown) => Promise<unknown> }> })
+        ._registeredTools;
+      expect(Object.keys(registered)).toEqual(["session_search", "memory_save"]);
+      const result = await registered.session_search?.handler({ query: "x" }, {});
+      expect(result).toEqual({ content: [{ type: "text", text: "found it" }] });
+      expect(calls).toEqual([{ args: { query: "x" }, turnId: U2 }]);
+    } finally {
+      removeTempHome(home);
+    }
   });
 });

@@ -213,6 +213,7 @@ export const chat = async (argv: readonly string[]) => {
             const tail = e.passed ? "" : `${e.output.trimEnd().split(/\r?\n/).slice(-10).join("\n")}\n`;
             process.stdout.write(`\n[verifier ${e.command} ${result} in ${(e.durationMs / 1000).toFixed(1)}s]\n${tail}`);
           }
+          if (e.type === "task.blocked") process.stdout.write(`\n[the agent is blocked: ${e.reason}]\n`);
           if (e.type === "task.escalated") {
             const moved = e.to ? `escalated to ${e.to.model} ${e.to.effort}` : "not escalated";
             process.stdout.write(`[${moved}: ${e.reason}]\n`);

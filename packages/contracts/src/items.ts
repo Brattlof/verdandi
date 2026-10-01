@@ -56,6 +56,8 @@ export const Item = Schema.Union([
   }),
   /** Verdandi ran a project verifier after the agent finished changing files. */
   Schema.Struct({ kind: Schema.Literal("verifier"), ...VerifierRun.fields }),
+  /** The agent reported, through Verdandi's `report_blocked` tool, that it can't finish the task as asked. */
+  Schema.Struct({ kind: Schema.Literal("blocked"), reason: Schema.String }),
   /** Something the harness or Verdandi tells the user about the turn, e.g. why a revert couldn't fork the conversation. */
   Schema.Struct({ kind: Schema.Literal("notice"), text: Schema.String }),
 ]);

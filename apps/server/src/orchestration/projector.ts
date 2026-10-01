@@ -187,6 +187,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
             where id = ${e.threadId}`,
       ),
     ),
+  "task.blocked": (e) => addItem(e.turnId, { kind: "blocked", reason: e.reason }),
   "thread.files.restored": (e) =>
     withSql(
       (sql) =>
