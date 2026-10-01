@@ -463,7 +463,7 @@ interface TaskOutcome {
 }
 ```
 
-Outcomes are recorded from M1 on, before the router exists, so the always-default baseline is measured on real work (`packages/contracts/src/task.ts`). The status is the task's last turn's, except that a task whose last verifier run failed is `failed`; satisfaction counts only the corrections Verdandi sees (steers, interrupts, rejected plans, a route override, and follow-ups the decision layer judges to be correcting the agent); `verifierRuns` lists the project's verifiers as they ran; `escalations` counts the task's escalation steps, and quota units and `rating` stay empty until ratings exist. `verdandi costs` shows cost per completed task by route.
+Outcomes are recorded from M1 on, before the router exists, so the always-default baseline is measured on real work (`packages/contracts/src/task.ts`). The status is the task's last turn's, except that a task whose last verifier run failed is `failed`; satisfaction counts only the corrections Verdandi sees (steers, interrupts, rejected or edited plans, a route override, and follow-ups the decision layer judges to be correcting the agent); `verifierRuns` lists the project's verifiers as they ran; `escalations` counts the task's escalation steps, and quota units and `rating` stay empty until ratings exist. `verdandi costs` shows cost per completed task by route.
 
 These outcomes are used at three levels:
 1. **Routing memory per project** (M2), e.g. "debug tasks on Sonnet escalated 7 times out of 10, so start on Opus".

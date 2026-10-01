@@ -65,6 +65,58 @@ const rowClass: Record<LineKind | "file" | "note", string> = {
   note: "py-1 font-sans italic text-muted",
 };
 
+export type TextLine = { readonly line: "context" | "del" | "add"; readonly text: string };
+
+/** `after` against `before` line by line, shared lines as context: for short texts like a plan. */
+// ponytail: an O(n·m) table of common lines, fine for plans of tens of lines. Upgrade to Myers' diff if it diffs files.
+export const lineDiff = (before: string, after: string): TextLine[] => {
+  const a = before.trimEnd().split(/\r?\n/);
+  const b = after.trimEnd().split(/\r?\n/);
+  const w = b.length + 1;
+  // How many lines a[i..] and b[j..] share, in order.
+  const common = new Uint32Array((a.length + 1) * w);
+  const at = (i: number, j: number) => common[i * w + j] ?? 0;
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--) common[i * w + j] = a[i] === b[j] ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1));
+  const lines: TextLine[] = [];
+  let [i, j] = [0, 0];
+  while (i < a.length || j < b.length) {
+    const [x, y] = [a[i], b[j]];
+    if (x !== undefined && x === y) {
+      lines.push({ line: "context", text: x });
+      i++;
+      j++;
+    } else if (x !== undefined && (y === undefined || at(i + 1, j) >= at(i, j + 1))) {
+      lines.push({ line: "del", text: x });
+      i++;
+    } else {
+      lines.push({ line: "add", text: y ?? "" });
+      j++;
+    }
+  }
+  return lines;
+};
+
+const marks: Record<TextLine["line"], string> = { context: " ", del: "-", add: "+" };
+
+/** The user's edit of a plan against the agent's proposal. */
+export const TextDiff = ({ before, after }: { before: string; after: string }) => (
+  <div className="my-2 whitespace-pre-wrap font-mono text-xs [overflow-wrap:anywhere]">
+    {lineDiff(before, after).map((l, i) => (
+      // biome-ignore lint/suspicious/noArrayIndexKey: the lines never reorder.
+      <div key={i} className={`flex gap-2 px-2 ${rowClass[l.line]}`}>
+        <span aria-hidden className="text-muted select-none">
+          {marks[l.line]}
+        </span>
+        <span>
+          {signs[l.line] && <span className="sr-only">{signs[l.line]}</span>}
+          {l.text}
+        </span>
+      </div>
+    ))}
+  </div>
+);
+
 const tabClass =
   "rounded-none border-0 border-b-2 border-transparent bg-transparent px-1 text-xs text-muted hover:bg-transparent hover:text-fg data-active:border-accent data-active:text-fg";
 

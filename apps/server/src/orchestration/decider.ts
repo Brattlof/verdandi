@@ -49,6 +49,8 @@ export type PendingRequest = {
   readonly requestId: string;
   readonly turnId: TurnId;
   readonly kind: "approval" | "user-input" | "plan";
+  /** A plan's text as proposed, which an approval's edit is compared with. */
+  readonly plan?: string;
   /** A plan's route for the build, when approving it moves the task (`plan.requested`'s `execute`). */
   readonly execute?: RouteDecision;
 };
@@ -538,13 +540,19 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
         `A ${request.kind} request takes ${fits[request.kind].join(" or ")}, not ${c.resolution.decision}.`,
       );
     }
+    const edit = c.resolution.decision === "allow" ? c.resolution.plan : undefined;
+    if (edit !== undefined && request.kind !== "plan")
+      return reject("InvalidResolution", `Only a plan can be approved with an edit, not a ${request.kind} request. Allow it without one.`);
+    if (edit?.trim() === "")
+      return reject("InvalidResolution", "The edited plan is empty. Approve the plan as proposed, or keep planning with feedback.");
     const resolved: Event = {
       type: "approval.resolved",
       v: 1,
       threadId: c.threadId,
       turnId: request.turnId,
       requestId: c.requestId,
-      resolution: c.resolution,
+      // An edit identical to the proposal is just an approval.
+      resolution: edit !== undefined && edit.trim() === request.plan?.trim() ? { decision: "allow" } : c.resolution,
     };
     // The build moves only if the thread is still routed and on the task the plan was made for.
     const { execute } = request;

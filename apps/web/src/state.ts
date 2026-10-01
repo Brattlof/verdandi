@@ -100,14 +100,31 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "approval.requested": addRequest,
   "user-input.requested": addRequest,
   "plan.requested": (thread, e) =>
-    addRequest(addItem(thread, e.turnId, { kind: "plan", text: e.plan, ...(e.filePath === undefined ? {} : { filePath: e.filePath }) }), e),
+    addRequest(
+      addItem(thread, e.turnId, {
+        kind: "plan",
+        requestId: e.requestId,
+        text: e.plan,
+        ...(e.filePath === undefined ? {} : { filePath: e.filePath }),
+      }),
+      e,
+    ),
   // An approved plan's build moves the rest of the task, and its reason becomes the task's.
   "task.rerouted": (thread, e) => ({
     ...addItem(thread, e.turnId, { kind: "route.switch", from: e.from, to: e.to, reason: e.decision.reason }),
     route: e.to,
     task: thread.task && { ...thread.task, source: e.decision.source, reason: e.decision.reason },
   }),
-  "approval.resolved": (thread, e) => ({ ...thread, pendingRequests: thread.pendingRequests.filter((r) => r.requestId !== e.requestId) }),
+  // A plan approved with the user's edit keeps both versions on its item.
+  "approval.resolved": (thread, e) => {
+    const edited = e.resolution.decision === "allow" ? e.resolution.plan : undefined;
+    const answered = { ...thread, pendingRequests: thread.pendingRequests.filter((r) => r.requestId !== e.requestId) };
+    if (edited === undefined) return answered;
+    return updateTurn(answered, e.turnId, (t) => ({
+      ...t,
+      items: t.items.map((i) => (i.kind === "plan" && i.requestId === e.requestId ? { ...i, edited } : i)),
+    }));
+  },
   "turn.completed": (thread, e) => ({
     ...updateTurn(thread, e.turnId, (t) => ({
       ...t,

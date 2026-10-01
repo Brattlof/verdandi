@@ -38,8 +38,17 @@ export const Item = Schema.Union([
   }),
   /** A message the user sent while the turn ran, recorded when Verdandi accepted it. */
   Schema.Struct({ kind: Schema.Literal("user.steer"), text: Schema.String }),
-  /** A plan the agent proposed for approval. `filePath` points at the harness's own copy, when it keeps one. */
-  Schema.Struct({ kind: Schema.Literal("plan"), text: Schema.String, filePath: Schema.optionalKey(Schema.String) }),
+  /**
+   * A plan the agent proposed for approval, raised as request `requestId`. `filePath` points at the harness's own
+   * copy, when it keeps one. `edited` is the user's edit it was approved with, which the agent built from.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("plan"),
+    requestId: Schema.optionalKey(Schema.String),
+    text: Schema.String,
+    filePath: Schema.optionalKey(Schema.String),
+    edited: Schema.optionalKey(Schema.String),
+  }),
   /** The router moved the rest of the turn to another route when the user approved its plan (DESIGN §8.2 lever 3). */
   Schema.Struct({ kind: Schema.Literal("route.switch"), from: Route, to: Route, reason: Schema.String }),
   /**

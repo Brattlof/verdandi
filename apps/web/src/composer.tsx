@@ -10,7 +10,7 @@ import {
   type ThreadView,
   type TurnId,
 } from "@verdandi/contracts";
-import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, useEffect, useId, useState } from "react";
+import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { addFiles, type Pending, PendingList } from "./attachments.tsx";
 import { type Connection, type Routed, uuid } from "./client.ts";
 import { PaperclipIcon, SendIcon, StopIcon } from "./icons.tsx";
@@ -521,9 +521,54 @@ const Approval = ({ request, sending, respond }: CardProps<"approval.requested">
   </>
 );
 
+/** Approve the plan, edit it first (the agent builds from the edit), or keep planning with feedback. */
 const PlanApproval = ({ request, sending, respond }: CardProps<"plan.requested">) => {
   const [feedback, setFeedback] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [edited, setEdited] = useState(request.plan);
   const id = useId();
+  const field = useRef<HTMLTextAreaElement>(null);
+  const editButton = useRef<HTMLButtonElement>(null);
+  const toggled = useRef(false);
+  // Focus follows the editor: into it when it opens, back to Edit when it closes.
+  useEffect(() => {
+    if (toggled.current) (editing ? field.current : editButton.current)?.focus();
+  }, [editing]);
+  const edit = (on: boolean) => {
+    toggled.current = true;
+    setEdited(request.plan);
+    setEditing(on);
+  };
+  if (editing)
+    return (
+      <>
+        <h3 className="font-semibold">Edit the plan, then approve it and build</h3>
+        <label htmlFor={`${id}-plan`} className="mt-2 mb-1 block text-xs font-medium text-muted">
+          Plan (the agent builds from your edit)
+        </label>
+        <textarea
+          ref={field}
+          id={`${id}-plan`}
+          rows={Math.min(20, edited.split("\n").length + 1)}
+          className="w-full font-mono text-xs"
+          value={edited}
+          onChange={(e) => setEdited(e.target.value)}
+        />
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+          <button type="button" disabled={sending} onClick={() => edit(false)}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="border-go bg-go text-on-go hover:bg-go-hover"
+            disabled={sending || !edited.trim()}
+            onClick={() => respond({ decision: "allow", plan: edited })}
+          >
+            Approve with edits
+          </button>
+        </div>
+      </>
+    );
   return (
     <>
       <h3 className="font-semibold">Approve the plan above and build it?</h3>
@@ -538,6 +583,9 @@ const PlanApproval = ({ request, sending, respond }: CardProps<"plan.requested">
       </label>
       <textarea id={id} rows={2} className="w-full" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+        <button type="button" ref={editButton} disabled={sending} onClick={() => edit(true)}>
+          Edit
+        </button>
         <button
           type="button"
           disabled={sending}

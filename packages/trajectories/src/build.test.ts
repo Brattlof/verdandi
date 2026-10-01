@@ -39,3 +39,14 @@ test("keeps the route the turn started on, and counts a partly metered turn as m
   expect(trajectory?.transcript).toEqual({ sessionId: "s1", path: "/t/s1.jsonl" });
   expect(buildTrajectory(events.slice(0, -1), turnId)).toBeUndefined();
 });
+
+test("a plan approved with the user's edit keeps both versions on its item", () => {
+  const events = stored([
+    { type: "thread.created", v: 1, threadId, projectId: "p" as ProjectId, projectPath: "/repo", route: sonnet },
+    { type: "turn.started", v: 2, threadId, turnId, text: "go", mode: "plan" },
+    { type: "plan.requested", v: 1, threadId, turnId, requestId: "r1", plan: "1. Edit a" },
+    { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r1", resolution: { decision: "allow", plan: "1. Edit b" } },
+    { type: "turn.completed", v: 1, threadId, turnId, status: "success" },
+  ]);
+  expect(buildTrajectory(events, turnId)?.items).toEqual([{ kind: "plan", requestId: "r1", text: "1. Edit a", edited: "1. Edit b" }]);
+});

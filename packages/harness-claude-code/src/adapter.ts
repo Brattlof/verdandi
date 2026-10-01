@@ -138,11 +138,15 @@ const requestFor = (requestId: string, toolName: string, input: Record<string, u
   return { type: "approval.requested", requestId, toolName, input };
 };
 
-/** The SDK answer for a resolution. Deny messages stay neutral: they reach the model as tool output (ADR 0003). */
+/**
+ * The SDK answer for a resolution. Deny messages stay neutral: they reach the model as tool output (ADR 0003).
+ * A plan approved with the user's edit goes back as `ExitPlanMode`'s `plan`: Claude Code saves it over the plan
+ * file and hands it to the agent as the approved plan (ADR 0003).
+ */
 const toPermission = (input: Record<string, unknown>, resolution: Resolution): PermissionResult => {
   switch (resolution.decision) {
     case "allow":
-      return { behavior: "allow", updatedInput: input };
+      return { behavior: "allow", updatedInput: resolution.plan === undefined ? input : { ...input, plan: resolution.plan } };
     case "answer":
       return { behavior: "allow", updatedInput: { ...input, answers: resolution.answers } };
     case "deny":

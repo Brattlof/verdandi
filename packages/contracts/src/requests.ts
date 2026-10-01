@@ -13,10 +13,11 @@ export type Question = typeof Question.Type;
  * How the user answered a request. Approvals and plans take `allow` or `deny`; user-input requests
  * take `answer` or `deny`. `answers` maps each question's text to its answer; multi-select answers
  * are the chosen labels joined with ", ". A deny's `feedback` reaches the agent as a user message
- * (ADR 0003): rejecting a plan with feedback keeps the agent planning with it.
+ * (ADR 0003): rejecting a plan with feedback keeps the agent planning with it. Allowing a plan can carry
+ * the user's edit of it as `plan`, which the agent then builds from (ADR 0003).
  */
 export const Resolution = Schema.Union([
-  Schema.Struct({ decision: Schema.Literal("allow") }),
+  Schema.Struct({ decision: Schema.Literal("allow"), plan: Schema.optionalKey(Schema.String) }),
   Schema.Struct({ decision: Schema.Literal("deny"), feedback: Schema.optionalKey(Schema.String) }),
   Schema.Struct({ decision: Schema.Literal("answer"), answers: Schema.Record(Schema.String, Schema.String) }),
 ]);

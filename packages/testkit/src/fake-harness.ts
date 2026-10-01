@@ -16,7 +16,7 @@ import { Effect, Stream } from "effect";
 
 /**
  * A scripted harness for tests. Text "fail" fails the turn, "hang" runs until interrupted, "gate" waits for
- * `release()`, "overage" reports a used-up subscription window and answers on metered usage, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan, each
+ * `release()`, "overage" reports a used-up subscription window and answers on metered usage, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan (echoing the user's edit when approved with one), each
  * finishing once `respond` answers on the model of the route `reroute` last moved the turn to, "steer" waits for the first steer and answers it, "edit <path>"
  * appends a line to that file, relative to the turn's folder, through an Edit tool call, and a turn Verdandi sends to escalate a failed verifier ("Verdandi ran the
  * project's verifier …") edits the thread's last edited file again, the way an agent fixing it would; "subagent" delegates a read to a subagent whose
@@ -141,7 +141,10 @@ export const makeFakeHarness = () => {
       const plan = request(
         input,
         (requestId) => ({ type: "plan.requested", requestId, plan: "1. Edit a.txt" }),
-        (r) => (r.decision === "allow" ? "built the plan" : `kept planning${r.decision === "deny" && r.feedback ? `: ${r.feedback}` : ""}`),
+        (r) =>
+          r.decision === "allow"
+            ? `built the plan${r.plan ? `: ${r.plan}` : ""}`
+            : `kept planning${r.decision === "deny" && r.feedback ? `: ${r.feedback}` : ""}`,
       );
       return Stream.concat(Stream.fromIterable(start), plan);
     }

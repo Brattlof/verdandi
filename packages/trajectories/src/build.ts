@@ -68,8 +68,17 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
         items.push({ kind: "user.steer", text: e.text });
         break;
       case "plan.requested":
-        items.push({ kind: "plan", text: e.plan, ...(e.filePath === undefined ? {} : { filePath: e.filePath }) });
+        items.push({ kind: "plan", requestId: e.requestId, text: e.plan, ...(e.filePath === undefined ? {} : { filePath: e.filePath }) });
         break;
+      // The agent built from the user's edit of its plan.
+      case "approval.resolved": {
+        const edited = e.resolution.decision === "allow" ? e.resolution.plan : undefined;
+        if (edited === undefined) break;
+        items.forEach((item, i) => {
+          if (item.kind === "plan" && item.requestId === e.requestId) items[i] = { ...item, edited };
+        });
+        break;
+      }
       case "task.rerouted":
         items.push({ kind: "route.switch", from: e.from, to: e.to, reason: e.decision.reason });
         break;
