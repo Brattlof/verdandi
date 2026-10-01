@@ -1,6 +1,13 @@
 import { describeCost, describeQuota, type ProjectSummary, type QuotaView, type ThreadSummary } from "@verdandi/contracts";
 
 const resetTime = (iso: string) => new Date(iso).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** An ISO timestamp as `YYYY-MM-DD HH:MM` on this machine's clock, its local time zone. */
+export const localMinute = (iso: string) => {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
 
 /**
  * `verdandi chat --list`: each harness's subscription window, then threads under their project, the folder
@@ -20,7 +27,7 @@ export const threadList = (
     .map(([projectId, ts]) => {
       const lines = ts.map((t) => {
         const cost = describeCost(t.cost);
-        return `  ${t.threadId}  ${t.busy ? "busy" : t.archived ? "archived" : "idle"}  ${t.lastActivityAt.slice(0, 16).replace("T", " ")}  ${t.title || "(no turns yet)"}${cost ? `  [${cost}]` : ""}`;
+        return `  ${t.threadId}  ${t.busy ? "busy" : t.archived ? "archived" : "idle"}  ${localMinute(t.lastActivityAt)}  ${t.title || "(no turns yet)"}${cost ? `  [${cost}]` : ""}`;
       });
       return `${paths.get(projectId) ?? projectId}\n${lines.join("\n")}\n`;
     })

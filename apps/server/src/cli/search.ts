@@ -4,6 +4,7 @@ import { flag, readServerFile, resolveHome } from "../config/home.ts";
 import { projectIdFor } from "../orchestration/decider.ts";
 import { connect } from "../rpc/client.ts";
 import { resolveProjectPath } from "../workspace/project.ts";
+import { localMinute } from "./thread-list.ts";
 
 /** One hit per block: where it is, then the text around the match, the match in brackets. */
 export const hitsText = (query: string, hits: readonly SessionHit[]) => {
@@ -12,7 +13,7 @@ export const hitsText = (query: string, hits: readonly SessionHit[]) => {
   const who = { user: "you", steer: "you, steering", assistant: "agent" } as const;
   return hits
     .map((h) => {
-      const where = `${h.at.slice(0, 16).replace("T", " ")}  ${h.title || "New thread"}${h.archived ? " (archived)" : ""}  ${h.projectPath}`;
+      const where = `${localMinute(h.at)}  ${h.title || "New thread"}${h.archived ? " (archived)" : ""}  ${h.projectPath}`;
       const text = h.parts
         .map((p) => (p.match ? `[${p.text}]` : p.text))
         .join("")
