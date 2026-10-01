@@ -410,7 +410,7 @@ restrictions:
 fallback: { prefer: [cc-sonnet], effort: medium, max: { prefer: [cc-opus] }, maxCost: 5 }   # safe default below minConfidence; maxCost/maxTurns apply to classes that set none (§8.9)
 ```
 
-A class's route is its Balanced route. `thrifty` and `max` change only the keys they set for those modes, and `plan` does the same for tasks started in plan mode. Layers merge key by key, except `restrictions`, which add up, so a project can't lift a profile's restriction. Unknown keys are errors that name the file and the key. `subagents` routes a class's subagent profiles, `explorer` and `reviewer`, each to the cheapest available target it prefers on the main route's harness, at its own effort or the task's. A harness session keeps the subagents it started with, so a new policy reaches a thread at its next fresh session (ADR 0014). `effortBand`, `quota` and `escalation` are rejected until the features behind them land (§8.7, §8.9).
+A class's route is its Balanced route. `thrifty` and `max` change only the keys they set for those modes, and `plan` does the same for tasks started in plan mode. Layers merge key by key, except `restrictions`, which add up, so a project can't lift a profile's restriction. Unknown keys are errors that name the file and the key. `subagents` routes a class's subagent profiles, `explorer` and `reviewer`, each to the cheapest available target it prefers on the main route's harness, at its own effort or the task's. A harness session keeps the subagents it started with, so a new policy reaches a thread at its next fresh session (ADR 0014). `escalation.verifiers` run after a turn whose agent changed files (§8.7); `effortBand`, `quota` and the rest of `escalation` are rejected until the features behind them land (§8.7, §8.9).
 
 ### 8.7 Escalation and de-escalation while a task runs
 
@@ -463,7 +463,7 @@ interface TaskOutcome {
 }
 ```
 
-Outcomes are recorded from M1 on, before the router exists, so the always-default baseline is measured on real work (`packages/contracts/src/task.ts`). Until the decision layer and verifiers exist, the status is the task's last turn's, satisfaction counts only the corrections Verdandi sees (steers, interrupts, rejected plans, a route override, and follow-ups the decision layer judges to be correcting the agent), and `verifierRuns`, `escalations`, quota units and `rating` stay empty. `verdandi costs` shows cost per completed task by route.
+Outcomes are recorded from M1 on, before the router exists, so the always-default baseline is measured on real work (`packages/contracts/src/task.ts`). The status is the task's last turn's, except that a task whose last verifier run failed is `failed`; satisfaction counts only the corrections Verdandi sees (steers, interrupts, rejected plans, a route override, and follow-ups the decision layer judges to be correcting the agent); `verifierRuns` lists the project's verifiers as they ran; and `escalations`, quota units and `rating` stay empty until escalation and ratings exist. `verdandi costs` shows cost per completed task by route.
 
 These outcomes are used at three levels:
 1. **Routing memory per project** (M2), e.g. "debug tasks on Sonnet escalated 7 times out of 10, so start on Opus".

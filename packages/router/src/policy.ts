@@ -29,6 +29,8 @@ export type ResolvedPolicy = {
   readonly routes: NonNullable<Policy["routes"]>;
   readonly fallback: RouteRule;
   readonly restrictions: NonNullable<Policy["restrictions"]>;
+  /** Commands that check a task's work, run in order after a turn that changed files (DESIGN §8.7). */
+  readonly verifiers: readonly string[];
   readonly catalog: Catalog;
 };
 
@@ -102,6 +104,7 @@ export const loadPolicy = (layers: readonly PolicyLayer[] = [], catalog: Catalog
     routes: merged.routes ?? {},
     fallback: merged.fallback ?? {},
     restrictions: merged.restrictions ?? [],
+    verifiers: merged.escalation?.verifiers ?? [],
     catalog,
   };
 };

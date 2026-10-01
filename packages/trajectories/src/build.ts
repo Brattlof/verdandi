@@ -67,6 +67,11 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
       case "task.rerouted":
         items.push({ kind: "route.switch", from: e.from, to: e.to, reason: e.decision.reason });
         break;
+      case "verifier.ran": {
+        const { type: _type, v: _v, threadId: _threadId, turnId: _turnId, ...run } = e;
+        items.push({ kind: "verifier", ...run });
+        break;
+      }
       case "turn.usage.recorded": {
         const { type: _type, v: _v, threadId: _threadId, turnId: _turnId, ...fields } = e;
         usage.push(fields);

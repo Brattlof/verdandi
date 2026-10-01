@@ -18,7 +18,16 @@ test("restrictions add up across layers", () => {
   expect(p.restrictions.map((r) => r.match)).toEqual(["secrets/**", "packages/billing/**"]);
 });
 
+test("a project names its verifiers under escalation", () => {
+  expect(loadPolicy().verifiers).toEqual([]);
+  expect(loadPolicy([project("escalation:\n  verifiers: [bun test, bun run typecheck]\n")]).verifiers).toEqual([
+    "bun test",
+    "bun run typecheck",
+  ]);
+});
+
 test.each([
+  ["escalation:\n  verifier: [bun test]\n", /\.verdandi\/routing\.yaml: [\s\S]*\["escalation"\]\["verifier"\]/],
   ["routes:\n  review: { effort: extreme }\n", /\.verdandi\/routing\.yaml: [\s\S]*\["routes"\]\["review"\]\["effort"\]/],
   ["routes:\n  code.magic: { effort: low }\n", /\.verdandi\/routing\.yaml: [\s\S]*\["routes"\]\["code\.magic"\]/],
   ["modes: thrifty\n", /\.verdandi\/routing\.yaml: [\s\S]*\["modes"\]/],

@@ -308,6 +308,11 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     c.event.type === "session.started" || state.thread?.runningTurnId === c.turnId
       ? fromHarness(state, c.threadId, c.turnId, c.event)
       : accept(),
+  // A verifier of a turn that has ended, interrupted while it ran, is dropped like a late harness report.
+  "verifier.report": (state, c) =>
+    state.thread?.runningTurnId === c.turnId
+      ? accept({ type: "verifier.ran", v: 1, threadId: c.threadId, turnId: c.turnId, ...c.run })
+      : accept(),
   "turn.recover": (state, c) =>
     state.thread?.runningTurnId === c.turnId
       ? accept(...denyPending(state, c.threadId, c.turnId, "verdandid stopped while this was waiting for an answer."), {

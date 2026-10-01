@@ -2,7 +2,7 @@ import { Data, Effect, Schema } from "effect";
 import { AttachmentRef } from "./attachments.ts";
 import { DecisionAnswer, DecisionQuestion } from "./decisions.ts";
 import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
-import { Item, Quota, UsageFields } from "./items.ts";
+import { Item, Quota, UsageFields, VerifierRun } from "./items.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, RouteDecision, RouteInputs } from "./routing.ts";
@@ -235,6 +235,17 @@ export const SpendCapRaised = Schema.Struct({
   fromUsd: Schema.Number,
   toUsd: Schema.Number,
 });
+/**
+ * Verdandi ran one of the project's verifiers after turn `turnId`'s agent finished changing files, before the
+ * turn completed. Projected as a `verifier` item of that turn; the task's outcome reads it (DESIGN §8.7, §8.8).
+ */
+export const VerifierRan = Schema.Struct({
+  type: Schema.Literal("verifier.ran"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  ...VerifierRun.fields,
+});
 /** `limit`: a budget guard of the task (its `maxCost` or `maxTurns`) stopped the turn, which ends the task. */
 export const TurnStatus = Schema.Literals(["success", "error", "interrupted", "limit"]);
 export const TurnCompleted = Schema.Struct({
@@ -269,6 +280,7 @@ export const Event = Schema.Union([
   TurnCompleted,
   DecisionRecorded,
   SpendCapRaised,
+  VerifierRan,
 ]);
 export type Event = typeof Event.Type;
 
@@ -314,6 +326,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "turn.completed@1": TurnCompleted,
   "decision.recorded@1": DecisionRecorded,
   "spend.cap.raised@1": SpendCapRaised,
+  "verifier.ran@1": VerifierRan,
 };
 
 /** The row shape an event is stored as. */

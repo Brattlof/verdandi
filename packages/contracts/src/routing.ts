@@ -122,6 +122,11 @@ export const Policy = Schema.Struct({
       minShare: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
     }),
   ),
+  /**
+   * How a task's work is checked (DESIGN §8.7). `verifiers` are shell commands, e.g. `bun test`, run in order in the project
+   * folder after a turn whose agent changed files, until one fails. Its exit code says whether the work holds up.
+   */
+  escalation: Schema.optionalKey(Schema.Struct({ verifiers: Schema.optionalKey(Schema.Array(Schema.String)) })),
   /** When a task touches a path matching `match` (a glob), drop targets with a forbidden access mode or below `minTier`. */
   restrictions: Schema.optionalKey(
     Schema.Array(

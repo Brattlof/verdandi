@@ -7,6 +7,7 @@ import type {
   HarnessEvent,
   HarnessId,
   InteractionMode,
+  Item,
   Route,
   TaskId,
   TaskLimits,
@@ -15,6 +16,8 @@ import type {
 } from "@verdandi/contracts";
 import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { editedPaths } from "../workspace/diff.ts";
+import { runVerifier } from "../workspace/verify.ts";
 import { Engine } from "./engine.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "./task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "./trajectory.ts";
@@ -25,6 +28,11 @@ export class HarnessRegistry extends Context.Service<HarnessRegistry, Partial<Re
 
 /** Where the profile keeps attachments' bytes, which harness turns read by path. */
 export class AttachmentsDir extends Context.Service<AttachmentsDir, string>()("verdandi/AttachmentsDir") {}
+
+/** The project's verifiers (`escalation.verifiers` in its routing policy), read when a turn needs them. */
+export class ProjectVerifiers extends Context.Service<ProjectVerifiers, (projectPath: string) => Effect.Effect<readonly string[]>>()(
+  "verdandi/ProjectVerifiers",
+) {}
 
 export class Reactor extends Context.Service<
   Reactor,
@@ -53,6 +61,7 @@ export const ReactorLive = Layer.effect(
     const engine = yield* Engine;
     const registry = yield* HarnessRegistry;
     const attachmentsDir = yield* AttachmentsDir;
+    const projectVerifiers = yield* ProjectVerifiers;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
     /** The adapter running each thread's current turn: where answers to its requests go. */
@@ -77,6 +86,16 @@ export const ReactorLive = Layer.effect(
         Effect.catchCause((cause) => Effect.logWarning(`Could not record the task outcomes of thread ${threadId}.`, cause)),
         Effect.provideService(SqlClient.SqlClient, sql),
       );
+
+    /** Runs the project's verifiers in order until one fails, recording each on the turn before it completes (DESIGN §8.7). */
+    const verify = (threadId: ThreadId, turnId: TurnId, projectPath: string) =>
+      Effect.gen(function* () {
+        for (const command of yield* projectVerifiers(projectPath)) {
+          const run = yield* runVerifier(command, projectPath);
+          yield* engine.dispatch({ type: "verifier.report", commandId: randomUUID() as CommandId, threadId, turnId, run });
+          if (!run.passed) return;
+        }
+      });
 
     const runTurn = (
       threadId: ThreadId,
@@ -113,6 +132,8 @@ export const ReactorLive = Layer.effect(
           thread.limits && thread.task_id
             ? { ...(JSON.parse(thread.limits) as TaskLimits), taskId: thread.task_id, spentUsd: thread.spent_usd }
             : undefined;
+        // The turn's file-tool calls: once its agent is done, a turn that changed files is verified before it completes.
+        const calls: Item[] = [];
         yield* adapter
           .run({
             threadId,
@@ -129,8 +150,16 @@ export const ReactorLive = Layer.effect(
           .pipe(
             Stream.runForEach((event) => {
               if (event.type === "text.delta") return engine.publishDelta(threadId, turnId, event.text);
-              if (event.type === "turn.finished") finished = true;
-              return report(threadId, turnId, event);
+              if (event.type === "item" && event.item.kind === "tool.call") calls.push(event.item);
+              if (event.type !== "turn.finished") return report(threadId, turnId, event);
+              finished = true;
+              // ponytail: a steer sent while verifiers run is recorded but never reaches the agent, which has finished.
+              // Upgrade: hand it to the next turn, once escalation starts one (DESIGN §8.7).
+              const verified =
+                event.status === "success" && editedPaths(thread.path, calls).length > 0
+                  ? verify(threadId, turnId, thread.path)
+                  : Effect.void;
+              return Effect.andThen(verified, report(threadId, turnId, event));
             }),
           );
         if (!finished) yield* fail("The harness stopped without finishing the turn.");
