@@ -36,7 +36,9 @@ test("checkpointing a dirty tree saves it whole and leaves the branch, index, st
   expect(state()).toEqual(before);
   expect(git(dir, "rev-parse", ref).trim()).toBe(commit ?? "");
   expect(git(dir, "ls-tree", "--name-only", ref).split("\n").filter(Boolean)).toEqual([".gitignore", "a.txt", "new.txt"]);
-  expect(git(dir, "show", `${ref}:a.txt`)).toBe("one\nstaged\nunstaged\n");
+  // Byte for byte as it is on disk (after `git stash`, Windows checks it out with CRLF).
+  expect(git(dir, "show", `${ref}:a.txt`)).toBe(readFileSync(join(dir, "a.txt"), "utf8"));
+  expect(readFileSync(join(dir, "a.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("one\nstaged\nunstaged\n");
   expect(await Effect.runPromise(listCheckpoints(dir, "t 1/../x.lock" as ThreadId))).toEqual(new Set([ref]));
 });
 
