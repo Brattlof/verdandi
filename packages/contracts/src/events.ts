@@ -306,6 +306,36 @@ export const ThreadWorktreeRemoved = Schema.Struct({
   v: v1,
   threadId: ThreadId,
 });
+/**
+ * The user reverted the thread to the end of turn `toTurnId`: `turnIds`, the later turns still shown, are now
+ * reverted, and the next turn forks the conversation from there (ADR 0004). It ends the running task, whose
+ * outcome becomes `reverted`. With `files` the reactor restores the files from `toTurnId`'s end checkpoint.
+ */
+export const ThreadReverted = Schema.Struct({
+  type: Schema.Literal("thread.reverted"),
+  v: v1,
+  threadId: ThreadId,
+  toTurnId: TurnId,
+  turnIds: Schema.Array(TurnId),
+  files: Schema.Boolean,
+});
+/** The user undid the thread's latest revert: `turnIds` show again; with `restore`, the reactor puts back the files saved before it. */
+export const ThreadRevertUndone = Schema.Struct({
+  type: Schema.Literal("thread.revert.undone"),
+  v: v1,
+  threadId: ThreadId,
+  turnIds: Schema.Array(TurnId),
+  restore: Schema.optionalKey(Schema.String),
+});
+/** The reactor restored the thread's files from checkpoint `from`, after saving them as `saved`, or failed to (`error`). */
+export const ThreadFilesRestored = Schema.Struct({
+  type: Schema.Literal("thread.files.restored"),
+  v: v1,
+  threadId: ThreadId,
+  from: Schema.String,
+  saved: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(Schema.String),
+});
 /** `limit`: a budget guard of the task (its `maxCost` or `maxTurns`) stopped the turn, which ends the task. */
 export const TurnStatus = Schema.Literals(["success", "error", "interrupted", "limit"]);
 export const TurnCompleted = Schema.Struct({
@@ -348,6 +378,9 @@ export const Event = Schema.Union([
   ThreadWorktreeSetupRan,
   ThreadWorktreeRemovalRequested,
   ThreadWorktreeRemoved,
+  ThreadReverted,
+  ThreadRevertUndone,
+  ThreadFilesRestored,
 ]);
 export type Event = typeof Event.Type;
 
@@ -401,6 +434,9 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.worktree.setup.ran@1": ThreadWorktreeSetupRan,
   "thread.worktree.removal.requested@1": ThreadWorktreeRemovalRequested,
   "thread.worktree.removed@1": ThreadWorktreeRemoved,
+  "thread.reverted@1": ThreadReverted,
+  "thread.revert.undone@1": ThreadRevertUndone,
+  "thread.files.restored@1": ThreadFilesRestored,
 };
 
 /** The row shape an event is stored as. */

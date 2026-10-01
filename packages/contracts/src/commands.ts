@@ -148,6 +148,36 @@ export const WorktreeReported = Schema.Struct({
   report: WorktreeReport,
 });
 
+/**
+ * Rolls the thread back to the end of turn `toTurnId` (DESIGN §13): the conversation, and with `files` the
+ * project's files too, from that turn's checkpoint. The later turns stay in the log, shown as reverted.
+ */
+export const ThreadRevert = Schema.Struct({
+  type: Schema.Literal("thread.revert"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  toTurnId: TurnId,
+  files: Schema.Boolean,
+});
+
+/** Undoes the thread's latest revert, files included, while no turn has run since. */
+export const ThreadRevertUndo = Schema.Struct({
+  type: Schema.Literal("thread.revert.undo"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
+/** Internal: the reactor reporting that it restored the thread's files from checkpoint `from`, or why it couldn't. */
+export const FilesReport = Schema.Struct({
+  type: Schema.Literal("files.report"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  from: Schema.String,
+  /** The checkpoint of the files as they were before, which undoing the revert restores. */
+  saved: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(Schema.String),
+});
+
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
   type: Schema.Literal("harness.report"),
@@ -199,6 +229,8 @@ export const ClientCommand = Schema.Union([
   ThreadUnarchive,
   ThreadWorktreeAdd,
   ThreadWorktreeRemove,
+  ThreadRevert,
+  ThreadRevertUndo,
   ApprovalRespond,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
@@ -217,8 +249,11 @@ export const Command = Schema.Union([
   ThreadUnarchive,
   ThreadWorktreeAdd,
   ThreadWorktreeRemove,
+  ThreadRevert,
+  ThreadRevertUndo,
   ApprovalRespond,
   HarnessReport,
+  FilesReport,
   WorktreeReported,
   VerifierReport,
   TaskEscalate,

@@ -48,6 +48,25 @@ const addItem = (turnId: TurnId, item: Item) =>
           values (${turnId}, (select count(*) from items where turn_id = ${turnId}), ${JSON.stringify(item)})`,
   );
 
+/** The thread's latest revert as `threads.revert` keeps it: what undoing it needs, and what its view shows. */
+export type StoredRevert = {
+  readonly toTurnId: TurnId;
+  readonly turnIds: readonly TurnId[];
+  readonly files: boolean;
+  readonly undone: boolean;
+  /** The fork pending before this revert, which undoing it puts back. */
+  readonly prevFork: string | null;
+  /** The checkpoint of the files from before the revert. */
+  readonly saved?: string | null;
+  readonly filesError?: string | null;
+};
+
+const revertView = (stored: string | null): ThreadView["revert"] => {
+  if (stored === null) return null;
+  const r = JSON.parse(stored) as StoredRevert;
+  return { toTurnId: r.toTurnId, files: r.files, undone: r.undone, ...(r.filesError ? { filesError: r.filesError } : {}) };
+};
+
 /** Folds a worktree event into the thread's `worktree` column. */
 const projectWorktree = (e: Parameters<typeof nextWorktree>[1]) =>
   withSql((sql) =>
@@ -112,10 +131,58 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       Effect.andThen(
         sql`insert into turns (id, thread_id, text, mode, attachments, status, started_at)
             values (${e.turnId}, ${e.threadId}, ${e.text}, ${e.mode ?? "build"}, ${JSON.stringify(e.attachments ?? [])}, 'running', ${at})`,
-        sql`update threads set running_turn_id = ${e.turnId} where id = ${e.threadId}`,
+        // A new turn closes the latest revert's undo window.
+        sql`update threads set running_turn_id = ${e.turnId}, revert = null where id = ${e.threadId}`,
       ),
     ),
-  "harness.session.bound": (e) => withSql((sql) => sql`update threads set session_id = ${e.sessionId} where id = ${e.threadId}`),
+  // A revert's fork drops its reverted turns from the session; any other new session starts with the running turn.
+  "harness.session.bound": (e) =>
+    withSql((sql) =>
+      Effect.andThen(
+        sql`update turns set reverted = 2 where thread_id = ${e.threadId} and reverted = 1
+              and (select pending_fork from threads where id = ${e.threadId}) is not null`,
+        sql`update threads set session_id = ${e.sessionId}, transcript_path = ${e.transcriptPath ?? null}, pending_fork = null,
+              session_first_turn = case when pending_fork is null and session_id is not ${e.sessionId} then running_turn_id
+                else session_first_turn end
+            where id = ${e.threadId}`,
+      ),
+    ),
+  // The next turn forks the session at `toTurnId`, dropping the turns after it still in the session.
+  "thread.reverted": (e) =>
+    withSql((sql) =>
+      Effect.gen(function* () {
+        const [thread] = yield* sql<{ pending_fork: string | null }>`select pending_fork from threads where id = ${e.threadId}`;
+        const drop = yield* sql<{ id: TurnId }>`
+          select id from turns where thread_id = ${e.threadId} and reverted != 2
+            and (started_at, rowid) > (select started_at, rowid from turns where id = ${e.toTurnId})
+          order by started_at, rowid`;
+        yield* sql`update turns set reverted = 1 where id in (select value from json_each(${JSON.stringify(e.turnIds)}))`;
+        const revert: StoredRevert = {
+          toTurnId: e.toTurnId,
+          turnIds: e.turnIds,
+          files: e.files,
+          undone: false,
+          prevFork: thread?.pending_fork ?? null,
+        };
+        const fork = { atTurnId: e.toTurnId, dropTurnIds: drop.map((t) => t.id) };
+        yield* sql`update threads set task_id = null, pending_fork = ${JSON.stringify(fork)}, revert = ${JSON.stringify(revert)}
+          where id = ${e.threadId}`;
+      }),
+    ),
+  "thread.revert.undone": (e) =>
+    withSql((sql) =>
+      Effect.andThen(
+        sql`update turns set reverted = 0 where id in (select value from json_each(${JSON.stringify(e.turnIds)}))`,
+        sql`update threads set pending_fork = json_extract(revert, '$.prevFork'), revert = json_set(revert, '$.undone', json('true'))
+            where id = ${e.threadId}`,
+      ),
+    ),
+  "thread.files.restored": (e) =>
+    withSql(
+      (sql) =>
+        sql`update threads set revert = json_set(revert, '$.saved', ${e.saved ?? null}, '$.filesError', ${e.error ?? null})
+            where id = ${e.threadId} and revert is not null`,
+    ),
   "turn.item.added": (e) => addItem(e.turnId, e.item),
   "turn.steered": (e) => addItem(e.turnId, { kind: "user.steer", text: e.text }),
   "turn.usage.recorded": (e, at) =>
@@ -237,8 +304,12 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         task_mode: string | null;
         cached_tokens: number;
         worktree: string | null;
+        pending_fork: number;
+        session_first_turn: TurnId | null;
+        revert: string | null;
       }>`
         select t.project_id, p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned, t.budget_mode, t.worktree,
+          t.pending_fork is not null as pending_fork, t.session_first_turn, t.revert,
           t.archived_at is not null as archived,
           (select count(*) from turns n where n.thread_id = t.id) as turns,
           (select id from turns n where n.thread_id = t.id order by started_at desc, rowid desc limit 1) as last_turn_id,
@@ -254,8 +325,14 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
       const pending = yield* sql<{ id: string; turn_id: string; kind: PendingRequest["kind"]; execute: string | null }>`
         select id, turn_id, kind, json_extract(payload, '$.execute') as execute
         from requests where thread_id = ${threadId} and resolution is null`;
+      const turnList = yield* sql<{ id: TurnId; reverted: 0 | 1 | 2 }>`
+        select id, reverted from turns where thread_id = ${threadId} order by started_at, rowid`;
       return {
         thread: {
+          turnList: turnList.map((t) => ({ turnId: t.id, reverted: t.reverted })),
+          pendingFork: row.pending_fork === 1,
+          sessionFirstTurn: row.session_first_turn,
+          revert: row.revert === null ? null : (JSON.parse(row.revert) as StoredRevert),
           projectId: row.project_id,
           projectPath: row.path,
           route: JSON.parse(row.route) as Route,
@@ -298,8 +375,10 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         source: RouteDecision["source"] | null;
         reason: string | null;
         worktree: string | null;
+        revert: string | null;
       }>`
         select p.path, t.route, t.session_id, t.running_turn_id, t.pinned, t.archived_at is not null as archived, t.budget_mode, t.worktree,
+          t.revert,
           t.task_id, d.source, d.reason
         from threads t join projects p on p.id = t.project_id left join route_decisions d on d.task_id = t.task_id
         where t.id = ${threadId}`;
@@ -311,8 +390,9 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         attachments: string;
         status: TurnView["status"];
         error: string | null;
+        reverted: number;
       }>`
-        select id, text, mode, attachments, status, error from turns where thread_id = ${threadId} order by started_at, rowid`;
+        select id, text, mode, attachments, status, error, reverted from turns where thread_id = ${threadId} order by started_at, rowid`;
       const items = yield* sql<{ turn_id: string; payload: string }>`
         select i.turn_id, i.payload from items i join turns t on t.id = i.turn_id where t.thread_id = ${threadId} order by i.turn_id, i.idx`;
       const itemsByTurn = Map.groupBy(items, (i) => i.turn_id);
@@ -349,6 +429,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
               },
         sessionId: thread.session_id,
         worktree: thread.worktree === null ? null : (JSON.parse(thread.worktree) as WorktreeView),
+        revert: revertView(thread.revert),
         busy: thread.running_turn_id !== null,
         turns: turns.map(
           (t): TurnView => ({
@@ -357,6 +438,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
             mode: t.mode,
             attachments: JSON.parse(t.attachments) as AttachmentRef[],
             status: t.status,
+            reverted: t.reverted !== 0,
             items: (itemsByTurn.get(t.id) ?? []).map((i) => JSON.parse(i.payload) as Item),
             usage: (usageByTurn.get(t.id) ?? []).map((u) => ({
               model: u.model,

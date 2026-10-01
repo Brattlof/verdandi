@@ -549,4 +549,93 @@ describe("Claude Code adapter", () => {
       removeTempHome(home);
     }
   });
+
+  describe("reverting forks the session (ADR 0004)", () => {
+    /** A transcript of turns U1 and U2, as Claude Code writes it: each prompt's parent is the turn before's last entry. */
+    const transcript = (dir: string) => {
+      const path = join(dir, "session.jsonl");
+      const lines = [
+        { type: "user", uuid: U1, parentUuid: null },
+        { type: "assistant", uuid: "a1", parentUuid: U1 },
+        { type: "attachment", uuid: "a1-end", parentUuid: "a1" },
+        { type: "user", uuid: U2, parentUuid: "a1-end" },
+        { type: "assistant", uuid: "a2", parentUuid: U2 },
+      ];
+      writeFileSync(path, `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`);
+      return path;
+    };
+    const forked = (cwd: string, transcriptPath?: string): HarnessRunInput => ({
+      ...input(cwd, "next", U3, "session-1"),
+      fork: { atTurnId: U1 as TurnId, dropTurnIds: [U2 as TurnId], ...(transcriptPath && { transcriptPath }) },
+    });
+
+    test("forks at the kept turn's last entry in a new process, dropping the next turn", async () => {
+      const home = makeTempHome();
+      try {
+        const { query, spawns } = stubQuery();
+        const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+        await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "hi", U1, "session-1"))));
+        await Effect.runPromise(Stream.runCollect(adapter.run(forked(home, transcript(home)))));
+        expect(spawns).toHaveLength(2);
+        expect(spawns[0]?.log.at(-1)).toBe("prompt hi"); // the unforked process is left behind
+        expect(spawns[1]?.options).toMatchObject({
+          resume: "session-1",
+          forkSession: true,
+          resumeSessionAt: "a1-end",
+          resumeDropsTurn: U2,
+        });
+        expect(spawns[1]?.prompts.map((m) => m.uuid)).toEqual([U3]);
+      } finally {
+        removeTempHome(home);
+      }
+    });
+
+    test("dropping several turns forks without the guard, which refuses a range of them", async () => {
+      const home = makeTempHome();
+      try {
+        const { query, spawns } = stubQuery();
+        const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+        const fork = { atTurnId: U1 as TurnId, dropTurnIds: [U2 as TurnId, "u4" as TurnId], transcriptPath: transcript(home) };
+        await Effect.runPromise(Stream.runCollect(adapter.run({ ...input(home, "next", U3, "session-1"), fork })));
+        expect(spawns[0]?.options).toMatchObject({ forkSession: true, resumeSessionAt: "a1-end" });
+        expect(spawns[0]?.options.resumeDropsTurn).toBeUndefined();
+      } finally {
+        removeTempHome(home);
+      }
+    });
+
+    test("a refused fork isn't retried: the turn runs on a plain resume, and a notice says why", async () => {
+      const home = makeTempHome();
+      try {
+        const { query, spawns } = stubQuery((_prompt, options) =>
+          options.forkSession
+            ? [result({}, "error_during_execution", ["Resume rejected by --resume-drops-turn: a queued message was absorbed"])]
+            : [textDelta("ok"), result(turn1Usage)],
+        );
+        const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+        const events = await Effect.runPromise(Stream.runCollect(adapter.run(forked(home, transcript(home)))));
+        expect(spawns.map((s) => s.options.forkSession ?? false)).toEqual([true, false]);
+        expect(spawns[1]?.options.resume).toBe("session-1");
+        expect(spawns[1]?.prompts.map((m) => m.uuid)).toEqual([U3]);
+        const notice = events.find((e) => e.type === "item" && e.item.kind === "notice");
+        expect(JSON.stringify(notice)).toContain("a queued message was absorbed");
+        expect(events.at(-1)).toMatchObject({ type: "turn.finished", status: "success" });
+      } finally {
+        removeTempHome(home);
+      }
+    });
+
+    test("without the transcript it resumes plainly and says the agent still remembers the reverted turns", async () => {
+      const home = makeTempHome();
+      try {
+        const { query, spawns } = stubQuery();
+        const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+        const events = await Effect.runPromise(Stream.runCollect(adapter.run(forked(home))));
+        expect(spawns[0]?.options.forkSession).toBeUndefined();
+        expect(JSON.stringify(events.find((e) => e.type === "item"))).toContain("still remembers the reverted turns");
+      } finally {
+        removeTempHome(home);
+      }
+    });
+  });
 });

@@ -17,6 +17,12 @@ Spike 004 branched a 3-turn session at turn 2 on the installed Claude Code 2.1.2
 3. The original session is never truncated; the old id stays on record, so the revert itself can be undone.
 4. A thrown error starting `Resume rejected by --resume-drops-turn:` means the transcript holds turns Verdandi didn't see. The adapter keeps the evidence, does not retry the fork, and falls back to a plain resume with the user told why.
 
+## Implementation (issue #79, 2026-10-01)
+
+- The fork point is the `parentUuid` of the dropped turn's prompt entry in the session transcript, whose `uuid` is that turn's id, so it is the kept turn's last chain entry whatever kind it is. The adapter reads it from the transcript path `harness.session.bound` recorded; without it, or without that entry, it resumes plainly and adds a `notice` item saying the agent still remembers the reverted turns.
+- The fork happens when the next turn runs: `thread.reverted` leaves a pending fork on the thread, and the session binding that turn reports (even to the same id, after a fallback) clears it.
+- The guard refuses a range of several of Verdandi's own turns (checked live on Claude Code 2.1.x, 2026-10-01: "range contains a user entry not attributable to the declared turn"). So `resumeDropsTurn` is passed only when the revert drops one turn; dropping several forks unguarded, which could silently drop entries Verdandi never saw.
+
 ## Consequences
 
 - The branch keeps turns 1..N; the original keeps everything (verified).

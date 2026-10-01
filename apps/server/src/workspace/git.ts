@@ -13,14 +13,14 @@ const inherited = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIR
  * `[id].tsx` is a file name, not a glob; paths unquoted. Fails only when git can't start: a non-zero
  * exit is the caller's to read.
  */
-export const git = (cwd: string, args: readonly string[], env: Record<string, string> = {}) =>
+export const git = (cwd: string, args: readonly string[], env: Record<string, string> = {}, input?: string) =>
   Effect.tryPromise({
     try: async (): Promise<GitResult> => {
       const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => !inherited.includes(k)));
       const proc = Bun.spawn(["git", "--no-optional-locks", "--literal-pathspecs", "-c", "core.quotePath=false", ...args], {
         cwd,
         env: { ...base, ...env },
-        stdin: "ignore",
+        stdin: input === undefined ? "ignore" : new TextEncoder().encode(input),
         stdout: "pipe",
         stderr: "pipe",
       });

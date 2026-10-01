@@ -27,6 +27,7 @@ const snapshot: ThreadFeed = {
     pinned: true,
     archived: false,
     worktree: null,
+    revert: null,
     budgetMode: null,
     task: null,
     sessionId: null,

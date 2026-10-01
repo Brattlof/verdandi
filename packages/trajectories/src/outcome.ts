@@ -45,6 +45,9 @@ const corrects = (a: DecisionAnswer) =>
 export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[] => {
   const tasks: Draft[] = [];
   const plans = new Set<string>();
+  /** Each turn's task, and the turns the user has reverted: a task with one is `reverted` (DESIGN §13). */
+  const taskOf = new Map<string, Draft>();
+  const reverted = new Set<string>();
   /** The task of the latest turn: a follow-up correcting the agent, recorded before its own turn starts, corrects that task. */
   let current: Draft | undefined;
   for (const { event: e, at } of events) {
@@ -62,6 +65,10 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         escalations: 0,
         usage: new Map(),
       });
+      continue;
+    }
+    if (e.type === "thread.reverted" || e.type === "thread.revert.undone") {
+      for (const turnId of e.turnIds) e.type === "thread.reverted" ? reverted.add(turnId) : reverted.delete(turnId);
       continue;
     }
     const task = tasks.at(-1);
@@ -82,6 +89,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         }
         break;
       case "turn.started":
+        taskOf.set(e.turnId, task);
         current = task;
         task.turns++;
         task.last = undefined;
@@ -131,7 +139,11 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
     // override, follow-ups the decision layer calls corrections). Upgrade: add explicit ratings (DESIGN §8.8).
     const corrections = t.corrections + (t.override ? 1 : 0);
     // A task whose agent finished but whose last verifier run failed didn't get its work right.
-    const status = t.last === "success" && t.verifierRuns.at(-1)?.passed === false ? "failed" : taskStatus[t.last];
+    const status = [...reverted].some((turnId) => taskOf.get(turnId) === t)
+      ? "reverted"
+      : t.last === "success" && t.verifierRuns.at(-1)?.passed === false
+        ? "failed"
+        : taskStatus[t.last];
     return [
       {
         v: 1,

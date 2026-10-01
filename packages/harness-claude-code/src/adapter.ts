@@ -142,7 +142,44 @@ const toPermission = (input: Record<string, unknown>, resolution: Resolution): P
   }
 };
 
-const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInput, additionalDirectories: readonly string[]): Session => {
+/**
+ * Where a revert forks the session (ADR 0004): the kept turn's last chain entry, and the turn the guard checks
+ * everything after it belongs to. The guard refuses a range of several turns (checked live), so with more than
+ * one dropped there is none.
+ */
+type Fork = { readonly resumeSessionAt: string; readonly dropTurnId?: string };
+
+/** How Claude Code refuses a fork whose dropped range holds entries Verdandi didn't see (ADR 0004). */
+const forkRefused = "Resume rejected by --resume-drops-turn:";
+
+/**
+ * The last chain entry before turn `dropTurnId` in a session transcript: the `parentUuid` of that turn's prompt,
+ * whose uuid is the turn id (ADR 0004). Undefined when the transcript can't be read or doesn't have it.
+ */
+export const forkPoint = (transcriptPath: string, dropTurnId: string): string | undefined => {
+  let text: string;
+  try {
+    text = readFileSync(transcriptPath, "utf8");
+  } catch {
+    return undefined;
+  }
+  for (const line of text.split("\n")) {
+    if (!line.includes(dropTurnId)) continue;
+    try {
+      const entry = JSON.parse(line) as { uuid?: unknown; parentUuid?: unknown };
+      if (entry.uuid === dropTurnId) return typeof entry.parentUuid === "string" ? entry.parentUuid : undefined;
+    } catch {}
+  }
+  return undefined;
+};
+
+const openSession = (
+  queryFn: QueryFn,
+  claudePath: string,
+  input: HarnessRunInput,
+  additionalDirectories: readonly string[],
+  fork?: Fork,
+): Session => {
   const queue: SDKUserMessage[] = [];
   let wake: (() => void) | undefined;
   let closed = false;
@@ -195,6 +232,14 @@ const openSession = (queryFn: QueryFn, claudePath: string, input: HarnessRunInpu
       model: input.route.model,
       effort: input.route.effort,
       ...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),
+      // A revert: the new session keeps the old one up to `resumeSessionAt` and drops the turn after it (ADR 0004).
+      // ponytail: several dropped turns fork unguarded, so entries Verdandi never saw could be dropped silently.
+      // Upgrade: fork one turn at a time, or a guard that takes a range, if the CLI grows one.
+      ...(fork && {
+        forkSession: true,
+        resumeSessionAt: fork.resumeSessionAt,
+        ...(fork.dropTurnId && { resumeDropsTurn: fork.dropTurnId }),
+      }),
       ...(input.mode === "build" ? {} : { permissionMode: "plan" as const }),
       // Spawn-time only, and counted over the process's life: `run` opens a process per task with limits.
       // A process opened mid-task (after an interrupt or restart) gets what the task has left.
@@ -437,10 +482,30 @@ export const makeClaudeCodeAdapter = (options: {
                 message: `An attachment of this turn can't be read (${String(error)}). It may have been deleted from the profile's attachments folder; attach it again.`,
               }),
           });
-          const session =
-            sessions.get(input.threadId) ??
-            openSession(options.query ?? query, options.claudePath, input, options.additionalDirectories ?? []);
-          sessions.set(input.threadId, session);
+          // A revert forks the session in a process of its own (ADR 0004); without its fork point it resumes plainly, and says why.
+          const { fork: reverted } = input;
+          const [first, ...rest] = reverted?.dropTurnIds ?? [];
+          const at = first && reverted?.transcriptPath ? forkPoint(reverted.transcriptPath, first) : undefined;
+          const fork = at ? { resumeSessionAt: at, ...(rest.length === 0 && { dropTurnId: first }) } : undefined;
+          const unforked: HarnessEvent[] =
+            first && !fork
+              ? [
+                  {
+                    type: "item",
+                    item: {
+                      kind: "notice",
+                      text: "Claude Code's transcript doesn't show where the reverted turns start, so it resumed the conversation as it was: the agent still remembers the reverted turns.",
+                    },
+                  },
+                ]
+              : [];
+          if (reverted) end(input.threadId);
+          const open = (f?: Fork) => {
+            const opened = openSession(options.query ?? query, options.claudePath, input, options.additionalDirectories ?? [], f);
+            sessions.set(input.threadId, opened);
+            return opened;
+          };
+          const session = sessions.get(input.threadId) ?? open(fork);
           yield* Effect.tryPromise({
             try: async () => {
               await applyRoute(session, input.route);
@@ -454,23 +519,47 @@ export const makeClaudeCodeAdapter = (options: {
             },
           });
           // Opened before the stream starts, so no steer can overtake the turn's own prompt.
-          session.live = true;
-          session.unanswered.clear();
-          session.push({
-            type: "user",
-            message: { role: "user", content },
-            parent_tool_use_id: null,
-            uuid: input.turnId as UUID,
-          });
-          const events = turn(session, input);
+          const send = (to: Session) => {
+            to.live = true;
+            to.unanswered.clear();
+            to.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null, uuid: input.turnId as UUID });
+          };
+          send(session);
+          /** The session the turn runs in: the fork's, or the plain resume a refused fork falls back to. */
+          let current = session;
+          // A refused fork is deterministic, so it isn't retried: the turn runs again on a plain resume, and the user is told why.
+          async function* forking(): AsyncGenerator<HarnessEvent> {
+            try {
+              for await (const e of turn(session, input)) {
+                if (e.type === "turn.finished" && e.error?.includes(forkRefused)) throw new Error(e.error);
+                yield e;
+              }
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              if (!message.includes(forkRefused)) throw error;
+              end(input.threadId);
+              current = open();
+              send(current);
+              yield {
+                type: "item",
+                item: {
+                  kind: "notice",
+                  text: `Claude Code wouldn't fork the conversation at the revert (${message.slice(message.indexOf(forkRefused) + forkRefused.length).trim() || "no reason given"}), so it resumed it as it was: the agent still remembers the reverted turns.`,
+                },
+              };
+              yield* turn(current, input);
+            }
+          }
+          const events = fork ? forking() : turn(session, input);
           // Without `return`: Effect awaits it on interrupt, and a generator parked on the SDK would never settle it.
           const reader = { [Symbol.asyncIterator]: () => ({ next: () => events.next() }) };
           return Stream.fromAsyncIterable(reader, (error) => {
             end(input.threadId);
             return error instanceof HarnessError ? error : new HarnessError({ message: `Claude Code failed: ${String(error)}` });
           }).pipe(
-            Stream.drainFork(input.steers.pipe(Stream.tap((text) => Effect.sync(() => say(session, text))))),
-            Stream.onExit((exit) => (Exit.hasInterrupts(exit) ? stop(input.threadId, session, events) : Effect.void)),
+            (s) => (unforked.length > 0 ? Stream.concat(Stream.fromIterable(unforked), s) : s),
+            Stream.drainFork(input.steers.pipe(Stream.tap((text) => Effect.sync(() => say(current, text))))),
+            Stream.onExit((exit) => (Exit.hasInterrupts(exit) ? stop(input.threadId, current, events) : Effect.void)),
           );
         }),
       ),

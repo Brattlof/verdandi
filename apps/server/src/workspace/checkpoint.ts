@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ThreadId, TurnId } from "@verdandi/contracts";
 import { Effect } from "effect";
-import { git, gitFailed, gitOk, notARepo } from "./git.ts";
+import { GitError, git, gitFailed, gitOk, notARepo } from "./git.ts";
 import { refPart } from "./refs.ts";
 
 /** Where a thread's checkpoints live: shared by every worktree of the repo, and never on a branch. */
@@ -64,3 +64,40 @@ export const listCheckpoints = (cwd: string, threadId: ThreadId) =>
     gitOk(cwd, ["for-each-ref", "--format=%(refname)", threadCheckpoints(threadId)]),
     (out) => new Set(out.split("\n").filter(Boolean)),
   );
+
+/** Where the files a revert replaced are saved, so it can be undone. */
+export const revertRef = (threadId: ThreadId, seq: number) => `refs/verdandi/reverts/${refPart(threadId)}/${seq}`;
+
+/**
+ * Puts the files under `cwd` back as checkpoint `ref` has them: changed files rewritten, files it doesn't have
+ * deleted. Written through a temporary index, so the user's index stays as it was; ignored files are left alone.
+ */
+export const restore = (cwd: string, ref: string) =>
+  Effect.gen(function* () {
+    const current = yield* snapshot(cwd);
+    if (current === undefined) return yield* new GitError({ message: `${cwd} is not in a git repository, so it has no checkpoints.` });
+    if ((yield* git(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).code !== 0) {
+      return yield* new GitError({
+        message: `There's no checkpoint ${ref}: its turn ran before Verdandi saved checkpoints, or saving it failed. The files were left as they are.`,
+      });
+    }
+    const top = resolve(yield* gitOk(cwd, ["rev-parse", "--show-toplevel"]));
+    // From `cwd`, `.` limits it to the project's folder; paths come back relative to the repo's top level.
+    const changed = yield* git(cwd, ["diff", "--name-status", "-z", "--no-renames", "--no-relative", current, ref, "--", "."]);
+    if (changed.code !== 0) return yield* gitFailed("diff", changed);
+    const fields = changed.stdout.split("\0");
+    const written: string[] = [];
+    for (let i = 0; i + 1 < fields.length; i += 2) {
+      const [status, path] = [fields[i], fields[i + 1] ?? ""];
+      if (status === "D") rmSync(join(top, path), { force: true, recursive: true });
+      else written.push(path);
+    }
+    if (written.length === 0) return;
+    const temp = join(tmpdir(), `verdandi-index-${randomUUID()}`);
+    const env = { GIT_INDEX_FILE: temp };
+    yield* Effect.gen(function* () {
+      yield* gitOk(top, ["read-tree", ref], env);
+      const out = yield* git(top, ["checkout-index", "--force", "-z", "--stdin"], env, `${written.join("\0")}\0`);
+      if (out.code !== 0) return yield* gitFailed("checkout-index", out);
+    }).pipe(Effect.ensuring(Effect.sync(() => rmSync(temp, { force: true }))));
+  });

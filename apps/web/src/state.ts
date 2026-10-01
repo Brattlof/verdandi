@@ -35,6 +35,11 @@ const addRequest = (thread: LiveThread, request: ThreadView["pendingRequests"][n
   pendingRequests: [...thread.pendingRequests, request],
 });
 
+const setReverted = (thread: LiveThread, turnIds: readonly TurnId[], reverted: boolean) => ({
+  ...thread,
+  turns: thread.turns.map((t) => (turnIds.includes(t.turnId) ? { ...t, reverted } : t)),
+});
+
 type Apply<T extends Event["type"]> = (thread: LiveThread, event: Extract<Event, { type: T }>, at: string) => LiveThread;
 
 // Mirrors the server's projector, so a live thread matches the snapshot a reload would fetch.
@@ -66,6 +71,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "turn.started": (thread, e) => ({
     ...thread,
     busy: true,
+    revert: null,
     turns: [
       ...thread.turns,
       {
@@ -74,6 +80,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
         mode: e.mode ?? "build",
         attachments: e.attachments ?? [],
         status: "running",
+        reverted: false,
         items: [],
         usage: [],
         streaming: "",
@@ -117,6 +124,19 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "task.escalated": (thread, { turnId, step, from, to, nextTurnId, reason }) => ({
     ...addItem(thread, turnId, { kind: "escalation", step, from, ...(to && { to }), ...(nextTurnId && { nextTurnId }), reason }),
     ...(to && { route: to, task: thread.task && { ...thread.task, reason } }),
+  }),
+  "thread.reverted": (thread, e) => ({
+    ...setReverted(thread, e.turnIds, true),
+    task: null,
+    revert: { toTurnId: e.toTurnId, files: e.files, undone: false },
+  }),
+  "thread.revert.undone": (thread, e) => ({
+    ...setReverted(thread, e.turnIds, false),
+    revert: thread.revert && { ...thread.revert, undone: true },
+  }),
+  "thread.files.restored": (thread, e) => ({
+    ...thread,
+    revert: thread.revert && (e.error ? { ...thread.revert, filesError: e.error } : thread.revert),
   }),
   "thread.worktree.requested": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
   "thread.worktree.created": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),

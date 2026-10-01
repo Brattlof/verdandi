@@ -150,6 +150,8 @@ export const chat = async (argv: readonly string[]) => {
   let answered: string[] = [];
   /** The turn a typed line steers; undefined while the thread is idle. */
   let running: TurnId | undefined;
+  /** The turns still in the conversation, oldest first: `/revert <n>` counts them. */
+  let shown: TurnId[] = [];
   /** The thread's latest turn, which `/diff` shows. */
   let lastTurn: TurnId | undefined;
   /** The mode the next turn is sent in. */
@@ -193,6 +195,7 @@ export const chat = async (argv: readonly string[]) => {
           if (f.kind === "snapshot") {
             running = f.thread.turns.find((t) => t.status === "running")?.turnId;
             lastTurn = f.thread.turns.at(-1)?.turnId;
+            shown.push(...f.thread.turns.filter((t) => !t.reverted).map((t) => t.turnId));
             requests.push(...f.thread.pendingRequests);
             snapshot.resolve(f.thread);
           }
@@ -214,6 +217,18 @@ export const chat = async (argv: readonly string[]) => {
             const moved = e.to ? `escalated to ${e.to.model} ${e.to.effort}` : "not escalated";
             process.stdout.write(`[${moved}: ${e.reason}]\n`);
           }
+          if (e.type === "thread.reverted") {
+            const n = shown.indexOf(e.toTurnId) + 1;
+            shown = shown.filter((t) => !e.turnIds.includes(t));
+            process.stdout.write(
+              `[reverted the conversation${e.files ? " and files" : ""} to turn ${n}: the next turn continues from there; /undo-revert undoes it]\n`,
+            );
+          }
+          if (e.type === "thread.revert.undone") {
+            shown = [...shown, ...e.turnIds];
+            process.stdout.write("[revert undone]\n");
+          }
+          if (e.type === "thread.files.restored" && e.error) process.stdout.write(`[files not restored: ${e.error}]\n`);
           if (e.type === "thread.worktree.created") process.stdout.write(`[worktree ready at ${e.path}]\n`);
           if (e.type === "thread.worktree.failed") process.stdout.write(`[worktree: ${e.error}]\n`);
           if (e.type === "thread.worktree.setup.ran") {
@@ -221,7 +236,10 @@ export const chat = async (argv: readonly string[]) => {
             process.stdout.write(`[worktree setup ${e.command} ${e.passed ? "passed" : "failed"}]\n${tail}`);
           }
           if (e.type === "thread.worktree.removed") process.stdout.write("[worktree removed; its branch is kept]\n");
-          if (e.type === "turn.started") running = lastTurn = e.turnId;
+          if (e.type === "turn.started") {
+            running = lastTurn = e.turnId;
+            shown.push(e.turnId);
+          }
           if (e.type === "approval.requested" || e.type === "user-input.requested" || e.type === "plan.requested") addRequest(e);
           if (e.type === "approval.resolved") removeRequest(e.requestId);
           if (e.type === "turn.usage.recorded") usage.push(e);
@@ -340,7 +358,7 @@ export const chat = async (argv: readonly string[]) => {
         ? `${harness} ${model} ${effort} (routed; --model or --effort pins a route)`
         : "the route the router picks for the next task";
   process.stdout.write(
-    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; Ctrl+C stops a turn; /exit quits.\n`,
+    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
   );
   const tree = thread.worktree;
   if (tree) {
@@ -390,6 +408,18 @@ export const chat = async (argv: readonly string[]) => {
     } else if (text === "/detach") {
       process.stdout.write(attached.length ? `[dropped ${attached.map((a) => a.name).join(", ")}]\n` : "[nothing attached]\n");
       attached = [];
+      if (!running) prompt();
+    } else if (/^\/revert(\s|$)/.test(text)) {
+      // `/revert` drops the latest turn; `/revert <n>` goes back to the end of turn n; `files` restores the files too.
+      const args = text.split(/\s+/).slice(1);
+      const files = args.includes("files");
+      const n = Number(args.find((a) => a !== "files") ?? shown.length - 1);
+      const toTurnId = shown[n - 1];
+      if (!toTurnId || !Number.isInteger(n)) process.stdout.write(`[usage: /revert [n] [files], with n from 1 to ${shown.length - 1}]\n`);
+      else await dispatch({ type: "thread.revert", commandId: uuid<CommandId>(), threadId, toTurnId, files });
+      if (!running) prompt();
+    } else if (text === "/undo-revert") {
+      await dispatch({ type: "thread.revert.undo", commandId: uuid<CommandId>(), threadId });
       if (!running) prompt();
     } else if (text === "/forget-routing") {
       if (await dispatch({ type: "routing.memory.clear", commandId: uuid<CommandId>(), threadId }))

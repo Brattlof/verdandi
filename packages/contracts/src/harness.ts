@@ -78,6 +78,14 @@ export type HarnessRunInput = {
    * `maxTurns`, ADR 0005). Absent when the task has none.
    */
   readonly limits?: TaskLimits & { readonly taskId: TaskId; readonly spentUsd: number };
+  /**
+   * The user reverted the conversation (DESIGN §13): continue `resumeSessionId` as it was at the end of turn
+   * `atTurnId`, dropping `dropTurnIds` (the session's later turns, oldest first), in a new session the harness
+   * reports with `session.started` (Claude Code: `resumeSessionAt` + `forkSession`, with `resumeDropsTurn` when one
+   * turn is dropped, ADR 0004). A harness that can't fork resumes plainly and says why in a `notice` item. Absent
+   * unless a revert waits for this turn.
+   */
+  readonly fork?: { readonly atTurnId: TurnId; readonly dropTurnIds: readonly TurnId[]; readonly transcriptPath?: string };
 };
 
 /**

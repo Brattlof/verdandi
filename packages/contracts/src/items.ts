@@ -56,6 +56,8 @@ export const Item = Schema.Union([
   }),
   /** Verdandi ran a project verifier after the agent finished changing files. */
   Schema.Struct({ kind: Schema.Literal("verifier"), ...VerifierRun.fields }),
+  /** Something the harness or Verdandi tells the user about the turn, e.g. why a revert couldn't fork the conversation. */
+  Schema.Struct({ kind: Schema.Literal("notice"), text: Schema.String }),
 ]);
 export type Item = typeof Item.Type;
 
