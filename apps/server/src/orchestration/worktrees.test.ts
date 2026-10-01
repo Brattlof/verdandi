@@ -19,6 +19,8 @@ const temp = (d: string) => {
   dirs.push(d);
   return d;
 };
+/** A file's text with CRLF read as LF: a checkout on Windows may convert line endings (core.autocrlf). */
+const text = (path: string) => readFileSync(path, "utf8").replaceAll("\r\n", "\n");
 let n = 0;
 const id = <T>() => `id-${++n}` as T;
 const route = { harness: "fake", model: "fake", effort: "low" } as const;
@@ -53,7 +55,7 @@ test("two threads in one repo each edit the same file in their own worktree, and
   for (const v of [first, second]) {
     expect(v?.turns.map((t) => t.status)).toEqual(["success"]);
     expect(v?.worktree).toMatchObject({ state: "ready", setup: { command: "echo set up", passed: true } });
-    expect(readFileSync(join(v?.worktree?.path ?? "", "a.txt"), "utf8")).toBe("one\nedited by the fake harness\n");
+    expect(text(join(v?.worktree?.path ?? "", "a.txt"))).toBe("one\nedited by the fake harness\n");
   }
   expect(first?.worktree?.path).not.toBe(second?.worktree?.path);
   expect(readFileSync(join(repo, "a.txt"), "utf8")).toBe("one\n");
@@ -69,7 +71,7 @@ test("two threads in one repo each edit the same file in their own worktree, and
   expect(existsSync(first?.worktree?.root ?? "")).toBe(false);
   const branch = removed?.worktree?.branch ?? "";
   expect(git(repo, "branch", "--list", branch).trim()).toBe(branch);
-  expect(readFileSync(join(second?.worktree?.path ?? "", "a.txt"), "utf8")).toBe("one\nedited by the fake harness\n");
+  expect(text(join(second?.worktree?.path ?? "", "a.txt"))).toBe("one\nedited by the fake harness\n");
   expect((await rejected(send(one, "hi"))).reason).toBe("WorktreeUnavailable");
 
   // The way back: the same worktree on its kept branch, then turns again.

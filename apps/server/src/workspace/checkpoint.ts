@@ -14,6 +14,12 @@ export const threadCheckpoints = (threadId: ThreadId) => `refs/verdandi/checkpoi
 export const checkpointRef = (threadId: ThreadId, turnId: TurnId, at: "start" | "end") =>
   `${threadCheckpoints(threadId)}${refPart(turnId)}/${at}`;
 
+/**
+ * Files go into a checkpoint and come back out byte for byte: the user's `core.autocrlf` (on by default in Git for
+ * Windows) would turn a file the agent wrote with LF into CRLF on restore. A project's `.gitattributes` still applies.
+ */
+const exact = ["-c", "core.autocrlf=false"];
+
 /** Checkpoint commits carry a fixed identity, so they never depend on (or show) the user's git config. */
 const identity = {
   GIT_AUTHOR_NAME: "Verdandi",
@@ -37,11 +43,11 @@ export const snapshot = (cwd: string) =>
     return yield* Effect.gen(function* () {
       if (existsSync(real)) copyFileSync(real, temp);
       // `--all` without a pathspec covers the whole repo, whichever folder in it `cwd` is.
-      let added = yield* git(cwd, ["add", "--all"], env);
+      let added = yield* git(cwd, [...exact, "add", "--all"], env);
       if (added.code !== 0 && existsSync(temp)) {
         // A copied index can lean on files next to the original (a split index); start from an empty one instead.
         rmSync(temp, { force: true });
-        added = yield* git(cwd, ["add", "--all"], env);
+        added = yield* git(cwd, [...exact, "add", "--all"], env);
       }
       if (added.code !== 0) return yield* gitFailed("add", added);
       return yield* gitOk(cwd, ["write-tree"], env);
@@ -97,7 +103,7 @@ export const restore = (cwd: string, ref: string) =>
     const env = { GIT_INDEX_FILE: temp };
     yield* Effect.gen(function* () {
       yield* gitOk(top, ["read-tree", ref], env);
-      const out = yield* git(top, ["checkout-index", "--force", "-z", "--stdin"], env, `${written.join("\0")}\0`);
+      const out = yield* git(top, [...exact, "checkout-index", "--force", "-z", "--stdin"], env, `${written.join("\0")}\0`);
       if (out.code !== 0) return yield* gitFailed("checkout-index", out);
     }).pipe(Effect.ensuring(Effect.sync(() => rmSync(temp, { force: true }))));
   });
