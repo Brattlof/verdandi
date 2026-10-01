@@ -712,7 +712,9 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 ## 12. User experience
 
 - **Layout:**
-  - sidebar: profiles, projects and threads, with live status and cost;
+  - rail: projects, threads, search and spend, one click from anywhere (profiles join it in M5);
+  - sidebar: threads by recency, each with its project, live status and cost; it folds away beside the rail;
+  - projects page: open any folder, or start a thread in a project you've worked in;
   - center: the conversation;
   - right panel, switchable: diff, terminal, routing trace, or memory and skills.
 - **Composer:**

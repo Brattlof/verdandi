@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./app.tsx";
 import { connect } from "./client.ts";
+import { RuneMark } from "./runes.tsx";
 
 const tokenKey = "verdandi.token";
 
@@ -27,9 +28,12 @@ createRoot(root).render(
     <App connection={connect(token)} />
   ) : (
     <div className="grid h-dvh place-items-center p-6">
-      <div className="max-w-sm rounded-xl border border-line bg-card px-5 py-4">
-        <h1 className="font-mono text-sm font-semibold">verdandi</h1>
-        <p className="mt-1 text-muted">
+      <div className="max-w-sm border border-line bg-card px-6 py-5">
+        <h1 className="flex items-center gap-2 font-serif text-2xl font-semibold">
+          <RuneMark className="size-7" />
+          Verdandi
+        </h1>
+        <p className="mt-2 text-muted">
           Open Verdandi with <code>verdandi open</code>: it passes this page the token it needs.
         </p>
       </div>

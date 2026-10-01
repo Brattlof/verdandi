@@ -4,8 +4,19 @@
 
 /*
  * Bundled with the page, never fetched from a font service. Only the Latin subsets (from Fontsource's
- * wght.css): other scripts fall back to the system font in each stack.
+ * wght.css): other scripts fall back to the system font in each stack. Crimson Pro sets headings and
+ * figures; IBM Plex Sans everything else; JetBrains Mono code, paths and models.
  */
+@font-face {
+  font-family: "Crimson Pro Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 900;
+  src: url("@fontsource-variable/crimson-pro/files/crimson-pro-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191,
+    U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 @font-face {
   font-family: "IBM Plex Sans Variable";
   font-style: normal;
@@ -29,39 +40,45 @@
 
 /*
  * Only these colours exist, so every class names one of them (`bg-panel`, `border-line`, `text-muted`).
- * Slate surfaces with one green for the primary action and blue for links and focus, from the
- * ui-ux-pro-max "Developer Tool / IDE" palette. Text pairs pass WCAG AA (4.5:1) on bg, panel and card,
- * and `line-strong` and the chart series pass 3:1, in both modes.
+ * Warm stone and bone neutrals with ink for the primary action, one fjord blue for links, focus and
+ * selection, and a pale sky surface for the user's own words. No tinted greys: surfaces are neutral.
+ * Text pairs pass WCAG AA (4.5:1) on bg, panel, card, hover and user, and `line-strong` and the chart
+ * series pass 3:1, in both modes.
  * No animations or transitions anywhere: nothing moves unless the content changed, so the theme has none.
  */
 @theme {
   --color-*: initial;
   --animate-*: initial;
-  --color-bg: light-dark(#f8fafc, #0f172a);
-  /* The sidebar and bars around the conversation. */
-  --color-panel: light-dark(#f1f5f9, #131c2f);
+  /* The canvas the conversation sits on. */
+  --color-bg: light-dark(#efeeea, #151413);
+  /* The rail, the sidebar and the bars around the conversation. */
+  --color-panel: light-dark(#fbfaf8, #1b1a18);
   /* Raised surfaces: the composer, cards, code. */
-  --color-card: light-dark(#ffffff, #1b2336);
-  --color-hover: light-dark(#e2e8f0, #252f44);
-  --color-line: light-dark(#e2e8f0, #2a3549);
+  --color-card: light-dark(#ffffff, #222120);
+  --color-hover: light-dark(#e7e5e0, #2d2b29);
+  --color-line: light-dark(#dfddd7, #353330);
   /* Borders that mark a control's edge. */
-  --color-line-strong: light-dark(#7b8aa0, #64748b);
-  --color-fg: light-dark(#0f172a, #f1f5f9);
-  --color-muted: light-dark(#526077, #94a3b8);
-  --color-accent: light-dark(#1d4ed8, #60a5fa);
-  /* The one primary action on screen: Send, Allow, Approve. Text on it is `on-go`. */
-  --color-go: #22c55e;
-  --color-go-hover: #4ade80;
-  --color-on-go: #0f172a;
-  --color-ok: light-dark(#15803d, #4ade80);
-  --color-warn: light-dark(#b45309, #fbbf24);
-  --color-error: light-dark(#b91c1c, #f87171);
-  --color-user: light-dark(#e6ecfa, #1e2b47);
-  --color-added: light-dark(#dcfce7, #12301f);
-  --color-removed: light-dark(#fee2e2, #3b1d26);
+  --color-line-strong: light-dark(#8a877f, #7c7972);
+  --color-fg: light-dark(#1b1a18, #eceae5);
+  --color-muted: light-dark(#5c5953, #a6a39c);
+  --color-accent: light-dark(#2a5b8a, #9cc3e8);
+  /* The one primary action on screen: Send, Allow, Approve. Ink on bone, bone on ink. Text on it is `on-go`. */
+  --color-go: light-dark(#1b1a18, #eceae5);
+  --color-go-hover: light-dark(#3b3935, #ffffff);
+  --color-on-go: light-dark(#ffffff, #151413);
+  --color-ok: light-dark(#2e6b39, #7dc48a);
+  --color-warn: light-dark(#8f500e, #e0a458);
+  --color-error: light-dark(#a3302b, #f08a80);
+  /* Runes and knotwork: the red ochre runestones were painted with. Decoration only, never a state. */
+  --color-rune: light-dark(#8c4a2b, #d08a63);
+  /* The user's messages and the current page in the sidebar. */
+  --color-user: light-dark(#d9e8f6, #2a2926);
+  --color-added: light-dark(#ddefdc, #1e3322);
+  --color-removed: light-dark(#f6dedb, #3d2220);
   /* Chart series, in this order: subscription use, then metered spend. Checked for colour-vision deficiency on bg in both modes. */
-  --color-plan: light-dark(#2a78d6, #3987e5);
-  --color-paid: light-dark(#eb6834, #d95926);
+  --color-plan: light-dark(#2f6fb0, #4a8fd6);
+  --color-paid: light-dark(#c2582b, #d9692f);
+  --font-serif: "Crimson Pro Variable", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --font-sans: "IBM Plex Sans Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", "Cascadia Code", "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   --text-xs--line-height: 1.5;
@@ -95,7 +112,7 @@
     padding: 8px 10px;
     background: var(--color-card);
     border: 1px solid var(--color-line);
-    border-radius: 6px;
+    border-radius: 4px;
   }
   button {
     display: inline-flex;
@@ -105,7 +122,7 @@
     min-height: 28px;
     padding: 0 12px;
     border: 1px solid var(--color-line);
-    border-radius: 6px;
+    border-radius: 4px;
     background: var(--color-card);
     font-weight: 500;
     cursor: pointer;
@@ -132,9 +149,9 @@
   textarea,
   select,
   input:is([type="text"], [type="search"], :not([type])) {
-    background: var(--color-bg);
+    background: var(--color-card);
     border: 1px solid var(--color-line-strong);
-    border-radius: 6px;
+    border-radius: 4px;
     padding: 3px 8px;
   }
   textarea,
@@ -167,8 +184,63 @@
   }
 }
 
+/* A small label in capitals, like a book's running head: section names, card kickers, status words. */
+@utility eyebrow {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* An action that reads as a word, not a box: capitals with an underline. Works on `a` and `button`. */
+@utility caps-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  &:hover:not(:disabled) {
+    background: transparent;
+    text-decoration-thickness: 2px;
+  }
+  @media (pointer: coarse) {
+    min-height: 44px;
+  }
+}
+
+/*
+ * Ludwig Burger's engraving (art.tsx): black ink on white paper. Multiplied, the paper takes the colour
+ * behind it; in dark mode the ink is inverted and screened, so light lines sit on the dark page.
+ */
+.engraving {
+  background: url("./art/nornen.webp") center / contain no-repeat;
+  mix-blend-mode: multiply;
+  @media (prefers-color-scheme: dark) {
+    filter: invert(1);
+    mix-blend-mode: screen;
+    opacity: 0.85;
+  }
+}
+
 /* Rendered Markdown and user text inside a turn: element styles, since markdown.tsx emits bare elements. */
 @layer components {
+  /* Replies are read at length, so a turn sets a slightly larger, looser text than the chrome around it. */
+  .turn {
+    font-size: 15px;
+    line-height: 1.6;
+  }
   .turn p {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -176,14 +248,21 @@
   }
   .turn :is(h1, h2, h3, h4, h5, h6) {
     font-weight: 600;
-    margin: 16px 0 6px;
+    margin: 18px 0 6px;
     text-wrap: balance;
   }
+  .turn :is(h1, h2, h3) {
+    font-family: var(--font-serif);
+    line-height: 1.2;
+  }
   .turn h1 {
-    font-size: 1.3em;
+    font-size: 1.6em;
   }
   .turn h2 {
-    font-size: 1.15em;
+    font-size: 1.4em;
+  }
+  .turn h3 {
+    font-size: 1.2em;
   }
   .turn :is(ul, ol) {
     margin: 6px 0;
@@ -220,7 +299,7 @@
     padding: 1px 5px;
     background: var(--color-card);
     border: 1px solid var(--color-line);
-    border-radius: 4px;
+    border-radius: 3px;
   }
   /* A wide table scrolls on its own instead of widening the turn. */
   .turn table {

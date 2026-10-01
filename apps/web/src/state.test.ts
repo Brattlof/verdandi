@@ -11,7 +11,7 @@ import type {
   ThreadSummary,
   TurnId,
 } from "@verdandi/contracts";
-import { applyPanel, applyProjectsFeed, applyThreadFeed, closedPanel, type LiveThread, type PanelAction } from "./state.ts";
+import { applyPanel, applyProjectsFeed, applyThreadFeed, closedPanel, groupByRecency, type LiveThread, type PanelAction } from "./state.ts";
 
 const threadId = "thread-1" as ThreadId;
 const turnId = "turn-1" as TurnId;
@@ -290,4 +290,40 @@ test("a delta for a turn that isn't running leaves the thread as it was", () => 
     event(3, { type: "turn.completed", v: 1, threadId, turnId, status: "interrupted" }),
   ]);
   expect(applyThreadFeed(ended, { kind: "delta", turnId, text: "late" })).toEqual(ended);
+});
+
+test("the sidebar groups threads by local day of last activity, newest first", () => {
+  const thread = (id: string, at: Date): ThreadSummary => ({
+    threadId: id as ThreadId,
+    projectId: "p1" as ProjectId,
+    title: id,
+    busy: false,
+    archived: false,
+    lastActivityAt: at.toISOString(),
+    route,
+    cost: { meteredUsd: 0, subscriptionUsd: 0 },
+  });
+  const now = new Date(2026, 9, 1, 9, 30);
+  const groups = groupByRecency(
+    [
+      thread("this morning", new Date(2026, 9, 1, 0, 5)),
+      thread("last night", new Date(2026, 8, 30, 23, 55)),
+      thread("five days ago", new Date(2026, 8, 26, 12)),
+      thread("two weeks ago", new Date(2026, 8, 17, 12)),
+      thread("early august", new Date(2026, 7, 3, 12)),
+      thread("late july", new Date(2026, 6, 28, 12)),
+      thread("mid july", new Date(2026, 6, 14, 12)),
+      thread("last year", new Date(2025, 6, 14, 12)),
+    ],
+    now,
+  );
+  expect(groups.slice(0, 4).map((g) => [g.label, g.threads.map((t) => t.title)])).toEqual([
+    ["Today", ["this morning"]],
+    ["Yesterday", ["last night"]],
+    ["Previous 7 days", ["five days ago"]],
+    ["Previous 30 days", ["two weeks ago"]],
+  ]);
+  // Older threads fall into one section per month, and a month of another year is told apart from this year's.
+  expect(groups.slice(4).map((g) => g.threads.map((t) => t.title))).toEqual([["early august"], ["late july", "mid july"], ["last year"]]);
+  expect(groups[5]?.label).not.toBe(groups[6]?.label);
 });

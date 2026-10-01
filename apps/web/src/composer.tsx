@@ -15,13 +15,15 @@ import { addFiles, type Pending, PendingList } from "./attachments.tsx";
 import { type Connection, type Routed, uuid } from "./client.ts";
 import { PaperclipIcon, SendIcon, StopIcon } from "./icons.tsx";
 import { RouteChip } from "./route.tsx";
+import { Rune, type RuneName } from "./runes.tsx";
 import { SpendCaps } from "./spend.tsx";
 import type { LiveThread } from "./state.ts";
 
-const modes: { value: InteractionMode; label: string; hint: string }[] = [
-  { value: "ask", label: "Ask", hint: "answers without changing anything" },
-  { value: "plan", label: "Plan", hint: "proposes a plan for you to approve first" },
-  { value: "build", label: "Build", hint: "does the work" },
+/** Each mode with its rune: ansuz, the word, to ask; raidho, the road, to plan; uruz, strength, to build. */
+const modes: { value: InteractionMode; label: string; hint: string; rune: RuneName }[] = [
+  { value: "ask", label: "Ask", hint: "answers without changing anything", rune: "ansuz" },
+  { value: "plan", label: "Plan", hint: "proposes a plan for you to approve first", rune: "raidho" },
+  { value: "build", label: "Build", hint: "does the work", rune: "uruz" },
 ];
 
 /**
@@ -141,7 +143,7 @@ export const Composer = ({
         onSubmit={onSubmit}
         onDragOver={(e) => e.preventDefault()}
         onDrop={onDrop}
-        className="relative rounded-xl border border-line-strong bg-card focus-within:border-accent focus-within:shadow-[0_0_0_1px_var(--color-accent)]"
+        className="relative rounded-lg border border-line-strong bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04)] focus-within:border-accent focus-within:shadow-[0_0_0_1px_var(--color-accent)]"
       >
         {pins.menu}
         <PendingList items={pending} onRemove={detach} />
@@ -156,7 +158,7 @@ export const Composer = ({
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          className="block max-h-[40vh] w-full resize-y rounded-xl border-0 bg-transparent px-3 pt-2.5 outline-none focus-visible:outline-none"
+          className="block max-h-[40vh] w-full resize-y rounded-lg border-0 bg-transparent px-3.5 pt-3 outline-none focus-visible:outline-none"
           placeholder={running ? "Steer the agent: it reads this at its next step" : "Message the agent, or @model to pin its task"}
           aria-describedby={preview ? "route-preview" : undefined}
           {...pins.inputProps}
@@ -205,6 +207,7 @@ export const Composer = ({
                   onChange={() => onMode(m.value)}
                   className="sr-only"
                 />
+                <Rune name={m.rune} className="mr-1 size-3 text-rune" />
                 {m.label}
               </label>
             ))}
@@ -439,7 +442,7 @@ export const Requests = ({
   onPlanApproved: () => void;
 }) =>
   requests.length === 0 ? null : (
-    <section className="max-h-[45vh] shrink-0 overflow-y-auto border-t border-line bg-panel py-2" aria-label="Waiting for your answer">
+    <section className="max-h-[45vh] shrink-0 overflow-y-auto border-t border-line py-2" aria-label="Waiting for your answer">
       {requests.map((r) => (
         <RequestCard key={r.requestId} connection={connection} threadId={threadId} request={r} onPlanApproved={onPlanApproved} />
       ))}
@@ -475,8 +478,8 @@ const RequestCard = ({
   };
   return (
     <div className="mx-auto max-w-[860px] px-3 py-1 sm:px-4">
-      <div className="rounded-xl border border-line border-l-2 border-l-warn bg-card px-4 py-3">
-        <p className="mb-1 flex items-center gap-1.5 font-mono text-[11px] font-semibold tracking-wider text-warn uppercase">
+      <div className="border border-line border-l-2 border-l-warn bg-card px-4 py-3">
+        <p className="eyebrow mb-1 flex items-center gap-1.5 text-warn">
           <span aria-hidden className="size-1.5 rounded-full bg-warn" />
           Waiting for you
         </p>
@@ -501,7 +504,7 @@ type CardProps<T extends Request["type"]> = {
 
 const Approval = ({ request, sending, respond }: CardProps<"approval.requested">) => (
   <>
-    <h3 className="font-semibold">
+    <h3 className="font-serif text-lg font-semibold">
       Allow <span className="font-mono">{request.toolName}</span>?
     </h3>
     <pre>{JSON.stringify(request.input, null, 2)}</pre>
@@ -542,7 +545,7 @@ const PlanApproval = ({ request, sending, respond }: CardProps<"plan.requested">
   if (editing)
     return (
       <>
-        <h3 className="font-semibold">Edit the plan, then approve it and build</h3>
+        <h3 className="font-serif text-lg font-semibold">Edit the plan, then approve it and build</h3>
         <label htmlFor={`${id}-plan`} className="mt-2 mb-1 block text-xs font-medium text-muted">
           Plan (the agent builds from your edit)
         </label>
@@ -571,7 +574,7 @@ const PlanApproval = ({ request, sending, respond }: CardProps<"plan.requested">
     );
   return (
     <>
-      <h3 className="font-semibold">Approve the plan above and build it?</h3>
+      <h3 className="font-serif text-lg font-semibold">Approve the plan above and build it?</h3>
       {request.filePath && <p className="font-mono text-xs text-muted">{request.filePath}</p>}
       {request.execute && (
         <p className="mt-1 text-accent">
