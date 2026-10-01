@@ -8,6 +8,7 @@ import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, EscalationStep, RouteDecision, RouteInputs } from "./routing.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
+import { TaskRating } from "./task.ts";
 
 // Events are append-only and must stay readable forever. To change one, add a v2 schema
 // next to v1 and upgrade v1 to v2 when it is read; never edit or delete a published version.
@@ -78,6 +79,14 @@ export const RoutingMemoryCleared = Schema.Struct({
   v: v1,
   threadId: ThreadId,
   projectId: ProjectId,
+});
+/** The user rated task `taskId` of the thread, or cleared its rating (`null`). Its outcome copies the latest. */
+export const TaskRated = Schema.Struct({
+  type: Schema.Literal("task.rated"),
+  v: v1,
+  threadId: ThreadId,
+  taskId: TaskId,
+  rating: Schema.NullOr(TaskRating),
 });
 /** The user put the thread away: thread lists leave it out, and it takes no turns until unarchived. Nothing is deleted. */
 export const ThreadArchived = Schema.Struct({
@@ -409,6 +418,7 @@ export const Event = Schema.Union([
   ThreadRouteUnpinned,
   ThreadBudgetChanged,
   RoutingMemoryCleared,
+  TaskRated,
   ThreadArchived,
   ThreadUnarchived,
   TaskStarted,
@@ -470,6 +480,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.route.unpinned@1": ThreadRouteUnpinned,
   "thread.budget.changed@1": ThreadBudgetChanged,
   "routing.memory.cleared@1": RoutingMemoryCleared,
+  "task.rated@1": TaskRated,
   "thread.archived@1": ThreadArchived,
   "thread.unarchived@1": ThreadUnarchived,
   "task.started@2": TaskStarted,

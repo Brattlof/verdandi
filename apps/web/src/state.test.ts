@@ -30,6 +30,7 @@ const snapshot: ThreadFeed = {
     revert: null,
     budgetMode: null,
     task: null,
+    tasks: [],
     sessionId: null,
     busy: false,
     turns: [],
@@ -251,6 +252,20 @@ test("a budget mode change ends a routed thread's task but keeps a pinned one's,
   const routed = fold([{ ...snapshot, thread: { ...snapshot.thread, pinned: false } }, task, budget]);
   expect(routed).toMatchObject({ budgetMode: "max", task: null });
   expect(fold([snapshot, task, budget])).toMatchObject({ budgetMode: "max", task: { taskId } });
+});
+
+test("each task joins the thread's list unrated, and a rating or its clearing changes only that task", () => {
+  const [one, two] = ["task-1" as TaskId, "task-2" as TaskId];
+  const rate = (seq: number, taskId: TaskId, rating: 1 | -1 | null) => event(seq, { type: "task.rated", v: 1, threadId, taskId, rating });
+  const tasks = [
+    event(2, { type: "task.started", v: 2, threadId, taskId: one, route }),
+    event(3, { type: "task.started", v: 2, threadId, taskId: two, route }),
+  ];
+  expect(fold([snapshot, ...tasks, rate(4, one, -1)])?.tasks).toEqual([
+    { taskId: one, rating: -1 },
+    { taskId: two, rating: null },
+  ]);
+  expect(fold([snapshot, ...tasks, rate(4, one, -1), rate(5, one, null)])?.tasks.map((t) => t.rating)).toEqual([null, null]);
 });
 
 test("the Terminal tab opens the panel without fetching a diff, and a fetch switches back to Diff", () => {

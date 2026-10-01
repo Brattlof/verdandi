@@ -10,7 +10,7 @@ import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, RouteDecision, RouteTarget, TaskClass } from "./routing.ts";
 import { SessionHit, SessionQuery } from "./search.ts";
 import { SpendCap } from "./spend.ts";
-import { RouteCost } from "./task.ts";
+import { RouteCost, TaskRating } from "./task.ts";
 import { TerminalFeed, TerminalId, TerminalSize, TerminalUnavailable, TerminalView } from "./terminal.ts";
 import { WorktreeView } from "./worktree.ts";
 
@@ -37,6 +37,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "MemoryFull",
     "MemoryNotFound",
     "InvalidPin",
+    "TaskNotFound",
   ]),
   message: Schema.String,
 }) {}
@@ -120,6 +121,8 @@ export const ThreadView = Schema.Struct({
       reason: Schema.optionalKey(Schema.String),
     }),
   ),
+  /** The thread's tasks, oldest first. Each starts with the turn its `taskId` names, and runs until the next one starts. */
+  tasks: Schema.Array(Schema.Struct({ taskId: TaskId, rating: Schema.NullOr(TaskRating) })),
   sessionId: Schema.NullOr(Schema.String),
   /**
    * The thread's latest revert, until its next turn starts: `undone` once the user undid it. `files` says

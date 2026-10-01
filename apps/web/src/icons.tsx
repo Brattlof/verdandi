@@ -38,3 +38,8 @@ export const BranchIcon = icon(<path d="M5 2.5v11M5 10.5a3 3 0 003-3h1.5a2.5 2.5
 export const DiffIcon = icon(<path d="M8 2.5v6M5 5.5h6M5 12.5h6" />);
 export const TerminalIcon = icon(<path d="M3.5 4.5L7 8l-3.5 3.5M8.5 12h4" />);
 export const FileIcon = icon(<path d="M9 2H4.5A1.5 1.5 0 003 3.5v9A1.5 1.5 0 004.5 14h7a1.5 1.5 0 001.5-1.5V6zM9 2v4h4" />);
+const thumb = (
+  <path d="M5 7.5v6M5 7.5L7.5 2.5a1.5 1.5 0 011.5 1.5v2.5h3a1.5 1.5 0 011.5 1.7l-.6 3.6A1.5 1.5 0 0111.4 13.5H3.5a1 1 0 01-1-1v-4a1 1 0 011-1z" />
+);
+export const ThumbUpIcon = icon(thumb);
+export const ThumbDownIcon = icon(<g transform="rotate(180 8 8)">{thumb}</g>);

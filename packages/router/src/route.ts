@@ -308,7 +308,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
     const n = memory.tasks;
     const top = memory.overrides[0];
     const failures = memory.failed + memory.escalated + memory.reverted;
-    const counts = `${n} ${c.taskClass} task${n === 1 ? "" : "s"} on ${describe(pick, effort)}: ${memory.completed} completed, ${failures} failed, escalated or reverted, ${top?.count ?? 0} moved by you`;
+    const counts = `${n} ${c.taskClass} task${n === 1 ? "" : "s"} on ${describe(pick, effort)}: ${memory.completed} completed, ${failures} failed, escalated, reverted or rated down, ${top?.count ?? 0} moved by you`;
     let move: { readonly to: CatalogEntry; readonly effort: Effort; readonly why: string } | undefined;
     let note = `${counts}; `;
     if (n < minTasks) note += `too few to act on (minTasks ${minTasks})`;

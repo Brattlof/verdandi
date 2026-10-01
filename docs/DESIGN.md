@@ -463,10 +463,10 @@ interface TaskOutcome {
 }
 ```
 
-Outcomes are recorded from M1 on, before the router exists, so the always-default baseline is measured on real work (`packages/contracts/src/task.ts`). The status is the task's last turn's, except that a task whose last verifier run failed is `failed`; satisfaction counts only the corrections Verdandi sees (steers, interrupts, rejected or edited plans, a route override, and follow-ups the decision layer judges to be correcting the agent); `verifierRuns` lists the project's verifiers as they ran; `escalations` counts the task's escalation steps, and quota units and `rating` stay empty until ratings exist. `verdandi costs` shows cost per completed task by route.
+Outcomes are recorded from M1 on, before the router exists, so the always-default baseline is measured on real work (`packages/contracts/src/task.ts`). The status is the task's last turn's, except that a task whose last verifier run failed is `failed`; satisfaction counts only the corrections Verdandi sees (steers, interrupts, rejected or edited plans, a route override, and follow-ups the decision layer judges to be correcting the agent); `verifierRuns` lists the project's verifiers as they ran; `escalations` counts the task's escalation steps; `rating` is the user's latest thumbs up or down on the task (`task.rate`), and quota units stay empty. `verdandi costs` shows cost per completed task by route.
 
 These outcomes are used at three levels:
-1. **Routing memory per project** (M2), e.g. "debug tasks on Sonnet escalated 7 times out of 10, so start on Opus".
+1. **Routing memory per project** (M2), e.g. "debug tasks on Sonnet escalated 7 times out of 10, so start on Opus". A task the user rated down counts as one that didn't succeed.
 2. **Offline replay:** re-run the router over saved tasks to see how a policy change would have routed them (`verdandi routing replay`). Each `task.started` keeps the router's inputs, so a replay routes a task exactly as it was routed, and prices its recorded tokens on the new target as an estimate.
 3. **A learned router** (M6). Recorded outcomes become fine-tuning data for a Laya decision model in `lab/`. The fine-tuned model is exported to ONNX and runs in a decision worker process through `onnxruntime-node` (ADR 0009); the composer's live routing preview asks verdandid. The learned router is adopted only if it beats `rules` on the eval set.
 

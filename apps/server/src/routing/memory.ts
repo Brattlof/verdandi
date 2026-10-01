@@ -43,8 +43,8 @@ export const loadRoutingMemory = (threadId: ThreadId) =>
             overrides: [],
           };
           s.tasks++;
-          // An escalated task counts against the route it started on, however it ended.
-          const status = o.escalations > 0 ? "escalated" : counted[o.status];
+          // An escalated task counts against the route it started on, however it ended; one the user rated down didn't succeed.
+          const status = o.escalations > 0 ? "escalated" : o.rating === -1 && o.status !== "reverted" ? "failed" : counted[o.status];
           if (status) s[status]++;
           const to = o.userOverride?.to;
           if (to) {

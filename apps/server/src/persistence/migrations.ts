@@ -293,6 +293,12 @@ const memory = Effect.gen(function* () {
   yield* sql`alter table threads add column memory_snapshot text`;
 });
 
+/** The user's latest rating of each task (DESIGN §8.8): 1, -1, or null for none. */
+const taskRatings = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table tasks add column rating integer`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -313,4 +319,5 @@ export const migrations = {
   "17_revert": revert,
   "18_session_index": sessionIndex,
   "19_memory": memory,
+  "20_task_ratings": taskRatings,
 };

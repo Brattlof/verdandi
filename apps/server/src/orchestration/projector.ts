@@ -15,6 +15,7 @@ import type {
   SessionHit,
   StoredEvent,
   TaskId,
+  TaskRating,
   ThreadId,
   ThreadSummary,
   ThreadView,
@@ -128,6 +129,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         sql`insert into routing_memory (project_id, cleared_seq, cleared_at) values (${e.projectId}, ${seq}, ${at})
             on conflict (project_id) do update set cleared_seq = excluded.cleared_seq, cleared_at = excluded.cleared_at`,
     ),
+  "task.rated": (e) => withSql((sql) => sql`update tasks set rating = ${e.rating} where id = ${e.taskId}`),
   "thread.archived": (e, at) => withSql((sql) => sql`update threads set archived_at = ${at} where id = ${e.threadId}`),
   "thread.unarchived": (e) => withSql((sql) => sql`update threads set archived_at = null where id = ${e.threadId}`),
   "thread.route.unpinned": (e) => withSql((sql) => sql`update threads set pinned = 0, task_id = null where id = ${e.threadId}`),
@@ -334,6 +336,12 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
 export const project = (stored: StoredEvent) =>
   (projections[stored.event.type] as Projection<Event["type"]>)(stored.event, stored.at, stored.seq).pipe(Effect.asVoid);
 
+/** The thread's tasks and their ratings, oldest first. */
+const loadTasks = (sql: SqlClient.SqlClient, threadId: ThreadId) =>
+  sql<{ id: TaskId; rating: TaskRating | null }>`select id, rating from tasks where thread_id = ${threadId} order by seq`.pipe(
+    Effect.map((rows) => rows.map((r) => ({ taskId: r.id, rating: r.rating }))),
+  );
+
 export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState, SqlError.SqlError, SqlClient.SqlClient> =>
   withSql((sql) =>
     Effect.gen(function* () {
@@ -385,6 +393,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         select id, reverted from turns where thread_id = ${threadId} order by started_at, rowid`;
       return {
         thread: {
+          tasks: yield* loadTasks(sql, threadId),
           turnList: turnList.map((t) => ({ turnId: t.id, reverted: t.reverted })),
           pendingFork: row.pending_fork === 1,
           sessionFirstTurn: row.session_first_turn,
@@ -484,6 +493,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
                 ...(thread.source === null ? {} : { source: thread.source }),
                 ...(thread.reason === null ? {} : { reason: thread.reason }),
               },
+        tasks: yield* loadTasks(sql, threadId),
         sessionId: thread.session_id,
         worktree: thread.worktree === null ? null : (JSON.parse(thread.worktree) as WorktreeView),
         revert: revertView(thread.revert),

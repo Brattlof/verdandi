@@ -35,14 +35,14 @@ export const recordTaskOutcomes = (threadId: ThreadId) =>
     );
   });
 
-/** Threads with a task whose outcome is missing, or older than a turn end or route change: verdandid stopped before writing it. */
+/** Threads with a task whose outcome is missing, or older than a turn end, route change or rating: verdandid stopped before writing it. */
 export const staleOutcomeThreads = Effect.flatMap(
   SqlClient.SqlClient,
   (sql) => sql<{ thread_id: ThreadId }>`
     select distinct k.thread_id from tasks k left join task_outcomes o on o.task_id = k.id
     where o.task_id is null or exists (
       select 1 from events e
-      where e.thread_id = k.thread_id and e.seq > o.seq and e.type in ('turn.completed', 'thread.route.changed'))`,
+      where e.thread_id = k.thread_id and e.seq > o.seq and e.type in ('turn.completed', 'thread.route.changed', 'task.rated'))`,
 );
 
 /** Cost per completed task on each route with a recorded outcome, most spent first. */
