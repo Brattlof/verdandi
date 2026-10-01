@@ -479,7 +479,7 @@ These outcomes are used at three levels:
 
 ### 8.10 Evaluation
 
-- **Eval set:** 30–100 real tasks, each with a verifier. Each is replayed in a temporary worktree from a pinned commit (`verdandi batch`, §14.6).
+- **Eval set:** 30–100 real tasks, each with a verifier, in a YAML file of `{ id, repo, commit, prompt, verify, setup?, mode? }`. `verdandi batch <file>` runs each task on each route in a throwaway `git clone --shared` of its repository at the pinned commit, with `verify` as the copy's project verifier (so routed runs escalate), then grades it by running `verify` on the final tree. A run has its own Verdandi home under the profile's `batch/`, so its threads and routing memory stay apart from yours; the profile's spend caps apply, and `--dry-run` prints a rough cost estimate first.
 - **Baselines:**
   - (a) always Opus at default effort,
   - (b) always Sonnet at `high`,

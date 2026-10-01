@@ -1,6 +1,7 @@
 export const contractsVersion = "1";
 
 export * from "./attachments.ts";
+export * from "./batch.ts";
 export * from "./commands.ts";
 export * from "./decisions.ts";
 export * from "./events.ts";

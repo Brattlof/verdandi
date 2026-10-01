@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { batch } from "./cli/batch.ts";
 import { chat } from "./cli/chat.ts";
 import { costs } from "./cli/costs.ts";
 import { doctor } from "./cli/doctor.ts";
@@ -16,9 +17,10 @@ const usage = `Usage:
   verdandi chat  --archive <thread> | --unarchive <thread> [--home <dir>]   put a thread away, or bring it back
   verdandi chat  --worktree [--thread <id>] | --remove-worktree [--force]   start a new thread in a git worktree of its own (with --thread, recreate that thread's removed worktree), or remove the thread's worktree and keep its branch
   verdandi costs [--home <dir>] [--days <n>] [--project <path>]   cost per completed task on each route, then spend, cost by task class, usage by model, override rate and estimated savings vs always-Opus
+  verdandi batch <evalset.yaml> [--route auto|<harness>/<model>/<effort>]... [--dry-run] [--approve] [--timeout <minutes>] [--keep] [--home <dir>]   run an eval set's tasks on each route (default: auto, claude-code/opus/medium, claude-code/sonnet/high) in throwaway copies of their repositories, and compare success rate and cost per passed task; --dry-run only estimates, --approve allows what agents ask to do (otherwise denied)
   verdandi routing replay [--policy <file>] [--project <path>] [--home <dir>]   how saved tasks would route under a proposed policy (or each project's current one), with the estimated cost change; reads the database read-only`;
 
-const commands: Record<string, (argv: readonly string[]) => Promise<void>> = { start, open, chat, doctor, costs, routing };
+const commands: Record<string, (argv: readonly string[]) => Promise<void>> = { start, open, chat, doctor, costs, routing, batch };
 
 const [name, ...argv] = Bun.argv.slice(2);
 const command = name === undefined ? undefined : commands[name];
