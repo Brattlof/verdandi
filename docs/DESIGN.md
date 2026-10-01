@@ -962,7 +962,7 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
 | Model SDKs | `@anthropic-ai/sdk`, `openai`, `@google/genai` | Official SDKs, with full access to cost features |
 | Agent SDK | `@anthropic-ai/claude-agent-sdk`, exact version pinned | Claude Code harness |
 | Database | SQLite in WAL mode via `bun:sqlite` + Effect SQL | Built in and fast, with no native addon; FTS5 for search |
-| Terminal | A PTY host process using Bun's built-in PTY (ConPTY on Windows; ADR 0007), plus xterm.js (WebGL) in the UI | A separate process keeps native terminal crashes away from the server. VS Code uses the same design. |
+| Terminal | A PTY host process using Bun's built-in PTY (ConPTY on Windows; ADR 0007), plus xterm.js in the UI | A separate process keeps native terminal crashes away from the server. VS Code uses the same design. |
 | Git | The `git` command line, through a typed wrapper | Worktrees and low-level checkpoint commands |
 | Credentials | OS keychain through `Bun.secrets`, plus `keyCommand` | No plain-text keys, and no native addon |
 | Decision models | `rules` by default; Laya (ONNX through `onnxruntime-node`) in a worker process where it beats rules (ADR 0009); ollaya for larger local models; the Jev API if turned on | §9.8 |

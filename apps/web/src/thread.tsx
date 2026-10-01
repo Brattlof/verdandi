@@ -6,10 +6,10 @@ import { TurnAttachments } from "./attachments.tsx";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
 import { SidePanel } from "./diff.tsx";
-import { ChevronIcon, DiffIcon } from "./icons.tsx";
+import { ChevronIcon, DiffIcon, TerminalIcon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { RouteMarkers } from "./route.tsx";
-import { applyDiffPanel, applyThreadFeed, closedPanel, type LiveThread, type LiveTurn } from "./state.ts";
+import { applyPanel, applyThreadFeed, closedPanel, type LiveThread, type LiveTurn } from "./state.ts";
 import { WorktreeBar } from "./worktree.tsx";
 
 export const ThreadPane = ({ connection, threadId }: { connection: Connection; threadId: ThreadId }) => {
@@ -28,7 +28,7 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
   const thread = useStore(store);
   // Chosen per turn, like `verdandi chat`: the thread's last mode, until the user picks another.
   const [mode, setMode] = useState<InteractionMode>();
-  const [panel, setPanel] = useReducer(applyDiffPanel, closedPanel);
+  const [panel, setPanel] = useReducer(applyPanel, closedPanel);
   // Diffs are fetched only when asked for: opening the panel, switching what it shows, or Refresh.
   const fetchDiff = useCallback(
     (turnId: TurnId | undefined, all: boolean) => {
@@ -66,11 +66,20 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
           <button
             type="button"
             className="px-2 text-xs aria-pressed:border-accent aria-pressed:text-accent"
-            aria-pressed={panel.open}
-            onClick={() => (panel.open ? setPanel({ type: "close" }) : fetchDiff(lastFinished?.turnId, true))}
+            aria-pressed={panel.open && panel.tab === "diff"}
+            onClick={() => (panel.open && panel.tab === "diff" ? setPanel({ type: "close" }) : fetchDiff(lastFinished?.turnId, true))}
           >
             <DiffIcon className="size-3.5" />
             Diff
+          </button>
+          <button
+            type="button"
+            className="px-2 text-xs aria-pressed:border-accent aria-pressed:text-accent"
+            aria-pressed={panel.open && panel.tab === "terminal"}
+            onClick={() => setPanel({ type: panel.open && panel.tab === "terminal" ? "close" : "terminal" })}
+          >
+            <TerminalIcon className="size-3.5" />
+            Terminal
           </button>
         </header>
         {thread.worktree && <WorktreeBar connection={connection} threadId={threadId} worktree={thread.worktree} busy={thread.busy} />}
@@ -92,9 +101,12 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
       </div>
       {panel.open && (
         <SidePanel
+          connection={connection}
+          threadId={threadId}
           panel={panel}
           turnLabel={turnIndex >= 0 ? `Turn ${turnIndex + 1}` : undefined}
           onFetch={fetchDiff}
+          onTerminal={() => setPanel({ type: "terminal" })}
           onClose={() => setPanel({ type: "close" })}
         />
       )}

@@ -11,7 +11,7 @@ import type {
   ThreadSummary,
   TurnId,
 } from "@verdandi/contracts";
-import { applyDiffPanel, applyProjectsFeed, applyThreadFeed, closedPanel, type DiffPanelAction, type LiveThread } from "./state.ts";
+import { applyPanel, applyProjectsFeed, applyThreadFeed, closedPanel, type LiveThread, type PanelAction } from "./state.ts";
 
 const threadId = "thread-1" as ThreadId;
 const turnId = "turn-1" as TurnId;
@@ -181,7 +181,7 @@ test("a harness's new quota replaces its old one and keeps the threads", () => {
 
 test("the diff panel shows the latest fetch's result, drops stale ones, and closes", () => {
   const view = { files: [{ path: "a.txt", diff: "+x\n", truncated: false }], omittedFiles: 0 };
-  const panel = (actions: DiffPanelAction[]) => actions.reduce(applyDiffPanel, closedPanel);
+  const panel = (actions: PanelAction[]) => actions.reduce(applyPanel, closedPanel);
 
   const turn = panel([
     { type: "fetch", turnId, all: false, request: "r1" },
@@ -197,7 +197,7 @@ test("the diff panel shows the latest fetch's result, drops stale ones, and clos
   ]);
   expect(switched).toMatchObject({ open: true, turnId, all: true, result: undefined });
 
-  const failed = applyDiffPanel(switched, { type: "result", request: "r2", result: { ok: false, message: "Run git init." } });
+  const failed = applyPanel(switched, { type: "result", request: "r2", result: { ok: false, message: "Run git init." } });
   expect(failed).toMatchObject({ all: true, result: { ok: false, message: "Run git init." } });
 
   // Without a turn there is only the whole project; a result after closing is dropped.
@@ -245,4 +245,18 @@ test("a budget mode change ends a routed thread's task but keeps a pinned one's,
   const routed = fold([{ ...snapshot, thread: { ...snapshot.thread, pinned: false } }, task, budget]);
   expect(routed).toMatchObject({ budgetMode: "max", task: null });
   expect(fold([snapshot, task, budget])).toMatchObject({ budgetMode: "max", task: { taskId } });
+});
+
+test("the Terminal tab opens the panel without fetching a diff, and a fetch switches back to Diff", () => {
+  const panel = (actions: PanelAction[]) => actions.reduce(applyPanel, closedPanel);
+  expect(panel([{ type: "terminal" }])).toMatchObject({ open: true, tab: "terminal", request: "", result: undefined });
+  const view = { files: [], omittedFiles: 0 };
+  const fetched = panel([
+    { type: "fetch", turnId, all: false, request: "r1" },
+    { type: "result", request: "r1", result: { ok: true, view } },
+    { type: "terminal" },
+  ]);
+  // The diff's turn and scope stay, so going back to Diff fetches the same one.
+  expect(fetched).toMatchObject({ tab: "terminal", turnId, result: { ok: true, view } });
+  expect(applyPanel(fetched, { type: "fetch", turnId, all: false, request: "r2" })).toMatchObject({ tab: "diff", request: "r2" });
 });

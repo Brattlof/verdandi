@@ -1,9 +1,11 @@
 import { Tabs } from "@base-ui/react/tabs";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { DiffView, TurnId } from "@verdandi/contracts";
+import type { DiffView, ThreadId, TurnId } from "@verdandi/contracts";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import type { Connection } from "./client.ts";
 import { ChevronIcon, CloseIcon } from "./icons.tsx";
-import type { DiffPanel } from "./state.ts";
+import type { OpenPanel } from "./state.ts";
+import { TerminalTab } from "./terminal.tsx";
 
 type LineKind = "add" | "del" | "hunk" | "context" | "meta";
 export type DiffRow =
@@ -62,19 +64,29 @@ const rowClass: Record<LineKind | "file" | "note", string> = {
   note: "py-1 font-sans italic text-muted",
 };
 
+const tabClass =
+  "rounded-none border-0 border-b-2 border-transparent bg-transparent px-1 text-xs text-muted hover:bg-transparent hover:text-fg data-active:border-accent data-active:text-fg";
+
 /**
- * The right panel, switchable; only "Diff" exists so far. It fetches when asked, never on its own,
- * and renders only the rows in view. `turnLabel` names `panel.turnId`.
+ * The right panel: the Diff tab and the Terminal tab. The diff is fetched when asked, never on its own,
+ * and renders only the rows in view. `turnLabel` names `panel.turnId`. Escape closes the panel, except
+ * inside a terminal, where it goes to the shell.
  */
 export const SidePanel = ({
+  connection,
+  threadId,
   panel,
   turnLabel,
   onFetch,
+  onTerminal,
   onClose,
 }: {
-  panel: Extract<DiffPanel, { open: true }>;
+  connection: Connection;
+  threadId: ThreadId;
+  panel: OpenPanel;
   turnLabel: string | undefined;
   onFetch: (turnId: TurnId | undefined, all: boolean) => void;
+  onTerminal: () => void;
   onClose: () => void;
 }) => {
   const id = useId();
@@ -94,19 +106,23 @@ export const SidePanel = ({
   return (
     <aside
       ref={aside}
-      onKeyDown={(e) => e.key === "Escape" && onClose()}
+      onKeyDown={(e) => e.key === "Escape" && !(e.target instanceof Element && e.target.closest(".xterm")) && onClose()}
       aria-label="Side panel"
       tabIndex={-1}
       className="fixed inset-0 z-40 flex min-w-0 bg-bg outline-none md:static md:z-auto md:w-[min(50%,760px)] md:border-l md:border-line"
     >
-      <Tabs.Root defaultValue="diff" className="flex min-w-0 flex-1 flex-col">
+      <Tabs.Root
+        value={panel.tab}
+        onValueChange={(tab) => (tab === "terminal" ? onTerminal() : onFetch(panel.turnId, panel.all))}
+        className="flex min-w-0 flex-1 flex-col"
+      >
         <div className="flex min-h-12 items-center justify-between border-b border-line px-3">
-          <Tabs.List aria-label="Panel">
-            <Tabs.Tab
-              value="diff"
-              className="rounded-none border-0 border-b-2 border-transparent bg-transparent px-1 text-xs text-muted hover:bg-transparent hover:text-fg data-active:border-accent data-active:text-fg"
-            >
+          <Tabs.List aria-label="Panel" className="flex gap-3">
+            <Tabs.Tab value="diff" className={tabClass}>
               Diff
+            </Tabs.Tab>
+            <Tabs.Tab value="terminal" className={tabClass}>
+              Terminal
             </Tabs.Tab>
           </Tabs.List>
           <button type="button" className="px-2 text-xs" onClick={onClose}>
@@ -149,12 +165,15 @@ export const SidePanel = ({
           </p>
           {rows && <DiffList rows={rows} onToggle={toggle} />}
         </Tabs.Panel>
+        <Tabs.Panel value="terminal" className="flex min-h-0 flex-1 flex-col">
+          <TerminalTab connection={connection} threadId={threadId} />
+        </Tabs.Panel>
       </Tabs.Root>
     </aside>
   );
 };
 
-const statusText = ({ all, result }: Extract<DiffPanel, { open: true }>) => {
+const statusText = ({ all, result }: OpenPanel) => {
   if (result === undefined) return "Loading…";
   if (!result.ok) return result.message;
   const count = result.view.files.length + result.view.omittedFiles;

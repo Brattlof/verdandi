@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
-import type { WorktreeView } from "@verdandi/contracts";
+import type { ThreadId, WorktreeView } from "@verdandi/contracts";
 import { Effect, Result, Schema } from "effect";
+import { SqlClient } from "effect/unstable/sql";
 import { GitError, git, gitFailed, gitOk, notARepo } from "./git.ts";
 
 /** Lets git make worktree paths past Windows' 260-character limit. */
@@ -89,3 +90,13 @@ export const removeWorktree = (projectPath: string, root: string, force: boolean
  */
 export const threadFolder = (projectPath: string, worktree: string | null) =>
   (worktree === null ? undefined : (JSON.parse(worktree) as WorktreeView).path) ?? projectPath;
+
+/** `threadFolder` of `threadId`, read from the database; undefined when the thread doesn't exist. */
+export const loadThreadFolder = (threadId: ThreadId) =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    Effect.map(
+      sql<{ path: string; worktree: string | null }>`
+        select p.path, t.worktree from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`,
+      ([row]) => row && threadFolder(row.path, row.worktree),
+    ),
+  );

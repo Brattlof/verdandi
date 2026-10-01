@@ -9,6 +9,7 @@ import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, RouteDecision, TaskClass } from "./routing.ts";
 import { SpendCap } from "./spend.ts";
 import { RouteCost } from "./task.ts";
+import { TerminalFeed, TerminalId, TerminalSize, TerminalUnavailable, TerminalView } from "./terminal.ts";
 import { WorktreeView } from "./worktree.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
@@ -284,5 +285,24 @@ export class Api extends RpcGroup.make(
     payload: { threadId: ThreadId, text: Schema.String, mode: InteractionMode, images: Schema.optionalKey(Schema.Int) },
     success: RouteDecision,
     error: RoutingUnavailable,
+  }),
+  /** Starts a shell in a PTY, in the folder the thread runs in. It runs until closed, a page reload included. */
+  Rpc.make("TerminalOpen", { payload: { threadId: ThreadId, ...TerminalSize }, success: TerminalView, error: TerminalUnavailable }),
+  /** The thread's terminals, oldest first, so a reloaded page can reattach to them. */
+  Rpc.make("TerminalList", { payload: { threadId: ThreadId }, success: Schema.Array(TerminalView) }),
+  /** Types into the terminal: keystrokes or a paste, as the terminal emulator encodes them. */
+  Rpc.make("TerminalWrite", {
+    payload: { terminalId: TerminalId, data: Schema.String.check(Schema.isMaxLength(1024 * 1024)) },
+    error: TerminalUnavailable,
+  }),
+  Rpc.make("TerminalResize", { payload: { terminalId: TerminalId, ...TerminalSize }, error: TerminalUnavailable }),
+  /** Kills the shell and its process tree, then forgets the terminal. Answers once the shell is gone. */
+  Rpc.make("TerminalClose", { payload: { terminalId: TerminalId }, error: TerminalUnavailable }),
+  /** The terminal's kept output, then its live output. The server ends it when the terminal is closed. */
+  Rpc.make("TerminalSubscribe", {
+    payload: { terminalId: TerminalId, subscriptionId: Schema.String },
+    success: TerminalFeed,
+    error: TerminalUnavailable,
+    stream: true,
   }),
 ) {}
