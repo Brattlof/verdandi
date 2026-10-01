@@ -3,7 +3,8 @@ import { appendFileSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Effect } from "effect";
-import { diffProject, editedPaths, limits } from "./diff.ts";
+import { snapshot } from "./checkpoint.ts";
+import { diffTrees, editedPaths, limits } from "./diff.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -22,29 +23,40 @@ const changedLines = (diff: string) =>
     .filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---) /.test(l))
     .map((l) => l.replace(/\r$/, ""));
 
-describe("diffProject", () => {
+/** The repo's tree now, as a diff can take it. */
+const tree = async (dir: string) => (await Effect.runPromise(snapshot(dir))) ?? "";
+
+describe("diffTrees", () => {
   test("shows only the changed lines of a CRLF file, and new files unless ignored", async () => {
     const dir = repo({ "a b.txt": "one\r\ntwo\r\n", ".gitignore": "*.log\n" });
+    const before = await tree(dir);
     appendFileSync(join(dir, "a b.txt"), "three\r\n");
     writeFileSync(join(dir, "new [id].txt"), "hello\n");
     writeFileSync(join(dir, "new i.txt"), "hi\n");
     writeFileSync(join(dir, "debug.log"), "noise\n");
 
-    const all = await Effect.runPromise(diffProject(dir));
+    const all = await Effect.runPromise(diffTrees(dir, before, await tree(dir)));
     expect(all.files.map((f) => f.path)).toEqual(["a b.txt", "new [id].txt", "new i.txt"]);
     expect(all.files.map((f) => changedLines(f.diff))).toEqual([["+three"], ["+hello"], ["+hi"]]);
+  });
 
-    // `[id]` is a file name, not a glob matching `new i.txt`.
-    const one = await Effect.runPromise(diffProject(dir, ["new [id].txt"]));
-    expect(one.files.map((f) => f.path)).toEqual(["new [id].txt"]);
+  test("a project in a subfolder sees only its own files, relative to it", async () => {
+    const dir = repo({ "root.txt": "r\n" });
+    mkdirSync(join(dir, "app"));
+    const before = await tree(dir);
+    writeFileSync(join(dir, "root.txt"), "changed\n");
+    writeFileSync(join(dir, "app", "x.txt"), "x\n");
+    const view = await Effect.runPromise(diffTrees(join(dir, "app"), before, await tree(dir)));
+    expect(view.files.map((f) => f.path)).toEqual(["x.txt"]);
   });
 
   test("cuts large diffs on a line break and counts the files left out", async () => {
     const dir = repo({ "keep.txt": "x\n" });
+    const before = await tree(dir);
     const big = "line of text that is long enough to add up\n".repeat(4000);
     for (let i = 0; i < 12; i++) writeFileSync(join(dir, `big${String(i).padStart(2, "0")}.txt`), big);
 
-    const view = await Effect.runPromise(diffProject(dir));
+    const view = await Effect.runPromise(diffTrees(dir, before, await tree(dir)));
     expect(view.files[0]?.truncated).toBe(true);
     expect(view.files[0]?.diff.length).toBeLessThanOrEqual(limits.fileBytes);
     expect(view.files[0]?.diff.endsWith("\n")).toBe(true);
@@ -52,16 +64,7 @@ describe("diffProject", () => {
     expect(view.files.length + view.omittedFiles).toBe(12);
     expect(view.files.reduce((n, f) => n + f.diff.length, 0)).toBeLessThanOrEqual(limits.totalBytes);
   });
-
-  test("a folder that isn't a git repo fails with the fix", async () => {
-    const dir = makeTempHome();
-    dirs.push(dir);
-    const error = await Effect.runPromise(Effect.flip(diffProject(dir)));
-    expect(error.reason).toBe("NotAGitRepo");
-    expect(error.message).toContain("git init");
-  });
 });
-
 test("editedPaths keeps the project's files that file tools touched", () => {
   const project = join("/", "work", "my repo");
   const call = (name: string, input: unknown) => ({ kind: "tool.call" as const, toolUseId: name, name, input });

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type {
   AttachmentRef,
@@ -16,6 +17,7 @@ import type {
 } from "@verdandi/contracts";
 import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { checkpoint, checkpointRef } from "../workspace/checkpoint.ts";
 import { editedPaths } from "../workspace/diff.ts";
 import { runVerifier } from "../workspace/verify.ts";
 import { Engine } from "./engine.ts";
@@ -96,6 +98,15 @@ export const ReactorLive = Layer.effect(
           if (!run.passed) return;
         }
       });
+
+    /** Saves the thread's tree as turn `turnId`'s start or end checkpoint (DESIGN §13). A failure is logged, never the turn's. */
+    const saveCheckpoint = (threadId: ThreadId, turnId: TurnId, at: "start" | "end") =>
+      Effect.gen(function* () {
+        const [thread] = yield* sql<{ cwd: string }>`
+          select p.path as cwd from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+        // A folder outside git has no checkpoints, and `checkpoint` skips it.
+        if (thread && existsSync(thread.cwd)) yield* checkpoint(thread.cwd, checkpointRef(threadId, turnId, at));
+      }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not save the ${at} checkpoint of turn ${turnId}.`, cause)));
 
     const runTurn = (
       threadId: ThreadId,
@@ -197,7 +208,11 @@ export const ReactorLive = Layer.effect(
           turns,
           Effect.andThen(
             previous ? Fiber.await(previous) : Effect.void,
-            runTurn(threadId, turnId, text, mode, attachments, Stream.fromQueue(queue)),
+            // The end checkpoint waits for the harness to stop, even an interrupted one, and the next turn waits for it.
+            Effect.andThen(
+              saveCheckpoint(threadId, turnId, "start"),
+              runTurn(threadId, turnId, text, mode, attachments, Stream.fromQueue(queue)),
+            ).pipe(Effect.ensuring(saveCheckpoint(threadId, turnId, "end"))),
           ).pipe(
             Effect.ensuring(done),
             Effect.ensuring(Effect.sync(() => latest.get(threadId)?.turnId === turnId && latest.delete(threadId))),
