@@ -230,6 +230,12 @@ const taskEscalations = Effect.gen(function* () {
   yield* sql`alter table tasks add column escalations integer not null default 0`;
 });
 
+/** Each thread's git worktree (DESIGN §13), as its `WorktreeView` JSON; null when it runs in the project folder. */
+const threadWorktree = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table threads add column worktree text`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -246,4 +252,5 @@ export const migrations = {
   "13_thread_archive": threadArchive,
   "14_turn_attachments": turnAttachments,
   "15_task_escalations": taskEscalations,
+  "16_thread_worktree": threadWorktree,
 };

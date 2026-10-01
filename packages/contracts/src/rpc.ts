@@ -9,6 +9,7 @@ import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, RouteDecision, TaskClass } from "./routing.ts";
 import { SpendCap } from "./spend.ts";
 import { RouteCost } from "./task.ts";
+import { WorktreeView } from "./worktree.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
   reason: Schema.Literals([
@@ -26,6 +27,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "SpendCapNotSet",
     "ThreadArchived",
     "InvalidAttachment",
+    "WorktreeUnavailable",
   ]),
   message: Schema.String,
 }) {}
@@ -108,6 +110,8 @@ export const ThreadView = Schema.Struct({
     }),
   ),
   sessionId: Schema.NullOr(Schema.String),
+  /** The git worktree the thread runs in; null when it runs in the project folder itself. */
+  worktree: Schema.NullOr(WorktreeView),
   busy: Schema.Boolean,
   turns: Schema.Array(TurnView),
   /** Oldest first, so a client can show each between the turns it came between. */

@@ -7,6 +7,7 @@ import { Resolution } from "./requests.ts";
 import { InteractionMode, Route } from "./route.ts";
 import { BudgetMode } from "./routing.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
+import { WorktreeReport } from "./worktree.ts";
 
 export const ThreadCreate = Schema.Struct({
   type: Schema.Literal("thread.create"),
@@ -15,6 +16,8 @@ export const ThreadCreate = Schema.Struct({
   projectPath: Schema.String,
   /** The user's pick, which pins the thread to it. Left out, the router picks a route for each new task. */
   route: Schema.optionalKey(Route),
+  /** Runs the thread in a git worktree of its own, on a new branch from the project's `HEAD` (DESIGN §13). */
+  worktree: Schema.optionalKey(Schema.Boolean),
 });
 /** A turn as the engine takes it: attachments are references to stored bytes. */
 export const TurnSend = Schema.Struct({
@@ -116,6 +119,35 @@ export const ThreadUnarchive = Schema.Struct({
   threadId: ThreadId,
 });
 
+/**
+ * Gives a thread a worktree: a new one for a thread that has had no turns, or the one it had again, on its
+ * kept branch, after it was removed or failed to be added.
+ */
+export const ThreadWorktreeAdd = Schema.Struct({
+  type: Schema.Literal("thread.worktree.add"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+
+/**
+ * Removes the thread's worktree and keeps its branch. git refuses while it has uncommitted changes or
+ * untracked files, unless `force`.
+ */
+export const ThreadWorktreeRemove = Schema.Struct({
+  type: Schema.Literal("thread.worktree.remove"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  force: Schema.Boolean,
+});
+
+/** Internal: the reactor reporting what happened to a thread's worktree. Clients cannot send it. */
+export const WorktreeReported = Schema.Struct({
+  type: Schema.Literal("worktree.report"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  report: WorktreeReport,
+});
+
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
   type: Schema.Literal("harness.report"),
@@ -165,6 +197,8 @@ export const ClientCommand = Schema.Union([
   RoutingMemoryClear,
   ThreadArchive,
   ThreadUnarchive,
+  ThreadWorktreeAdd,
+  ThreadWorktreeRemove,
   ApprovalRespond,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
@@ -181,8 +215,11 @@ export const Command = Schema.Union([
   RoutingMemoryClear,
   ThreadArchive,
   ThreadUnarchive,
+  ThreadWorktreeAdd,
+  ThreadWorktreeRemove,
   ApprovalRespond,
   HarnessReport,
+  WorktreeReported,
   VerifierReport,
   TaskEscalate,
   TurnRecover,

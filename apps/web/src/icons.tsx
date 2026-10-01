@@ -34,5 +34,6 @@ export const ChartIcon = icon(<path d="M2.5 13.5h11M4.5 11V7.5M8 11V4M11.5 11V9"
 export const FolderIcon = icon(
   <path d="M2 4.5A1.5 1.5 0 013.5 3h2.8l1.5 1.5h4.7A1.5 1.5 0 0114 6v5.5a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 11.5z" />,
 );
+export const BranchIcon = icon(<path d="M5 2.5v11M5 10.5a3 3 0 003-3h1.5a2.5 2.5 0 002.5-2.5M12 3.5v1.5" />);
 export const DiffIcon = icon(<path d="M8 2.5v6M5 5.5h6M5 12.5h6" />);
 export const FileIcon = icon(<path d="M9 2H4.5A1.5 1.5 0 003 3.5v9A1.5 1.5 0 004.5 14h7a1.5 1.5 0 001.5-1.5V6zM9 2v4h4" />);

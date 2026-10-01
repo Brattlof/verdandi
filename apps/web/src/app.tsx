@@ -11,7 +11,7 @@ import { type FormEvent, useEffect, useRef, useState, useSyncExternalStore } fro
 import { ArchiveButton } from "./archive.tsx";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
 import { Dashboard } from "./dashboard.tsx";
-import { ChartIcon, CloseIcon, FolderIcon, MenuIcon, PlusIcon } from "./icons.tsx";
+import { BranchIcon, ChartIcon, CloseIcon, FolderIcon, MenuIcon, PlusIcon } from "./icons.tsx";
 import { applyProjectsFeed, type Sidebar as SidebarData } from "./state.ts";
 import { ThreadPane } from "./thread.tsx";
 
@@ -261,10 +261,18 @@ const OpenFolder = ({ connection }: { connection: Connection }) => {
   const open = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = event.currentTarget;
-    const projectPath = String(new FormData(form).get("path")).trim();
+    const data = new FormData(form);
+    const projectPath = String(data.get("path")).trim();
     if (!projectPath) return;
     const threadId = uuid<ThreadId>();
-    const result = await connection.dispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath });
+    const worktree = data.get("worktree") === "on";
+    const result = await connection.dispatch({
+      type: "thread.create",
+      commandId: uuid<CommandId>(),
+      threadId,
+      projectPath,
+      ...(worktree && { worktree }),
+    });
     setError(result.ok ? undefined : result.message);
     if (!result.ok) return;
     form.reset();
@@ -291,6 +299,10 @@ const OpenFolder = ({ connection }: { connection: Connection }) => {
         />
         <button type="submit">Open</button>
       </div>
+      <label className="mt-1 flex items-center gap-1.5 text-xs text-muted">
+        <input type="checkbox" name="worktree" />
+        In a git worktree of its own
+      </label>
       {error && (
         <p id="open-folder-error" role="alert" className="mt-1 text-xs text-error [overflow-wrap:anywhere]">
           {error}
@@ -313,9 +325,15 @@ const Project = ({
 }) => {
   const [error, setError] = useState<string>();
   // Without a route, the router picks one for each task of the new thread.
-  const newThread = async () => {
+  const newThread = async (worktree: boolean) => {
     const threadId = uuid<ThreadId>();
-    const result = await connection.dispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: project.path });
+    const result = await connection.dispatch({
+      type: "thread.create",
+      commandId: uuid<CommandId>(),
+      threadId,
+      projectPath: project.path,
+      ...(worktree && { worktree }),
+    });
     if (result.ok) openThread(threadId);
     else setError(result.message);
   };
@@ -326,15 +344,27 @@ const Project = ({
         <h3 id={headingId} title={project.path} className="truncate font-mono text-xs font-semibold">
           {basename(project.path)}
         </h3>
-        <button
-          type="button"
-          className="gap-1 border-0 bg-transparent px-1.5 text-xs text-muted hover:text-fg"
-          onClick={newThread}
-          aria-label={`New thread in ${basename(project.path)}`}
-        >
-          <PlusIcon className="size-3.5" />
-          New
-        </button>
+        <span className="flex shrink-0">
+          <button
+            type="button"
+            className="gap-1 border-0 bg-transparent px-1.5 text-xs text-muted hover:text-fg"
+            onClick={() => newThread(false)}
+            aria-label={`New thread in ${basename(project.path)}`}
+          >
+            <PlusIcon className="size-3.5" />
+            New
+          </button>
+          <button
+            type="button"
+            className="gap-1 border-0 bg-transparent px-1.5 text-xs text-muted hover:text-fg"
+            onClick={() => newThread(true)}
+            aria-label={`New thread in a git worktree of ${basename(project.path)}`}
+            title="New thread in a git worktree of its own"
+          >
+            <BranchIcon className="size-3.5" />
+            Worktree
+          </button>
+        </span>
       </div>
       {error && (
         <p role="alert" className="mx-2 text-xs text-error">

@@ -1,4 +1,5 @@
 import { appendFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type {
   AccessMode,
   HarnessAdapter,
@@ -16,7 +17,7 @@ import { Effect, Stream } from "effect";
  * A scripted harness for tests. Text "fail" fails the turn, "hang" runs until interrupted, "gate" waits for
  * `release()`, "overage" reports a used-up subscription window and answers on metered usage, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan, each
  * finishing once `respond` answers on the model of the route `reroute` last moved the turn to, "steer" waits for the first steer and answers it, "edit <path>"
- * appends a line to that file through an Edit tool call, and a turn Verdandi sends to escalate a failed verifier ("Verdandi ran the
+ * appends a line to that file, relative to the turn's folder, through an Edit tool call, and a turn Verdandi sends to escalate a failed verifier ("Verdandi ran the
  * project's verifier …") edits the thread's last edited file again, the way an agent fixing it would; "subagent" delegates a read to a subagent whose
  * steps carry `parentToolUseId`, "background" does the same in a background subagent that reports after the main
  * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back, with its attachments' names, kinds and sizes, and fixed usage on the route's model.
@@ -134,7 +135,7 @@ export const makeFakeHarness = () => {
     }
     const fixing = input.text.startsWith("Verdandi ran the project's verifier") ? edited.get(input.threadId) : undefined;
     if (input.text.startsWith("edit ") || fixing) {
-      const path = fixing ?? input.text.slice("edit ".length);
+      const path = fixing ?? resolve(input.cwd, input.text.slice("edit ".length));
       edited.set(input.threadId, path);
       const edit = Stream.suspend(() => {
         appendFileSync(path, "edited by the fake harness\n");

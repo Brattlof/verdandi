@@ -10,6 +10,7 @@ import { ChevronIcon, DiffIcon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { RouteMarkers } from "./route.tsx";
 import { applyDiffPanel, applyThreadFeed, closedPanel, type LiveThread, type LiveTurn } from "./state.ts";
+import { WorktreeBar } from "./worktree.tsx";
 
 export const ThreadPane = ({ connection, threadId }: { connection: Connection; threadId: ThreadId }) => {
   const [store] = useState(() => createStore<LiveThread | undefined>(undefined));
@@ -54,8 +55,9 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
         <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-line px-4 py-1.5">
           <div className="min-w-0 flex-1">
             <h1 className="truncate font-medium">{thread.turns[0]?.text.split("\n", 1)[0] || "New thread"}</h1>
-            <p title={thread.projectPath} className="truncate font-mono text-xs text-muted">
+            <p title={thread.worktree?.path ?? thread.projectPath} className="truncate font-mono text-xs text-muted">
               {thread.projectPath}
+              {thread.worktree && <span> · worktree on {thread.worktree.branch}</span>}
             </p>
           </div>
           {!thread.busy && (
@@ -71,6 +73,7 @@ export const ThreadPane = ({ connection, threadId }: { connection: Connection; t
             Diff
           </button>
         </header>
+        {thread.worktree && <WorktreeBar connection={connection} threadId={threadId} worktree={thread.worktree} busy={thread.busy} />}
         {(thread.archived || archiveError) && (
           <p role="status" className={`border-b border-line bg-panel px-4 py-1.5 text-xs ${archiveError ? "text-error" : "text-muted"}`}>
             {archiveError ?? "This thread is archived: it's hidden from the thread list and takes no turns until you unarchive it."}

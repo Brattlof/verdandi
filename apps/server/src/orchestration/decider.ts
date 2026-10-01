@@ -20,6 +20,7 @@ import {
   type ThreadId,
   type TurnId,
   type VerifierRun,
+  type WorktreeView,
 } from "@verdandi/contracts";
 import { Result } from "effect";
 import {
@@ -31,6 +32,7 @@ import {
   routeInputs,
   routeOf,
 } from "../routing/routing.ts";
+import { worktreeBranch } from "../workspace/refs.ts";
 import type { SpendState } from "./spend.ts";
 
 export type PendingRequest = {
@@ -50,6 +52,8 @@ export type DeciderState = {
         readonly runningTurnId: string | null;
         /** Put away by the user: it takes no turns until unarchived. */
         readonly archived: boolean;
+        /** The git worktree the thread runs in; null when it runs in the project folder. */
+        readonly worktree: WorktreeView | null;
         /** The task the next turn continues; null before the first turn and after a route change. */
         readonly taskId: TaskId | null;
         /** How many turns the thread has had, and the latest one's id. */
@@ -138,6 +142,15 @@ const handoff = (run: VerifierRun) => {
   ].join("\n");
 };
 
+/** Why the thread's worktree can't take a turn now, naming the fix; undefined when it can (or there is none). */
+const worktreeProblem = (threadId: ThreadId, worktree: WorktreeView | null): string | undefined => {
+  if (!worktree || worktree.state === "ready" || worktree.state === "creating") return undefined;
+  const again = `Recreate it on its branch with Recreate worktree in the web UI or \`verdandi chat --thread ${threadId} --worktree\`.`;
+  if (worktree.state === "failed") return `This thread's worktree couldn't be created: ${worktree.error ?? "no reason recorded"} ${again}`;
+  if (worktree.state === "removing") return "This thread's worktree is being removed. Wait for it, then recreate it to send a turn.";
+  return `This thread's worktree was removed; its branch ${worktree.branch} is kept. ${again}`;
+};
+
 type Handler<T extends Command["type"]> = (state: DeciderState, command: Extract<Command, { type: T }>) => Decision;
 
 const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, event: HarnessEvent): Decision => {
@@ -186,15 +199,20 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
   "thread.create": (state, c) =>
     state.thread
       ? reject("ThreadExists", `Thread ${c.threadId} already exists.`)
-      : accept({
-          type: "thread.created",
-          v: 1,
-          threadId: c.threadId,
-          projectId: projectIdFor(c.projectPath),
-          projectPath: c.projectPath,
-          route: c.route ?? defaultRoute,
-          pinned: c.route !== undefined,
-        }),
+      : accept(
+          {
+            type: "thread.created",
+            v: 1,
+            threadId: c.threadId,
+            projectId: projectIdFor(c.projectPath),
+            projectPath: c.projectPath,
+            route: c.route ?? defaultRoute,
+            pinned: c.route !== undefined,
+          },
+          ...(c.worktree
+            ? [{ type: "thread.worktree.requested", v: 1, threadId: c.threadId, branch: worktreeBranch(c.threadId) } as const]
+            : []),
+        ),
   "turn.send": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
     if (state.thread.runningTurnId) return reject("ThreadBusy", "A turn is already running in this thread. Wait for it to finish.");
@@ -204,6 +222,8 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
         `Thread ${c.threadId} is archived. Unarchive it to send a turn: Unarchive in the web UI, or \`verdandi chat --unarchive ${c.threadId}\`.`,
       );
     }
+    const unavailable = worktreeProblem(c.threadId, state.thread.worktree);
+    if (unavailable) return reject("WorktreeUnavailable", unavailable);
     const stop = capped(state.spend);
     if (stop) return stop;
     const attachments = c.attachments?.length ? { attachments: c.attachments } : {};
@@ -254,7 +274,57 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
         "A turn is running in this thread. Interrupt it first (Stop in the web UI, Ctrl+C in `verdandi chat`), then archive it.",
       );
     }
-    return state.thread.archived ? accept() : accept({ type: "thread.archived", v: 1, threadId: c.threadId });
+    if (state.thread.archived) return accept();
+    // Archiving puts the worktree away too; git keeps it if it has uncommitted changes, and the thread says so.
+    const removal =
+      state.thread.worktree?.state === "ready"
+        ? [{ type: "thread.worktree.removal.requested", v: 1, threadId: c.threadId, force: false } as const]
+        : [];
+    return accept({ type: "thread.archived", v: 1, threadId: c.threadId }, ...removal);
+  },
+  "thread.worktree.add": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    const { worktree, turns } = state.thread;
+    if (worktree && worktree.state !== "removed" && worktree.state !== "failed") return accept();
+    // The harness keeps its session where the thread first ran, so that folder can't change afterwards.
+    if (!worktree && turns > 0) {
+      return reject(
+        "WorktreeUnavailable",
+        "This thread already ran in the project folder, and its harness session lives there. Start a new thread in a worktree instead.",
+      );
+    }
+    return accept({
+      type: "thread.worktree.requested",
+      v: 1,
+      threadId: c.threadId,
+      branch: worktree?.branch ?? worktreeBranch(c.threadId),
+    });
+  },
+  "thread.worktree.remove": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    const { worktree, runningTurnId } = state.thread;
+    if (!worktree)
+      return reject("WorktreeUnavailable", "This thread runs in the project folder, not a worktree, so there's nothing to remove.");
+    if (worktree.state !== "ready") return accept();
+    if (runningTurnId) {
+      return reject("ThreadBusy", "A turn is running in this thread's worktree. Interrupt it or let it finish, then remove the worktree.");
+    }
+    return accept({ type: "thread.worktree.removal.requested", v: 1, threadId: c.threadId, force: c.force });
+  },
+  "worktree.report": (state, c) => {
+    if (!state.thread) return accept();
+    const { report } = c;
+    const threadId = c.threadId;
+    switch (report.type) {
+      case "created":
+        return accept({ type: "thread.worktree.created", v: 1, threadId, root: report.root, path: report.path });
+      case "failed":
+        return accept({ type: "thread.worktree.failed", v: 1, threadId, action: report.action, error: report.error });
+      case "setup":
+        return accept({ type: "thread.worktree.setup.ran", v: 1, threadId, ...report.run });
+      case "removed":
+        return accept({ type: "thread.worktree.removed", v: 1, threadId });
+    }
   },
   "thread.unarchive": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);

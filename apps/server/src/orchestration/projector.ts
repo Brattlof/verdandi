@@ -17,7 +17,9 @@ import type {
   TurnId,
   TurnView,
   Usage,
+  WorktreeView,
 } from "@verdandi/contracts";
+import { nextWorktree } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import type { DeciderState, PendingRequest } from "./decider.ts";
@@ -44,6 +46,16 @@ const addItem = (turnId: TurnId, item: Item) =>
     (sql) =>
       sql`insert into items (turn_id, idx, payload)
           values (${turnId}, (select count(*) from items where turn_id = ${turnId}), ${JSON.stringify(item)})`,
+  );
+
+/** Folds a worktree event into the thread's `worktree` column. */
+const projectWorktree = (e: Parameters<typeof nextWorktree>[1]) =>
+  withSql((sql) =>
+    Effect.gen(function* () {
+      const [row] = yield* sql<{ worktree: string | null }>`select worktree from threads where id = ${e.threadId}`;
+      const next = nextWorktree(row?.worktree ? (JSON.parse(row.worktree) as WorktreeView) : null, e);
+      yield* sql`update threads set worktree = ${next && JSON.stringify(next)} where id = ${e.threadId}`;
+    }),
   );
 
 const projections: { [T in Event["type"]]: Projection<T> } = {
@@ -160,6 +172,12 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         reason: e.reason,
       }),
     ),
+  "thread.worktree.requested": projectWorktree,
+  "thread.worktree.created": projectWorktree,
+  "thread.worktree.failed": projectWorktree,
+  "thread.worktree.setup.ran": projectWorktree,
+  "thread.worktree.removal.requested": projectWorktree,
+  "thread.worktree.removed": projectWorktree,
   "verifier.ran": ({ type: _, v: _v, threadId: _t, turnId, ...run }) => addItem(turnId, { kind: "verifier", ...run }),
   "approval.resolved": (e, at) =>
     withSql(
@@ -218,8 +236,9 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         task_decision: string | null;
         task_mode: string | null;
         cached_tokens: number;
+        worktree: string | null;
       }>`
-        select t.project_id, p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned, t.budget_mode,
+        select t.project_id, p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned, t.budget_mode, t.worktree,
           t.archived_at is not null as archived,
           (select count(*) from turns n where n.thread_id = t.id) as turns,
           (select id from turns n where n.thread_id = t.id order by started_at desc, rowid desc limit 1) as last_turn_id,
@@ -248,6 +267,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           taskEscalations: row.task_escalations,
           pinned: row.pinned === 1,
           archived: row.archived === 1,
+          worktree: row.worktree === null ? null : (JSON.parse(row.worktree) as WorktreeView),
           budgetMode: row.budget_mode,
           taskDecision: row.task_decision === null ? null : (JSON.parse(row.task_decision) as RouteDecision),
           taskPlanned: row.task_mode === "plan",
@@ -277,8 +297,9 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         task_id: TaskId | null;
         source: RouteDecision["source"] | null;
         reason: string | null;
+        worktree: string | null;
       }>`
-        select p.path, t.route, t.session_id, t.running_turn_id, t.pinned, t.archived_at is not null as archived, t.budget_mode,
+        select p.path, t.route, t.session_id, t.running_turn_id, t.pinned, t.archived_at is not null as archived, t.budget_mode, t.worktree,
           t.task_id, d.source, d.reason
         from threads t join projects p on p.id = t.project_id left join route_decisions d on d.task_id = t.task_id
         where t.id = ${threadId}`;
@@ -327,6 +348,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
                 ...(thread.reason === null ? {} : { reason: thread.reason }),
               },
         sessionId: thread.session_id,
+        worktree: thread.worktree === null ? null : (JSON.parse(thread.worktree) as WorktreeView),
         busy: thread.running_turn_id !== null,
         turns: turns.map(
           (t): TurnView => ({

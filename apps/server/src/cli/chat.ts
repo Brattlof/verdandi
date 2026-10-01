@@ -118,7 +118,9 @@ export const chat = async (argv: readonly string[]) => {
   }
   const cwd = process.cwd();
   const threads = readThreads(home);
-  let threadId = picked ?? (threads[cwd] as ThreadId | undefined);
+  // --worktree starts a new thread in a worktree of its own; with --thread, it recreates that thread's worktree.
+  const worktree = argv.includes("--worktree");
+  let threadId = picked ?? (worktree ? undefined : (threads[cwd] as ThreadId | undefined));
   if (!threadId) {
     threadId = uuid<ThreadId>();
     await runtime.runPromise(
@@ -128,6 +130,7 @@ export const chat = async (argv: readonly string[]) => {
         threadId,
         projectPath: cwd,
         ...(picksRoute(argv) ? { route } : {}),
+        ...(worktree && { worktree }),
       }),
     );
     writeFileSync(threadsFile(home), JSON.stringify({ ...threads, [cwd]: threadId }, null, 2));
@@ -211,6 +214,13 @@ export const chat = async (argv: readonly string[]) => {
             const moved = e.to ? `escalated to ${e.to.model} ${e.to.effort}` : "not escalated";
             process.stdout.write(`[${moved}: ${e.reason}]\n`);
           }
+          if (e.type === "thread.worktree.created") process.stdout.write(`[worktree ready at ${e.path}]\n`);
+          if (e.type === "thread.worktree.failed") process.stdout.write(`[worktree: ${e.error}]\n`);
+          if (e.type === "thread.worktree.setup.ran") {
+            const tail = e.passed ? "" : `${e.output.trimEnd().split(/\r?\n/).slice(-10).join("\n")}\n`;
+            process.stdout.write(`[worktree setup ${e.command} ${e.passed ? "passed" : "failed"}]\n${tail}`);
+          }
+          if (e.type === "thread.worktree.removed") process.stdout.write("[worktree removed; its branch is kept]\n");
           if (e.type === "turn.started") running = lastTurn = e.turnId;
           if (e.type === "approval.requested" || e.type === "user-input.requested" || e.type === "plan.requested") addRequest(e);
           if (e.type === "approval.resolved") removeRequest(e.requestId);
@@ -332,6 +342,16 @@ export const chat = async (argv: readonly string[]) => {
   process.stdout.write(
     `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; Ctrl+C stops a turn; /exit quits.\n`,
   );
+  const tree = thread.worktree;
+  if (tree) {
+    const where = tree.path ? ` at ${tree.path}` : "";
+    process.stdout.write(`Worktree on branch ${tree.branch}${where}: ${tree.state}${tree.error ? `. ${tree.error}` : ""}\n`);
+  }
+  if (picked && worktree) await dispatch({ type: "thread.worktree.add", commandId: uuid<CommandId>(), threadId });
+  if (argv.includes("--remove-worktree")) {
+    const force = argv.includes("--force");
+    await dispatch({ type: "thread.worktree.remove", commandId: uuid<CommandId>(), threadId, force });
+  }
   if (thread.archived) {
     process.stdout.write(`This thread is archived, so turns are rejected. Unarchive it with: verdandi chat --unarchive ${threadId}\n`);
   }
