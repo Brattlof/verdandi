@@ -4,6 +4,7 @@ import {
   type SpendSplit,
   type TaskClass,
   type TaskOutcome,
+  type Usage,
   type UsageFilter,
   type UsageReport,
 } from "@verdandi/contracts";
@@ -20,7 +21,8 @@ if (!alwaysOpus) throw new Error("The built-in model catalog has no Claude Code 
 export const periodStart = (days: number | undefined, now: Date) =>
   days === undefined ? null : new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1)).toISOString();
 
-const split = (usage: TaskOutcome["usage"]): SpendSplit => ({
+/** Usage in USD kept apart by access mode: metered was paid, subscription is what the plan covered. */
+export const spendSplit = (usage: readonly Usage[]): SpendSplit => ({
   meteredUsd: usage.reduce((sum, u) => sum + (u.accessMode === "metered" ? u.costUsd : 0), 0),
   subscriptionUsd: usage.reduce((sum, u) => sum + (u.accessMode === "subscription" ? u.costUsd : 0), 0),
 });
@@ -38,7 +40,7 @@ export const summarizeOutcomes = (
   let baselineUsd = 0;
   for (const { taskClass, outcome } of rows) {
     const done = outcome.status === "completed";
-    const cost = split(outcome.usage);
+    const cost = spendSplit(outcome.usage);
     const c = classes.get(taskClass) ?? { tasks: 0, completed: 0, cost: { meteredUsd: 0, subscriptionUsd: 0 } };
     classes.set(taskClass, {
       tasks: c.tasks + 1,

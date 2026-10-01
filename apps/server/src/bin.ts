@@ -5,6 +5,7 @@ import { costs } from "./cli/costs.ts";
 import { doctor } from "./cli/doctor.ts";
 import { open } from "./cli/open.ts";
 import { routing } from "./cli/routing.ts";
+import { run } from "./cli/run.ts";
 import { search } from "./cli/search.ts";
 import { requireBun } from "./config/bun-version.ts";
 import { start } from "./main.ts";
@@ -17,12 +18,23 @@ const usage = `Usage:
   verdandi chat  --list [--archived] [--home <dir>]  list every thread by project; --archived includes archived ones
   verdandi chat  --archive <thread> | --unarchive <thread> [--home <dir>]   put a thread away, or bring it back
   verdandi chat  --worktree [--thread <id>] | --remove-worktree [--force]   start a new thread in a git worktree of its own (with --thread, recreate that thread's removed worktree), or remove the thread's worktree and keep its branch
+  verdandi run <task> [--project <path> | --thread <id>] [--mode ask|plan|build] [--route auto|<harness>/<model>/<effort>] [--deny-requests] [--json] [--home <dir>]   send one turn headless, on a new thread in --project (default: this folder) or on the thread named, and print the agent's text; --route pins the thread to a route or with auto lets the router pick; the agent's requests stop the run unless --deny-requests denies them, and nothing is ever approved; --json prints one object at the end instead (threadId, turnId, taskId, status, route, cost, reply, error); Ctrl+C interrupts the turn. Exits 0 completed, 1 couldn't run it, 2 bad flags, 3 failed (an agent error or a failed verifier), 4 stopped at a task limit, 5 the agent asked for approval or an answer, 130 interrupted
   verdandi costs [--home <dir>] [--days <n>] [--project <path>]   cost per completed task on each route, then spend, cost by task class, usage by model, override rate and estimated savings vs always-Opus
   verdandi search <query> [--project <path>] [--home <dir>]   find past sessions' messages containing the query (3 characters or more), newest first, archived threads included
   verdandi batch <evalset.yaml> [--route auto|<harness>/<model>/<effort>]... [--dry-run] [--approve] [--timeout <minutes>] [--keep] [--home <dir>]   run an eval set's tasks on each route (default: auto, claude-code/opus/medium, claude-code/sonnet/high) in throwaway copies of their repositories, and compare success rate and cost per passed task; --dry-run only estimates, --approve allows what agents ask to do (otherwise denied)
   verdandi routing replay [--policy <file>] [--project <path>] [--home <dir>]   how saved tasks would route under a proposed policy (or each project's current one), with the estimated cost change; reads the database read-only`;
 
-const commands: Record<string, (argv: readonly string[]) => Promise<void>> = { start, open, chat, doctor, costs, routing, batch, search };
+const commands: Record<string, (argv: readonly string[]) => Promise<void>> = {
+  start,
+  open,
+  chat,
+  run,
+  doctor,
+  costs,
+  routing,
+  batch,
+  search,
+};
 
 const [name, ...argv] = Bun.argv.slice(2);
 const command = name === undefined ? undefined : commands[name];
