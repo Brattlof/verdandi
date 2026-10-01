@@ -13,5 +13,6 @@ export * from "./routing.ts";
 export * from "./rpc.ts";
 export * from "./spend.ts";
 export * from "./task.ts";
+export * from "./terminal.ts";
 export * from "./trajectory.ts";
 export * from "./worktree.ts";

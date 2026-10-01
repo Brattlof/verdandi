@@ -1,4 +1,6 @@
 @import "tailwindcss" source("../");
+/* xterm.js's own layout rules: the terminal panel's screen, scrollbar and accessibility tree. */
+@import "@xterm/xterm/css/xterm.css";
 
 /*
  * Bundled with the page, never fetched from a font service. Only the Latin subsets (from Fontsource's

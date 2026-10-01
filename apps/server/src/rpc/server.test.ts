@@ -2,13 +2,15 @@ import { Database } from "bun:sqlite";
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
-import type { CommandId, ProjectsFeed, TaskId, ThreadFeed, ThreadId, TurnId } from "@verdandi/contracts";
+import type { CommandId, ProjectsFeed, TaskId, TerminalId, TerminalView, ThreadFeed, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
-import { Deferred, Effect, Fiber, ManagedRuntime, Stream } from "effect";
+import { Deferred, type Duration, Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { alive } from "../config/home.ts";
 import { spendCapsFile } from "../config/spend-caps.ts";
 import { projectIdFor } from "../orchestration/decider.ts";
 import { Reactor } from "../orchestration/reactor.ts";
+import { Terminals } from "../workspace/terminals.ts";
 import { connect } from "./client.ts";
 import { ServerInfo, ServerLayer } from "./server.ts";
 
@@ -48,11 +50,48 @@ const withClient = <A, E>(port: number, token: string, f: (client: Effect.Succes
   Effect.runPromise(Effect.scoped(Effect.flatMap(connect({ port, token }), f)));
 
 /** Fails with the step's name instead of hanging until the test timeout, so a CI hang says where it stuck. */
-const step = <A, E>(label: string, e: Effect.Effect<A, E>) =>
-  e.pipe(Effect.timeoutOrElse({ duration: "2 seconds", orElse: () => Effect.die(`step timed out: ${label}`) }));
+const step = <A, E>(label: string, e: Effect.Effect<A, E>, duration: Duration.Input = "2 seconds") =>
+  e.pipe(Effect.timeoutOrElse({ duration, orElse: () => Effect.die(`step timed out: ${label}`) }));
 
 const createThread = (client: Effect.Success<ReturnType<typeof connect>>, threadId: ThreadId) =>
   client.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: folder, route });
+
+type Client = Effect.Success<ReturnType<typeof connect>>;
+
+/**
+ * Follows a terminal's feed in the background, recording what it shows. `until` waits for the recording to
+ * pass a check; `stop` unsubscribes and waits for the feed to end, as does closing the terminal.
+ */
+const followTerminal = (c: Client, terminalId: TerminalId) =>
+  Effect.gen(function* () {
+    const subscriptionId = crypto.randomUUID();
+    const seen = { snapshot: undefined as string | undefined, output: "", ended: undefined as TerminalView | undefined };
+    const waiters = new Set<{ readonly check: () => boolean; readonly done: Deferred.Deferred<void> }>();
+    const wake = Effect.suspend(() => Effect.forEach([...waiters], (w) => (w.check() ? Deferred.succeed(w.done, undefined) : Effect.void)));
+    const fiber = yield* c.TerminalSubscribe({ terminalId, subscriptionId }).pipe(
+      Stream.runForEach((f) => {
+        if (f.kind === "snapshot") seen.snapshot = f.output;
+        if (f.kind === "ended") seen.ended = f.terminal;
+        seen.output += f.kind === "snapshot" ? f.output : f.kind === "output" ? f.data : "";
+        return wake;
+      }),
+      Effect.forkChild,
+    );
+    const until = (check: () => boolean) =>
+      Effect.gen(function* () {
+        const done = yield* Deferred.make<void>();
+        waiters.add({ check, done });
+        if (check()) return;
+        yield* Deferred.await(done);
+      });
+    const stop = Effect.andThen(c.Unsubscribe({ subscriptionId }), Fiber.join(fiber));
+    return { seen, until, stop, ended: Fiber.join(fiber) };
+  });
+
+/** Prints `verdandi-<n * 7>`, which the typed command line itself never shows. */
+const echo = (n: number) => (process.platform === "win32" ? `Write-Output ("verdandi-" + ${n}*7)\r` : `echo verdandi-$((${n}*7))\r`);
+/** A shell's start reads the user's profile, which can take a while. */
+const shellStart = "15 seconds";
 
 describe("rpc server", () => {
   test("shuts down while a client is still connected", async () => {
@@ -677,5 +716,88 @@ describe("rpc server", () => {
       expect.stringContaining("is a file"),
       expect.stringContaining("not an absolute path"),
     ]);
+  });
+
+  test("a terminal runs in the thread's folder, survives a reload, and closing it leaves no shell behind", async () => {
+    const { info } = await startServer();
+    const threadId = uuid<ThreadId>();
+    const opened = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        yield* step("create", createThread(c, threadId));
+        const terminal = yield* step("open", c.TerminalOpen({ threadId, cols: 80, rows: 24 }), shellStart);
+        const feed = yield* followTerminal(c, terminal.terminalId);
+        yield* c.TerminalWrite({ terminalId: terminal.terminalId, data: echo(6) });
+        yield* step(
+          "echo",
+          feed.until(() => feed.seen.output.includes("verdandi-42")),
+          shellStart,
+        );
+        yield* step("unsubscribe", feed.stop);
+        return terminal;
+      }),
+    );
+    expect(opened.cwd).toBe(realpathSync.native(folder));
+    expect(alive(opened.pid)).toBe(true);
+
+    // A reloaded page: a new connection finds the terminal, gets its output so far, then live output.
+    const [listed, replayed, after] = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        const listed = yield* c.TerminalList({ threadId });
+        const feed = yield* followTerminal(c, opened.terminalId);
+        yield* step(
+          "snapshot",
+          feed.until(() => feed.seen.snapshot !== undefined),
+        );
+        yield* c.TerminalWrite({ terminalId: opened.terminalId, data: echo(8) });
+        yield* step(
+          "live echo",
+          feed.until(() => feed.seen.output.includes("verdandi-56")),
+        );
+        yield* step("close", c.TerminalClose({ terminalId: opened.terminalId }), shellStart);
+        yield* step("feed ends", feed.ended);
+        return [listed, feed.seen.snapshot, yield* c.TerminalList({ threadId })] as const;
+      }),
+    );
+    expect(listed.map((t) => [t.terminalId, t.status])).toEqual([[opened.terminalId, "running"]]);
+    expect(replayed).toContain("verdandi-42");
+    expect(after).toEqual([]);
+    expect(alive(opened.pid)).toBe(false);
+  });
+
+  test("a crashed PTY host loses its terminals but not verdandid, and stopping verdandid ends every shell", async () => {
+    const { info, runtime } = await startServer();
+    const hostPid = () =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          return (yield* Terminals).hostPid();
+        }),
+      );
+    const threadId = uuid<ThreadId>();
+    const [lost, second] = await withClient(info.port, info.token, (c) =>
+      Effect.gen(function* () {
+        yield* step("create", createThread(c, threadId));
+        const first = yield* step("open", c.TerminalOpen({ threadId, cols: 80, rows: 24 }), shellStart);
+        const feed = yield* followTerminal(c, first.terminalId);
+        yield* step(
+          "snapshot",
+          feed.until(() => feed.seen.snapshot !== undefined),
+        );
+        const crashed = yield* Effect.promise(hostPid);
+        if (crashed === undefined) return yield* Effect.die("no PTY host is running");
+        process.kill(crashed, "SIGKILL"); // the host's PID, captured when verdandid started it
+        yield* step(
+          "lost",
+          feed.until(() => feed.seen.ended !== undefined),
+        );
+        const second = yield* step("reopen", c.TerminalOpen({ threadId, cols: 80, rows: 24 }), shellStart);
+        expect(yield* Effect.promise(hostPid)).not.toBe(crashed);
+        yield* step("unsubscribe", feed.stop);
+        return [feed.seen.ended, second] as const;
+      }),
+    );
+    expect(lost).toMatchObject({ status: "lost", exitCode: null });
+    expect(alive(second.pid)).toBe(true);
+    await runtime.dispose();
+    expect(alive(second.pid)).toBe(false);
   });
 });

@@ -161,33 +161,41 @@ export const applyProjectsFeed = (sidebar: Sidebar | undefined, feed: ProjectsFe
 };
 
 /**
- * The right panel. Open, it shows a diff: what `turnId` changed, or with `all` everything since
+ * The right panel, on its Diff or Terminal tab. The diff is what `turnId` changed, or with `all` everything since
  * the thread's first turn. `turnId` is kept while `all` is on, so switching back shows the same turn. Each fetch
  * has its own `request`, and a result for any other request is dropped, so a slow answer never
- * replaces a newer one.
+ * replaces a newer one. Opened on the Terminal tab, no diff is fetched (`request` is empty) until the Diff tab is chosen.
  */
-export type DiffPanel =
+export type Panel =
   | { readonly open: false }
   | {
       readonly open: true;
+      readonly tab: "diff" | "terminal";
       readonly turnId: TurnId | undefined;
       readonly all: boolean;
       readonly request: string;
       readonly result: { readonly ok: true; readonly view: DiffView } | { readonly ok: false; readonly message: string } | undefined;
     };
+export type OpenPanel = Extract<Panel, { open: true }>;
 
-export type DiffPanelAction =
+export type PanelAction =
   | { readonly type: "fetch"; readonly turnId: TurnId | undefined; readonly all: boolean; readonly request: string }
-  | { readonly type: "result"; readonly request: string; readonly result: NonNullable<Extract<DiffPanel, { open: true }>["result"]> }
+  | { readonly type: "result"; readonly request: string; readonly result: NonNullable<OpenPanel["result"]> }
+  | { readonly type: "terminal" }
   | { readonly type: "close" };
 
-export const closedPanel: DiffPanel = { open: false };
+export const closedPanel: Panel = { open: false };
 
-export const applyDiffPanel = (panel: DiffPanel, action: DiffPanelAction): DiffPanel => {
+export const applyPanel = (panel: Panel, action: PanelAction): Panel => {
   if (action.type === "close") return closedPanel;
+  if (action.type === "terminal")
+    return panel.open
+      ? { ...panel, tab: "terminal" }
+      : { open: true, tab: "terminal", turnId: undefined, all: true, request: "", result: undefined };
   if (action.type === "fetch")
     return {
       open: true,
+      tab: "diff",
       turnId: action.turnId,
       all: action.all || action.turnId === undefined,
       request: action.request,

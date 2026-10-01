@@ -9,6 +9,7 @@ import {
   type RouteDecision,
   RoutingUnavailable,
   SpendCapsUnavailable,
+  TerminalUnavailable,
 } from "@verdandi/contracts";
 import web from "@verdandi/web/index.html";
 import { Context, Deferred, Effect, Layer, Result, Stream } from "effect";
@@ -28,6 +29,8 @@ import { decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/
 import { attachmentPath, attachmentsDir, storeAttachments } from "../workspace/attachments.ts";
 import { threadDiff } from "../workspace/diff.ts";
 import { resolveProjectPath } from "../workspace/project.ts";
+import { Terminals, TerminalsLive } from "../workspace/terminals.ts";
+import { loadThreadFolder } from "../workspace/worktree.ts";
 
 /** Where the running server listens, and the token clients must present. */
 export class ServerInfo extends Context.Service<ServerInfo, { readonly port: number; readonly token: string }>()("verdandi/ServerInfo") {}
@@ -38,6 +41,7 @@ const Handlers = (home: string) =>
       const engine = yield* Engine;
       const sql = yield* SqlClient.SqlClient;
       const registry = yield* HarnessRegistry;
+      const terminals = yield* Terminals;
       const harnesses = Object.keys(registry) as HarnessId[];
       const routing = routingFor(registry);
       const subscriptions = new Map<string, Deferred.Deferred<void>>();
@@ -128,6 +132,21 @@ const Handlers = (home: string) =>
             if (Result.isFailure(decided)) return yield* new RoutingUnavailable(decided.failure);
             return decided.success;
           }),
+        TerminalOpen: ({ threadId, cols, rows }) =>
+          loadThreadFolder(threadId).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.catchTag("SqlError", Effect.die),
+            Effect.flatMap((cwd) =>
+              cwd === undefined
+                ? Effect.fail(new TerminalUnavailable({ reason: "ThreadNotFound", message: `Thread ${threadId} does not exist.` }))
+                : terminals.open(threadId, cwd, cols, rows),
+            ),
+          ),
+        TerminalList: ({ threadId }) => Effect.sync(() => terminals.list(threadId)),
+        TerminalWrite: ({ terminalId, data }) => terminals.write(terminalId, data),
+        TerminalResize: ({ terminalId, cols, rows }) => terminals.resize(terminalId, cols, rows),
+        TerminalClose: ({ terminalId }) => terminals.close(terminalId),
+        TerminalSubscribe: ({ terminalId, subscriptionId }) => untilUnsubscribed(subscriptionId, terminals.feed(terminalId)),
       };
     }),
   );
@@ -226,5 +245,5 @@ export const ServerLayer = (
       return { port: address.port, token };
     }),
   );
-  return info.pipe(Layer.provideMerge(http), Layer.provideMerge(AppLayer(home, harnesses)));
+  return info.pipe(Layer.provideMerge(http), Layer.provideMerge(TerminalsLive), Layer.provideMerge(AppLayer(home, harnesses)));
 };

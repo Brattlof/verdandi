@@ -11,6 +11,8 @@ import {
   type SpendCap,
   SpendCapsUnavailable,
   type TaskId,
+  type TerminalId,
+  TerminalUnavailable,
   type ThreadId,
   type TurnId,
   type UsageFilter,
@@ -150,6 +152,24 @@ export const connect = (token: string) => {
     return url;
   };
 
+  /** A terminal call's answer; a `TerminalUnavailable` message names the fix. */
+  const terminalCall = async <A>(
+    call: (rpc: Rpc) => Effect.Effect<A, unknown>,
+  ): Promise<{ readonly ok: true; readonly value: A } | { readonly ok: false; readonly message: string }> => {
+    const exit = await run(call);
+    if (Exit.isSuccess(exit)) return { ok: true, value: exit.value };
+    const unavailable = failure(exit.cause, TerminalUnavailable);
+    return unavailable ? { ok: false, message: unavailable.message } : disconnected;
+  };
+  /** The thread's terminals, which outlive the page: open, list, type, resize and close them. Their output is a feed. */
+  const terminals = {
+    open: (threadId: ThreadId, cols: number, rows: number) => terminalCall((rpc) => rpc.TerminalOpen({ threadId, cols, rows })),
+    list: (threadId: ThreadId) => terminalCall((rpc) => rpc.TerminalList({ threadId })),
+    write: (terminalId: TerminalId, data: string) => terminalCall((rpc) => rpc.TerminalWrite({ terminalId, data })),
+    resize: (terminalId: TerminalId, cols: number, rows: number) => terminalCall((rpc) => rpc.TerminalResize({ terminalId, cols, rows })),
+    close: (terminalId: TerminalId) => terminalCall((rpc) => rpc.TerminalClose({ terminalId })),
+  };
+
   /** The spend caps over the thread's project and profile, and what each has spent this period. */
   const spendCaps = async (
     threadId: ThreadId,
@@ -176,6 +196,8 @@ export const connect = (token: string) => {
     open: (rpc: Rpc, subscriptionId: string) => Stream.Stream<A, E>,
     onMessage: (message: A) => void,
     onRejected: (message: string) => void,
+    /** The error class whose message `onRejected` gets; any other failure sets `lost`. */
+    known: abstract new (...args: never[]) => { readonly message: string } = CommandRejected,
   ) => {
     const subscriptionId = uuid();
     const started = Promise.withResolvers<void>();
@@ -192,7 +214,7 @@ export const connect = (token: string) => {
     ).then((exit) => {
       ended = true;
       started.resolve();
-      const rejected = Exit.isFailure(exit) ? failure(exit.cause, CommandRejected) : undefined;
+      const rejected = Exit.isFailure(exit) ? failure(exit.cause, known) : undefined;
       if (rejected) onRejected(rejected.message);
     });
     return () => {
@@ -209,6 +231,6 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, follow, harnesses, lost };
+  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, terminals, follow, harnesses, lost };
 };
 export type Connection = ReturnType<typeof connect>;
