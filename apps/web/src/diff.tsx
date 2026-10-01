@@ -58,7 +58,7 @@ const signs: Partial<Record<LineKind, string>> = { add: "added: ", del: "removed
 const rowClass: Record<LineKind | "file" | "note", string> = {
   add: "bg-added",
   del: "bg-removed",
-  hunk: "bg-panel text-accent",
+  hunk: "bg-bg text-accent",
   meta: "text-muted",
   context: "",
   file: "pt-3",
@@ -118,7 +118,7 @@ export const TextDiff = ({ before, after }: { before: string; after: string }) =
 );
 
 const tabClass =
-  "rounded-none border-0 border-b-2 border-transparent bg-transparent px-1 text-xs text-muted hover:bg-transparent hover:text-fg data-active:border-accent data-active:text-fg";
+  "eyebrow rounded-none border-0 border-b-2 border-transparent bg-transparent px-1 text-muted hover:bg-transparent hover:text-fg data-active:border-fg data-active:text-fg";
 
 /**
  * The right panel: the Diff, Terminal and Memory tabs. The diff is fetched when asked, never on its own,
@@ -162,15 +162,15 @@ export const SidePanel = ({
       onKeyDown={(e) => e.key === "Escape" && !(e.target instanceof Element && e.target.closest(".xterm")) && onClose()}
       aria-label="Side panel"
       tabIndex={-1}
-      className="fixed inset-0 z-40 flex min-w-0 bg-bg outline-none md:static md:z-auto md:w-[min(50%,760px)] md:border-l md:border-line"
+      className="fixed inset-0 z-40 flex min-w-0 bg-panel outline-none md:static md:z-auto md:w-[min(50%,760px)] md:border-l md:border-line"
     >
       <Tabs.Root
         value={panel.tab}
         onValueChange={(tab) => (tab === "terminal" || tab === "memory" ? onTab(tab) : onFetch(panel.turnId, panel.all))}
         className="flex min-w-0 flex-1 flex-col"
       >
-        <div className="flex min-h-12 items-center justify-between border-b border-line px-3">
-          <Tabs.List aria-label="Panel" className="flex gap-3">
+        <div className="flex min-h-14 items-center justify-between border-b border-line px-4">
+          <Tabs.List aria-label="Panel" className="flex gap-5">
             <Tabs.Tab value="diff" className={tabClass}>
               Diff
             </Tabs.Tab>
@@ -181,14 +181,14 @@ export const SidePanel = ({
               Memory
             </Tabs.Tab>
           </Tabs.List>
-          <button type="button" className="px-2 text-xs" onClick={onClose}>
+          <button type="button" className="border-transparent bg-transparent px-2 text-xs text-muted hover:text-fg" onClick={onClose}>
             <CloseIcon className="size-3.5" />
             Close
           </button>
         </div>
         <Tabs.Panel value="diff" className="flex min-h-0 flex-1 flex-col">
           <div className="flex flex-wrap items-center justify-between gap-2 px-3 pt-2">
-            <fieldset className="flex rounded-lg border border-line bg-panel p-0.5">
+            <fieldset className="flex rounded-md border border-line bg-bg p-0.5">
               <legend className="sr-only">Show</legend>
               <label className="inline-flex min-h-6 items-center rounded-md px-2.5 text-xs font-medium text-muted hover:text-fg has-checked:bg-card has-checked:text-fg has-checked:shadow-[inset_0_0_0_1px_var(--color-line-strong)] has-focus-visible:outline-2 has-focus-visible:outline-accent has-disabled:opacity-45 pointer-coarse:min-h-10">
                 <input
@@ -272,7 +272,7 @@ const DiffList = ({ rows, onToggle }: { rows: readonly DiffRow[]; onToggle: (pat
               {row.kind === "file" ? (
                 <button
                   type="button"
-                  className="w-full justify-start rounded-md border-line bg-panel px-2 text-left font-semibold [overflow-wrap:anywhere]"
+                  className="w-full justify-start rounded border-line bg-bg px-2 text-left font-semibold [overflow-wrap:anywhere]"
                   aria-expanded={row.expanded}
                   onClick={() => onToggle(row.path)}
                 >

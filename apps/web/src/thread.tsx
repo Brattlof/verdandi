@@ -14,15 +14,21 @@ import {
 } from "@verdandi/contracts";
 import { memo, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ArchiveButton } from "./archive.tsx";
+import { Longship } from "./art.tsx";
 import { TurnAttachments } from "./attachments.tsx";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
 import { SidePanel, TextDiff } from "./diff.tsx";
-import { ChevronIcon, DiffIcon, TerminalIcon, ThumbDownIcon, ThumbUpIcon } from "./icons.tsx";
+import { ChevronIcon, ThumbDownIcon, ThumbUpIcon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { RouteMarkers } from "./route.tsx";
+import { Rune } from "./runes.tsx";
 import { applyPanel, applyThreadFeed, closedPanel, type LiveThread, type LiveTurn } from "./state.ts";
 import { WorktreeBar } from "./worktree.tsx";
+
+/** The header's quiet buttons: words with an icon, on the sky surface while their panel is open. */
+const headerButton =
+  "border-transparent bg-transparent px-2 text-xs text-muted hover:text-fg aria-pressed:bg-user aria-pressed:text-accent";
 
 export const ThreadPane = ({
   connection,
@@ -89,43 +95,54 @@ export const ThreadPane = ({
   return (
     <div className="flex min-h-0 flex-1">
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-line px-4 py-1.5">
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate font-medium">{thread.turns[0]?.text.split("\n", 1)[0] || "New thread"}</h1>
+        <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-panel px-4 py-2">
+          <div className="min-w-0 flex-1 basis-60">
+            <h1 className="truncate font-serif text-xl leading-tight font-semibold">
+              {thread.turns[0]?.text.split("\n", 1)[0] || "New thread"}
+            </h1>
             <p title={thread.worktree?.path ?? thread.projectPath} className="truncate font-mono text-xs text-muted">
               {thread.projectPath}
               {thread.worktree && <span> · worktree on {thread.worktree.branch}</span>}
             </p>
           </div>
-          {!thread.busy && (
-            <ArchiveButton connection={connection} threadId={threadId} archived={thread.archived} onError={setArchiveError} />
-          )}
-          <button
-            type="button"
-            className="px-2 text-xs aria-pressed:border-accent aria-pressed:text-accent"
-            aria-pressed={panel.open && panel.tab === "diff"}
-            onClick={() => (panel.open && panel.tab === "diff" ? setPanel({ type: "close" }) : fetchDiff(lastFinished?.turnId, true))}
-          >
-            <DiffIcon className="size-3.5" />
-            Diff
-          </button>
-          <button
-            type="button"
-            className="px-2 text-xs aria-pressed:border-accent aria-pressed:text-accent"
-            aria-pressed={panel.open && panel.tab === "terminal"}
-            onClick={() => setPanel(panel.open && panel.tab === "terminal" ? { type: "close" } : { type: "tab", tab: "terminal" })}
-          >
-            <TerminalIcon className="size-3.5" />
-            Terminal
-          </button>
-          <button
-            type="button"
-            className="px-2 text-xs aria-pressed:border-accent aria-pressed:text-accent"
-            aria-pressed={panel.open && panel.tab === "memory"}
-            onClick={() => setPanel(panel.open && panel.tab === "memory" ? { type: "close" } : { type: "tab", tab: "memory" })}
-          >
-            Memory
-          </button>
+          <span className="flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              className={headerButton}
+              aria-pressed={panel.open && panel.tab === "diff"}
+              onClick={() => (panel.open && panel.tab === "diff" ? setPanel({ type: "close" }) : fetchDiff(lastFinished?.turnId, true))}
+            >
+              <Rune name="eihwaz" className="size-3.5" />
+              Diff
+            </button>
+            <button
+              type="button"
+              className={headerButton}
+              aria-pressed={panel.open && panel.tab === "terminal"}
+              onClick={() => setPanel(panel.open && panel.tab === "terminal" ? { type: "close" } : { type: "tab", tab: "terminal" })}
+            >
+              <Rune name="thurisaz" className="size-3.5" />
+              Terminal
+            </button>
+            <button
+              type="button"
+              className={headerButton}
+              aria-pressed={panel.open && panel.tab === "memory"}
+              onClick={() => setPanel(panel.open && panel.tab === "memory" ? { type: "close" } : { type: "tab", tab: "memory" })}
+            >
+              <Rune name="mannaz" className="size-3.5" />
+              Memory
+            </button>
+            {!thread.busy && (
+              <ArchiveButton
+                connection={connection}
+                threadId={threadId}
+                archived={thread.archived}
+                className={headerButton}
+                onError={setArchiveError}
+              />
+            )}
+          </span>
         </header>
         {thread.worktree && <WorktreeBar connection={connection} threadId={threadId} worktree={thread.worktree} busy={thread.busy} />}
         {(thread.archived || archiveError) && (
@@ -260,7 +277,9 @@ const Conversation = ({
     >
       {turns.length === 0 && (
         <div className="mx-auto max-w-[860px] px-4 pt-16 text-center">
-          <h2 className="font-mono text-sm font-semibold">Start the conversation</h2>
+          <Longship className="mx-auto mb-4 size-20 text-line-strong" />
+          <h2 className="font-serif text-3xl font-semibold">Start the conversation</h2>
+          <p className="mt-2 font-serif text-lg">Every thread is spun one turn at a time.</p>
           <p className="mt-1 text-muted">
             Ask a question, plan a change or build it. Unless you pin a route, the router picks one when you send.
           </p>
@@ -317,8 +336,8 @@ const statusColor: Record<LiveTurn["status"], readonly [string, string]> = {
 
 /** The user's words sit on the right, the agent's work runs full width beneath. */
 const UserBubble = ({ label, children }: { label: string; children: ReactNode }) => (
-  <div className="my-2 ml-auto w-fit max-w-[85%] rounded-lg rounded-br-sm bg-user px-3 py-2">
-    <span className="block text-xs text-muted">{label}</span>
+  <div className="my-2 ml-auto w-fit max-w-[85%] rounded-md bg-user px-4 py-2.5">
+    <span className="eyebrow block text-muted">{label}</span>
     {children}
   </div>
 );
@@ -374,25 +393,17 @@ const TurnStatus = ({ turn, revertable, task, onChanges, onRevert, onRate }: Tur
   const [reverting, setReverting] = useState(false);
   return (
     <footer className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-2 text-xs text-muted">
-      <span className={`flex items-center gap-1.5 font-medium ${text}`}>
+      <span className={`eyebrow flex items-center gap-1.5 ${text}`}>
         <span aria-hidden className={`size-1.5 rounded-full ${dot}`} />
         {statusText[turn.status]}
       </span>
       {turn.status !== "running" && (
-        <button
-          type="button"
-          className="border-0 bg-transparent p-0 font-normal text-accent underline underline-offset-2 hover:bg-transparent"
-          onClick={() => onChanges(turn.turnId)}
-        >
+        <button type="button" className="caps-link text-fg" onClick={() => onChanges(turn.turnId)}>
           Changes
         </button>
       )}
       {revertable && !reverting && (
-        <button
-          type="button"
-          className="border-0 bg-transparent p-0 font-normal text-accent underline underline-offset-2 hover:bg-transparent"
-          onClick={() => setReverting(true)}
-        >
+        <button type="button" className="caps-link text-fg" onClick={() => setReverting(true)}>
           Revert to here
         </button>
       )}
@@ -503,8 +514,8 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
   ),
   // A plan approved with the user's edit shows the edit against the proposal.
   plan: ({ item }) => (
-    <div className="my-3 rounded-lg border border-line border-l-2 border-l-accent bg-card px-3 py-2">
-      <span className="font-mono text-[11px] font-semibold tracking-wider text-accent uppercase">
+    <div className="my-3 border border-line border-l-2 border-l-accent bg-card px-4 py-3">
+      <span className="eyebrow text-accent">
         Plan
         <span className="font-normal tracking-normal text-muted normal-case">
           {item.edited === undefined ? "" : " · approved with your edits"}
@@ -530,19 +541,19 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
     </p>
   ),
   blocked: ({ item }) => (
-    <p role="note" className="my-2 rounded-md border border-line border-l-2 border-l-warn bg-panel px-2 py-1 text-xs">
+    <p role="note" className="my-2 border border-line border-l-2 border-l-warn bg-card px-3 py-1.5 text-xs">
       <span className="font-medium text-warn">The agent is blocked: </span>
       {item.reason}
     </p>
   ),
   notice: ({ item }) => (
-    <p role="note" className="my-2 rounded-md border border-line bg-panel px-2 py-1 text-xs text-warn">
+    <p role="note" className="my-2 border border-line bg-card px-3 py-1.5 text-xs text-warn">
       {item.text}
     </p>
   ),
   verifier: ({ item }) => (
-    <details className="my-1.5 rounded-md border border-line bg-panel">
-      <summary className="flex list-none items-center gap-2 rounded-md px-2 py-1 font-mono text-xs hover:bg-hover [&::-webkit-details-marker]:hidden">
+    <details className="my-1.5 rounded border border-line bg-card">
+      <summary className="flex list-none items-center gap-2 rounded px-2 py-1 font-mono text-xs hover:bg-hover [&::-webkit-details-marker]:hidden">
         <ChevronIcon className="size-3.5 text-muted [details[open]>summary>&]:rotate-90" />
         <span className="font-semibold">Verifier</span>
         <span className="min-w-0 flex-1 truncate text-muted">{item.command}</span>
@@ -564,8 +575,8 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
     const result = tree.results.get(item.toolUseId);
     const steps = tree.children.get(item.toolUseId);
     return (
-      <details className="my-1.5 rounded-md border border-line bg-panel">
-        <summary className="flex list-none items-center gap-2 rounded-md px-2 py-1 font-mono text-xs hover:bg-hover [&::-webkit-details-marker]:hidden">
+      <details className="my-1.5 rounded border border-line bg-card">
+        <summary className="flex list-none items-center gap-2 rounded px-2 py-1 font-mono text-xs hover:bg-hover [&::-webkit-details-marker]:hidden">
           <ChevronIcon className="size-3.5 text-muted [details[open]>summary>&]:rotate-90" />
           <span className="font-semibold">{item.name}</span>
           <span className="min-w-0 flex-1 truncate text-muted">{summarize(item.input)}</span>

@@ -210,6 +210,27 @@ export const applyProjectsFeed = (sidebar: Sidebar | undefined, feed: ProjectsFe
   return { ...sidebar, projects, threads };
 };
 
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+/**
+ * The sidebar's sections, by each thread's last activity in local time: Today, Yesterday, Previous 7 days,
+ * Previous 30 days, then one per month. `threads` come newest first, and so do the sections.
+ */
+export const groupByRecency = (threads: readonly ThreadSummary[], now: Date) => {
+  const today = startOfDay(now);
+  const label = (iso: string) => {
+    const at = new Date(iso);
+    // Rounded, since a day across a daylight-saving change is 23 or 25 hours long.
+    const days = Math.round((today - startOfDay(at)) / 86_400_000);
+    if (days <= 0) return "Today";
+    if (days === 1) return "Yesterday";
+    if (days < 7) return "Previous 7 days";
+    if (days < 30) return "Previous 30 days";
+    return at.toLocaleDateString([], at.getFullYear() === now.getFullYear() ? { month: "long" } : { month: "long", year: "numeric" });
+  };
+  return [...Map.groupBy(threads, (t) => label(t.lastActivityAt))].map(([label, threads]) => ({ label, threads }));
+};
+
 /**
  * The right panel, on its Diff, Terminal or Memory tab. The diff is what `turnId` changed, or with `all` everything since
  * the thread's first turn. `turnId` is kept while `all` is on, so switching back shows the same turn. Each fetch

@@ -8,7 +8,9 @@ import {
   type UsageReport,
 } from "@verdandi/contracts";
 import { type ReactNode, useEffect, useState } from "react";
+import { Plait } from "./art.tsx";
 import type { Connection } from "./client.ts";
+import { RuneText } from "./runes.tsx";
 
 const periods: { days: number | undefined; label: string }[] = [
   { days: 7, label: "Last 7 days" },
@@ -61,9 +63,15 @@ export const Dashboard = ({ connection, projects }: { connection: Connection; pr
   }, [connection, filter, refreshes]);
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-[1040px] px-4 py-5 sm:px-6">
-        <header className="mb-5 flex flex-wrap items-center gap-3">
-          <h1 className="mr-auto font-mono text-lg font-semibold">Spend</h1>
+      <div className="mx-auto max-w-[1040px] px-5 py-10 sm:px-8 sm:py-14">
+        <header className="mb-6 flex flex-wrap items-end gap-3">
+          <div className="relative mr-auto">
+            <p className="flex items-center gap-3 text-rune">
+              <RuneText runes={["fehu"]} className="h-4" />
+              <span className="eyebrow text-muted">Fehu · wealth</span>
+            </p>
+            <h1 className="mt-3 font-serif text-5xl leading-[0.95] font-bold tracking-tight uppercase sm:text-6xl">Spend</h1>
+          </div>
           <label className="flex items-center gap-1.5 text-xs text-muted">
             Project
             <select
@@ -106,6 +114,7 @@ export const Dashboard = ({ connection, projects }: { connection: Connection; pr
             <span className="text-xs text-muted">as of {report.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
           )}
         </header>
+        <Plait className="mb-8 text-rune" />
         {report ? (
           <UsageView report={report.report} today={report.at} />
         ) : (
@@ -118,19 +127,20 @@ export const Dashboard = ({ connection, projects }: { connection: Connection; pr
   );
 };
 
-const Tile = ({ label, value, note }: { label: string; value: string; note: string }) => (
-  <div className="flex flex-col rounded-xl border border-line bg-card px-4 py-3">
-    <dt className="font-mono text-[11px] font-semibold tracking-wider text-muted uppercase">{label}</dt>
-    <dd className="mt-1 text-2xl font-semibold tabular-nums">{value}</dd>
-    <dd className="mt-1 text-xs text-muted">{note}</dd>
+/** One total: a large figure under its label. `lead` puts it on the sky surface, as the figure that matters most. */
+const Tile = ({ label, value, note, lead = false }: { label: string; value: string; note: string; lead?: boolean }) => (
+  <div className={`flex flex-col border border-line px-5 py-4 ${lead ? "bg-user" : "bg-card"}`}>
+    <dt className="eyebrow text-muted">{label}</dt>
+    <dd className="mt-2 font-serif text-4xl leading-none font-semibold tabular-nums">{value}</dd>
+    <dd className="mt-2 text-xs text-muted">{note}</dd>
   </div>
 );
 
 /** A titled card for one part of the report. */
 const Panel = ({ id, title, legend, children }: { id: string; title: string; legend?: ReactNode; children: ReactNode }) => (
-  <section aria-labelledby={id} className="mb-4 rounded-xl border border-line bg-card px-4 py-3">
-    <div className="mb-2 flex flex-wrap items-baseline gap-3">
-      <h2 id={id} className="mr-auto text-sm font-semibold">
+  <section aria-labelledby={id} className="mb-4 border border-line bg-card px-5 py-4">
+    <div className="mb-3 flex flex-wrap items-baseline gap-3">
+      <h2 id={id} className="mr-auto font-serif text-xl font-semibold">
         {title}
       </h2>
       {legend}
@@ -148,6 +158,7 @@ export const UsageView = ({ report, today }: { report: UsageReport; today: Date 
         <Tile label="Paid" value={formatUsd(spend.meteredUsd)} note="metered usage, in real dollars" />
         <Tile label="On plan" value={formatUsd(spend.subscriptionUsd)} note="subscription usage, valued at API prices" />
         <Tile
+          lead
           label="Saved vs always-Opus (estimate)"
           value={savings.tasks === 0 ? "–" : `${savings.savedUsd < 0 ? "−" : ""}${formatUsd(Math.abs(savings.savedUsd))}`}
           note={

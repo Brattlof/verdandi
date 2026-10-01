@@ -1,5 +1,6 @@
 import { type CommandId, type MemoryEntry, type MemoryScope, type MemoryView, memoryCaps, type ThreadId } from "@verdandi/contracts";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { Raven } from "./art.tsx";
 import { type Connection, uuid } from "./client.ts";
 
 const titles: Record<MemoryScope, string> = { user: "About you", project: "About this project" };
@@ -23,8 +24,12 @@ export const MemoryTab = ({ connection, threadId }: { connection: Connection; th
   };
   if (!view) return <p className="p-3 text-xs text-muted">Loading…</p>;
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 text-xs">
-      <p className="text-muted">
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 text-xs">
+      <p className="flex items-center gap-2 font-serif text-lg font-semibold">
+        <Raven className="size-7" />
+        Muninn remembers
+      </p>
+      <p className="mt-1 text-muted">
         New sessions start with these. The agent saves facts with memory_save; it never edits CLAUDE.md or AGENTS.md. Saves show from the
         next session on.
       </p>
@@ -65,9 +70,9 @@ const Store = ({
   };
   return (
     <section aria-labelledby={headingId} className="mt-4">
-      <h3 id={headingId} className="flex items-baseline justify-between gap-2 font-medium">
+      <h3 id={headingId} className="flex items-baseline justify-between gap-2 font-serif text-lg font-semibold">
         {titles[scope]}
-        <span className="shrink-0 font-normal tabular-nums text-muted">
+        <span className="shrink-0 font-sans text-xs font-normal tabular-nums text-muted">
           {used} / {memoryCaps[scope]} characters
         </span>
       </h3>
@@ -135,16 +140,12 @@ const Entry = ({ entry, threadId, send }: { entry: MemoryEntry; threadId: Thread
             <span>
               {by}, confirmed {day(entry.confirmedAt)}
             </span>
-            <button
-              type="button"
-              className="border-0 bg-transparent p-0 text-accent underline hover:bg-transparent"
-              onClick={() => setEditing(true)}
-            >
+            <button type="button" className="caps-link text-fg" onClick={() => setEditing(true)}>
               Edit
             </button>
             <button
               type="button"
-              className="border-0 bg-transparent p-0 text-accent underline hover:bg-transparent"
+              className="caps-link text-fg"
               aria-label={`Delete: ${entry.text.slice(0, 60)}`}
               onClick={() => void send({ type: "memory.delete", commandId: uuid<CommandId>(), threadId, entryId: entry.entryId })}
             >
