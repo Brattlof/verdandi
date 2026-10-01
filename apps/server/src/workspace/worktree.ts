@@ -5,9 +5,6 @@ import { Effect, Result, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { GitError, git, gitFailed, gitOk, notARepo } from "./git.ts";
 
-/** Lets git make worktree paths past Windows' 260-character limit. */
-const longPaths = ["-c", "core.longpaths=true"];
-
 /** `.verdandi/worktree.yaml` in the project: `setup` runs once in each new worktree of it, e.g. `bun install`. */
 const WorktreeFile = Schema.Struct({ setup: Schema.optionalKey(Schema.String) });
 
@@ -60,7 +57,7 @@ export const addWorktree = (projectPath: string, worktreesDir: string, branch: s
       return yield* new GitError({ message: `${at} already exists and isn't this thread's worktree. Move it away, then retry.` });
     }
     const exists = (yield* git(projectPath, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])).code === 0;
-    yield* gitOk(projectPath, [...longPaths, "worktree", "add", ...(exists ? [at, branch] : ["-b", branch, at, "HEAD"])]);
+    yield* gitOk(projectPath, ["worktree", "add", ...(exists ? [at, branch] : ["-b", branch, at, "HEAD"])]);
     return { root: at, path };
   });
 
@@ -74,7 +71,7 @@ export const removeWorktree = (projectPath: string, root: string, force: boolean
       yield* gitOk(projectPath, ["worktree", "prune"]);
       return;
     }
-    const removed = yield* git(projectPath, [...longPaths, "worktree", "remove", ...(force ? ["--force"] : []), root]);
+    const removed = yield* git(projectPath, ["worktree", "remove", ...(force ? ["--force"] : []), root]);
     if (removed.code === 0) return;
     if (/modified or untracked files|--force/.test(removed.stderr)) {
       return yield* new GitError({

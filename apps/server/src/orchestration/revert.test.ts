@@ -44,7 +44,9 @@ test("reverting conversation and files to turn 1 of 3 forks the next turn from t
   };
   const revert = (toTurnId: TurnId): Command => ({ type: "thread.revert", commandId: id<CommandId>(), threadId, toTurnId, files: true });
   const undo: () => Command = () => ({ type: "thread.revert.undo", commandId: id<CommandId>(), threadId });
-  const file = (name: string) => (existsSync(join(repo, name)) ? readFileSync(join(repo, name), "utf8") : undefined);
+  // Line endings as git checks files out: a restore on Windows (core.autocrlf) writes CRLF, like a checkout would.
+  const lf = (text: string) => text.replaceAll("\r\n", "\n");
+  const file = (name: string) => (existsSync(join(repo, name)) ? lf(readFileSync(join(repo, name), "utf8")) : undefined);
 
   await dispatch({
     type: "thread.create",
@@ -65,7 +67,7 @@ test("reverting conversation and files to turn 1 of 3 forks the next turn from t
   const reverted = await view();
   expect(reverted?.turns.map((t) => t.reverted)).toEqual([false, true, true]);
   expect(reverted?.revert).toEqual({ toTurnId: t1, files: true, undone: false });
-  expect(file("a.txt")).toBe(git(repo, "show", `${checkpointRef(threadId, t1, "end")}:a.txt`));
+  expect(file("a.txt")).toBe(lf(git(repo, "show", `${checkpointRef(threadId, t1, "end")}:a.txt`)));
   expect(file("new.txt")).toBeUndefined();
   expect(await outcome()).toEqual([{ status: "reverted" }]);
 

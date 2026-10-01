@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Effect } from "effect";
@@ -14,24 +14,30 @@ const temp = (d: string) => {
   return d;
 };
 
-test("a worktree past 260 characters with spaces is added, kept while dirty, removed with its branch kept, and added again", async () => {
+test("a worktree with files past 260 characters in a path with spaces is added, kept while dirty, removed with its branch kept, and added again", async () => {
   const repo = temp(makeTempRepo({ "a.txt": "one\n" }));
-  mkdirSync(join(repo, "app"));
-  writeFileSync(join(repo, "app", "b.txt"), "b\n");
+  // A file whose path in the worktree passes Windows' MAX_PATH, committed with plumbing so only git ever writes it.
+  // (Git for Windows can't put a worktree's own folder past MAX_PATH, so the length is in the files.)
+  const deep = `app/${"a folder with spaces in its name/".repeat(7)}b.txt`;
+  const blob = git(repo, "hash-object", "-w", "--stdin").trim();
+  git(repo, "update-index", "--add", "--cacheinfo", `100644,${blob},${deep}`);
+  git(repo, "commit", "-q", "-m", "deep");
+  git(repo, "-c", "core.longpaths=true", "checkout", "--", "app");
+  mkdirSync(join(repo, "app", "src"));
+  writeFileSync(join(repo, "app", "src", "c.txt"), "c\n");
   git(repo, "add", "-A");
   git(repo, "commit", "-q", "-m", "app");
-  // Windows' MAX_PATH is 260: the worktree's files sit past it.
-  const worktrees = join(temp(makeTempHome()), "a folder with spaces ".repeat(6).trim(), "and another long one ".repeat(4).trim());
+  const worktrees = join(temp(makeTempHome()), "work trees");
   const branch = "verdandi/thread-1";
 
   const added = await Effect.runPromise(addWorktree(join(repo, "app"), worktrees, branch));
-  expect(join(added.root, "app", "b.txt").length).toBeGreaterThan(260);
+  expect(join(added.root, deep).length).toBeGreaterThan(260);
   expect(added.path).toBe(join(added.root, "app"));
-  expect(readFileSync(join(added.path, "b.txt"), "utf8")).toBe("b\n");
+  expect(git(added.root, "-c", "core.longpaths=true", "status", "--porcelain")).toBe(""); // every file checked out, the deep one too
   // Adding it again (after a crash mid-creation) reuses it.
   expect(await Effect.runPromise(addWorktree(join(repo, "app"), worktrees, branch, added.root))).toEqual(added);
 
-  writeFileSync(join(added.path, "b.txt"), "changed\n");
+  writeFileSync(join(added.path, "src", "c.txt"), "changed\n");
   const kept = await Effect.runPromise(Effect.flip(removeWorktree(repo, added.root, false)));
   expect(kept.message).toContain("uncommitted changes");
   expect(existsSync(added.root)).toBe(true);

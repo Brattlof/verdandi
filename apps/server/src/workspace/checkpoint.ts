@@ -70,7 +70,8 @@ export const revertRef = (threadId: ThreadId, seq: number) => `refs/verdandi/rev
 
 /**
  * Puts the files under `cwd` back as checkpoint `ref` has them: changed files rewritten, files it doesn't have
- * deleted. Written through a temporary index, so the user's index stays as it was; ignored files are left alone.
+ * deleted, line endings as git checks them out (`core.autocrlf`, `.gitattributes`), as a checkout of a commit
+ * would. Written through a temporary index, so the user's index stays as it was; ignored files are left alone.
  */
 export const restore = (cwd: string, ref: string) =>
   Effect.gen(function* () {

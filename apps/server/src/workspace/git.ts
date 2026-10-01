@@ -10,20 +10,23 @@ const inherited = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIR
 
 /**
  * Runs git in `cwd`. No optional locks, so it never refreshes the user's index; literal pathspecs, so
- * `[id].tsx` is a file name, not a glob; paths unquoted. Fails only when git can't start: a non-zero
- * exit is the caller's to read.
+ * `[id].tsx` is a file name, not a glob; paths unquoted; paths past Windows' 260 characters allowed. Fails
+ * only when git can't start: a non-zero exit is the caller's to read.
  */
 export const git = (cwd: string, args: readonly string[], env: Record<string, string> = {}, input?: string) =>
   Effect.tryPromise({
     try: async (): Promise<GitResult> => {
       const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => !inherited.includes(k)));
-      const proc = Bun.spawn(["git", "--no-optional-locks", "--literal-pathspecs", "-c", "core.quotePath=false", ...args], {
-        cwd,
-        env: { ...base, ...env },
-        stdin: input === undefined ? "ignore" : new TextEncoder().encode(input),
-        stdout: "pipe",
-        stderr: "pipe",
-      });
+      const proc = Bun.spawn(
+        ["git", "--no-optional-locks", "--literal-pathspecs", "-c", "core.quotePath=false", "-c", "core.longpaths=true", ...args],
+        {
+          cwd,
+          env: { ...base, ...env },
+          stdin: input === undefined ? "ignore" : new TextEncoder().encode(input),
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
       const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
       return { stdout, stderr, code };
     },
@@ -38,4 +41,8 @@ export const gitFailed = (what: string, r: GitResult) =>
 
 /** Runs git and fails unless it exits 0; returns its trimmed stdout. */
 export const gitOk = (cwd: string, args: readonly string[], env?: Record<string, string>) =>
-  Effect.flatMap(git(cwd, args, env), (r) => (r.code === 0 ? Effect.succeed(r.stdout.trim()) : Effect.fail(gitFailed(args[0] ?? "", r))));
+  Effect.flatMap(git(cwd, args, env), (r) =>
+    r.code === 0
+      ? Effect.succeed(r.stdout.trim())
+      : Effect.fail(gitFailed(args.find((a, i) => !a.startsWith("-") && args[i - 1] !== "-c") ?? "", r)),
+  );
