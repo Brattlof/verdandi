@@ -14,6 +14,7 @@ const claudeMissing: HarnessAdapter = {
   run: () => Stream.fail(new HarnessError({ message: "Claude Code CLI not found on PATH. Install it and run `claude` once to log in." })),
   respond: () => Effect.void,
   reroute: () => Effect.void,
+  close: () => Effect.void,
 };
 
 /** This machine's addresses on its local network, for the URLs to open from other devices. */

@@ -29,7 +29,15 @@ export const AppLayer = (
       EngineLive({ ...options, routing, catalog: catalogFor(harnesses), spendCaps: loadSpendCaps(options.spendCapsHome ?? home) }),
     ),
     Layer.provideMerge(Layer.succeed(ProjectVerifiers, verifiers)),
-    Layer.provideMerge(Layer.succeed(HarnessRegistry, harnesses)),
+    // Stopping closes the sessions harnesses keep warm between turns, so no harness process outlives verdandid.
+    Layer.provideMerge(
+      Layer.effect(
+        HarnessRegistry,
+        Effect.acquireRelease(Effect.succeed(harnesses), (registry) =>
+          Effect.forEach(Object.values(registry), (harness) => harness?.close() ?? Effect.void, { discard: true }),
+        ),
+      ),
+    ),
     Layer.provideMerge(Layer.succeed(AttachmentsDir, attachmentsDir(home))),
     Layer.provideMerge(Layer.succeed(WorktreesDir, join(home, "worktrees"))),
     Layer.provideMerge(Layer.sync(ToolSettings, () => ({ approveMemorySaves: loadMemorySettings(home).approveSaves }))),

@@ -158,13 +158,13 @@ export const runBatch = async (options: BatchOptions): Promise<{ results: BatchR
       ...fields,
     });
     const dir = checkout(task);
+    const threadId = randomUUID() as ThreadId;
     try {
       if (task.setup) {
         const setup = await Effect.runPromise(runVerifier(task.setup, dir));
         if (!setup.passed)
           return result({ error: `setup \`${task.setup}\` failed (exit ${setup.exitCode ?? "none"}): ${setup.output.slice(-500)}` });
       }
-      const threadId = randomUUID() as ThreadId;
       await dispatch({
         type: "thread.create",
         commandId: randomUUID() as CommandId,
@@ -223,6 +223,10 @@ export const runBatch = async (options: BatchOptions): Promise<{ results: BatchR
         ...(error && { error }),
       });
     } finally {
+      // Done with the thread: its harness session (Claude Code's process, which runs in `dir`) closes before the copy goes.
+      await Effect.runPromise(
+        Effect.forEach(Object.values(options.harnesses), (harness) => harness?.close(threadId) ?? Effect.void, { discard: true }),
+      );
       if (!options.keep) rmSync(dir, { recursive: true, force: true });
     }
   };

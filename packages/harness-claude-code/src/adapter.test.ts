@@ -445,6 +445,26 @@ describe("Claude Code adapter", () => {
     }
   });
 
+  test("close ends a thread's warm session, or every one; the next turn resumes it in a fresh process", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery();
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const other = "thread-2" as ThreadId;
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "hi", U1))));
+      await Effect.runPromise(Stream.runCollect(adapter.run({ ...input(home, "hi", U2), threadId: other })));
+      await Effect.runPromise(adapter.close(threadId));
+      expect(spawns.map((s) => s.log.includes("close"))).toEqual([true, false]);
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "again", "turn-3", "sess-1"))));
+      expect(spawns).toHaveLength(3);
+      expect(spawns[2]?.options.resume).toBe("sess-1");
+      await Effect.runPromise(adapter.close());
+      expect(spawns.map((s) => s.log.filter((l) => l === "close").length)).toEqual([1, 1, 1]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
   test("an error result closes the session; the next turn resumes it", async () => {
     const home = makeTempHome();
     try {

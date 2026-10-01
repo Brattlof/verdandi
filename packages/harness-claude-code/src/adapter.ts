@@ -630,5 +630,14 @@ export const makeClaudeCodeAdapter = (options: {
         // Upgrade: report it, once a harness event can say the route didn't change.
         session.rerouting = session.rerouting.then(() => applyRoute(session, route)).catch(() => undefined);
       }),
+    close: (threadId) =>
+      Effect.sync(() => {
+        for (const [id, session] of sessions) {
+          if (threadId !== undefined && id !== threadId) continue;
+          sessions.delete(id);
+          session.close();
+          session.query.close();
+        }
+      }),
   };
 };
