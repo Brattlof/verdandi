@@ -1,9 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
+import type { CommandId, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
 import { type ServerFile, serverFile } from "../config/home.ts";
+import { Engine } from "../orchestration/engine.ts";
 import { ServerInfo, ServerLayer } from "../rpc/server.ts";
+import { attachmentsDir, storeAttachments } from "../workspace/attachments.ts";
 import { type Check, diagnose } from "./doctor.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
@@ -51,4 +54,33 @@ test("fails with the fix when verdandid has stopped but left its server.json", a
   const server = check(await diagnose(home, tools), "verdandid");
   expect(server?.status).toBe("fail");
   expect(server?.detail).toContain("verdandi start");
+});
+
+test("counts the stored attachments no turn references", async () => {
+  const { home, runtime } = await healthyHome();
+  const upload = (text: string) => ({ name: `${text}.log`, mediaType: "text/plain", data: Buffer.from(text).toString("base64") });
+  const [sent] = await Effect.runPromise(storeAttachments(attachmentsDir(home), [upload("sent"), upload("never sent")]));
+  const threadId = crypto.randomUUID() as ThreadId;
+  await runtime.runPromise(
+    Effect.gen(function* () {
+      const engine = yield* Engine;
+      const route = { harness: "fake", model: "fake", effort: "low" } as const;
+      yield* engine.dispatch({ type: "thread.create", commandId: crypto.randomUUID() as CommandId, threadId, projectPath: home, route });
+      const turnId = crypto.randomUUID() as TurnId;
+      const attachments = sent ? [sent] : [];
+      yield* engine.dispatch({
+        type: "turn.send",
+        commandId: crypto.randomUUID() as CommandId,
+        threadId,
+        turnId,
+        text: "look",
+        mode: "build",
+        attachments,
+      });
+    }),
+  );
+  const attachments = check(await diagnose(home, tools), "Attachments");
+  expect(attachments?.status).toBe("ok");
+  expect(attachments?.detail).toStartWith("2 files");
+  expect(attachments?.detail).toContain("1 no turn references");
 });
