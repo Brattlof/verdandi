@@ -12,6 +12,7 @@ import {
   type RouteInputs,
   type RouteStats,
   type RouteTarget,
+  type SpendCapped,
 } from "@verdandi/contracts";
 import { classificationOf, followUpRules, makeDecide, routingQuestions, routingRules, rulesBackend } from "@verdandi/decisions";
 import {
@@ -44,6 +45,8 @@ export type RoutingContext = {
   readonly harnesses: readonly HarnessId[];
   /** The project's routing memory, loaded with the thread's state; none means the policy alone decides. */
   readonly memory?: readonly RouteStats[];
+  /** A reached metered spend cap over the thread: the router leaves targets that would spend metered dollars out. */
+  readonly capped?: SpendCapped;
 };
 
 /**
@@ -67,6 +70,7 @@ export const routeInputs = (thread: RoutingThread, routing: RoutingContext): Rou
   cachedTokens: thread.cachedTokens,
   harnesses: routing.harnesses,
   ...(routing.memory && { memory: routing.memory }),
+  ...(routing.capped && { capped: routing.capped }),
 });
 
 /** The inverse of `routeInputs`: the thread and routing context a recorded task was decided with, under `policy` now. */
@@ -81,7 +85,12 @@ export const replayed = (
     sessionId: inputs.warm ? "recorded session" : null,
     cachedTokens: inputs.cachedTokens,
   },
-  routing: { ...policy, harnesses: inputs.harnesses, ...(inputs.memory && { memory: inputs.memory }) },
+  routing: {
+    ...policy,
+    harnesses: inputs.harnesses,
+    ...(inputs.memory && { memory: inputs.memory }),
+    ...(inputs.capped && { capped: inputs.capped }),
+  },
 });
 
 export type RoutingFailure = { readonly reason: "InvalidPolicy" | "NoRoute"; readonly message: string };
@@ -109,15 +118,19 @@ export const projectRouting =
       }
     });
 
-/** Routing over the harnesses verdandid runs; the fake harness's models join the catalog when it runs. */
+/** The catalog of the harnesses verdandid runs: the fake harness's models join it when it runs. */
+export const catalogFor = (harnesses: Partial<Record<HarnessId, unknown>>): Catalog =>
+  harnesses.fake ? [...builtInCatalog, ...fakeCatalog] : builtInCatalog;
+
+/** Routing over the harnesses verdandid runs. */
 export const routingFor = (harnesses: Partial<Record<HarnessId, unknown>>) =>
-  projectRouting(Object.keys(harnesses) as HarnessId[], harnesses.fake ? [...builtInCatalog, ...fakeCatalog] : builtInCatalog);
+  projectRouting(Object.keys(harnesses) as HarnessId[], catalogFor(harnesses));
 
 /** The subagent routes a warm session started with, which it keeps. */
 const warmSubagents = (thread: RoutingThread) => (thread.route.subagents ? { subagents: thread.route.subagents } : {});
 
 /** The catalog's target for a route. A model it doesn't know keeps its harness's provider and access mode. */
-const targetOf = (r: Route, catalog: Catalog): RouteTarget => {
+export const targetOf = (r: Route, catalog: Catalog): RouteTarget => {
   const entry = catalog.find((e) => e.harness === r.harness && e.model === r.model) ?? catalog.find((e) => e.harness === r.harness);
   return { harness: r.harness, provider: entry?.provider ?? r.harness, model: r.model, access: entry?.access ?? "local" };
 };
@@ -161,6 +174,7 @@ export const decideExecuteRoute = (
         planApproved: true,
         // A running turn can't change harness.
         harnesses: [thread.route.harness],
+        ...(routing.capped ? { capped: routing.capped } : {}),
         ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens, ...warmSubagents(thread) } }),
       },
       policy,
@@ -176,7 +190,8 @@ export const decideExecuteRoute = (
 /**
  * Pure: the decision for a new task in `thread` starting with `text` and `images` attached images, classified
  * by the decision layer's `answers` to `taskQuestions`. A pinned thread keeps its route (DESIGN §8.4 stage 0);
- * otherwise the router picks, with the thread's warm session for the switch-cost gate.
+ * otherwise the router picks, with the thread's warm session for the switch-cost gate, among the targets a
+ * reached spend cap leaves.
  */
 export const decideRoute = (
   thread: RoutingThread,
@@ -200,6 +215,7 @@ export const decideRoute = (
           ...(images > 0 && { images }),
           harnesses: routing.harnesses,
           ...(routing.memory ? { memory: routing.memory } : {}),
+          ...(routing.capped ? { capped: routing.capped } : {}),
           ...(thread.pinned ? { pin: current } : {}),
           ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens, ...warmSubagents(thread) } }),
         },

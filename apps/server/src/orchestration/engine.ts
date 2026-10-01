@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  type Catalog,
   type Command,
   type CommandId,
   CommandRejected,
@@ -68,6 +69,8 @@ export type EngineOptions = {
   readonly decide?: Decide["Service"];
   /** Reads the profile's spend caps. Without it no turn is capped. */
   readonly spendCaps?: Effect.Effect<Result.Result<SpendCaps, string>>;
+  /** The model catalog, which tells the turns a reached spend cap stops: those that spend metered dollars. Without it, every turn. */
+  readonly catalog?: Catalog;
 };
 
 export const EngineLive = (options: EngineOptions = {}) =>
@@ -107,12 +110,20 @@ export const EngineLive = (options: EngineOptions = {}) =>
               };
             const loaded = yield* loadDeciderState(command.threadId);
             // Caps are read on each turn and raise, so an edit to the caps file applies to the next one.
+            // A proposed plan's build is routed around a reached cap too.
             const capped =
-              (command.type === "turn.send" || command.type === "spend.cap.raise" || command.type === "task.escalate") &&
+              (command.type === "turn.send" ||
+                command.type === "spend.cap.raise" ||
+                command.type === "task.escalate" ||
+                (command.type === "harness.report" && command.event.type === "plan.requested")) &&
               loaded.thread &&
               options.spendCaps;
             const state = capped
-              ? { ...loaded, spend: yield* loadSpendState(capped, loaded.thread?.projectPath ?? "", new Date()) }
+              ? {
+                  ...loaded,
+                  spend: yield* loadSpendState(capped, loaded.thread?.projectPath ?? "", new Date()),
+                  ...(options.catalog && { catalog: options.catalog }),
+                }
               : loaded;
             const current = state.thread;
             const send = command.type === "turn.send" && current?.runningTurnId === null ? command : undefined;

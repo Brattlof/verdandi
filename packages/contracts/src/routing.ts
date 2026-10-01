@@ -172,7 +172,19 @@ export const RouteStats = Schema.Struct({
 export type RouteStats = typeof RouteStats.Type;
 
 /**
- * What the router read about a new task besides its text and mode (kept in its `turn.started`), so offline
+ * A reached metered spend cap (DESIGN §8.9). `cap` names it, e.g. `the profile's daily cap`. While it holds, targets
+ * that would spend metered dollars are unavailable: metered ones, and any on a harness in `paying`, whose
+ * subscription window runs on extra usage (ADR 0005).
+ */
+export const SpendCapped = Schema.Struct({ cap: Schema.String, paying: Schema.Array(HarnessId) });
+export type SpendCapped = typeof SpendCapped.Type;
+
+/** Whether a turn on `target` spends metered dollars: a metered target, or one on a harness whose subscription is `paying`. */
+export const spendsMetered = (target: Pick<RouteTarget, "harness" | "access">, paying: readonly HarnessId[]) =>
+  target.access === "metered" || paying.includes(target.harness);
+
+/**
+ * What the router read about a new task besides its text and mode (kept in its `task.started`), so offline
  * replay (DESIGN §8.8 level 2) can route it again exactly. Provider health and quota aren't router inputs yet.
  */
 export const RouteInputs = Schema.Struct({
@@ -188,6 +200,8 @@ export const RouteInputs = Schema.Struct({
   harnesses: Schema.Array(HarnessId),
   /** The project's routing memory, when the router consulted it. */
   memory: Schema.optionalKey(Schema.Array(RouteStats)),
+  /** The spend cap that was reached, when one was. */
+  capped: Schema.optionalKey(SpendCapped),
 });
 export type RouteInputs = typeof RouteInputs.Type;
 

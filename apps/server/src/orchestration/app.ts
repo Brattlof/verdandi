@@ -4,7 +4,7 @@ import { Effect, Layer, Result } from "effect";
 import { loadMemorySettings } from "../config/memory.ts";
 import { loadSpendCaps } from "../config/spend-caps.ts";
 import { SqlLive } from "../persistence/db.ts";
-import { routingFor } from "../routing/routing.ts";
+import { catalogFor, routingFor } from "../routing/routing.ts";
 import { attachmentsDir } from "../workspace/attachments.ts";
 import { EngineLive, type Projector } from "./engine.ts";
 import { AttachmentsDir, HarnessRegistry, ProjectVerifiers, ReactorLive, ToolSettings, WorktreesDir } from "./reactor.ts";
@@ -25,7 +25,9 @@ export const AppLayer = (
         : Effect.as(Effect.logWarning(`Skipped the project's verifiers: ${policy.failure}`), []),
     );
   return ReactorLive.pipe(
-    Layer.provideMerge(EngineLive({ ...options, routing, spendCaps: loadSpendCaps(options.spendCapsHome ?? home) })),
+    Layer.provideMerge(
+      EngineLive({ ...options, routing, catalog: catalogFor(harnesses), spendCaps: loadSpendCaps(options.spendCapsHome ?? home) }),
+    ),
     Layer.provideMerge(Layer.succeed(ProjectVerifiers, verifiers)),
     Layer.provideMerge(Layer.succeed(HarnessRegistry, harnesses)),
     Layer.provideMerge(Layer.succeed(AttachmentsDir, attachmentsDir(home))),

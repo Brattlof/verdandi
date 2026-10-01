@@ -508,7 +508,7 @@ describe("rpc server", () => {
       status: "rejected",
       window: "five_hour",
       utilization: 1,
-      resetsAt: "2026-10-01T00:00:00.000Z",
+      resetsAt: "2099-01-01T00:00:00.000Z",
       usingOverage: true,
     } as const;
     expect(live.flatMap((f) => (f.kind === "quota" ? [f.quota.quota] : []))).toEqual([quota]);

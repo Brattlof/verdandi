@@ -19,6 +19,7 @@ import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { loadSpendCaps } from "../config/spend-caps.ts";
 import { AppLayer } from "../orchestration/app.ts";
+import { reachedCap } from "../orchestration/decider.ts";
 import { Engine } from "../orchestration/engine.ts";
 import { loadDeciderState, loadMemory } from "../orchestration/projector.ts";
 import { HarnessRegistry } from "../orchestration/reactor.ts";
@@ -139,7 +140,13 @@ const Handlers = (home: string) =>
               Effect.provideService(SqlClient.SqlClient, sql),
               Effect.catchTag("SqlError", Effect.die),
             );
-            const context = { ...(yield* routing(thread.projectPath)), memory };
+            // The preview routes around a reached spend cap the way the turn would.
+            const spend = yield* loadSpendState(loadSpendCaps(home), thread.projectPath, new Date()).pipe(
+              Effect.provideService(SqlClient.SqlClient, sql),
+              Effect.catchTag("SqlError", Effect.die),
+            );
+            const cap = reachedCap(spend);
+            const context = { ...(yield* routing(thread.projectPath)), memory, ...(cap && { capped: cap }) };
             const { answers } = yield* rulesDecide.decide({ state: text, questions: taskQuestions(context) });
             const decided = decideRoute(thread, context, text, mode, answers, images);
             if (Result.isFailure(decided)) return yield* new RoutingUnavailable(decided.failure);
