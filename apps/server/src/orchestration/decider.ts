@@ -24,6 +24,7 @@ import {
   type SpendCapped,
   spendsMetered,
   type TaskId,
+  type TaskRating,
   type ThreadId,
   type TurnId,
   type VerifierRun,
@@ -68,6 +69,8 @@ export type DeciderState = {
         readonly worktree: WorktreeView | null;
         /** The task the next turn continues; null before the first turn and after a route change. */
         readonly taskId: TaskId | null;
+        /** Every task of the thread, oldest first, with the user's rating. */
+        readonly tasks: readonly { readonly taskId: TaskId; readonly rating: TaskRating | null }[];
         /** How many turns the thread has had, and the latest one's id. */
         readonly turns: number;
         readonly lastTurnId: TurnId | null;
@@ -343,6 +346,14 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     state.thread
       ? accept({ type: "routing.memory.cleared", v: 1, threadId: c.threadId, projectId: state.thread.projectId })
       : reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`),
+  "task.rate": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    const task = state.thread.tasks.find((t) => t.taskId === c.taskId);
+    if (!task) return reject("TaskNotFound", `Thread ${c.threadId} has no task ${c.taskId}. Rate one of its own tasks.`);
+    return task.rating === c.rating
+      ? accept()
+      : accept({ type: "task.rated", v: 1, threadId: c.threadId, taskId: c.taskId, rating: c.rating });
+  },
   "thread.archive": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
     if (state.thread.runningTurnId) {

@@ -425,6 +425,37 @@ describe("routing memory", () => {
     expect(cleared.memory).toBeUndefined();
     expect(fake.calls.map((c) => c.route.model).slice(-2)).toEqual(["fake-large", "fake-small"]);
   });
+
+  test("tasks the user rated down count as ones that didn't succeed, and move the next task to a stronger target", async () => {
+    const { projectPath, run } = setup();
+    const task = Effect.gen(function* () {
+      const thread = id<ThreadId>();
+      const turnId = id<TurnId>();
+      yield* dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId: thread, projectPath });
+      yield* dispatch({ type: "turn.send", commandId: id<CommandId>(), threadId: thread, turnId, text: SEARCH, mode: "build" });
+      yield* drain;
+      const [row] = yield* (yield* SqlClient.SqlClient)<{ payload: string }>`select payload from route_decisions where task_id = ${turnId}`;
+      return { thread, taskId: turnId as string as TaskId, decision: JSON.parse(row?.payload ?? "{}") as RouteDecision };
+    });
+    const moved = await run(
+      Effect.gen(function* () {
+        // Five search tasks that completed, each rated down: the built-in minimum sample.
+        for (let i = 0; i < 5; i++) {
+          const { thread, taskId } = yield* task;
+          yield* dispatch({ type: "task.rate", commandId: id<CommandId>(), threadId: thread, taskId, rating: -1 });
+          yield* drain;
+        }
+        return (yield* task).decision;
+      }),
+    );
+    expect(moved).toMatchObject({
+      source: "memory",
+      target: { model: "fake-large" },
+      effort: "low",
+      reason: "ask.search tasks here didn't succeed on fake-small 5 of 5 times, so it starts on the stronger fake-large at low effort.",
+      memory: { taskClass: "ask.search", tasks: 5, completed: 0, failed: 5 },
+    });
+  });
 });
 
 describe("subagent routing", () => {

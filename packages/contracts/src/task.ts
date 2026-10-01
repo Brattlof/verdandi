@@ -13,8 +13,12 @@ import { Route } from "./route.ts";
 export const TaskStatus = Schema.Literals(["completed", "abandoned", "reverted", "escalated", "failed", "limit"]);
 export type TaskStatus = typeof TaskStatus.Type;
 
-/** How a task went, for routing memory and the lab (DESIGN §8.8). Rewritten after each of its turns; final once the next task starts. */
-export const TaskOutcome = Schema.Struct({
+/** The user's thumbs up (1) or down (-1) on a task. */
+export const TaskRating = Schema.Literals([1, -1]);
+export type TaskRating = typeof TaskRating.Type;
+
+/** v1 reads as v2 without a rating. */
+const TaskOutcomeV1 = Schema.Struct({
   v: Schema.Literal(1),
   taskId: TaskId,
   threadId: ThreadId,
@@ -31,6 +35,16 @@ export const TaskOutcome = Schema.Struct({
   usage: Schema.Array(Usage),
   /** Time the task's turns ran, summed; the user's time between turns doesn't count. */
   wallMs: Schema.Number,
+});
+/**
+ * How a task went, for routing memory and the lab (DESIGN §8.8). Rewritten after each of its turns and each
+ * rating; its turns are final once the next task starts.
+ */
+export const TaskOutcome = Schema.Struct({
+  ...TaskOutcomeV1.fields,
+  v: Schema.Literal(2),
+  /** The user's latest rating of the task; absent when there's none, or it was cleared. */
+  rating: Schema.optionalKey(TaskRating),
 });
 export type TaskOutcome = typeof TaskOutcome.Type;
 

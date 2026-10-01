@@ -51,6 +51,11 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     route: e.route,
     sessionId: thread.route.harness === e.route.harness ? thread.sessionId : null,
     task: { taskId: e.taskId, ...(e.decision ? { source: e.decision.source, reason: e.decision.reason } : {}) },
+    tasks: [...thread.tasks, { taskId: e.taskId, rating: null }],
+  }),
+  "task.rated": (thread, e) => ({
+    ...thread,
+    tasks: thread.tasks.map((t) => (t.taskId === e.taskId ? { ...t, rating: e.rating } : t)),
   }),
   // A pick pins the route and ends the task; unpinning ends it too, so the next turn starts a routed one.
   "thread.route.unpinned": (thread) => ({ ...thread, pinned: false, task: null }),

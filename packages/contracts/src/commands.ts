@@ -1,13 +1,14 @@
 import { Schema } from "effect";
 import { AttachmentRef, AttachmentUpload } from "./attachments.ts";
 import { HarnessEvent } from "./harness.ts";
-import { CommandId, ThreadId, TurnId } from "./ids.ts";
+import { CommandId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { VerifierRun } from "./items.ts";
 import { MemoryScope } from "./memory.ts";
 import { Resolution } from "./requests.ts";
 import { InteractionMode, Route } from "./route.ts";
 import { BudgetMode } from "./routing.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
+import { TaskRating } from "./task.ts";
 import { WorktreeReport } from "./worktree.ts";
 
 export const ThreadCreate = Schema.Struct({
@@ -104,6 +105,15 @@ export const RoutingMemoryClear = Schema.Struct({
   type: Schema.Literal("routing.memory.clear"),
   commandId: CommandId,
   threadId: ThreadId,
+});
+
+/** The user rates the thread's task `taskId` up or down (DESIGN §8.8); `null` clears the rating. */
+export const TaskRate = Schema.Struct({
+  type: Schema.Literal("task.rate"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  taskId: TaskId,
+  rating: Schema.NullOr(TaskRating),
 });
 
 /** Puts a thread away: it leaves the thread lists, and nothing is deleted. A thread with a running turn can't be archived. */
@@ -267,6 +277,7 @@ export const ClientCommand = Schema.Union([
   ThreadBudgetSet,
   SpendCapRaise,
   RoutingMemoryClear,
+  TaskRate,
   ThreadArchive,
   ThreadUnarchive,
   ThreadWorktreeAdd,
@@ -290,6 +301,7 @@ export const Command = Schema.Union([
   ThreadBudgetSet,
   SpendCapRaise,
   RoutingMemoryClear,
+  TaskRate,
   ThreadArchive,
   ThreadUnarchive,
   ThreadWorktreeAdd,

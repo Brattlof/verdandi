@@ -163,6 +163,7 @@ export const RouteStats = Schema.Struct({
   route: Route,
   tasks: Schema.Int,
   completed: Schema.Int,
+  /** Failed, or ended another way and the user rated it down. */
   failed: Schema.Int,
   escalated: Schema.Int,
   reverted: Schema.Int,

@@ -1,10 +1,20 @@
 import { afterEach, expect, test } from "bun:test";
-import { type Command, type CommandId, TaskOutcome, type ThreadId, Trajectory, type TurnId } from "@verdandi/contracts";
+import {
+  type Command,
+  type CommandId,
+  type TaskId,
+  TaskOutcome,
+  type TaskRating,
+  type ThreadId,
+  Trajectory,
+  type TurnId,
+} from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AppLayer } from "./app.ts";
 import { Engine } from "./engine.ts";
+import { loadThreadView } from "./projector.ts";
 import { Reactor } from "./reactor.ts";
 import { loadTaskCosts } from "./task-outcome.ts";
 
@@ -103,4 +113,36 @@ test("task outcomes verdandid missed are recorded when it next starts", async ()
   );
   const rows = await withApp(home, outcomes);
   expect(rows.map((o) => [o.threadId, o.status])).toEqual([[threadId, "completed"]]);
+});
+
+test("a rating reaches its task's outcome, an earlier task's too, and clearing it removes it", async () => {
+  const [threadId, other] = [uuid<ThreadId>(), uuid<ThreadId>()];
+  const rate = (turnId: TurnId, rating: TaskRating | null, thread = threadId) =>
+    dispatch({ type: "task.rate", commandId: uuid(), threadId: thread, taskId: turnId as string as TaskId, rating });
+  const ratings = Effect.map(outcomes, (rows) => rows.map((o) => o.rating));
+  const result = await withApp(
+    newHome(),
+    Effect.gen(function* () {
+      yield* create(threadId);
+      const first = yield* runTurn(threadId, "hi");
+      yield* rate(first, -1);
+      const down = yield* ratings;
+      yield* dispatch({ type: "thread.route.set", commandId: uuid(), threadId, route: { ...route, model: "fake-2" } });
+      yield* runTurn(threadId, "hi");
+      yield* rate(first, 1);
+      const up = yield* ratings;
+      const tasks = (yield* loadThreadView(threadId))?.tasks;
+      yield* rate(first, null);
+      const cleared = yield* ratings;
+      yield* create(other);
+      const foreign = yield* Effect.flip(rate(first, 1, other));
+      return { first, down, up, tasks, cleared, foreign };
+    }),
+  );
+  expect(result.down).toEqual([-1]);
+  expect(result.up).toEqual([1, undefined]);
+  expect(result.tasks?.map((t) => t.rating)).toEqual([1, null]);
+  expect(result.tasks?.[0]?.taskId).toBe(result.first as string as TaskId);
+  expect(result.cleared).toEqual([undefined, undefined]);
+  expect(result.foreign.reason).toBe("TaskNotFound");
 });

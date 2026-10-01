@@ -77,6 +77,7 @@ test("projects a full turn into the thread view", async () => {
     revert: null,
     budgetMode: null,
     task: null,
+    tasks: [],
     sessionId: "s1",
     busy: false,
     turns: [

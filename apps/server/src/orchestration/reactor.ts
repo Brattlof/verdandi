@@ -404,8 +404,9 @@ export const ReactorLive = Layer.effect(
       // Queued like turns: a turn sent while its worktree is being added waits for it.
       if (e.type === "thread.worktree.requested") return enqueue(e.threadId, createWorktree(e.threadId));
       if (e.type === "thread.worktree.removal.requested") return enqueue(e.threadId, dropWorktree(e.threadId, e.force));
-      // A route change is an override of the running task, and ends it.
-      if (e.type === "thread.route.changed") return FiberSet.run(turns, recordOutcomes(e.threadId)).pipe(Effect.asVoid);
+      // A route change is an override of the running task, and ends it. A rating changes its task's outcome.
+      if (e.type === "thread.route.changed" || e.type === "task.rated")
+        return FiberSet.run(turns, recordOutcomes(e.threadId)).pipe(Effect.asVoid);
       // Queued like turns, so the next turn starts on the restored files. A revert changes its tasks' outcomes.
       if (e.type === "thread.reverted" || e.type === "thread.revert.undone") {
         const files =

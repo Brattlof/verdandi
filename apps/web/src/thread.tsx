@@ -6,6 +6,8 @@ import {
   describeRouteChange,
   type InteractionMode,
   type Item,
+  type TaskId,
+  type TaskRating,
   type ThreadId,
   type TurnId,
   type TurnView,
@@ -16,7 +18,7 @@ import { TurnAttachments } from "./attachments.tsx";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
 import { SidePanel, TextDiff } from "./diff.tsx";
-import { ChevronIcon, DiffIcon, TerminalIcon } from "./icons.tsx";
+import { ChevronIcon, DiffIcon, TerminalIcon, ThumbDownIcon, ThumbUpIcon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { RouteMarkers } from "./route.tsx";
 import { applyPanel, applyThreadFeed, closedPanel, type LiveThread, type LiveTurn } from "./state.ts";
@@ -64,6 +66,14 @@ export const ThreadPane = ({
       void connection
         .dispatch({ type: "thread.revert", commandId: uuid<CommandId>(), threadId, toTurnId, files })
         .then((r) => setRevertError(r.ok ? undefined : r.message)),
+    [connection, threadId],
+  );
+  const [rateError, setRateError] = useState<string>();
+  const rate = useCallback(
+    (taskId: TaskId, rating: TaskRating | null) =>
+      void connection
+        .dispatch({ type: "task.rate", commandId: uuid<CommandId>(), threadId, taskId, rating })
+        .then((r) => setRateError(r.ok ? undefined : r.message)),
     [connection, threadId],
   );
   if (error)
@@ -123,17 +133,24 @@ export const ThreadPane = ({
             {archiveError ?? "This thread is archived: it's hidden from the thread list and takes no turns until you unarchive it."}
           </p>
         )}
+        {rateError && (
+          <p role="alert" className="border-b border-line bg-panel px-4 py-1.5 text-xs text-error">
+            {rateError}
+          </p>
+        )}
         {(thread.revert || revertError) && (
           <RevertBar connection={connection} threadId={threadId} thread={thread} error={revertError} onError={setRevertError} />
         )}
         <Conversation
           connection={connection}
           turns={thread.turns}
+          tasks={thread.tasks}
           routeChanges={thread.routeChanges}
           busy={thread.busy}
           focus={focusTurn}
           onChanges={showTurnDiff}
           onRevert={revert}
+          onRate={rate}
         />
         <Requests connection={connection} threadId={threadId} requests={thread.pendingRequests} onPlanApproved={() => setMode("build")} />
         <Composer connection={connection} thread={thread} mode={mode ?? last?.mode ?? "build"} onMode={setMode} />
@@ -167,19 +184,23 @@ export const ThreadPane = ({
 const Conversation = ({
   connection,
   turns,
+  tasks,
   routeChanges,
   busy,
   focus,
   onChanges,
   onRevert,
+  onRate,
 }: {
   connection: Connection;
   turns: readonly LiveTurn[];
+  tasks: LiveThread["tasks"];
   routeChanges: LiveThread["routeChanges"];
   busy: boolean;
   focus: TurnId | null;
   onChanges: (turnId: TurnId) => void;
   onRevert: (turnId: TurnId, files: boolean) => void;
+  onRate: (taskId: TaskId, rating: TaskRating | null) => void;
 }) => {
   // Any shown turn but the latest can be reverted to, while no turn runs.
   const lastShown = turns.findLast((t) => !t.reverted)?.turnId;
@@ -191,6 +212,18 @@ const Conversation = ({
     () => new Set(turns.flatMap((t) => t.items.flatMap((i) => (i.kind === "escalation" && i.nextTurnId ? [i.nextTurnId] : [])))),
     [turns],
   );
+  // A task starts with the turn its id names; its rating sits under its last turn, before the next task's first.
+  const rateAt = useMemo(() => {
+    const starts = new Map<string, Task>(tasks.map((t) => [t.taskId, t]));
+    const at = new Map<TurnId, Task>();
+    let task: Task | undefined;
+    turns.forEach((turn, i) => {
+      task = starts.get(turn.turnId) ?? task;
+      const next = turns[i + 1];
+      if (task && (!next || starts.has(next.turnId))) at.set(turn.turnId, task);
+    });
+    return at;
+  }, [turns, tasks]);
   const virtualizer = useVirtualizer({
     count: turns.length,
     getScrollElement: () => scroller.current,
@@ -251,8 +284,10 @@ const Conversation = ({
                   turn={turn}
                   byVerdandi={escalations.has(turn.turnId)}
                   revertable={!busy && !turn.reverted && turn.turnId !== lastShown}
+                  task={rateAt.get(turn.turnId)}
                   onChanges={onChanges}
                   onRevert={onRevert}
+                  onRate={onRate}
                 />
               </div>
             )
@@ -288,13 +323,18 @@ const UserBubble = ({ label, children }: { label: string; children: ReactNode })
   </div>
 );
 
+type Task = LiveThread["tasks"][number];
+
 type TurnProps = {
   connection: Connection;
   turn: LiveTurn;
   byVerdandi: boolean;
   revertable: boolean;
+  /** The task this turn ends, which the user can rate once it's done. */
+  task: Task | undefined;
   onChanges: (turnId: TurnId) => void;
   onRevert: (turnId: TurnId, files: boolean) => void;
+  onRate: (taskId: TaskId, rating: TaskRating | null) => void;
 };
 
 const Turn = memo((props: TurnProps) => {
@@ -329,7 +369,7 @@ const Turn = memo((props: TurnProps) => {
   );
 });
 
-const TurnStatus = ({ turn, revertable, onChanges, onRevert }: TurnProps) => {
+const TurnStatus = ({ turn, revertable, task, onChanges, onRevert, onRate }: TurnProps) => {
   const [text, dot] = statusColor[turn.status];
   const [reverting, setReverting] = useState(false);
   return (
@@ -371,6 +411,7 @@ const TurnStatus = ({ turn, revertable, onChanges, onRevert }: TurnProps) => {
           </button>
         </span>
       )}
+      {task && turn.status !== "running" && <Rating task={task} onRate={onRate} />}
       {turn.error && <span className="text-error">{turn.error}</span>}
       {turn.usage.map((u) => (
         <span
@@ -384,6 +425,26 @@ const TurnStatus = ({ turn, revertable, onChanges, onRevert }: TurnProps) => {
     </footer>
   );
 };
+
+/** Thumbs up or down on a finished task, for routing memory and the lab; pressing the chosen one again clears it. */
+const Rating = ({ task, onRate }: { task: Task; onRate: TurnProps["onRate"] }) => (
+  // biome-ignore lint/a11y/useSemanticElements: a group of toggle buttons, not a form field set.
+  <span role="group" aria-label="Rate this task" className="flex items-center gap-1">
+    {([1, -1] as const).map((rating) => (
+      <button
+        key={rating}
+        type="button"
+        aria-pressed={task.rating === rating}
+        aria-label={rating === 1 ? "Good result" : "Bad result"}
+        title={rating === 1 ? "Good result" : "Bad result: the router counts it as a task that didn't succeed"}
+        className="px-1.5 text-xs aria-pressed:border-accent aria-pressed:text-accent"
+        onClick={() => onRate(task.taskId, task.rating === rating ? null : rating)}
+      >
+        {rating === 1 ? <ThumbUpIcon className="size-3.5" /> : <ThumbDownIcon className="size-3.5" />}
+      </button>
+    ))}
+  </span>
+);
 
 type ToolResult = Extract<Item, { kind: "tool.result" }>;
 /** Results sit under their call, and a subagent's steps under the call that started it. */

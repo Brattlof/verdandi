@@ -11,6 +11,8 @@ import {
   type InteractionMode,
   type ProjectsFeed,
   type Resolution,
+  type TaskId,
+  type TaskRating,
   type ThreadFeed,
   type ThreadId,
   type ThreadView,
@@ -40,6 +42,12 @@ const summary = (status: string, error: string | undefined, usage: Usage[]) => {
   return `\n[${status}${error ? `: ${error}` : ""}${parts.length ? ` · ${parts.join(" · ")}` : ""}]\n`;
 };
 
+/** `/rate`'s words; `clear` takes the rating back. */
+const ratingWords = new Map<string, TaskRating | null>([
+  ["up", 1],
+  ["down", -1],
+  ["clear", null],
+]);
 const modeCommands = new Map<string, InteractionMode>([
   ["/ask", "ask"],
   ["/plan", "plan"],
@@ -154,6 +162,8 @@ export const chat = async (argv: readonly string[]) => {
   let shown: TurnId[] = [];
   /** The thread's latest turn, which `/diff` shows. */
   let lastTurn: TurnId | undefined;
+  /** The thread's latest task, which `/rate` rates. */
+  let lastTask: TaskId | undefined;
   /** The mode the next turn is sent in. */
   let mode: InteractionMode = "build";
   /** Files `/attach` read, which go with the next turn. */
@@ -195,6 +205,7 @@ export const chat = async (argv: readonly string[]) => {
           if (f.kind === "snapshot") {
             running = f.thread.turns.find((t) => t.status === "running")?.turnId;
             lastTurn = f.thread.turns.at(-1)?.turnId;
+            lastTask = f.thread.tasks.at(-1)?.taskId;
             shown.push(...f.thread.turns.filter((t) => !t.reverted).map((t) => t.turnId));
             requests.push(...f.thread.pendingRequests);
             snapshot.resolve(f.thread);
@@ -202,6 +213,7 @@ export const chat = async (argv: readonly string[]) => {
           if (f.kind === "delta") process.stdout.write(f.text);
           if (f.kind !== "event") return;
           const e = f.stored.event;
+          if (e.type === "task.started") lastTask = e.taskId;
           // A pinned thread's tasks need no line; one a message pinned with `@name` gets one.
           if (e.type === "task.started" && e.decision && (e.decision.source !== "pin" || e.inputs?.at)) {
             const how = e.decision.source === "pin" ? "pinned" : "routed";
@@ -364,7 +376,7 @@ export const chat = async (argv: readonly string[]) => {
         ? `${harness} ${model} ${effort} (routed; --model or --effort pins a route)`
         : "the route the router picks for the next task";
   process.stdout.write(
-    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
+    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /rate up|down rates the latest task, /rate clear clears it; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
   );
   const tree = thread.worktree;
   if (tree) {
@@ -430,6 +442,14 @@ export const chat = async (argv: readonly string[]) => {
     } else if (text === "/forget-routing") {
       if (await dispatch({ type: "routing.memory.clear", commandId: uuid<CommandId>(), threadId }))
         process.stdout.write("[routing memory cleared: this project's next routed tasks go by the policy alone]\n");
+      if (!running) prompt();
+    } else if (/^\/rate(\s|$)/.test(text)) {
+      const word = text.split(/\s+/)[1] ?? "";
+      const rating = ratingWords.get(word);
+      if (rating === undefined) process.stdout.write("[usage: /rate up|down|clear]\n");
+      else if (!lastTask) process.stdout.write("[this thread has no task to rate yet]\n");
+      else if (await dispatch({ type: "task.rate", commandId: uuid<CommandId>(), threadId, taskId: lastTask, rating }))
+        process.stdout.write(rating === null ? "[rating cleared]\n" : `[rated the latest task ${word}]\n`);
       if (!running) prompt();
     } else if (text === "/diff" || text === "/diff all") {
       await showDiff(text === "/diff all", thread.projectPath);

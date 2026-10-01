@@ -7,6 +7,7 @@ import {
   type StoredEvent,
   type TaskId,
   type TaskOutcome,
+  type TaskRating,
   type TaskStatus,
   type ThreadId,
   type Usage,
@@ -32,6 +33,7 @@ type Draft = {
   readonly verifierRuns: { command: string; passed: boolean }[];
   escalations: number;
   readonly usage: Map<string, Usage>;
+  rating: TaskRating | null;
 };
 
 /** The decision layer says a follow-up pushes back on the agent. Unsure answers take the safe default: it doesn't. */
@@ -64,7 +66,14 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         verifierRuns: [],
         escalations: 0,
         usage: new Map(),
+        rating: null,
       });
+      continue;
+    }
+    // The user can rate any of the thread's tasks, not only the latest.
+    if (e.type === "task.rated") {
+      const rated = tasks.find((t) => t.taskId === e.taskId);
+      if (rated) rated.rating = e.rating;
       continue;
     }
     if (e.type === "thread.reverted" || e.type === "thread.revert.undone") {
@@ -138,8 +147,8 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
   }
   return tasks.flatMap((t): TaskOutcome[] => {
     if (t.last === undefined) return [];
-    // ponytail: satisfaction counts the corrections Verdandi sees (steers, interrupts, rejected or edited plans, a route
-    // override, follow-ups the decision layer calls corrections). Upgrade: add explicit ratings (DESIGN §8.8).
+    // Satisfaction counts the corrections Verdandi sees (steers, interrupts, rejected or edited plans, a route override,
+    // follow-ups the decision layer calls corrections); the user's own word is `rating`.
     const corrections = t.corrections + (t.override ? 1 : 0);
     // A task whose agent finished but whose last verifier run failed didn't get its work right.
     const status = [...reverted].some((turnId) => taskOf.get(turnId) === t)
@@ -149,7 +158,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         : taskStatus[t.last];
     return [
       {
-        v: 1,
+        v: 2,
         taskId: t.taskId,
         threadId: t.threadId,
         route: t.route,
@@ -161,6 +170,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         escalations: t.escalations,
         usage: [...t.usage.values()],
         wallMs: t.wallMs,
+        ...(t.rating === null ? {} : { rating: t.rating }),
       },
     ];
   });
