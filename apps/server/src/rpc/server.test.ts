@@ -53,6 +53,9 @@ const withClient = <A, E>(port: number, token: string, f: (client: Effect.Succes
 const step = <A, E>(label: string, e: Effect.Effect<A, E>, duration: Duration.Input = "2 seconds") =>
   e.pipe(Effect.timeoutOrElse({ duration, orElse: () => Effect.die(`step timed out: ${label}`) }));
 
+/** Terminal tests start real shells: PowerShell on a Windows CI runner takes seconds, past Bun's 5 s default. A hang guard. */
+const terminalTimeout = 30_000;
+
 const createThread = (client: Effect.Success<ReturnType<typeof connect>>, threadId: ThreadId) =>
   client.CommandDispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: folder, route });
 
@@ -718,86 +721,94 @@ describe("rpc server", () => {
     ]);
   });
 
-  test("a terminal runs in the thread's folder, survives a reload, and closing it leaves no shell behind", async () => {
-    const { info } = await startServer();
-    const threadId = uuid<ThreadId>();
-    const opened = await withClient(info.port, info.token, (c) =>
-      Effect.gen(function* () {
-        yield* step("create", createThread(c, threadId));
-        const terminal = yield* step("open", c.TerminalOpen({ threadId, cols: 80, rows: 24 }), shellStart);
-        const feed = yield* followTerminal(c, terminal.terminalId);
-        yield* c.TerminalWrite({ terminalId: terminal.terminalId, data: echo(6) });
-        yield* step(
-          "echo",
-          feed.until(() => feed.seen.output.includes("verdandi-42")),
-          shellStart,
-        );
-        yield* step("unsubscribe", feed.stop);
-        return terminal;
-      }),
-    );
-    expect(opened.cwd).toBe(realpathSync.native(folder));
-    expect(alive(opened.pid)).toBe(true);
-
-    // A reloaded page: a new connection finds the terminal, gets its output so far, then live output.
-    const [listed, replayed, after] = await withClient(info.port, info.token, (c) =>
-      Effect.gen(function* () {
-        const listed = yield* c.TerminalList({ threadId });
-        const feed = yield* followTerminal(c, opened.terminalId);
-        yield* step(
-          "snapshot",
-          feed.until(() => feed.seen.snapshot !== undefined),
-        );
-        yield* c.TerminalWrite({ terminalId: opened.terminalId, data: echo(8) });
-        yield* step(
-          "live echo",
-          feed.until(() => feed.seen.output.includes("verdandi-56")),
-        );
-        yield* step("close", c.TerminalClose({ terminalId: opened.terminalId }), shellStart);
-        yield* step("feed ends", feed.ended);
-        return [listed, feed.seen.snapshot, yield* c.TerminalList({ threadId })] as const;
-      }),
-    );
-    expect(listed.map((t) => [t.terminalId, t.status])).toEqual([[opened.terminalId, "running"]]);
-    expect(replayed).toContain("verdandi-42");
-    expect(after).toEqual([]);
-    expect(alive(opened.pid)).toBe(false);
-  });
-
-  test("a crashed PTY host loses its terminals but not verdandid, and stopping verdandid ends every shell", async () => {
-    const { info, runtime } = await startServer();
-    const hostPid = () =>
-      runtime.runPromise(
+  test(
+    "a terminal runs in the thread's folder, survives a reload, and closing it leaves no shell behind",
+    async () => {
+      const { info } = await startServer();
+      const threadId = uuid<ThreadId>();
+      const opened = await withClient(info.port, info.token, (c) =>
         Effect.gen(function* () {
-          return (yield* Terminals).hostPid();
+          yield* step("create", createThread(c, threadId));
+          const terminal = yield* step("open", c.TerminalOpen({ threadId, cols: 80, rows: 24 }), shellStart);
+          const feed = yield* followTerminal(c, terminal.terminalId);
+          yield* c.TerminalWrite({ terminalId: terminal.terminalId, data: echo(6) });
+          yield* step(
+            "echo",
+            feed.until(() => feed.seen.output.includes("verdandi-42")),
+            shellStart,
+          );
+          yield* step("unsubscribe", feed.stop);
+          return terminal;
         }),
       );
-    const threadId = uuid<ThreadId>();
-    const [lost, second] = await withClient(info.port, info.token, (c) =>
-      Effect.gen(function* () {
-        yield* step("create", createThread(c, threadId));
-        const first = yield* step("open", c.TerminalOpen({ threadId, cols: 80, rows: 24 }), shellStart);
-        const feed = yield* followTerminal(c, first.terminalId);
-        yield* step(
-          "snapshot",
-          feed.until(() => feed.seen.snapshot !== undefined),
+      expect(opened.cwd).toBe(realpathSync.native(folder));
+      expect(alive(opened.pid)).toBe(true);
+
+      // A reloaded page: a new connection finds the terminal, gets its output so far, then live output.
+      const [listed, replayed, after] = await withClient(info.port, info.token, (c) =>
+        Effect.gen(function* () {
+          const listed = yield* c.TerminalList({ threadId });
+          const feed = yield* followTerminal(c, opened.terminalId);
+          yield* step(
+            "snapshot",
+            feed.until(() => feed.seen.snapshot !== undefined),
+          );
+          yield* c.TerminalWrite({ terminalId: opened.terminalId, data: echo(8) });
+          yield* step(
+            "live echo",
+            feed.until(() => feed.seen.output.includes("verdandi-56")),
+          );
+          yield* step("close", c.TerminalClose({ terminalId: opened.terminalId }), shellStart);
+          yield* step("feed ends", feed.ended);
+          return [listed, feed.seen.snapshot, yield* c.TerminalList({ threadId })] as const;
+        }),
+      );
+      expect(listed.map((t) => [t.terminalId, t.status])).toEqual([[opened.terminalId, "running"]]);
+      expect(replayed).toContain("verdandi-42");
+      expect(after).toEqual([]);
+      expect(alive(opened.pid)).toBe(false);
+    },
+    terminalTimeout,
+  );
+
+  test(
+    "a crashed PTY host loses its terminals but not verdandid, and stopping verdandid ends every shell",
+    async () => {
+      const { info, runtime } = await startServer();
+      const hostPid = () =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            return (yield* Terminals).hostPid();
+          }),
         );
-        const crashed = yield* Effect.promise(hostPid);
-        if (crashed === undefined) return yield* Effect.die("no PTY host is running");
-        process.kill(crashed, "SIGKILL"); // the host's PID, captured when verdandid started it
-        yield* step(
-          "lost",
-          feed.until(() => feed.seen.ended !== undefined),
-        );
-        const second = yield* step("reopen", c.TerminalOpen({ threadId, cols: 80, rows: 24 }), shellStart);
-        expect(yield* Effect.promise(hostPid)).not.toBe(crashed);
-        yield* step("unsubscribe", feed.stop);
-        return [feed.seen.ended, second] as const;
-      }),
-    );
-    expect(lost).toMatchObject({ status: "lost", exitCode: null });
-    expect(alive(second.pid)).toBe(true);
-    await runtime.dispose();
-    expect(alive(second.pid)).toBe(false);
-  });
+      const threadId = uuid<ThreadId>();
+      const [lost, second] = await withClient(info.port, info.token, (c) =>
+        Effect.gen(function* () {
+          yield* step("create", createThread(c, threadId));
+          const first = yield* step("open", c.TerminalOpen({ threadId, cols: 80, rows: 24 }), shellStart);
+          const feed = yield* followTerminal(c, first.terminalId);
+          yield* step(
+            "snapshot",
+            feed.until(() => feed.seen.snapshot !== undefined),
+          );
+          const crashed = yield* Effect.promise(hostPid);
+          if (crashed === undefined) return yield* Effect.die("no PTY host is running");
+          process.kill(crashed, "SIGKILL"); // the host's PID, captured when verdandid started it
+          yield* step(
+            "lost",
+            feed.until(() => feed.seen.ended !== undefined),
+          );
+          const second = yield* step("reopen", c.TerminalOpen({ threadId, cols: 80, rows: 24 }), shellStart);
+          expect(yield* Effect.promise(hostPid)).not.toBe(crashed);
+          yield* step("unsubscribe", feed.stop);
+          return [feed.seen.ended, second] as const;
+        }),
+      );
+      expect(lost).toMatchObject({ status: "lost", exitCode: null });
+      expect(alive(second.pid)).toBe(true);
+      await runtime.dispose();
+      expect(alive(second.pid)).toBe(false);
+    },
+    terminalTimeout,
+  );
 });

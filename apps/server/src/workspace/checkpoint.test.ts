@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
-import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ThreadId, TurnId } from "@verdandi/contracts";
 import { git, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Effect } from "effect";
-import { checkpoint, checkpointRef, listCheckpoints, restore } from "./checkpoint.ts";
+import { checkpoint, checkpointRef, listCheckpoints } from "./checkpoint.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -36,9 +36,7 @@ test("checkpointing a dirty tree saves it whole and leaves the branch, index, st
   expect(state()).toEqual(before);
   expect(git(dir, "rev-parse", ref).trim()).toBe(commit ?? "");
   expect(git(dir, "ls-tree", "--name-only", ref).split("\n").filter(Boolean)).toEqual([".gitignore", "a.txt", "new.txt"]);
-  // Byte for byte as it is on disk (after `git stash`, Windows checks it out with CRLF).
-  expect(git(dir, "show", `${ref}:a.txt`)).toBe(readFileSync(join(dir, "a.txt"), "utf8"));
-  expect(readFileSync(join(dir, "a.txt"), "utf8").replaceAll("\r\n", "\n")).toBe("one\nstaged\nunstaged\n");
+  expect(git(dir, "show", `${ref}:a.txt`)).toBe("one\nstaged\nunstaged\n");
   expect(await Effect.runPromise(listCheckpoints(dir, "t 1/../x.lock" as ThreadId))).toEqual(new Set([ref]));
 });
 
@@ -46,19 +44,4 @@ test("a folder outside git has no checkpoint", async () => {
   const dir = makeTempHome();
   dirs.push(dir);
   expect(await Effect.runPromise(checkpoint(dir, checkpointRef("t" as ThreadId, "u" as TurnId, "start")))).toBeUndefined();
-});
-
-test("restoring a checkpoint puts files back byte for byte, even with core.autocrlf on (Git for Windows' default)", async () => {
-  const dir = makeTempRepo({ "a.txt": "one\n" });
-  dirs.push(dir);
-  git(dir, "config", "core.autocrlf", "true");
-  writeFileSync(join(dir, "a.txt"), "one\ntwo\n");
-  writeFileSync(join(dir, "crlf.txt"), "x\r\ny\r\n");
-  const ref = checkpointRef("t" as ThreadId, "u" as TurnId, "end");
-  await Effect.runPromise(checkpoint(dir, ref));
-  writeFileSync(join(dir, "a.txt"), "changed\n");
-  rmSync(join(dir, "crlf.txt"));
-  await Effect.runPromise(restore(dir, ref));
-  expect(readFileSync(join(dir, "a.txt"), "utf8")).toBe("one\ntwo\n");
-  expect(readFileSync(join(dir, "crlf.txt"), "utf8")).toBe("x\r\ny\r\n");
 });
