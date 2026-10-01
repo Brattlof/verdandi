@@ -36,6 +36,9 @@ export type AttachmentRef = typeof AttachmentRef.Type;
 export const AttachmentUpload = Schema.Struct({ name: Schema.String, mediaType: Schema.String, data: Schema.String });
 export type AttachmentUpload = typeof AttachmentUpload.Type;
 
-/** e.g. `1.2 MB` */
-export const formatBytes = (bytes: number) =>
-  bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+/** e.g. `1.2 MB`. The unit is picked after rounding, so 1,048,575 bytes is `1.0 MB`, not `1024 KB`. */
+export const formatBytes = (bytes: number) => {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = Math.round(bytes / 1024);
+  return kb < 1024 ? `${kb} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+};
