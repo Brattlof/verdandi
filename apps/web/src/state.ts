@@ -174,7 +174,9 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
 export const applyThreadFeed = (thread: LiveThread | undefined, feed: ThreadFeed): LiveThread | undefined => {
   if (feed.kind === "snapshot") return { ...feed.thread, turns: feed.thread.turns.map((t) => ({ ...t, streaming: "" })), seq: feed.seq };
   if (!thread) return thread;
-  if (feed.kind === "delta") return updateTurn(thread, feed.turnId, (t) => ({ ...t, streaming: t.streaming + feed.text }));
+  // Only a running turn streams: a feed that resubscribes as a turn completes can get a last delta after a snapshot that ended it.
+  if (feed.kind === "delta")
+    return updateTurn(thread, feed.turnId, (t) => (t.status === "running" ? { ...t, streaming: t.streaming + feed.text } : t));
   const { seq, event, at } = feed.stored;
   if (seq <= thread.seq) return thread;
   return { ...(apply[event.type] as Apply<Event["type"]>)(thread, event, at), seq };

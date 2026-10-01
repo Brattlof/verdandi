@@ -18,7 +18,7 @@ The event-sourced core of verdandid (DESIGN.md §10). Read the root `AGENTS.md` 
 - **Adding an event** takes: a `v: 1` schema in `packages/contracts/src/events.ts`, its `type@v` entry in the decoder map, a case in the decider, and a projection (the handler maps are exhaustive, so the typechecker lists what's missing). Changing a published event means a new version plus an upgrade on read, never an edit. Migrations in `../persistence/migrations.ts` are append-only.
 - **Commands are idempotent by `commandId`.** A retry returns the first receipt and emits nothing. Generate a fresh `commandId` for each intent, never reuse one across intents.
 - **Accepting with no events is fine.** Duplicate session bindings, text deltas and stale recoveries all decide to `[]`.
-- **Text deltas are never stored.** The reactor publishes them with `engine.publishDelta`; they reach live feeds only. Anything a client needs after a reconnect must be an event.
+- **Text deltas are never stored.** The reactor publishes them with `engine.publishDelta`; they reach live feeds only, and only while their turn runs, so what an interrupted harness streams as it winds down is dropped. Anything a client needs after a reconnect must be an event.
 - **A thread's turns never overlap in its harness.** A new turn's fiber waits for the thread's previous one to finish, finalizers included, so an interrupted harness has wound down before the next turn reaches it.
 - **Reactions must not block.** A `Reaction` runs inside `dispatch`, after the commit. Fork long work (the reactor uses a `FiberSet`) and return.
 - **Dispatch is uninterruptible.** Once a command commits, its reactions run even if the caller disconnects. Keep what runs inside it short.

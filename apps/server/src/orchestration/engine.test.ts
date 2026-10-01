@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Command, CommandId, InteractionMode, Resolution, StoredEvent, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
-import { Deferred, Effect, Fiber, Layer, ManagedRuntime } from "effect";
+import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { SqlLive } from "../persistence/db.ts";
 import { migrations } from "../persistence/migrations.ts";
@@ -308,6 +308,46 @@ describe("engine", () => {
     );
     expect(v?.turns.map((t) => t.status)).toEqual(["interrupted", "success"]);
     expect(fake.calls.map((c) => c.resumeSessionId)).toEqual([undefined, "fake-session-1"]);
+  });
+
+  test("text a stopped turn's harness streams while it winds down reaches no feed", async () => {
+    const { runtime } = start(newHome());
+    const [stopped, next] = [id<TurnId>(), id<TurnId>()];
+    const deltas = await runtime.runPromise(
+      Effect.gen(function* () {
+        const engine = yield* Engine;
+        yield* dispatch(create);
+        const bound = yield* sessionBound;
+        yield* dispatch(send("hang", stopped));
+        yield* Deferred.await(bound);
+        const seen: [TurnId, string][] = [];
+        const [subscribed, nextDone] = [yield* Deferred.make<void>(), yield* Deferred.make<void>()];
+        const feed = yield* engine.feed(threadId).pipe(
+          Stream.runForEach((f) => {
+            if (f.kind === "snapshot") return Deferred.succeed(subscribed, undefined);
+            if (f.kind === "delta") seen.push([f.turnId, f.text]);
+            const done = f.kind === "event" && f.stored.event.type === "turn.completed" && f.stored.event.turnId === next;
+            return done ? Deferred.succeed(nextDone, undefined) : Effect.void;
+          }),
+          Effect.forkChild,
+        );
+        yield* Deferred.await(subscribed);
+        // What the harness streams for the stopped turn, before and after the interrupt ends it.
+        yield* engine.publishDelta(threadId, stopped, "partial");
+        yield* dispatch(interrupt(stopped));
+        yield* engine.publishDelta(threadId, stopped, "late");
+        yield* drain;
+        yield* dispatch(send("hi", next));
+        yield* Deferred.await(nextDone);
+        yield* Fiber.interrupt(feed);
+        return seen;
+      }),
+    );
+    expect(deltas).toEqual([
+      [stopped, "partial"],
+      [next, "echo: "],
+      [next, "hi"],
+    ]);
   });
 
   test("interrupting a turn denies its pending requests", async () => {
