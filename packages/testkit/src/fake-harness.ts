@@ -23,6 +23,7 @@ import { Effect, Stream } from "effect";
  * steps carry `parentToolUseId`, "background" does the same in a background subagent that reports after the main
  * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back, with its attachments' names, kinds and sizes, and fixed usage on the route's model.
  * A turn with a `fork` starts a new session holding the old one's turns up to the fork; `history` keeps each session's turns.
+ * "tool <name> <json args>" calls one of the Verdandi tools the run was given, reporting the call and its result as items.
  * Every reply costs $0.01. Like Claude Code, it checks the task's `maxCost` after the call: when the task's
  * spend then exceeds it, the turn ends with status `limit`. `calls` records every run.
  */
@@ -154,6 +155,28 @@ export const makeFakeHarness = () => {
         ]);
       });
       return Stream.concat(Stream.fromIterable(start), Stream.concat(edit, reply(input.route.model, `edited ${path}`)));
+    }
+    if (input.text.startsWith("tool ")) {
+      // `tool <name> <json args>` calls one of Verdandi's tools the run was given, as Claude Code's MCP client would.
+      const [, name = "", ...rest] = input.text.split(" ");
+      const args = rest.length > 0 ? (JSON.parse(rest.join(" ")) as Record<string, unknown>) : {};
+      const toolUseId = `fake-tool-${name}`;
+      const called = Stream.unwrap(
+        Effect.promise(async () => {
+          const tool = input.tools?.find((t) => t.name === name);
+          const result = tool
+            ? await tool.call(args, { threadId: input.threadId, turnId: input.turnId })
+            : { text: `There's no Verdandi tool ${name}.`, isError: true };
+          return Stream.concat(
+            Stream.fromIterable<HarnessEvent>([
+              { type: "item", item: { kind: "tool.call", toolUseId, name: `mcp__verdandi__${name}`, input: args } },
+              { type: "item", item: { kind: "tool.result", toolUseId, isError: result.isError === true, content: result.text } },
+            ]),
+            reply(input.route.model, `called ${name}`),
+          );
+        }),
+      );
+      return Stream.concat(Stream.fromIterable(start), called);
     }
     if (input.text === "steer") {
       const answer = input.steers.pipe(

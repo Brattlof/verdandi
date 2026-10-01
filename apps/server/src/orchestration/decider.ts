@@ -359,6 +359,12 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     const restore = revert.files && revert.saved ? { restore: revert.saved } : {};
     return accept({ type: "thread.revert.undone", v: 1, threadId: c.threadId, turnIds: revert.turnIds, ...restore });
   },
+  "task.block": (state, c) => {
+    if (state.thread?.runningTurnId !== c.turnId || !state.thread.taskId) {
+      return reject("TurnNotRunning", `Turn ${c.turnId} isn't running, so there's no task to report blocked.`);
+    }
+    return accept({ type: "task.blocked", v: 1, threadId: c.threadId, taskId: state.thread.taskId, turnId: c.turnId, reason: c.reason });
+  },
   "files.report": (state, c) =>
     state.thread
       ? accept({

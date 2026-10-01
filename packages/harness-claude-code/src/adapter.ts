@@ -3,12 +3,14 @@ import { existsSync, readFileSync } from "node:fs";
 import {
   type AgentDefinition,
   type CanUseTool,
+  createSdkMcpServer,
   type PermissionMode,
   type PermissionResult,
   type Query,
   query,
   type SDKMessage,
   type SDKUserMessage,
+  tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   formatBytes,
@@ -16,6 +18,7 @@ import {
   HarnessError,
   type HarnessEvent,
   type HarnessRunInput,
+  type HarnessTool,
   type InteractionMode,
   type imageMediaTypes,
   Question,
@@ -24,8 +27,11 @@ import {
   type SubagentProfile,
   type TaskId,
   type ThreadId,
+  type ToolParam,
+  type TurnId,
 } from "@verdandi/contracts";
 import { Effect, Exit, Option, Schema, Stream } from "effect";
+import { z } from "zod";
 import { initialContext, type NormalizeContext, normalize } from "./normalize.ts";
 
 export type QueryFn = typeof query;
@@ -69,6 +75,8 @@ type Session = {
   reportsState: boolean;
   /** The task whose budget guards the process was started with; undefined when it has none. */
   readonly limitedTask: TaskId | undefined;
+  /** The turn running now: Verdandi's tools act for it. */
+  turnId: TurnId;
 };
 
 /**
@@ -173,6 +181,41 @@ export const forkPoint = (transcriptPath: string, dropTurnId: string): string | 
   return undefined;
 };
 
+/** Claude Code's name for a tool of Verdandi's MCP server. */
+export const mcpName = (name: string) => `mcp__verdandi__${name}`;
+
+const zodOf: Record<ToolParam["type"], () => z.ZodType> = {
+  string: () => z.string(),
+  number: () => z.number(),
+  boolean: () => z.boolean(),
+};
+
+/**
+ * Verdandi's tools as one in-process MCP server (ADR 0005), built at spawn: the tool list sits in the cached
+ * prompt, so a session keeps it for its life. Calls act for whichever turn `turnId` says runs now.
+ */
+const verdandiServer = (tools: readonly HarnessTool[], threadId: ThreadId, turnId: () => TurnId) =>
+  createSdkMcpServer({
+    name: "verdandi",
+    version: "1",
+    tools: tools.map((t) =>
+      tool(
+        t.name,
+        t.description,
+        Object.fromEntries(
+          Object.entries(t.params).map(([name, p]) => {
+            const type = zodOf[p.type]().describe(p.description);
+            return [name, p.optional ? type.optional() : type];
+          }),
+        ),
+        async (args) => {
+          const result = await t.call(args, { threadId, turnId: turnId() });
+          return { content: [{ type: "text" as const, text: result.text }], ...(result.isError && { isError: true }) };
+        },
+      ),
+    ),
+  });
+
 const openSession = (
   queryFn: QueryFn,
   claudePath: string,
@@ -221,6 +264,7 @@ const openSession = (
 
   // Fixed for the process: the agent list sits in the cached prompt. The route's subagents only change with a new session.
   const agents = agentsFor(input.route.subagents);
+  const tools = input.tools ?? [];
   const q = queryFn({
     prompt,
     options: {
@@ -267,6 +311,11 @@ const openSession = (
       // Connectors attach nondeterministically and would change the tool list between turns (ADR 0001).
       settings: { disableClaudeAiConnectors: true },
       canUseTool,
+      // Verdandi's own tools, fixed for the process like the rest of the tool list; those that don't ask run without approval.
+      ...(tools.length > 0 && {
+        mcpServers: { verdandi: verdandiServer(tools, input.threadId, () => session.turnId) },
+        allowedTools: tools.filter((t) => !t.ask).map((t) => mcpName(t.name)),
+      }),
     },
   });
   // One iterator for the session's lifetime: leaving a for-await early would close the CLI (ADR 0003).
@@ -296,6 +345,7 @@ const openSession = (
     transcriptPath: undefined,
     reportsState: false,
     limitedTask: input.limits?.taskId,
+    turnId: input.turnId,
   };
   return session;
 };
@@ -520,6 +570,7 @@ export const makeClaudeCodeAdapter = (options: {
           });
           // Opened before the stream starts, so no steer can overtake the turn's own prompt.
           const send = (to: Session) => {
+            to.turnId = input.turnId;
             to.live = true;
             to.unanswered.clear();
             to.push({ type: "user", message: { role: "user", content }, parent_tool_use_id: null, uuid: input.turnId as UUID });

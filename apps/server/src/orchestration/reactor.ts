@@ -10,6 +10,7 @@ import type {
   HarnessRunInput,
   InteractionMode,
   Item,
+  ProjectId,
   Route,
   TaskId,
   TaskLimits,
@@ -18,6 +19,7 @@ import type {
   WorktreeReport,
   WorktreeView,
 } from "@verdandi/contracts";
+import { ToolFailed, verdandiTools } from "@verdandi/tools";
 import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { checkpoint, checkpointRef, restore, revertRef } from "../workspace/checkpoint.ts";
@@ -25,6 +27,7 @@ import { editedPaths } from "../workspace/diff.ts";
 import { runVerifier } from "../workspace/verify.ts";
 import { addWorktree, loadThreadFolder, removeWorktree, threadFolder, worktreeSetup } from "../workspace/worktree.ts";
 import { Engine } from "./engine.ts";
+import { searchSessions } from "./search.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "./task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "./trajectory.ts";
 
@@ -101,6 +104,22 @@ export const ReactorLive = Layer.effect(
 
     const report = (threadId: ThreadId, turnId: TurnId, event: HarnessEvent) =>
       engine.dispatch({ type: "harness.report", commandId: randomUUID() as CommandId, threadId, turnId, event });
+
+    /** Verdandi's own tools (DESIGN §9.6), built once: every turn gets this same list, so a session's never changes. */
+    const tools = verdandiTools({
+      search: (query, allProjects, at) =>
+        Effect.gen(function* () {
+          const [thread] = yield* sql<{ project_id: ProjectId }>`select project_id from threads where id = ${at.threadId}`;
+          return yield* searchSessions({ query, ...(!allProjects && thread && { projectId: thread.project_id }) });
+        }).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.orDie),
+      block: (reason, at) =>
+        engine.dispatch({ type: "task.block", commandId: randomUUID() as CommandId, ...at, reason }).pipe(
+          Effect.asVoid,
+          Effect.catchTag("CommandRejected", (e) => Effect.fail(new ToolFailed({ message: e.message }))),
+          // Only a database failure is a defect; a refusal goes back to the agent as the tool's error.
+          Effect.catchTag("SqlError", Effect.die),
+        ),
+    });
 
     // A failed write is retried by the sweep below when verdandid next starts.
     const record = (threadId: ThreadId, turnId: TurnId) =>
@@ -195,6 +214,7 @@ export const ReactorLive = Layer.effect(
             mode,
             ...(attachments.length > 0 && { attachments: attachments.map((a) => ({ ...a, path: join(attachmentsDir, a.id) })) }),
             steers,
+            tools,
             ...(limits && { limits }),
             // A revert waits to fork the conversation until this turn (ADR 0004).
             ...(thread.pending_fork && {

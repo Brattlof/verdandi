@@ -1,0 +1,12 @@
+{
+  "name": "@verdandi/tools",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@verdandi/contracts": "workspace:*",
+    "effect": "4.0.0-rc.115"
+  }
+}

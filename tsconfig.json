@@ -6,6 +6,7 @@
     { "path": "packages/trajectories" },
     { "path": "packages/router" },
     { "path": "packages/decisions" },
+    { "path": "packages/tools" },
     { "path": "packages/harness-claude-code" },
     { "path": "apps/server" },
     { "path": "apps/web" }

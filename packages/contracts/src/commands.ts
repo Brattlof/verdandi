@@ -178,6 +178,15 @@ export const FilesReport = Schema.Struct({
   error: Schema.optionalKey(Schema.String),
 });
 
+/** Internal: the agent of running turn `turnId` called `report_blocked`. Clients cannot send it. */
+export const TaskBlock = Schema.Struct({
+  type: Schema.Literal("task.block"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  reason: Schema.String,
+});
+
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
   type: Schema.Literal("harness.report"),
@@ -254,6 +263,7 @@ export const Command = Schema.Union([
   ApprovalRespond,
   HarnessReport,
   FilesReport,
+  TaskBlock,
   WorktreeReported,
   VerifierReport,
   TaskEscalate,

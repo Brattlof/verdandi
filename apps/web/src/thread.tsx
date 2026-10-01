@@ -449,6 +449,12 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
       </span>
     </p>
   ),
+  blocked: ({ item }) => (
+    <p role="note" className="my-2 rounded-md border border-line border-l-2 border-l-warn bg-panel px-2 py-1 text-xs">
+      <span className="font-medium text-warn">The agent is blocked: </span>
+      {item.reason}
+    </p>
+  ),
   notice: ({ item }) => (
     <p role="note" className="my-2 rounded-md border border-line bg-panel px-2 py-1 text-xs text-warn">
       {item.text}
