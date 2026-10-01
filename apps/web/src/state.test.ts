@@ -266,3 +266,13 @@ test("the Terminal tab opens the panel without fetching a diff, and a fetch swit
   expect(fetched).toMatchObject({ tab: "terminal", turnId, result: { ok: true, view } });
   expect(applyPanel(fetched, { type: "fetch", turnId, all: false, request: "r2" })).toMatchObject({ tab: "diff", request: "r2" });
 });
+
+test("a delta for a turn that isn't running leaves the thread as it was", () => {
+  const ended = fold([
+    snapshot,
+    event(2, { type: "turn.started", v: 2, threadId, turnId, text: "hi" }),
+    { kind: "delta", turnId, text: "echo: " },
+    event(3, { type: "turn.completed", v: 1, threadId, turnId, status: "interrupted" }),
+  ]);
+  expect(applyThreadFeed(ended, { kind: "delta", turnId, text: "late" })).toEqual(ended);
+});

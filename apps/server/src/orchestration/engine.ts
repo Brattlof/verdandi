@@ -56,7 +56,7 @@ export class Engine extends Context.Service<
      * snapshot leaves archived threads out unless `archived`; changes always come, so a client sees a thread leave.
      */
     readonly projectsFeed: (archived: boolean) => Stream.Stream<ProjectsFeed, SqlError.SqlError>;
-    /** Deltas are broadcast to subscribers and never stored. */
+    /** Deltas are broadcast to subscribers while their turn runs, and never stored. */
     readonly publishDelta: (threadId: ThreadId, turnId: TurnId, text: string) => Effect.Effect<void>;
     readonly react: (reaction: Reaction) => Effect.Effect<void>;
   }
@@ -82,6 +82,9 @@ export const EngineLive = (options: EngineOptions = {}) =>
       const pubsub = yield* PubSub.unbounded<FeedMessage>();
       const changes = yield* PubSub.unbounded<ProjectsChange>();
       const reactions: Reaction[] = [];
+      // Turns whose deltas reach feeds: from `turn.started` until `turn.completed` is published. An interrupted turn
+      // completes before its harness winds down, and what the harness streams meanwhile is dropped.
+      const streaming = new Set<TurnId>();
       const projectOne = options.project ?? project;
       const decider = options.decide ?? rulesDecide;
 
@@ -197,9 +200,12 @@ export const EngineLive = (options: EngineOptions = {}) =>
             Effect.forEach(
               stored,
               (s) =>
-                Effect.andThen(
-                  PubSub.publish(pubsub, { threadId: s.event.threadId, feed: { kind: "event", stored: s } }),
-                  Effect.forEach(reactions, (react) => react(s), { discard: true }),
+                Effect.sync(() => {
+                  if (s.event.type === "turn.started") streaming.add(s.event.turnId);
+                  if (s.event.type === "turn.completed") streaming.delete(s.event.turnId);
+                }).pipe(
+                  Effect.andThen(PubSub.publish(pubsub, { threadId: s.event.threadId, feed: { kind: "event", stored: s } })),
+                  Effect.andThen(Effect.forEach(reactions, (react) => react(s), { discard: true })),
                 ),
               { discard: true },
             ),
@@ -261,8 +267,11 @@ export const EngineLive = (options: EngineOptions = {}) =>
         dispatch: (command) => dispatch(command).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
         feed,
         projectsFeed,
+        // Checked and published in one step, so no delta can follow its turn's `turn.completed` on a feed.
         publishDelta: (threadId, turnId, text) =>
-          PubSub.publish(pubsub, { threadId, feed: { kind: "delta", turnId, text } }).pipe(Effect.asVoid),
+          Effect.sync(() => {
+            if (streaming.has(turnId)) PubSub.publishUnsafe(pubsub, { threadId, feed: { kind: "delta", turnId, text } });
+          }),
         react: (reaction) => Effect.sync(() => void reactions.push(reaction)),
       });
     }),
