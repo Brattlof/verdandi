@@ -1,4 +1,4 @@
-import type { CapPeriod, CapScope, ProjectId, SpendCap } from "@verdandi/contracts";
+import type { CapPeriod, CapScope, HarnessId, ProjectId, Quota, SpendCap } from "@verdandi/contracts";
 import { Effect, Result } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import type { SpendCaps } from "../config/spend-caps.ts";
@@ -15,8 +15,29 @@ export const periodsAt = (now: Date): Record<CapPeriod, { readonly key: string; 
   };
 };
 
-/** What the decider knows about spend caps: those over the thread, or why the caps file can't be used. */
-export type SpendState = Result.Result<{ readonly file: string; readonly caps: readonly SpendCap[] }, string>;
+/**
+ * What the decider knows about spend caps: those over the thread and the harnesses whose subscription is `paying`
+ * on extra usage, or why the caps file can't be used.
+ */
+export type SpendState = Result.Result<
+  { readonly file: string; readonly caps: readonly SpendCap[]; readonly paying: readonly HarnessId[] },
+  string
+>;
+
+/**
+ * The harnesses whose latest subscription window runs on extra usage as of `now`, priced as metered (ADR 0005).
+ * A window whose reset time has passed no longer counts: its harness reports the new one on its next turn.
+ */
+export const loadPaying = (now: Date) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ harness: HarnessId; payload: string }>`select harness, payload from quota`;
+    return rows.flatMap((r) => {
+      const quota = JSON.parse(r.payload) as Quota;
+      const current = quota.resetsAt === undefined || Date.parse(quota.resetsAt) > now.getTime();
+      return quota.usingOverage && current ? [r.harness] : [];
+    });
+  });
 
 /**
  * Each cap over `projectPath`'s threads as of `now`: the profile's first, then the project's. A cap's
@@ -67,5 +88,9 @@ export const loadSpendState = (load: Effect.Effect<Result.Result<SpendCaps, stri
   Effect.gen(function* () {
     const caps = yield* load;
     if (Result.isFailure(caps)) return Result.fail(caps.failure) as SpendState;
-    return Result.succeed({ file: caps.success.file, caps: yield* loadSpendCaps(caps.success, projectPath, now) }) as SpendState;
+    return Result.succeed({
+      file: caps.success.file,
+      caps: yield* loadSpendCaps(caps.success, projectPath, now),
+      paying: yield* loadPaying(now),
+    }) as SpendState;
   });

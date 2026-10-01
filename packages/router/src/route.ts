@@ -1,17 +1,19 @@
-import type {
-  BudgetMode,
-  CatalogEntry,
-  Effort,
-  HarnessId,
-  InteractionMode,
-  RouteDecision,
-  RouteRule,
-  RouteSpec,
-  RouteStats,
-  RouteTarget,
-  RuleTrace,
-  SubagentRoutes,
-  Tier,
+import {
+  type BudgetMode,
+  type CatalogEntry,
+  type Effort,
+  type HarnessId,
+  type InteractionMode,
+  type RouteDecision,
+  type RouteRule,
+  type RouteSpec,
+  type RouteStats,
+  type RouteTarget,
+  type RuleTrace,
+  type SpendCapped,
+  type SubagentRoutes,
+  spendsMetered,
+  type Tier,
 } from "@verdandi/contracts";
 import type { ResolvedPolicy } from "./policy.ts";
 import type { Classifier } from "./rules.ts";
@@ -42,6 +44,8 @@ export type RouteInput = {
   readonly images?: number;
   /** The project's routing memory (DESIGN §8.8): how its tasks went, per class and route. Pins ignore it. */
   readonly memory?: readonly RouteStats[];
+  /** A reached metered spend cap: targets that would spend metered dollars drop out (DESIGN §8.9). Pins ignore it. */
+  readonly capped?: SpendCapped;
 };
 
 /** No target is available at all. The message says why each one dropped out. */
@@ -178,9 +182,11 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const paths = [...(input.paths ?? []), ...sig.files];
   const restrictions = policy.restrictions.filter((r) => paths.some((p) => new Bun.Glob(r.match).match(p)));
   const cachedTokens = input.current?.cachedTokens ?? 0;
+  const capped = input.capped && `the ${input.capped.cap} of metered spend is reached`;
   const unavailable = (t: CatalogEntry) => {
     if (input.harnesses && !input.harnesses.includes(t.harness)) return `the ${t.harness} harness isn't running`;
     if (input.images && !t.vision) return `it can't read the attached image${input.images === 1 ? "" : "s"}`;
+    if (capped && spendsMetered(t, input.capped?.paying ?? [])) return capped;
     const provider = input.providers?.[t.provider];
     if (provider?.healthy === false) return `${t.provider} is unhealthy`;
     if (provider?.remaining !== undefined && provider.remaining <= 0) return `${t.provider} is out of quota`;
@@ -235,10 +241,15 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
     stage: "policy",
     note: `${unsure ? "fallback" : c.taskClass}${planning ? " (plan)" : input.planApproved ? " (build after its plan)" : ""} in ${policy.mode} mode accepts ${accepted.join(", ") || "nothing"} at ${effort}; picked ${pick.model}, ~${kTokens(tokens)} tokens for ${dollars(cost(pick))}`,
   });
+  // The cap moved the task when, without it, the class would have run on a target the cap dropped.
+  const skipped = capped ? accepted.flatMap((n) => (dropped.get(n) === capped ? (policy.targets.get(n) ?? []) : [])) : [];
+  const instead = skipped.length > 0 ? cheapest([...preferred, ...skipped]) : undefined;
   let reason =
-    preferred.length > 0
-      ? `${lead}, so ${unsure ? `it runs on the ${policy.mode} default, ` : `${byMode}it runs on `}${describe(pick, effort)}.`
-      : `${lead}, but ${accepted.map((n) => policy.targets.get(n)?.model ?? n).join(" and ")} ${accepted.length === 1 ? "is" : "are"} unavailable, so it runs on ${describe(pick, effort)}, the ${above.length > 0 ? "cheapest capable" : "strongest"} target left.`;
+    instead && skipped.includes(instead)
+      ? `${lead}, but ${capped}, so it runs on ${describe(pick, effort)} instead of ${instead.access === "metered" ? `the metered ${instead.model}` : `${instead.model} on extra usage`}.`
+      : preferred.length > 0
+        ? `${lead}, so ${unsure ? `it runs on the ${policy.mode} default, ` : `${byMode}it runs on `}${describe(pick, effort)}.`
+        : `${lead}, but ${accepted.map((n) => policy.targets.get(n)?.model ?? n).join(" and ")} ${accepted.length === 1 ? "is" : "are"} unavailable, so it runs on ${describe(pick, effort)}, the ${above.length > 0 ? "cheapest capable" : "strongest"} target left.`;
 
   // Stage 4, continued: routing memory. How this project's tasks of the class went on the policy's route
   // can move it: to where the user kept moving them, or else one tier up from where they kept failing.

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   type CapPeriod,
   type CapScope,
+  type Catalog,
   type Command,
   CommandRejected,
   capName,
@@ -16,7 +17,11 @@ import {
   type MemoryView,
   type ProjectId,
   type Resolution,
+  type Route,
   type RouteDecision,
+  type RouteTarget,
+  type SpendCapped,
+  spendsMetered,
   type TaskId,
   type ThreadId,
   type TurnId,
@@ -33,6 +38,7 @@ import {
   type RoutingThread,
   routeInputs,
   routeOf,
+  targetOf,
 } from "../routing/routing.ts";
 import { worktreeBranch } from "../workspace/refs.ts";
 import type { StoredRevert } from "./projector.ts";
@@ -85,8 +91,10 @@ export type DeciderState = {
   readonly routing?: RoutingContext;
   /** The decision layer's answers about a `turn.send`'s text, asked by the engine: recorded, and routing reads them. */
   readonly decisions?: { readonly questions: readonly DecisionQuestion[]; readonly answers: readonly DecisionAnswer[] };
-  /** The spend caps over the thread, loaded for `turn.send` and `spend.cap.raise`. Without it nothing is capped. */
+  /** The spend caps over the thread, loaded for `turn.send`, `task.escalate` and `spend.cap.raise`. Without it nothing is capped. */
   readonly spend?: SpendState;
+  /** The model catalog, loaded with `spend`: which routes spend metered dollars. Without it a reached cap stops every turn. */
+  readonly catalog?: Catalog;
   /** The thread's user and project memory, loaded for `memory.*` commands and for a turn that starts a new session. */
   readonly memory?: MemoryView;
 };
@@ -119,17 +127,25 @@ const configKey: Record<CapScope, Record<CapPeriod, string>> = {
   project: { day: "daily under projects", month: "monthly under projects" },
 };
 
-/** Why a turn can't start: the caps file is broken, or a cap over the thread is reached. */
-const capped = (spend: SpendState | undefined): Decision | undefined => {
+/** The reached spend cap over the thread, for the router to route around; undefined when none is (or the caps file is broken). */
+export const reachedCap = (spend: SpendState | undefined): SpendCapped | undefined => {
+  if (!spend || Result.isFailure(spend)) return undefined;
+  const cap = spend.success.caps.find(capReached);
+  return cap && { cap: capName(cap), paying: spend.success.paying };
+};
+
+/**
+ * Why a turn on `target` can't start: the caps file is broken, or a cap over the thread is reached and the turn
+ * would spend metered dollars (DESIGN §8.9). An unknown `target` counts as metered.
+ */
+const capped = (spend: SpendState | undefined, target: Pick<RouteTarget, "harness" | "access"> | undefined): Decision | undefined => {
   if (!spend) return undefined;
   if (Result.isFailure(spend)) return reject("InvalidSpendCaps", spend.failure);
   const cap = spend.success.caps.find(capReached);
-  if (!cap) return undefined;
+  if (!cap || (target && !spendsMetered(target, spend.success.paying))) return undefined;
   const now = capPeriodNow(cap.period);
   return reject(
     "SpendCapReached",
-    // ponytail: blocks every turn while a cap is reached, even one that would run inside a subscription window.
-    // Upgrade: block only turns whose target spends metered dollars, once the quota window's state is trusted here (§8.3).
     `The ${capName(cap)} of metered spend is reached: ${formatUsd(cap.spentUsd)} of ${formatUsd(cap.limitUsd)} spent ${now}. ` +
       `Raise it for the rest of ${now} with Raise in the web UI or \`verdandi chat --raise-cap\`, or change ${configKey[cap.scope][cap.period]} in ${spend.success.file}.`,
   );
@@ -166,6 +182,9 @@ const worktreeProblem = (threadId: ThreadId, worktree: WorktreeView | null): str
 
 const memoryEntries = (memory: MemoryView) => [...memory.user, ...memory.project];
 
+/** The catalog's target for `route`, when the catalog is loaded. */
+const targetFor = (state: DeciderState, route: Route) => state.catalog && targetOf(route, state.catalog);
+
 type Handler<T extends Command["type"]> = (state: DeciderState, command: Extract<Command, { type: T }>) => Decision;
 
 const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, event: HarnessEvent): Decision => {
@@ -195,9 +214,10 @@ const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, ev
     case "plan.requested": {
       // A routed task started in plan mode moves its build to the class's own route when the plan is approved.
       const { thread, routing } = state;
+      const cap = reachedCap(state.spend);
       const execute =
         thread?.taskPlanned && thread.taskDecision && routing
-          ? decideExecuteRoute(thread, routing, thread.taskDecision, event.plan)
+          ? decideExecuteRoute(thread, cap ? { ...routing, capped: cap } : routing, thread.taskDecision, event.plan)
           : undefined;
       return accept({ ...event, v: 1, threadId, turnId, ...(execute && { execute }) });
     }
@@ -242,8 +262,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     const unavailable = worktreeProblem(c.threadId, state.thread.worktree);
     if (unavailable) return reject("WorktreeUnavailable", unavailable);
-    const stop = capped(state.spend);
-    if (stop) return stop;
+    if (state.spend && Result.isFailure(state.spend)) return reject("InvalidSpendCaps", state.spend.failure);
     const attachments = c.attachments?.length ? { attachments: c.attachments } : {};
     const started: Event = {
       type: "turn.started",
@@ -264,13 +283,23 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     const recorded: Event[] = state.decisions
       ? [{ type: "decision.recorded", v: 1, threadId: c.threadId, turnId: c.turnId, ...state.decisions }]
       : [];
-    if (state.thread.taskId) return accept(...recorded, ...turn);
+    // A reached cap stops only turns that would spend metered dollars; the router routes a new task around it.
+    const onRoute = capped(state.spend, targetFor(state, state.thread.route));
+    if (state.thread.taskId) return onRoute ?? accept(...recorded, ...turn);
     const task = { type: "task.started", v: 2, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
-    if (!state.routing) return accept(...recorded, { ...task, route: state.thread.route }, ...turn);
+    if (!state.routing) return onRoute ?? accept(...recorded, { ...task, route: state.thread.route }, ...turn);
+    const cap = reachedCap(state.spend);
+    const routing = cap ? { ...state.routing, capped: cap } : state.routing;
     const images = c.attachments?.filter((a) => a.kind === "image").length ?? 0;
-    const decided = decideRoute(state.thread, state.routing, c.text, c.mode, state.decisions?.answers ?? [], images);
-    if (Result.isFailure(decided)) return reject(decided.failure.reason, decided.failure.message);
-    const inputs = routeInputs(state.thread, state.routing);
+    const decided = decideRoute(state.thread, routing, c.text, c.mode, state.decisions?.answers ?? [], images);
+    if (Result.isFailure(decided)) {
+      // Every target left would spend metered dollars: the cap is what stops the turn.
+      const stop = decided.failure.reason === "NoRoute" && cap ? capped(state.spend, undefined) : undefined;
+      return stop ?? reject(decided.failure.reason, decided.failure.message);
+    }
+    const stop = capped(state.spend, decided.success.target);
+    if (stop) return stop;
+    const inputs = routeInputs(state.thread, routing);
     return accept(...recorded, { ...task, route: routeOf(decided.success), decision: decided.success, inputs }, ...turn);
   },
   "thread.route.set": (state, c) => {
@@ -558,7 +587,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       turnId: c.turnId,
       from: thread.route,
     } as const;
-    const stop = capped(state.spend);
+    const stop = step.step === "ask" ? undefined : capped(state.spend, step.target);
     if (step.step === "ask" || stop) {
       const reason = stop && Result.isFailure(stop) ? `${failure}, and Verdandi didn't escalate: ${stop.failure.message}` : step.reason;
       return accept({ ...escalated, step: "ask", reason });

@@ -102,7 +102,7 @@ export const makeFakeHarness = () => {
     if (input.text === "overage") {
       const quota: HarnessEvent = {
         type: "quota",
-        quota: { status: "rejected", window: "five_hour", utilization: 1, resetsAt: "2026-10-01T00:00:00.000Z", usingOverage: true },
+        quota: { status: "rejected", window: "five_hour", utilization: 1, resetsAt: "2099-01-01T00:00:00.000Z", usingOverage: true },
       };
       return Stream.concat(Stream.fromIterable([...start, quota]), reply(input.route.model, "on extra usage", "metered"));
     }

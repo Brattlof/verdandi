@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Command, CommandId, ProjectId, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
+import type { Command, CommandId, HarnessId, ProjectId, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
 import { builtInCatalog, loadPolicy } from "@verdandi/router";
 import { fakeCatalog } from "@verdandi/testkit";
 import { Result } from "effect";
@@ -340,20 +340,117 @@ describe("decide", () => {
 
 describe("spend caps", () => {
   const cap = { scope: "project", period: "day", periodKey: "2026-09-30", baseUsd: 5, limitUsd: 5 } as const;
-  const withCaps = (spentUsd: number): DeciderState => ({
+  const apiPrice = { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.12 };
+  const api = {
+    harness: "fake",
+    provider: "fake-api",
+    model: "fake-api",
+    access: "metered",
+    tier: "S",
+    context: 200_000,
+    vision: false,
+    price: apiPrice,
+  } as const;
+  const catalog = [...builtInCatalog, ...fakeCatalog, api];
+  const withCaps = (spentUsd: number, paying: HarnessId[] = []): DeciderState => ({
     ...idle,
-    spend: Result.succeed({ file: "C:/home/spend-caps.yaml", caps: [{ ...cap, spentUsd }] }),
+    spend: Result.succeed({ file: "C:/home/spend-caps.yaml", caps: [{ ...cap, spentUsd }], paying }),
+    catalog,
+  });
+  /** `state` with its thread on `harness`/`model`. */
+  const on = (state: DeciderState, harness: HarnessId, model: string): DeciderState => ({
+    ...state,
+    thread: { ...(state.thread as NonNullable<DeciderState["thread"]>), route: { harness, model, effort: "low" } },
   });
   const raise: Command = { type: "spend.cap.raise", commandId, threadId, scope: "project", period: "day" };
   const message = (r: ReturnType<typeof decide>) => (Result.isFailure(r) ? r.failure.message : "");
 
-  test("a reached cap rejects the turn, naming the cap, what it spent and how to raise it", () => {
-    expect(reason(decide(withCaps(4.99), send))).toBe("accepted");
-    const rejected = decide(withCaps(5.2), send);
+  test("a reached cap rejects a metered turn, naming the cap, what it spent and how to raise it", () => {
+    expect(reason(decide(on(withCaps(4.99), "fake", "fake-api"), send))).toBe("accepted");
+    const rejected = decide(on(withCaps(5.2), "fake", "fake-api"), send);
     expect(reason(rejected)).toBe("SpendCapReached");
     expect(message(rejected)).toBe(
       "The project's daily cap of metered spend is reached: $5.20 of $5.00 spent today. Raise it for the rest of today with Raise in the web UI or `verdandi chat --raise-cap`, or change daily under projects in C:/home/spend-caps.yaml.",
     );
+  });
+
+  test("under the same reached cap a subscription turn runs, unless its subscription is on extra usage", () => {
+    expect(reason(decide(on(withCaps(5.2), "claude-code", "sonnet"), send))).toBe("accepted");
+    expect(reason(decide(on(withCaps(5.2), "fake", "fake-api"), send))).toBe("SpendCapReached");
+    expect(reason(decide(on(withCaps(5.2, ["claude-code"]), "claude-code", "sonnet"), send))).toBe("SpendCapReached");
+    // A task already running keeps to the same rule.
+    const continuing = on(withCaps(5.2), "claude-code", "sonnet");
+    const thread = { ...(continuing.thread as NonNullable<DeciderState["thread"]>), taskId };
+    expect(reason(decide({ ...continuing, thread }, send))).toBe("accepted");
+    // Without the catalog, a turn's access mode is unknown, so it counts as metered.
+    const { catalog: _, ...unknown } = on(withCaps(5.2), "claude-code", "sonnet");
+    expect(reason(decide(unknown, send))).toBe("SpendCapReached");
+  });
+
+  test("an unpinned task routes around a reached cap; when only metered targets are left, the cap rejects it", () => {
+    const targets = {
+      api: { harness: "fake", provider: "fake-api", model: "fake-api" },
+      local: { harness: "fake", provider: "fake", model: "fake" },
+    };
+    const policy = loadPolicy([{ source: "test", data: { targets, fallback: { prefer: ["api"] } } }], catalog);
+    const routing = { policy: Result.succeed(policy), builtIn: policy, harnesses: ["fake"] as const };
+    const routed = (state: DeciderState): DeciderState => ({
+      ...state,
+      routing,
+      thread: { ...(state.thread as NonNullable<DeciderState["thread"]>), pinned: false },
+    });
+    const started = (state: DeciderState) => events(decide(state, send)).find((e) => e.type === "task.started");
+
+    expect(started(routed(withCaps(0)))).toMatchObject({ decision: { target: { model: "fake-api" } } });
+    const capped = started(routed(withCaps(5.2)));
+    expect(capped).toMatchObject({
+      decision: { target: { model: "fake", access: "local" } },
+      inputs: { capped: { cap: "project's daily cap", paying: [] } },
+    });
+    expect(capped?.type === "task.started" && capped.decision?.reason).toContain("the project's daily cap of metered spend is reached");
+
+    const metered = loadPolicy([{ source: "test", data: { targets: { api: targets.api }, fallback: { prefer: ["api"] } } }], catalog);
+    const onlyMetered = { ...routed(withCaps(5.2)), routing: { ...routing, policy: Result.succeed(metered), builtIn: metered } };
+    expect(reason(decide(onlyMetered, send))).toBe("SpendCapReached");
+  });
+
+  test("a planned task's build moves off a metered target while a cap is reached", () => {
+    const targets = {
+      api: { harness: "fake", provider: "fake-api", model: "fake-api" },
+      local: { harness: "fake", provider: "fake", model: "fake" },
+      large: { harness: "fake", provider: "fake", model: "fake-large" },
+    };
+    const routes = { "code.feature": { prefer: ["api"], effort: "medium", plan: { prefer: ["large"], effort: "high" } } };
+    const policy = loadPolicy([{ source: "test", data: { targets, routes } }], catalog);
+    const planning = {
+      ...(running.thread as NonNullable<DeciderState["thread"]>),
+      route: { harness: "fake", model: "fake-large", effort: "high" },
+      pinned: false,
+      sessionId: null,
+      taskPlanned: true,
+      taskDecision: {
+        source: "policy",
+        taskClass: "code.feature",
+        difficulty: 0.5,
+        confidence: 0.9,
+        target: { harness: "fake", provider: "fake", model: "fake-large", access: "local" },
+        effort: "high",
+        reason: "",
+        trace: [],
+      },
+    } as const;
+    const plan = (spentUsd: number) => {
+      const state = {
+        ...withCaps(spentUsd),
+        thread: planning,
+        routing: { policy: Result.succeed(policy), builtIn: policy, harnesses: ["fake"] as const },
+      };
+      const [requested] = events(decide(state, report({ type: "plan.requested", requestId: "p1", plan: "1. Build it" })));
+      return requested?.type === "plan.requested" ? requested.execute : undefined;
+    };
+    expect(plan(0)?.target.model).toBe("fake-api");
+    expect(plan(5.2)).toMatchObject({ target: { model: "fake", access: "local" } });
+    expect(plan(5.2)?.reason).toContain("the project's daily cap of metered spend is reached");
   });
 
   test("raising a cap adds its configured amount for the rest of the period", () => {
@@ -406,9 +503,20 @@ describe("task.escalate", () => {
     expect(events(decide({ thread: { ...thread, pinned: true }, routing }, escalate))).toEqual([]);
   });
 
-  test("a reached spend cap stops the ladder and asks instead", () => {
+  test("a reached spend cap stops the ladder and asks instead, when the next step would spend metered dollars", () => {
     const cap = { scope: "project", period: "day", periodKey: "2026-09-30", baseUsd: 5, limitUsd: 5, spentUsd: 5 } as const;
-    const spent = { thread, routing, spend: Result.succeed({ file: "C:/home/spend-caps.yaml", caps: [cap] }) };
-    expect(events(decide(spent, escalate))).toMatchObject([{ type: "task.escalated", step: "ask" }]);
+    const spent = (paying: HarnessId[]) => ({
+      thread,
+      routing,
+      spend: Result.succeed({ file: "C:/home/spend-caps.yaml", caps: [cap], paying }),
+    });
+    expect(events(decide(spent(["fake"]), escalate))).toMatchObject([
+      {
+        type: "task.escalated",
+        step: "ask",
+        reason: expect.stringContaining("didn't escalate: The project's daily cap of metered spend is reached"),
+      },
+    ]);
+    expect(events(decide(spent([]), escalate))).toMatchObject([{ type: "task.escalated", step: "effort" }, { type: "turn.started" }]);
   });
 });
