@@ -75,8 +75,8 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
     if (!task) continue;
     switch (e.type) {
       case "thread.route.changed":
-        // Pinning the route the router picked keeps the task's route: nothing was overridden.
-        if (describeRouteChange(e.from, e.to) !== "") task.override = { from: task.current, to: e.to };
+        // The user's last pick counts. Pinning the route the task runs on, or changing back to it, overrides nothing.
+        task.override = describeRouteChange(task.current, e.to) === "" ? undefined : { from: task.current, to: e.to };
         break;
       case "task.rerouted":
         task.current = e.to;
