@@ -12,6 +12,7 @@ export * from "./requests.ts";
 export * from "./route.ts";
 export * from "./routing.ts";
 export * from "./rpc.ts";
+export * from "./search.ts";
 export * from "./spend.ts";
 export * from "./task.ts";
 export * from "./terminal.ts";

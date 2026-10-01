@@ -7,6 +7,7 @@ import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { AccessMode, Item, Quota, Usage } from "./items.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, RouteDecision, TaskClass } from "./routing.ts";
+import { SessionHit, SessionQuery } from "./search.ts";
 import { SpendCap } from "./spend.ts";
 import { RouteCost } from "./task.ts";
 import { TerminalFeed, TerminalId, TerminalSize, TerminalUnavailable, TerminalView } from "./terminal.ts";
@@ -302,6 +303,11 @@ export class Api extends RpcGroup.make(
     success: RouteDecision,
     error: RoutingUnavailable,
   }),
+  /**
+   * Past sessions' messages containing `query` (DESIGN §14.3, ADR 0006), newest first, at most 50. A query
+   * under 3 characters matches nothing.
+   */
+  Rpc.make("SessionSearch", { payload: SessionQuery, success: Schema.Array(SessionHit) }),
   /** Starts a shell in a PTY, in the folder the thread runs in. It runs until closed, a page reload included. */
   Rpc.make("TerminalOpen", { payload: { threadId: ThreadId, ...TerminalSize }, success: TerminalView, error: TerminalUnavailable }),
   /** The thread's terminals, oldest first, so a reloaded page can reattach to them. */

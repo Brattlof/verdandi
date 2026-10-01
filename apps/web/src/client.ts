@@ -8,6 +8,8 @@ import {
   type InteractionMode,
   type RouteDecision,
   RoutingUnavailable,
+  type SessionHit,
+  type SessionQuery,
   type SpendCap,
   SpendCapsUnavailable,
   type TaskId,
@@ -181,6 +183,14 @@ export const connect = (token: string) => {
   };
 
   /** The spend dashboard's totals; undefined once the connection is lost. */
+  /** Past sessions' messages containing `query`, newest first. Under 3 characters, none. */
+  const search = async (query: SessionQuery): Promise<readonly SessionHit[] | undefined> => {
+    const exit = await run((rpc) => rpc.SessionSearch(query));
+    if (Exit.isSuccess(exit)) return exit.value;
+    lost.set(true); // it has no errors of its own
+    return undefined;
+  };
+
   const usage = async (filter: UsageFilter): Promise<UsageReport | undefined> => {
     const exit = await run((rpc) => rpc.UsageQuery(filter));
     if (Exit.isSuccess(exit)) return exit.value;
@@ -231,6 +241,6 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, terminals, follow, harnesses, lost };
+  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, search, terminals, follow, harnesses, lost };
 };
 export type Connection = ReturnType<typeof connect>;
