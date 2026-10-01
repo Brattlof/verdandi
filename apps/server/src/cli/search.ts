@@ -26,8 +26,8 @@ export const hitsText = (query: string, hits: readonly SessionHit[]) => {
 export const search = async (argv: readonly string[]) => {
   const server = readServerFile(resolveHome(argv));
   const project = flag(argv, "--project");
-  const values = new Set([flag(argv, "--home"), project]);
-  const query = argv.filter((a, i) => !a.startsWith("--") && !(values.has(a) && argv[i - 1]?.startsWith("--"))).join(" ");
+  // The query is every word that isn't a flag or the value after `--home` or `--project` (`--project=<path>` is one word).
+  const query = argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--home" && argv[i - 1] !== "--project").join(" ");
   if (!query) throw new Error('Name what to search for, e.g. verdandi search "ENOENT on Windows".');
   const projectId = project === undefined ? undefined : projectIdFor(await Effect.runPromise(resolveProjectPath(project)));
   const hits = await Effect.runPromise(
