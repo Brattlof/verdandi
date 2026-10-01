@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { CapPeriod, ProjectId } from "@verdandi/contracts";
 import { Effect, Result, Schema } from "effect";
 import { projectIdFor } from "../orchestration/decider.ts";
+import { resolveProjectPath } from "../workspace/project.ts";
 
 const Usd = Schema.Number.check(Schema.isGreaterThan(0));
 const Caps = Schema.Struct({ daily: Schema.optionalKey(Usd), monthly: Schema.optionalKey(Usd) });
@@ -39,10 +39,10 @@ export const loadSpendCaps = (home: string): Effect.Effect<Result.Result<SpendCa
         onExcessProperty: "error",
         errors: "all",
       });
-      // Keyed like projects themselves, so `~`, slash direction and drive letter case don't matter.
-      const projects = Object.entries(data.projects ?? {}).map(
-        ([path, caps]) => [projectIdFor(path.replace(/^~(?=$|[\\/])/, homedir())), periods(caps)] as const,
-      );
+      // Keyed like projects themselves, so `~`, symlinks, a trailing slash, slash direction and drive letter case don't
+      // matter. A folder that isn't there (yet) holds no project, so it keeps its spelling until it exists.
+      const folder = (path: string) => Effect.runSync(resolveProjectPath(path).pipe(Effect.orElseSucceed(() => path)));
+      const projects = Object.entries(data.projects ?? {}).map(([path, caps]) => [projectIdFor(folder(path)), periods(caps)] as const);
       return Result.succeed({ file, profile: periods(data), projects: new Map(projects) });
     } catch (e) {
       return Result.fail(`${file}: ${e instanceof Error ? e.message : String(e)}\nFix the file, or delete it to turn spend caps off.`);
