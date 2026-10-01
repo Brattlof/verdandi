@@ -22,11 +22,17 @@ import { describeSignals, signals } from "./signals.ts";
 export type Pinned = { readonly target: RouteTarget; readonly effort: Effort };
 
 export type RouteInput = {
-  /** The task's first message. */
+  /** The task's first message, without its leading `@name`. */
   readonly text: string;
   readonly mode: InteractionMode;
-  /** The user's choice (thread pin, picker or `@model`). It always wins. */
+  /** The thread's pin: the user's pick in the route picker. It wins over everything but `at`. */
   readonly pin?: Pinned;
+  /**
+   * The model the message named with a leading `@name` (contracts' `atPin`), matched to the catalog's models on `harnesses`
+   * ignoring case. It pins this task, over the thread's pin too, at the thread's effort when that's its model, else at
+   * the policy's effort for the task's class. A name that isn't one of them throws a `PinError`.
+   */
+  readonly at?: string;
   /** The thread's warm session, how many tokens of context it has cached, and the subagent routes it started with. */
   readonly current?: Pinned & { readonly cachedTokens: number; readonly subagents?: SubagentRoutes };
   /** Files the task touches beyond those its text names, matched against policy restrictions. */
@@ -51,6 +57,11 @@ export type RouteInput = {
 /** No target is available at all. The message says why each one dropped out. */
 export class RouterError extends Error {
   override name = "RouterError";
+}
+
+/** An `@name` that isn't a model on a running harness. The message names the ones that are. */
+export class PinError extends Error {
+  override name = "PinError";
 }
 
 const TIERS: readonly Tier[] = ["S", "M", "L", "XL"];
@@ -126,6 +137,32 @@ const dollars = (n: number) => `$${n < 0.01 ? n.toPrecision(1) : n.toFixed(2)}`;
 const kTokens = (n: number) => `${Math.round(n / 1000)}K`;
 const describe = (t: RouteTarget, effort: Effort) => `${t.model} at ${effort} effort`;
 
+type Pin = Pinned & { readonly reason: string; readonly note: string };
+
+/**
+ * Stage 0 for `@name`: the catalog's model of that name on a running harness. It keeps the effort of the thread's warm
+ * session or pin when that's on the same model, since an effort change rewrites the cache (ADR 0002), and otherwise
+ * takes `policy`, the effort the policy gives the task's class.
+ */
+const atPinned = (input: RouteInput, name: string, catalog: readonly CatalogEntry[], policy: { effort: Effort; of: string }): Pin => {
+  const runnable = catalog.filter((e) => !input.harnesses || input.harnesses.includes(e.harness));
+  const entry = runnable.find((e) => e.model.toLowerCase() === name.toLowerCase());
+  if (!entry) {
+    const names = [...new Set(runnable.map((e) => `@${e.model}`))].join(", ");
+    throw new PinError(`@${name} isn't a model Verdandi can run. Use one of ${names}.`);
+  }
+  const { harness, provider, model, access } = entry;
+  const thread = input.current ?? input.pin;
+  const kept = thread && same(thread.target, entry) ? thread.effort : undefined;
+  const effort = kept ?? policy.effort;
+  return {
+    target: { harness, provider, model, access },
+    effort,
+    reason: `Pinned with @${model}.`,
+    note: `@${model} pinned ${harness} · ${model} · ${effort}, ${kept ? "the thread's effort on it" : `${policy.of}'s effort`}; routing skipped`,
+  };
+};
+
 /**
  * Stages 0–5 of the routing pipeline (DESIGN §8.4). Pure: everything it knows comes in through
  * `input` and `policy`, and the classifier is passed in. Throws a `RouterError` only when no
@@ -155,9 +192,18 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
     { stage: "classify", note: `${c.taskClass}, confidence ${c.confidence.toFixed(2)}, difficulty ${c.difficulty.toFixed(2)} (${c.why})` },
   ];
 
-  // Stage 0: a pin always wins, whatever the policy says.
-  if (input.pin) {
-    const { target, effort } = input.pin;
+  // Stage 0: the user's choice always wins, whatever the policy says: a model named with `@`, then the thread's pin.
+  const of = `${unsure ? "fallback" : c.taskClass}${planning ? " (plan)" : ""} in ${policy.mode} mode`;
+  const pin: Pin | undefined =
+    input.at !== undefined
+      ? atPinned(input, input.at, policy.catalog, { effort: resolveSpec(rule, policy.mode, planning).effort ?? "medium", of })
+      : input.pin && {
+          ...input.pin,
+          reason: `You pinned ${describe(input.pin.target, input.pin.effort)}.`,
+          note: `pinned ${input.pin.target.harness} · ${input.pin.target.model} · ${input.pin.effort}; routing skipped`,
+        };
+  if (pin) {
+    const { target, effort } = pin;
     const entry = policy.catalog.find((e) => same(e, target));
     // The policy's subagents don't apply to a pin; a warm session still keeps its own.
     const sub = routeSubagents(input, {}, target, effort, new Map(), () => 0);
@@ -168,12 +214,8 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
       effort,
       ...(sub.subagents && { subagents: sub.subagents }),
       ...(entry && { estimate: { tokens, cost: effectiveCost(entry, tokens, input), switchCost: 0 } }),
-      reason: `You pinned ${describe(target, effort)}.`,
-      trace: [
-        { stage: "pin", note: `pinned ${target.harness} · ${target.model} · ${effort}; routing skipped` },
-        ...signalNotes,
-        ...(sub.trace ? [sub.trace] : []),
-      ],
+      reason: pin.reason,
+      trace: [{ stage: "pin", note: pin.note }, ...signalNotes, ...(sub.trace ? [sub.trace] : [])],
       ...limits,
     };
   }

@@ -56,9 +56,8 @@ export const RouteChip = ({ connection, thread }: { connection: Connection; thre
       </summary>
       {open && (
         <div className="mt-1.5 rounded-lg border border-line bg-card p-3">
-          {thread.task && thread.task.source !== "pin" && reason && (
-            <Why connection={connection} taskId={thread.task.taskId} reason={reason} />
-          )}
+          {/* A routed task's, or one its message pinned with `@name`; a pinned thread's needs no explaining. */}
+          {thread.task && !thread.pinned && reason && <Why connection={connection} taskId={thread.task.taskId} reason={reason} />}
           <RouteForm connection={connection} thread={thread} close={close} />
           <ForgetMemory connection={connection} thread={thread} />
         </div>

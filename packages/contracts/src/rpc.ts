@@ -7,7 +7,7 @@ import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { AccessMode, Item, Quota, Usage } from "./items.ts";
 import { MemoryView } from "./memory.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
-import { BudgetMode, RouteDecision, TaskClass } from "./routing.ts";
+import { BudgetMode, RouteDecision, RouteTarget, TaskClass } from "./routing.ts";
 import { SessionHit, SessionQuery } from "./search.ts";
 import { SpendCap } from "./spend.ts";
 import { RouteCost } from "./task.ts";
@@ -36,6 +36,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "MemoryRejected",
     "MemoryFull",
     "MemoryNotFound",
+    "InvalidPin",
   ]),
   message: Schema.String,
 }) {}
@@ -48,7 +49,7 @@ export class SpendCapsUnavailable extends Schema.TaggedError<SpendCapsUnavailabl
 
 /** Why routing can't be explained or simulated. The message names the cause and the fix. */
 export class RoutingUnavailable extends Schema.TaggedError<RoutingUnavailable>()("RoutingUnavailable", {
-  reason: Schema.Literals(["ThreadNotFound", "TaskNotFound", "InvalidPolicy", "NoRoute"]),
+  reason: Schema.Literals(["ThreadNotFound", "TaskNotFound", "InvalidPolicy", "NoRoute", "InvalidPin"]),
   message: Schema.String,
 }) {}
 
@@ -284,6 +285,8 @@ export class Api extends RpcGroup.make(
   Rpc.make("Unsubscribe", { payload: { subscriptionId: Schema.String } }),
   /** The harnesses this verdandid runs, so clients offer only those. */
   Rpc.make("HarnessesList", { success: Schema.Array(HarnessId) }),
+  /** The catalog's models on the harnesses this verdandid runs: the names a message can pin its task to with `@name`. */
+  Rpc.make("ModelsList", { success: Schema.Array(RouteTarget) }),
   /** What `turnId` changed in the project, or without it, everything since the thread's first turn. */
   Rpc.make("DiffGet", {
     payload: { threadId: ThreadId, turnId: Schema.optionalKey(TurnId) },
@@ -300,7 +303,7 @@ export class Api extends RpcGroup.make(
   Rpc.make("RoutingExplain", { payload: { taskId: TaskId }, success: RouteDecision, error: RoutingUnavailable }),
   /**
    * What the router would pick if `text`, with `images` attached, started a new task in the thread, for the composer's live preview.
-   * Pure and stores nothing; a pinned thread gets its pin back.
+   * Pure and stores nothing; a pinned thread gets its pin back, and a leading `@name` its model.
    */
   Rpc.make("RoutingSimulate", {
     payload: { threadId: ThreadId, text: Schema.String, mode: InteractionMode, images: Schema.optionalKey(Schema.Int) },

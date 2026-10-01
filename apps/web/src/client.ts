@@ -8,6 +8,7 @@ import {
   type InteractionMode,
   type MemoryView,
   type RouteDecision,
+  type RouteTarget,
   RoutingUnavailable,
   type SessionHit,
   type SessionQuery,
@@ -250,6 +251,15 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, search, memory, terminals, follow, harnesses, lost };
+  /** The models a message can pin its task to with a leading `@name`. Asked once: they are fixed while verdandid runs. */
+  let modelList: Promise<readonly RouteTarget[]> | undefined;
+  const models = () =>
+    (modelList ??= run((rpc) => rpc.ModelsList()).then((exit) => {
+      if (Exit.isSuccess(exit)) return exit.value;
+      lost.set(true); // it has no errors of its own
+      return [];
+    }));
+
+  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, search, memory, terminals, follow, harnesses, models, lost };
 };
 export type Connection = ReturnType<typeof connect>;

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { RouteTarget } from "@verdandi/contracts";
 import { builtInCatalog, loadPolicy } from "./policy.ts";
-import { RouterError, route } from "./route.ts";
+import { PinError, RouterError, route } from "./route.ts";
 import { rules } from "./rules.ts";
 
 const cc = (model: string): RouteTarget => ({ harness: "claude-code", provider: "claude-subscription", model, access: "subscription" });
@@ -24,6 +24,23 @@ describe("pins", () => {
     );
     expect(d).toMatchObject({ source: "pin", target: cc("haiku"), effort: "max", taskClass: "ask.search" });
     expect(d.reason).toBe("You pinned haiku at max effort.");
+  });
+
+  test("@name wins over the thread's pin, keeps the warm session's effort on its model, and ignores case", () => {
+    const warm = { target: cc("opus"), effort: "xhigh", cachedTokens: 50_000 } as const;
+    const d = route(
+      { text: SEARCH, at: "Opus", mode: "build", pin: { target: cc("sonnet"), effort: "low" }, current: warm },
+      policy,
+      rules,
+    );
+    expect(d).toMatchObject({ source: "pin", target: cc("opus"), effort: "xhigh", reason: "Pinned with @opus." });
+    expect(d.trace[0]?.note).toContain("the thread's effort");
+  });
+
+  test("an @name that isn't a model on a running harness throws, naming the ones that are", () => {
+    expect(() => route({ text: SEARCH, at: "gpt", mode: "build", harnesses: ["claude-code"] }, policy, rules)).toThrow(
+      new PinError("@gpt isn't a model Verdandi can run. Use one of @haiku, @sonnet, @opus, @fable."),
+    );
   });
 
   test("a pinned model the catalog doesn't know is kept, without a cost estimate", () => {

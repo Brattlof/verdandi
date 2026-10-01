@@ -88,7 +88,7 @@ export const sameRoute = (a: Route, b: Route) => a.harness === b.harness && a.mo
 export const replayTask = (task: SavedTask, policy: Pick<RoutingContext, "policy" | "builtIn">): Result.Result<ReplayedTask, string> => {
   const { thread, routing } = replayed(task.inputs ?? assumedInputs(task), policy);
   const { answers } = Effect.runSync(rulesDecide.decide({ state: task.text, questions: taskQuestions(routing) }));
-  const decided = decideRoute(thread, routing, task.text, task.mode, answers, task.images);
+  const decided = decideRoute(thread, routing, task.text, task.mode, answers, task.images, task.inputs?.at);
   if (Result.isFailure(decided)) return Result.fail(decided.failure.message);
   const to = routeOf(decided.success);
   return Result.succeed({

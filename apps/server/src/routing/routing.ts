@@ -20,6 +20,7 @@ import {
   type Escalation,
   escalate,
   loadPolicy,
+  PinError,
   PolicyError,
   type ResolvedPolicy,
   RouterError,
@@ -93,7 +94,7 @@ export const replayed = (
   },
 });
 
-export type RoutingFailure = { readonly reason: "InvalidPolicy" | "NoRoute"; readonly message: string };
+export type RoutingFailure = { readonly reason: "InvalidPolicy" | "NoRoute" | "InvalidPin"; readonly message: string };
 
 /** Where a project keeps its routing policy (DESIGN §8.6). */
 export const policyFile = (projectPath: string) => join(projectPath, ".verdandi", "routing.yaml");
@@ -189,9 +190,10 @@ export const decideExecuteRoute = (
 
 /**
  * Pure: the decision for a new task in `thread` starting with `text` and `images` attached images, classified
- * by the decision layer's `answers` to `taskQuestions`. A pinned thread keeps its route (DESIGN §8.4 stage 0);
- * otherwise the router picks, with the thread's warm session for the switch-cost gate, among the targets a
- * reached spend cap leaves.
+ * by the decision layer's `answers` to `taskQuestions`. `at`, the model the message named with a leading `@name`
+ * (stripped from `text`), pins the task to it; a pinned thread keeps its route (DESIGN §8.4 stage 0); otherwise
+ * the router picks, with the thread's warm session for the switch-cost gate, among the targets a reached spend
+ * cap leaves.
  */
 export const decideRoute = (
   thread: RoutingThread,
@@ -200,9 +202,11 @@ export const decideRoute = (
   mode: InteractionMode,
   answers: readonly DecisionAnswer[],
   images = 0,
+  at?: string,
 ): Result.Result<RouteDecision, RoutingFailure> => {
   const classification = classificationOf(answers) ?? unclassified;
-  if (Result.isFailure(routing.policy) && !thread.pinned) return Result.fail({ reason: "InvalidPolicy", message: routing.policy.failure });
+  if (Result.isFailure(routing.policy) && !thread.pinned && at === undefined)
+    return Result.fail({ reason: "InvalidPolicy", message: routing.policy.failure });
   const layered = Result.getOrElse(routing.policy, () => routing.builtIn);
   const policy = thread.budgetMode ? { ...layered, mode: thread.budgetMode } : layered;
   const current = { target: targetOf(thread.route, policy.catalog), effort: thread.route.effort };
@@ -217,6 +221,7 @@ export const decideRoute = (
           ...(routing.memory ? { memory: routing.memory } : {}),
           ...(routing.capped ? { capped: routing.capped } : {}),
           ...(thread.pinned ? { pin: current } : {}),
+          ...(at === undefined ? {} : { at }),
           ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens, ...warmSubagents(thread) } }),
         },
         policy,
@@ -224,6 +229,7 @@ export const decideRoute = (
       ),
     );
   } catch (e) {
+    if (e instanceof PinError) return Result.fail({ reason: "InvalidPin", message: e.message });
     if (!(e instanceof RouterError)) throw e;
     return Result.fail({
       reason: "NoRoute",

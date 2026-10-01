@@ -123,6 +123,14 @@ test("prices a changed task's recorded tokens at both targets' list prices, and 
   expect(replayText(old)).toContain("replayed assuming no warm session, the policy's budget mode, no routing memory");
 });
 
+test("a task pinned with @name replays to its pin, whatever the policy says", () => {
+  const route = { harness: "claude-code", model: "fable", effort: "low" } as const;
+  const inputs = { route, pinned: false, budgetMode: null, warm: false, cachedTokens: 0, harnesses: ["claude-code"], at: "fable" } as const;
+  const t = Result.getOrThrow(replayTask({ ...saved(inputs), route }, { policy: Result.succeed(loadPolicy()), builtIn: loadPolicy() }));
+  expect(t.to).toEqual(route);
+  expect(t.reason).toBe("Pinned with @fable.");
+});
+
 test("a broken proposed policy fails naming the file and the key", () => {
   const file = join(tempDir(), "broken.yaml");
   writeFileSync(file, "routes:\n  ask.search: { effort: extreme }\n");

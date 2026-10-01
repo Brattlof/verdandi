@@ -288,7 +288,7 @@ flowchart TD
   P5 -- stay --> ALT[Keep target;<br/>adjust effort / delegate] --> OUT
 ```
 
-- **Stage 0 · Pins.** Your explicit choice always wins. Sources: a thread pin, the picker, or `@opus` / `@local` / `@native` typed in the composer.
+- **Stage 0 · Pins.** Your explicit choice always wins. Sources: a thread pin from the picker, or a leading `@name` in a message (`@opus`: a catalog model on a running harness; later also `@local` / `@native`), which pins only the task that message starts and leaves the thread's pin alone.
 - **Stage 1 · Candidates.** Start from every target that is configured. Remove the ones that:
   - **lack a needed capability**, such as tools, vision or a 1M context (e.g. Haiku 4.5's 200K window is too small);
   - **are out of quota or unhealthy**, meaning rate-limited or down, according to provider health (§9.5);

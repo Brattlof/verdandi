@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  atPin,
   type Catalog,
   type Command,
   type CommandId,
@@ -127,6 +128,8 @@ export const EngineLive = (options: EngineOptions = {}) =>
               : loaded;
             const current = state.thread;
             const send = command.type === "turn.send" && current?.runningTurnId === null ? command : undefined;
+            // A leading `@name` starts a task of its own, pinned to that model; the decision layer reads the text without it.
+            const at = send && atPin(send.text);
             // A routed task started in plan mode routes its build when it proposes its plan.
             const plans =
               command.type === "harness.report" &&
@@ -137,7 +140,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
             const escalates = command.type === "task.escalate" && current?.pinned === false;
             // Routing reads the project's policy file, so only when this command starts a task, routes a planned task's build or escalates.
             const routing =
-              current && ((send && current.taskId === null) || plans || escalates) && options.routing
+              current && ((send && (current.taskId === null || at)) || plans || escalates) && options.routing
                 ? {
                     ...(yield* options.routing(current.projectPath)),
                     // Routing memory moves where a task starts, not an approved plan's build.
@@ -149,7 +152,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
             // ponytail: asked inside the write transaction, which is free on `rules`; ask before it once a backend takes real time (ADR 0009).
             const decisions =
               send && questions.length > 0
-                ? { questions, answers: (yield* decider.decide({ state: send.text, questions })).answers }
+                ? { questions, answers: (yield* decider.decide({ state: at ? at.text : send.text, questions })).answers }
                 : undefined;
             // Memory: read for memory commands, and for a turn whose new harness session starts with a snapshot of it.
             const remembers = command.type.startsWith("memory.") || (send !== undefined && current?.sessionId === null);
