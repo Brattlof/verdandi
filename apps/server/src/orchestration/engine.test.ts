@@ -375,8 +375,20 @@ describe("engine", () => {
     expect(pending).toEqual([requestId]);
     expect(after?.pendingRequests).toEqual([]);
     expect(after?.turns.at(-1)?.items).toEqual([
-      { kind: "plan", text: "1. Edit a.txt" },
+      { kind: "plan", requestId, text: "1. Edit a.txt" },
       { kind: "assistant.message", text: "built the plan" },
+    ]);
+  });
+
+  test("a plan approved with the user's edit builds from the edit, and the thread keeps both after a restart", async () => {
+    const home = newHome();
+    const first = start(home).runtime;
+    const { requestId } = await first.runPromise(answerTurn("plan", { decision: "allow", plan: "1. Edit b.txt" }, "plan"));
+    await first.dispose();
+    const reloaded = await start(home).runtime.runPromise(view);
+    expect(reloaded?.turns.at(-1)?.items).toEqual([
+      { kind: "plan", requestId, text: "1. Edit a.txt", edited: "1. Edit b.txt" },
+      { kind: "assistant.message", text: "built the plan: 1. Edit b.txt" },
     ]);
   });
 

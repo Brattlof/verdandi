@@ -13,7 +13,7 @@ import { ArchiveButton } from "./archive.tsx";
 import { TurnAttachments } from "./attachments.tsx";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
 import { Composer, Requests } from "./composer.tsx";
-import { SidePanel } from "./diff.tsx";
+import { SidePanel, TextDiff } from "./diff.tsx";
 import { ChevronIcon, DiffIcon, TerminalIcon } from "./icons.tsx";
 import { Markdown } from "./markdown.tsx";
 import { RouteMarkers } from "./route.tsx";
@@ -434,12 +434,17 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
       <p className="mt-0.5 mb-0">{item.text}</p>
     </UserBubble>
   ),
+  // A plan approved with the user's edit shows the edit against the proposal.
   plan: ({ item }) => (
     <div className="my-3 rounded-lg border border-line border-l-2 border-l-accent bg-card px-3 py-2">
       <span className="font-mono text-[11px] font-semibold tracking-wider text-accent uppercase">
-        Plan{item.filePath ? <span className="font-normal tracking-normal text-muted normal-case"> · {item.filePath}</span> : ""}
+        Plan
+        <span className="font-normal tracking-normal text-muted normal-case">
+          {item.edited === undefined ? "" : " · approved with your edits"}
+          {item.filePath ? ` · ${item.filePath}` : ""}
+        </span>
       </span>
-      <Markdown text={item.text} />
+      {item.edited === undefined ? <Markdown text={item.text} /> : <TextDiff before={item.text} after={item.edited} />}
     </div>
   ),
   "route.switch": ({ item }) => (

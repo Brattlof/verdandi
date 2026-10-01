@@ -309,6 +309,40 @@ describe("Claude Code adapter", () => {
     }
   });
 
+  test("a plan approved with the user's edit goes back as ExitPlanMode's updatedInput.plan (ADR 0003)", async () => {
+    const home = makeTempHome();
+    try {
+      const decisions: unknown[] = [];
+      const { query } = stubQuery(async function* (_prompt, options, m) {
+        decisions.push(
+          await options.canUseTool?.(
+            "ExitPlanMode",
+            { plan: "1. Edit a.txt", planFilePath: "C:/Users/a b/.claude/plans/p.md" },
+            { signal: new AbortController().signal, toolUseID: "toolu_1", requestId: "c1" },
+          ),
+        );
+        yield { ...result(turn1Usage), user_message_uuids: [m.uuid] } as SDKMessage;
+      });
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      await Effect.runPromise(
+        adapter
+          .run(input(home, "plan it", U1, undefined, Stream.empty, haikuLow, "plan"))
+          .pipe(
+            Stream.runForEach((e) =>
+              e.type === "plan.requested"
+                ? adapter.respond(threadId, e.requestId, { decision: "allow", plan: "1. Edit b.txt" })
+                : Effect.void,
+            ),
+          ),
+      );
+      expect(decisions).toEqual([
+        { behavior: "allow", updatedInput: { plan: "1. Edit b.txt", planFilePath: "C:/Users/a b/.claude/plans/p.md" } },
+      ]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
   test("a reroute lands before the plan's approval reaches Claude Code, and the next turn needs no switch (ADR 0013)", async () => {
     const home = makeTempHome();
     try {

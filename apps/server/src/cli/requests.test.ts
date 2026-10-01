@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Question } from "@verdandi/contracts";
-import { parseAnswer } from "./requests.ts";
+import { editPlan, parseAnswer } from "./requests.ts";
 
 const q = (multiSelect: boolean): Question => ({
   question: "Which?",
@@ -27,4 +30,24 @@ describe("parseAnswer", () => {
     expect(parseAnswer(q(false), "3")).toBeUndefined();
     expect(parseAnswer(q(false), "1,2")).toBeUndefined();
   });
+});
+
+test("editPlan returns the plan as the editor saved it, and says why when there is nothing to approve", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "verdandi-editor-"));
+  try {
+    // Each editor is a Bun script that does to the file what a user might.
+    let n = 0;
+    const editor = (body: string) => {
+      const script = join(dir, `${++n}.ts`);
+      writeFileSync(script, body);
+      return `"${process.execPath}" "${script}"`;
+    };
+    const write = (text: string) => editor(`require("node:fs").writeFileSync(process.argv[2], ${JSON.stringify(text)})`);
+    expect(await editPlan("1. Edit a", write("1. Edit b\r\n2. Test\r\n"))).toEqual({ plan: "1. Edit b\n2. Test" });
+    expect(await editPlan("1. Edit a", editor(""))).toEqual({ error: expect.stringContaining("unchanged") });
+    expect(await editPlan("1. Edit a", write(" \n"))).toEqual({ error: expect.stringContaining("empty") });
+    expect(await editPlan("1. Edit a", editor("process.exit(3)"))).toEqual({ error: expect.stringContaining("exited with 3") });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

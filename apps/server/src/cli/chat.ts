@@ -20,7 +20,7 @@ import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { flag, readServerFile, resolveHome } from "../config/home.ts";
 import { connect } from "../rpc/client.ts";
 import { readAttachment } from "./attach.ts";
-import { approvalPrompt, type PendingRequest, parseAnswer, planPrompt, questionPrompt } from "./requests.ts";
+import { approvalPrompt, editPlan, type PendingRequest, parseAnswer, planPrompt, questionPrompt } from "./requests.ts";
 import { budgetFromFlags, picksRoute, routeFromFlags } from "./route-flags.ts";
 import { threadList } from "./thread-list.ts";
 
@@ -275,10 +275,13 @@ export const chat = async (argv: readonly string[]) => {
         answered.push(line);
         return showRequest();
       }
-      if (!/^y(es)?$/i.test(line)) return process.stdout.write("Answer y or n: ");
+      // The plan opens in the user's editor; what they save is what the agent builds from.
+      const edited = /^e(dit)?$/i.test(line) ? await editPlan(request.plan) : undefined;
+      if (edited && "error" in edited) return process.stdout.write(`[${edited.error}]\nAnswer y, n or e: `);
+      if (!edited && !/^y(es)?$/i.test(line)) return process.stdout.write("Answer y, n or e: ");
       // An approved plan goes on in build mode, and so do the turns after it.
       mode = "build";
-      return resolve(request, { decision: "allow" });
+      return resolve(request, edited ? { decision: "allow", plan: edited.plan } : { decision: "allow" });
     }
     if (line === "/skip") return resolve(request, { decision: "deny" });
     const question = request.questions[answered.length];

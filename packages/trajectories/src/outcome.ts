@@ -107,10 +107,13 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
       case "plan.requested":
         plans.add(e.requestId);
         break;
-      case "approval.resolved":
-        // A `reason` means Verdandi denied it because the turn ended; only the user rejecting a plan is a correction.
-        if (plans.has(e.requestId) && e.resolution.decision === "deny" && e.reason === undefined) task.corrections++;
+      case "approval.resolved": {
+        // A `reason` means Verdandi denied it because the turn ended; only the user rejecting or editing a plan is a correction.
+        const { resolution } = e;
+        const corrected = resolution.decision === "deny" || (resolution.decision === "allow" && resolution.plan !== undefined);
+        if (plans.has(e.requestId) && corrected && e.reason === undefined) task.corrections++;
         break;
+      }
       case "turn.usage.recorded": {
         const key = `${e.model} ${e.accessMode}`;
         const sum = task.usage.get(key);
@@ -135,7 +138,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
   }
   return tasks.flatMap((t): TaskOutcome[] => {
     if (t.last === undefined) return [];
-    // ponytail: satisfaction counts the corrections Verdandi sees (steers, interrupts, rejected plans, a route
+    // ponytail: satisfaction counts the corrections Verdandi sees (steers, interrupts, rejected or edited plans, a route
     // override, follow-ups the decision layer calls corrections). Upgrade: add explicit ratings (DESIGN §8.8).
     const corrections = t.corrections + (t.override ? 1 : 0);
     // A task whose agent finished but whose last verifier run failed didn't get its work right.

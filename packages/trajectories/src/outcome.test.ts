@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { Event, ProjectId, StoredEvent, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
+import type { Event, ProjectId, Resolution, StoredEvent, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
 import { buildTaskOutcomes } from "./outcome.ts";
 
 const threadId = "t1" as ThreadId;
@@ -79,6 +79,21 @@ test("a task counts the user's interrupt as a correction, and has no outcome whi
   expect(second).toMatchObject({ taskId: u3, route: opus, status: "completed", turns: 2, implicitSatisfaction: 0, wallMs: 7000 });
   expect(second?.userOverride).toBeUndefined();
   expect(buildTaskOutcomes(events.slice(0, -1)).map((o) => o.taskId)).toEqual([u1 as string as TaskId]);
+});
+
+test("approving a plan with the user's edit is a correction; approving it as proposed is not", () => {
+  const planned = (resolution: Resolution) =>
+    buildTaskOutcomes(
+      stored([
+        [0, { type: "task.started", v: 2, threadId, taskId: u1 as string as TaskId, route: sonnet }],
+        [0, started(u1)],
+        [1, { type: "plan.requested", v: 1, threadId, turnId: u1, requestId: "r1", plan: "1. Edit" }],
+        [2, { type: "approval.resolved", v: 1, threadId, turnId: u1, requestId: "r1", resolution }],
+        [3, completed(u1, "success")],
+      ]),
+    )[0]?.implicitSatisfaction;
+  expect(planned({ decision: "allow", plan: "1. Edit b" })).toBe(0);
+  expect(planned({ decision: "allow" })).toBe(1);
 });
 
 test("a follow-up the decision layer calls a correction counts against the task that answered before it", () => {

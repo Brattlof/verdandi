@@ -122,7 +122,12 @@ test("a plan waits as a pending request and leaves a plan item once answered", (
     event(4, { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r1", resolution: { decision: "allow" } }),
   ]);
   expect(answered?.pendingRequests).toEqual([]);
-  expect(answered?.turns[0]?.items).toEqual([{ kind: "plan", text: "1. Edit a.txt" }]);
+  expect(answered?.turns[0]?.items).toEqual([{ kind: "plan", requestId: "r1", text: "1. Edit a.txt" }]);
+  const edited = fold([
+    ...feeds,
+    event(4, { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r1", resolution: { decision: "allow", plan: "1. Edit b" } }),
+  ]);
+  expect(edited?.turns[0]?.items).toEqual([{ kind: "plan", requestId: "r1", text: "1. Edit a.txt", edited: "1. Edit b" }]);
 });
 
 test("the projects feed adds new threads on top and moves a changed thread up", () => {

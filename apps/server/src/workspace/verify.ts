@@ -6,9 +6,14 @@ const TAIL = 8 * 1024;
 // ponytail: one fixed limit for every verifier. Upgrade: a policy key, once a project's suite needs longer.
 export const verifierTimeoutMs = 10 * 60 * 1000;
 
-/** The platform shell, as Node's `shell: true` runs it: `cmd /d /s /c "<command>"` strips the outer quotes. */
-const shell = (command: string) =>
-  process.platform === "win32" ? [process.env.ComSpec ?? "cmd.exe", "/d", "/s", "/c", `"${command}"`] : ["/bin/sh", "-c", command];
+/**
+ * `Bun.spawn` options that run `command` in the platform shell, as Node's `shell: true` does: `cmd /d /s /c "<command>"`
+ * strips the outer quotes. The arguments go to cmd.exe verbatim, since it doesn't read the `\"` that quoting them would add.
+ */
+export const shell = (command: string) =>
+  process.platform === "win32"
+    ? { cmd: [process.env.ComSpec ?? "cmd.exe", "/d", "/s", "/c", `"${command}"`], windowsVerbatimArguments: true }
+    : { cmd: ["/bin/sh", "-c", command] };
 
 /** Kills the verifier's process tree by the PID captured at spawn, never by name. POSIX: its process group. */
 const killTree = (proc: Bun.Subprocess) => {
@@ -62,13 +67,13 @@ export const runVerifier = (command: string, cwd: string, timeoutMs = verifierTi
   return Effect.acquireUseRelease(
     Effect.sync(() => {
       try {
-        return Bun.spawn(shell(command), {
+        return Bun.spawn({
+          ...shell(command),
           cwd,
           stdin: "ignore",
           stdout: "pipe",
           stderr: "pipe",
           detached: process.platform !== "win32",
-          windowsVerbatimArguments: true,
           windowsHide: true,
         });
       } catch (e) {

@@ -240,7 +240,12 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "user-input.requested": insertRequest,
   "plan.requested": (e, at) =>
     Effect.andThen(
-      addItem(e.turnId, { kind: "plan", text: e.plan, ...(e.filePath === undefined ? {} : { filePath: e.filePath }) }),
+      addItem(e.turnId, {
+        kind: "plan",
+        requestId: e.requestId,
+        text: e.plan,
+        ...(e.filePath === undefined ? {} : { filePath: e.filePath }),
+      }),
       insertRequest(e, at),
     ),
   // The task's decision becomes the one it runs on now, so the route chip and `RoutingExplain` match the route.
@@ -285,11 +290,17 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "thread.worktree.removal.requested": projectWorktree,
   "thread.worktree.removed": projectWorktree,
   "verifier.ran": ({ type: _, v: _v, threadId: _t, turnId, ...run }) => addItem(turnId, { kind: "verifier", ...run }),
+  // A plan approved with the user's edit keeps both versions on its item.
   "approval.resolved": (e, at) =>
-    withSql(
-      (sql) =>
+    withSql((sql) =>
+      Effect.andThen(
         sql`update requests set resolution = ${JSON.stringify(e.resolution)}, reason = ${e.reason ?? null}, resolved_at = ${at}
             where id = ${e.requestId}`,
+        e.resolution.decision === "allow" && e.resolution.plan !== undefined
+          ? sql`update items set payload = json_set(payload, '$.edited', ${e.resolution.plan})
+                where turn_id = ${e.turnId} and json_extract(payload, '$.requestId') = ${e.requestId}`.pipe(Effect.asVoid)
+          : Effect.void,
+      ),
     ),
   "decision.recorded": (e, at, seq) =>
     withSql((sql) =>
@@ -361,8 +372,14 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
             as cached_tokens
         from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
       if (!row) return { thread: undefined };
-      const pending = yield* sql<{ id: string; turn_id: string; kind: PendingRequest["kind"]; execute: string | null }>`
-        select id, turn_id, kind, json_extract(payload, '$.execute') as execute
+      const pending = yield* sql<{
+        id: string;
+        turn_id: string;
+        kind: PendingRequest["kind"];
+        plan: string | null;
+        execute: string | null;
+      }>`
+        select id, turn_id, kind, json_extract(payload, '$.plan') as plan, json_extract(payload, '$.execute') as execute
         from requests where thread_id = ${threadId} and resolution is null`;
       const turnList = yield* sql<{ id: TurnId; reverted: 0 | 1 | 2 }>`
         select id, reverted from turns where thread_id = ${threadId} order by started_at, rowid`;
@@ -392,6 +409,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
             requestId: r.id,
             turnId: r.turn_id as TurnId,
             kind: r.kind,
+            ...(r.plan === null ? {} : { plan: r.plan }),
             ...(r.execute === null ? {} : { execute: JSON.parse(r.execute) as RouteDecision }),
           })),
         },

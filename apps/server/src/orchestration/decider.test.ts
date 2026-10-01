@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Command, CommandId, HarnessId, ProjectId, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
+import type { Command, CommandId, HarnessId, ProjectId, Resolution, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
 import { builtInCatalog, loadPolicy, route as routeTask, rules } from "@verdandi/router";
 import { fakeCatalog } from "@verdandi/testkit";
 import { Result } from "effect";
@@ -247,6 +247,21 @@ describe("decide", () => {
       { type: "approval.resolved", v: 1, threadId, turnId, requestId: "p1", resolution: { decision: "deny", feedback: "smaller" } },
     ]);
     expect(reason(decide(planning, respond("p1", { decision: "answer", answers: {} })))).toBe("InvalidResolution");
+  });
+
+  test("a plan's approval can carry the user's edit; an unchanged one is a plain approval, and only a plan takes one", () => {
+    const planning: DeciderState = {
+      thread: running.thread && { ...running.thread, pendingRequests: [{ requestId: "p1", turnId, kind: "plan", plan: "1. Edit" }] },
+    };
+    const resolved = (resolution: Resolution) => [
+      { type: "approval.resolved", v: 1, threadId, turnId, requestId: "p1", resolution } as const,
+    ];
+    expect(events(decide(planning, respond("p1", { decision: "allow", plan: "1. Edit b" })))).toEqual(
+      resolved({ decision: "allow", plan: "1. Edit b" }),
+    );
+    expect(events(decide(planning, respond("p1", { decision: "allow", plan: "1. Edit\n" })))).toEqual(resolved({ decision: "allow" }));
+    expect(reason(decide(planning, respond("p1", { decision: "allow", plan: " \n" })))).toBe("InvalidResolution");
+    expect(reason(decide(waiting, respond("r1", { decision: "allow", plan: "1. Edit" })))).toBe("InvalidResolution");
   });
 
   test("approving a plan moves its build before the approval, unless the user pinned the thread since", () => {
