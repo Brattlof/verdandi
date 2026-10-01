@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   type AttachmentRef,
@@ -10,7 +10,8 @@ import {
   formatBytes,
   imageMediaTypes,
 } from "@verdandi/contracts";
-import { Effect } from "effect";
+import { Effect, Layer, Schedule } from "effect";
+import { SqlClient } from "effect/unstable/sql";
 
 /** Where a profile keeps attachments, each file named by its id: its content's SHA-256 and extension. */
 export const attachmentsDir = (home: string) => join(home, "attachments");
@@ -94,7 +95,59 @@ export const storeAttachments = (dir: string, uploads: readonly AttachmentUpload
         const partial = `${path}.${process.pid}.partial`;
         writeFileSync(partial, bytes);
         renameSync(partial, path);
+      } else {
+        // Sent again: fresh, so the sweep spares it until this turn commits its reference.
+        const now = new Date();
+        utimesSync(path, now, now);
       }
       return { id, name, kind: image ? "image" : "file", mediaType, size: bytes.length };
     });
   });
+
+/** Every attachment id a stored turn references, over the `turns` read model. doctor runs it too, read-only. */
+export const referencedAttachmentsSql = "select distinct json_extract(value, '$.id') as id from turns, json_each(turns.attachments)";
+
+/** The files in `dir`, with their size and last-modified time; none when it doesn't exist yet. */
+export const attachmentFiles = (dir: string) =>
+  existsSync(dir)
+    ? readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
+        const stat = d.isFile() ? statSync(join(dir, d.name), { throwIfNoEntry: false }) : undefined;
+        return stat ? [{ name: d.name, size: stat.size, modifiedMs: stat.mtimeMs }] : [];
+      })
+    : [];
+
+const hour = 60 * 60 * 1000;
+
+/**
+ * Deletes the files in `dir` that no stored turn references and that are over an hour old at `now` (ms): a
+ * rejected turn's bytes, or a crash's partial file. The hour spares bytes stored for a turn not yet committed.
+ * Logs what it couldn't do and never fails; a file open elsewhere (Windows) is tried again next sweep.
+ */
+export const sweepAttachments = (dir: string, now: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const referenced = new Set((yield* sql.unsafe<{ id: string }>(referencedAttachmentsSql)).map((r) => r.id));
+    // Synchronous from here, so no turn stores its bytes between the age check and the delete.
+    const failed: string[] = [];
+    let removed = 0;
+    for (const f of attachmentFiles(dir)) {
+      if (referenced.has(f.name) || now - f.modifiedMs < hour) continue;
+      try {
+        rmSync(join(dir, f.name), { force: true });
+        removed++;
+      } catch (e) {
+        failed.push(`${f.name} (${e instanceof Error ? e.message : String(e)})`);
+      }
+    }
+    if (removed > 0) yield* Effect.logInfo(`Removed ${removed} attachment files no turn references.`);
+    if (failed.length > 0)
+      yield* Effect.logWarning(`Couldn't remove unreferenced attachments; the next sweep tries again: ${failed.join(", ")}`);
+  }).pipe(Effect.ignoreCause({ log: "Warn", message: `The attachments sweep of ${dir} failed; the next one tries again.` }));
+
+/** Sweeps the profile's attachments in the background when verdandid starts, then once a day. */
+export const AttachmentSweepLive = (home: string) =>
+  Layer.effectDiscard(
+    Effect.forkScoped(
+      Effect.suspend(() => sweepAttachments(attachmentsDir(home), Date.now())).pipe(Effect.repeat(Schedule.spaced("1 day"))),
+    ),
+  );

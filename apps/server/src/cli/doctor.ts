@@ -1,12 +1,14 @@
 import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { formatBytes } from "@verdandi/contracts";
 import { findClaude } from "@verdandi/harness-claude-code";
 import { Effect } from "effect";
 import { requireBun } from "../config/bun-version.ts";
 import { alive, resolveHome, type ServerFile, serverFile } from "../config/home.ts";
 import { migrations } from "../persistence/migrations.ts";
 import { connect } from "../rpc/client.ts";
+import { attachmentFiles, attachmentsDir, referencedAttachmentsSql } from "../workspace/attachments.ts";
 
 type Status = "ok" | "warn" | "fail";
 /** One line of `verdandi doctor`. When it isn't ok, `detail` ends with the fix. */
@@ -93,6 +95,34 @@ const database = (home: string): Check => {
   }
 };
 
+/** The attachments folder's size, and how many of its files no stored turn references (read-only, like `database`). */
+const attachments = (home: string): Check => {
+  const name = "Attachments";
+  const files = attachmentFiles(attachmentsDir(home));
+  if (files.length === 0) return { name, status: "ok", detail: "none stored" };
+  const stored = `${files.length} file${files.length === 1 ? "" : "s"}, ${formatBytes(files.reduce((sum, f) => sum + f.size, 0))}`;
+  let db: Database | undefined;
+  try {
+    db = new Database(join(home, "verdandi.db"), { readonly: true });
+    const referenced = new Set(
+      db
+        .query<{ id: string }, []>(referencedAttachmentsSql)
+        .all()
+        .map((r) => r.id),
+    );
+    const unreferenced = files.filter((f) => !referenced.has(f.name)).length;
+    return {
+      name,
+      status: "ok",
+      detail: `${stored}; ${unreferenced} no turn references, which verdandid removes daily once they're an hour old`,
+    };
+  } catch (e) {
+    return { name, status: "warn", detail: `${stored}; can't tell which a turn references (${message(e)}). See the Database line.` };
+  } finally {
+    db?.close();
+  }
+};
+
 /** The token must be accepted, so this calls the API with it; the token itself is never printed. */
 const server = async (home: string): Promise<Check> => {
   const name = "verdandid";
@@ -143,6 +173,7 @@ export const diagnose = async (
   await tool("git", tools.git, { name: "git", status: "warn", detail: "not found on PATH. Install git to see diffs." }),
   writable(home),
   database(home),
+  attachments(home),
   await server(home),
 ];
 

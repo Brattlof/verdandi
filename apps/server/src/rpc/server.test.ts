@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
-import { appendFileSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import type { CommandId, ProjectsFeed, TaskId, TerminalId, TerminalView, ThreadFeed, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
@@ -10,6 +10,7 @@ import { alive } from "../config/home.ts";
 import { spendCapsFile } from "../config/spend-caps.ts";
 import { projectIdFor } from "../orchestration/decider.ts";
 import { Reactor } from "../orchestration/reactor.ts";
+import { attachmentsDir, sweepAttachments } from "../workspace/attachments.ts";
 import { Terminals } from "../workspace/terminals.ts";
 import { connect } from "./client.ts";
 import { ServerInfo, ServerLayer } from "./server.ts";
@@ -426,6 +427,46 @@ describe("rpc server", () => {
       headers: { authorization: `Bearer ${info.token}` },
     });
     expect(traversal.status).toBe(404);
+  });
+
+  test("the sweep removes a rejected turn's attachment once it's an hour old, and keeps an accepted turn's", async () => {
+    const { info, fake, drain, home, runtime } = await startServer();
+    const threadId = uuid<ThreadId>();
+    const send = (text: string) =>
+      withClient(info.port, info.token, (c) =>
+        Effect.exit(
+          c.CommandDispatch({
+            type: "turn.send",
+            commandId: uuid<CommandId>(),
+            threadId,
+            turnId: uuid<TurnId>(),
+            text,
+            mode: "build",
+            attachments: [{ name: `${text}.log`, mediaType: "text/plain", data: Buffer.from(text).toString("base64") }],
+          }),
+        ),
+      );
+    await withClient(info.port, info.token, (c) => createThread(c, threadId));
+    expect((await send("accepted"))._tag).toBe("Success");
+    await drain();
+    const accepted = fake.calls.at(-1)?.attachments?.[0]?.path ?? "";
+    await withClient(info.port, info.token, (c) => c.CommandDispatch({ type: "thread.archive", commandId: uuid<CommandId>(), threadId }));
+    expect(JSON.stringify(await send("rejected"))).toContain("ThreadArchived");
+    const dir = attachmentsDir(home);
+    const rejected = join(dir, readdirSync(dir).find((name) => !accepted.endsWith(name)) ?? "?");
+    const hour = 60 * 60 * 1000;
+    const sweep = (now: number) => runtime.runPromise(sweepAttachments(dir, now));
+
+    // Bytes sent again are fresh, even when the file is old: the sweep never races a turn's commit.
+    const old = new Date(Date.now() - 2 * hour);
+    utimesSync(rejected, old, old);
+    expect(JSON.stringify(await send("rejected"))).toContain("ThreadArchived");
+    await sweep(Date.now());
+    expect(existsSync(rejected)).toBe(true);
+
+    await sweep(Date.now() + 2 * hour);
+    expect(existsSync(rejected)).toBe(false);
+    expect(existsSync(accepted)).toBe(true);
   });
 
   test("a reported quota and the thread's metered cost reach the feed live and after a reload", async () => {

@@ -28,7 +28,7 @@ import { loadTaskCosts } from "../orchestration/task-outcome.ts";
 import { loadUsageReport } from "../orchestration/usage.ts";
 import { loadRoutingMemory } from "../routing/memory.ts";
 import { decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
-import { attachmentPath, attachmentsDir, storeAttachments } from "../workspace/attachments.ts";
+import { AttachmentSweepLive, attachmentPath, attachmentsDir, storeAttachments } from "../workspace/attachments.ts";
 import { threadDiff } from "../workspace/diff.ts";
 import { resolveProjectPath } from "../workspace/project.ts";
 import { Terminals, TerminalsLive } from "../workspace/terminals.ts";
@@ -69,8 +69,7 @@ const Handlers = (home: string) =>
             ? Effect.map(resolveProjectPath(command.projectPath), (projectPath): Command => ({ ...command, projectPath }))
             : command.type === "turn.send"
               ? Effect.map(
-                  // ponytail: bytes are stored before the engine accepts the turn, and nothing removes unreferenced ones.
-                  // Upgrade: sweep files no turn references, once attachments take real space.
+                  // Stored before the engine accepts the turn: a rejected turn's bytes stay until the daily sweep (AttachmentSweepLive).
                   storeAttachments(attachmentsDir(home), command.attachments ?? []),
                   (refs): Command => {
                     const { attachments: _, ...rest } = command;
@@ -259,5 +258,9 @@ export const ServerLayer = (
       return { port: address.port, token };
     }),
   );
-  return info.pipe(Layer.provideMerge(http), Layer.provideMerge(TerminalsLive), Layer.provideMerge(AppLayer(home, harnesses)));
+  return Layer.mergeAll(info, AttachmentSweepLive(home)).pipe(
+    Layer.provideMerge(http),
+    Layer.provideMerge(TerminalsLive),
+    Layer.provideMerge(AppLayer(home, harnesses)),
+  );
 };
