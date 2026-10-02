@@ -3,10 +3,10 @@ import { writeFileSync } from "node:fs";
 import type { CommandId, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
-import { type ServerFile, serverFile } from "../config/home.ts";
-import { Engine } from "../orchestration/engine.ts";
+import { attachmentsDir, storeAttachments } from "../attachments/attachments.ts";
+import { Engine } from "../event-store/engine.ts";
+import { type ServerFile, serverFile } from "../home/home.ts";
 import { ServerInfo, ServerLayer } from "../rpc/server.ts";
-import { attachmentsDir, storeAttachments } from "../workspace/attachments.ts";
 import { type Check, diagnose } from "./doctor.ts";
 
 const cleanups: (() => Promise<void>)[] = [];

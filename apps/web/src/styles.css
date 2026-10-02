@@ -221,7 +221,7 @@
 }
 
 /*
- * Ludwig Burger's engraving (art.tsx): black ink on white paper. Multiplied, the paper takes the colour
+ * Ludwig Burger's engraving (ui/art.tsx): black ink on white paper. Multiplied, the paper takes the colour
  * behind it; in dark mode the ink is inverted and screened, so light lines sit on the dark page.
  */
 .engraving {

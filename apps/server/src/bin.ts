@@ -1,14 +1,14 @@
 #!/usr/bin/env bun
-import { batch } from "./cli/batch.ts";
+import { batch } from "./batch/batch-cli.ts";
 import { chat } from "./cli/chat.ts";
-import { costs } from "./cli/costs.ts";
 import { doctor } from "./cli/doctor.ts";
 import { open } from "./cli/open.ts";
-import { routing } from "./cli/routing.ts";
 import { run } from "./cli/run.ts";
-import { search } from "./cli/search.ts";
-import { requireBun } from "./config/bun-version.ts";
+import { requireBun } from "./home/bun-version.ts";
 import { start } from "./main.ts";
+import { routing } from "./routing/routing-cli.ts";
+import { search } from "./search/search-cli.ts";
+import { costs } from "./spend/costs-cli.ts";
 
 const usage = `Usage:
   verdandi start [--home <dir>] [--port <n>] [--host <ip>]   run verdandid in the foreground; --host 0.0.0.0 (or this machine's LAN address) also opens it to your local network on --port, never to the internet

@@ -3,8 +3,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
-import { type ServerFile, serverFile } from "../config/home.ts";
-import { Engine } from "../orchestration/engine.ts";
+import { Engine } from "../event-store/engine.ts";
+import { type ServerFile, serverFile } from "../home/home.ts";
 import { ServerInfo, ServerLayer } from "../rpc/server.ts";
 import { exitCodes, type RunResult } from "./run.ts";
 

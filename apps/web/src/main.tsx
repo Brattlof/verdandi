@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./app.tsx";
 import { connect } from "./client.ts";
-import { RuneMark } from "./runes.tsx";
+import { RuneMark } from "./ui/runes.tsx";
 
 const tokenKey = "verdandi.token";
 

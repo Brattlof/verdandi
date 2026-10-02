@@ -4,11 +4,11 @@ import { join } from "node:path";
 import { formatBytes } from "@verdandi/contracts";
 import { findClaude } from "@verdandi/harness-claude-code";
 import { Effect } from "effect";
-import { requireBun } from "../config/bun-version.ts";
-import { alive, resolveHome, type ServerFile, serverFile } from "../config/home.ts";
-import { migrations } from "../persistence/migrations.ts";
+import { attachmentFiles, attachmentsDir, referencedAttachmentsSql } from "../attachments/attachments.ts";
+import { migrations } from "../event-store/migrations.ts";
+import { requireBun } from "../home/bun-version.ts";
+import { alive, resolveHome, type ServerFile, serverFile } from "../home/home.ts";
 import { connect } from "../rpc/client.ts";
-import { attachmentFiles, attachmentsDir, referencedAttachmentsSql } from "../workspace/attachments.ts";
 
 type Status = "ok" | "warn" | "fail";
 /** One line of `verdandi doctor`. When it isn't ok, `detail` ends with the fix. */

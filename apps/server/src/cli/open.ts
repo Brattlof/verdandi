@@ -1,4 +1,4 @@
-import { readServerFile, resolveHome } from "../config/home.ts";
+import { readServerFile, resolveHome } from "../home/home.ts";
 
 /** The platform's own way to open a URL in the default browser. Windows skips `start`: cmd would parse the URL. */
 const opener = (url: string) =>

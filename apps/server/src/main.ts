@@ -4,10 +4,10 @@ import { type HarnessAdapter, HarnessError, type HarnessId } from "@verdandi/con
 import { findClaude, makeClaudeCodeAdapter } from "@verdandi/harness-claude-code";
 import { makeFakeHarness } from "@verdandi/testkit";
 import { Effect, ManagedRuntime, Stream } from "effect";
-import { alive, flag, resolveHome, type ServerFile, serverFile } from "./config/home.ts";
+import { attachmentsDir } from "./attachments/attachments.ts";
+import { alive, flag, resolveHome, type ServerFile, serverFile } from "./home/home.ts";
 import { hostProblem, isLocalAddress, startLanGate } from "./rpc/lan-gate.ts";
 import { ServerInfo, ServerLayer } from "./rpc/server.ts";
-import { attachmentsDir } from "./workspace/attachments.ts";
 
 const claudeMissing: HarnessAdapter = {
   id: "claude-code",
