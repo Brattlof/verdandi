@@ -49,6 +49,7 @@ const idle: DeciderState = {
     sessionId: null,
     taskId: null,
     pendingRequests: [],
+    trustedCommands: [],
   },
 };
 const running: DeciderState = {
@@ -77,6 +78,7 @@ const running: DeciderState = {
     sessionId: "s1",
     taskId,
     pendingRequests: [],
+    trustedCommands: [],
   },
 };
 const waiting: DeciderState = {
@@ -108,6 +110,7 @@ const waiting: DeciderState = {
       { requestId: "r1", turnId, kind: "approval" },
       { requestId: "r2", turnId, kind: "user-input" },
     ],
+    trustedCommands: [],
   },
 };
 
@@ -264,6 +267,7 @@ describe("decide", () => {
         sessionId: "s1",
         taskId,
         pendingRequests: [{ requestId: "p1", turnId, kind: "plan" }],
+        trustedCommands: [],
       },
     };
     expect(events(decide(planning, respond("p1", { decision: "deny", feedback: "smaller" })))).toEqual([

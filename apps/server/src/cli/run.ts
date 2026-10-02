@@ -22,7 +22,7 @@ import { flag, readServerFile, resolveHome, type ServerFile } from "../home/home
 import { expandHome } from "../projects/project.ts";
 import { connect } from "../rpc/client.ts";
 import { spendSplit } from "../spend/usage.ts";
-import { type PendingRequest, skillChangeTitle } from "./requests.ts";
+import { type PendingRequest, skillChangeTitle, trustedCommandsLine } from "./requests.ts";
 
 /** How `verdandi run` ends, as its usage line in `bin.ts` documents. Any other error (verdandid not running, the turn rejected) exits 1. */
 export const exitCodes = { completed: 0, usage: 2, failed: 3, limit: 4, request: 5, interrupted: 130 } as const;
@@ -89,17 +89,19 @@ const parse = (argv: readonly string[]): Options => {
   };
 };
 
-/** What the agent stopped for, in a line, or with a plan the plan itself. */
+/** What the turn stopped for, in a line, or with a plan the plan itself. */
 const describeRequest = (r: PendingRequest) =>
-  r.type === "approval.requested"
-    ? `approval to use ${r.toolName} ${clip(JSON.stringify(r.input), 400)}`
-    : r.type === "user-input.requested"
-      ? `an answer to: ${r.questions.map((q) => `${q.question} (${q.options.map((o) => o.label).join(", ")})`).join(" ")}`
-      : r.type === "skill.proposed"
-        ? `approval to ${skillChangeTitle(r.change)}`
-        : r.type === "memory.proposed"
-          ? `approval to remember: ${r.text}`
-          : `approval of its plan:\n${r.plan}`;
+  r.type === "commands.trust.requested"
+    ? `approval to run ${trustedCommandsLine(r)}, which this project hasn't trusted`
+    : r.type === "approval.requested"
+      ? `approval to use ${r.toolName} ${clip(JSON.stringify(r.input), 400)}`
+      : r.type === "user-input.requested"
+        ? `an answer to: ${r.questions.map((q) => `${q.question} (${q.options.map((o) => o.label).join(", ")})`).join(" ")}`
+        : r.type === "skill.proposed"
+          ? `approval to ${skillChangeTitle(r.change)}`
+          : r.type === "memory.proposed"
+            ? `approval to remember: ${r.text}`
+            : `approval of its plan:\n${r.plan}`;
 
 const uuid = <T>() => crypto.randomUUID() as T;
 type Signal = ThreadFeed | { readonly kind: "sigint" } | { readonly kind: "ended" };
@@ -269,7 +271,8 @@ const runTurn = (server: ServerFile, o: Options) =>
         e.type === "approval.requested" ||
         e.type === "user-input.requested" ||
         e.type === "plan.requested" ||
-        e.type === "skill.proposed"
+        e.type === "skill.proposed" ||
+        e.type === "commands.trust.requested"
       ) {
         if (o.deny) {
           process.stderr.write(`[denied ${describeRequest(e)}]\n`);
@@ -288,7 +291,7 @@ const runTurn = (server: ServerFile, o: Options) =>
       const tail = verifier?.output.trimEnd().split(/\r?\n/).slice(-10).join("\n");
       const error =
         status === "request" && asked
-          ? `The agent stopped for ${describeRequest(asked)}\nverdandi run never answers for you, so it interrupted the turn. Continue the thread with verdandi chat --thread ${threadId} to answer what it asks, or rerun with --deny-requests to deny it and let the agent go on.`
+          ? `${asked.type === "commands.trust.requested" ? "Verdandi" : "The agent"} stopped for ${describeRequest(asked)}\nverdandi run never answers for you, so it interrupted the turn. Continue the thread with verdandi chat --thread ${threadId} to answer what it asks, or rerun with --deny-requests to deny it and let the agent go on.`
           : verifierFailed && verifier
             ? `The verifier ${verifier.command} failed${verifier.exitCode === null ? "" : ` (exit ${verifier.exitCode})`}:\n${tail}`
             : e.error;

@@ -19,6 +19,7 @@ import {
   type TerminalId,
   TerminalUnavailable,
   type ThreadId,
+  type TrustedCommands,
   type TurnId,
   type UsageFilter,
   type UsageReport,
@@ -211,6 +212,14 @@ export const connect = (token: string) => {
     return undefined;
   };
 
+  /** The command lists the user trusted, in every project, newest first; undefined when the connection is lost. */
+  const trusted = async (): Promise<readonly TrustedCommands[] | undefined> => {
+    const exit = await run((rpc) => rpc.TrustedCommandsList({}));
+    if (Exit.isSuccess(exit)) return exit.value;
+    lost.set(true); // it has no errors of its own
+    return undefined;
+  };
+
   /** Past sessions' messages containing `query`, newest first. Under 3 characters, none. */
   const search = async (query: SessionQuery): Promise<readonly SessionHit[] | undefined> => {
     const exit = await run((rpc) => rpc.SessionSearch(query));
@@ -275,6 +284,23 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, pickFolder, explain, simulate, attachmentUrl, spendCaps, usage, search, memory, skills, terminals, follow, models, lost };
+  return {
+    dispatch,
+    diff,
+    pickFolder,
+    explain,
+    simulate,
+    attachmentUrl,
+    spendCaps,
+    usage,
+    search,
+    memory,
+    skills,
+    trusted,
+    terminals,
+    follow,
+    models,
+    lost,
+  };
 };
 export type Connection = ReturnType<typeof connect>;

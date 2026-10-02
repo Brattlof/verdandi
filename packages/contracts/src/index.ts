@@ -21,4 +21,5 @@ export * from "./task.ts";
 export * from "./terminal.ts";
 export * from "./text.ts";
 export * from "./trajectory.ts";
+export * from "./trust.ts";
 export * from "./worktree.ts";

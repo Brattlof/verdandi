@@ -9,6 +9,7 @@ import { AppLayer } from "../event-store/app.ts";
 import { Engine } from "../event-store/engine.ts";
 import { loadThreadView } from "../event-store/projector.ts";
 import { Reactor } from "../event-store/reactor.ts";
+import { allowTrustRequests } from "../trust/allow-trust.ts";
 import { loadRoutingMemory } from "./routing-memory.ts";
 
 const dirs: string[] = [];
@@ -55,6 +56,7 @@ const setup = async ({ verifier, pin, texts }: { verifier?: string; pin?: Route;
   );
   const runtime = ManagedRuntime.make(AppLayer(tempDir(), { fake: makeFakeHarness() }));
   runtimes.push(runtime as never);
+  await runtime.runPromise(allowTrustRequests);
   const dispatch = (c: Command) => runtime.runPromise(Effect.flatMap(Engine, (e) => e.dispatch(c)));
   await dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId, projectPath, ...(pin && { route: pin }) });
   // An escalation's follow-up turn starts from its turn's reactions, so drain until nothing runs before the next.

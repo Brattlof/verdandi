@@ -108,13 +108,13 @@ export type BatchOptions = {
  */
 export const runBatch = async (options: BatchOptions): Promise<{ results: BatchResult[]; stopped?: string }> => {
   mkdirSync(options.runHome, { recursive: true });
-  // Each copy's task `verify` is its project verifier, so a routed run can escalate, unless its policy names verifiers
-  // of its own. It's handed to the run here, never written into the copy, where the agent could read it.
+  // Each copy's task `verify` is its project verifier, so a routed run can escalate, in place of any its policy names, which
+  // a batch never trusts. It's handed to the run here, never written into the copy, where the agent could read it.
   const verifyIn = new Map<string, string>();
   const runtime = ManagedRuntime.make(
     AppLayer(options.runHome, options.harnesses, {
       spendCapsHome: options.home,
-      defaultVerifiers: (projectPath) => {
+      verifiers: (projectPath) => {
         const verify = verifyIn.get(projectPath);
         return verify ? [verify] : [];
       },
@@ -123,7 +123,8 @@ export const runBatch = async (options: BatchOptions): Promise<{ results: BatchR
   const run = <A, E>(effect: Effect.Effect<A, E, Engine | Reactor | SqlClient.SqlClient>) => runtime.runPromise(effect);
   const dispatch = (command: Parameters<Engine["Service"]["dispatch"]>[0]) =>
     run(Effect.flatMap(Engine, (engine) => engine.dispatch(command)));
-  // Nobody is watching a batch: answer each request as it comes, so no turn waits.
+  // Nobody is watching a batch: answer each request as it comes, so no turn waits. A repository's own commands never run
+  // unasked, so trust requests are denied even with --approve.
   await run(
     Effect.flatMap(Engine, (engine) =>
       engine.react(({ event: e }) => {
@@ -131,10 +132,11 @@ export const runBatch = async (options: BatchOptions): Promise<{ results: BatchR
           e.type !== "approval.requested" &&
           e.type !== "user-input.requested" &&
           e.type !== "plan.requested" &&
-          e.type !== "skill.proposed"
+          e.type !== "skill.proposed" &&
+          e.type !== "commands.trust.requested"
         )
           return Effect.void;
-        const allow = options.approve && e.type !== "user-input.requested";
+        const allow = options.approve && e.type !== "user-input.requested" && e.type !== "commands.trust.requested";
         return engine
           .dispatch({
             type: "approval.respond",

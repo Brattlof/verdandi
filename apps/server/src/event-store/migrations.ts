@@ -352,6 +352,20 @@ const review = Effect.gen(function* () {
   yield* sql`alter table decisions add column state text`;
 });
 
+/** The command lists the user trusted per project (`commands.trusted`, until `commands.trust.revoked`). New, so nothing to fill. */
+const trustedCommands = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table trusted_commands (
+    project_id text not null references projects (id),
+    hash text not null,
+    purpose text not null,
+    commands text not null,
+    thread_id text not null,
+    trusted_at text not null,
+    primary key (project_id, hash)
+  )`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -377,4 +391,5 @@ export const migrations = {
   "22_route_change_reasons": routeChangeReasons,
   "23_skills": skills,
   "24_review": review,
+  "25_trusted_commands": trustedCommands,
 };

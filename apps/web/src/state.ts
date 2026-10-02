@@ -108,6 +108,10 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "skill.applied": (thread) => thread, // the skill is on disk; the Skills tab reads it from there
   // A background review's proposal waits for the user like the agent's own requests; the review itself runs out of sight.
   "memory.proposed": addRequest,
+  // Verdandi's own request to run the project's commands; trusted lists show on the projects page, fetched when opened.
+  "commands.trust.requested": addRequest,
+  "commands.trusted": (thread) => thread,
+  "commands.trust.revoked": (thread) => thread,
   "review.requested": (thread) => thread,
   "review.started": (thread) => thread,
   "plan.requested": (thread, e) =>
@@ -189,6 +193,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "thread.worktree.created": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
   "thread.worktree.failed": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
   "thread.worktree.setup.ran": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
+  "thread.worktree.setup.held": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
   "thread.worktree.removal.requested": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
   "thread.worktree.removed": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
   "verifiers.started": (thread) => thread, // only closes the turn to steers, which the server refuses

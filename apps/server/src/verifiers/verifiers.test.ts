@@ -9,6 +9,7 @@ import { AppLayer } from "../event-store/app.ts";
 import { Engine } from "../event-store/engine.ts";
 import { loadThreadView } from "../event-store/projector.ts";
 import { Reactor } from "../event-store/reactor.ts";
+import { allowTrustRequests } from "../trust/allow-trust.ts";
 
 const dirs: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];
@@ -26,7 +27,10 @@ let n = 0;
 const id = <T>() => `id-${++n}` as T;
 const threadId = "thread-1" as ThreadId;
 
-/** A project whose routing policy sets `verifiers`, with one pinned thread on the fake harness; a git repo holding `repo`'s files when given. */
+/**
+ * A project whose routing policy sets `verifiers`, which the user trusts, with one pinned thread on the fake harness; a git
+ * repo holding `repo`'s files when given.
+ */
 const setup = async (verifiers?: string[], repo?: Record<string, string>) => {
   const projectPath = repo ? makeTempRepo(repo) : tempDir();
   if (repo) dirs.push(projectPath);
@@ -36,6 +40,7 @@ const setup = async (verifiers?: string[], repo?: Record<string, string>) => {
   }
   const runtime = ManagedRuntime.make(AppLayer(tempDir(), { fake: makeFakeHarness() }));
   runtimes.push(runtime as never);
+  await runtime.runPromise(allowTrustRequests);
   const dispatch = (c: Command) => runtime.runPromise(Effect.flatMap(Engine, (e) => e.dispatch(c)));
   await dispatch({
     type: "thread.create",
