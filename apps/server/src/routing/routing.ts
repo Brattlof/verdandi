@@ -23,6 +23,7 @@ import {
   routingRules,
   rulesBackend,
 } from "@verdandi/decisions";
+import { nativeCatalog } from "@verdandi/harness-native";
 import {
   builtInCatalog,
   deescalate,
@@ -133,9 +134,12 @@ export const projectRouting =
       }
     });
 
-/** The catalog of the harnesses verdandid runs: the fake harness's models join it when it runs. */
-export const catalogFor = (harnesses: Partial<Record<HarnessId, unknown>>): Catalog =>
-  harnesses.fake ? [...builtInCatalog, ...fakeCatalog] : builtInCatalog;
+/** The catalog of the harnesses verdandid runs: the native and fake harnesses' models join it while they run. */
+export const catalogFor = (harnesses: Partial<Record<HarnessId, unknown>>): Catalog => [
+  ...builtInCatalog,
+  ...(harnesses.native ? nativeCatalog : []),
+  ...(harnesses.fake ? fakeCatalog : []),
+];
 
 /** Routing over the harnesses verdandid runs. */
 export const routingFor = (harnesses: Partial<Record<HarnessId, unknown>>) =>

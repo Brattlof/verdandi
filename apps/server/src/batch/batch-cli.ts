@@ -4,6 +4,7 @@ import type { BatchReport, HarnessAdapter, HarnessId } from "@verdandi/contracts
 import { findClaude, makeClaudeCodeAdapter } from "@verdandi/harness-claude-code";
 import { makeFakeHarness } from "@verdandi/testkit";
 import { flag, flags, resolveHome } from "../home/home.ts";
+import { nativeHarness } from "../native/native-harness.ts";
 import { columns } from "../spend/costs-cli.ts";
 import { defaultBatchRoutes, estimateBatch, loadEvalSet, parseBatchRoute, runBatch, summarize } from "./batch.ts";
 
@@ -26,10 +27,13 @@ export const batch = async (argv: readonly string[]) => {
   const claudePath = fake ? undefined : findClaude();
   if (!fake && !claudePath) throw new Error("Claude Code CLI not found on PATH. Install it and run `claude` once to log in.");
   const runHome = join(home, "batch", new Date().toISOString().replaceAll(":", "-"));
+  // The native harness joins when an Anthropic API key is configured, so `--route native/<model>/<effort>` can run.
+  const native = fake ? undefined : (await nativeHarness(runHome)).adapter;
   const harnesses: Partial<Record<HarnessId, HarnessAdapter>> = fake
     ? { fake: makeFakeHarness() }
     : {
         "claude-code": makeClaudeCodeAdapter({ claudePath: claudePath ?? "claude", additionalDirectories: [join(runHome, "attachments")] }),
+        ...(native && { native }),
       };
 
   const estimate = await estimateBatch(tasks, chosen, harnesses);

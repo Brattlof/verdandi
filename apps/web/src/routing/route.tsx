@@ -15,14 +15,15 @@ import type { LiveThread } from "../state.ts";
 
 /**
  * What switching `thread` to `to` costs beyond the usual turn, or undefined when nothing extra.
- * A warm session loses its cache on a model change, and on Claude Code on an effort change too
- * (ADR 0002); a new harness starts a fresh session. A thread with no session yet has nothing to lose.
+ * A warm session loses its cache on a model change, and on an effort change too (Claude Code: ADR 0002; native: a
+ * top-level effort change rewrites the message cache, ADR 0022); only the fake harness has no cache. A new harness
+ * starts a fresh session. A thread with no session yet has nothing to lose.
  */
 export const switchCost = (thread: Pick<ThreadView, "route" | "sessionId" | "turns">, to: Route) => {
   const from = thread.route;
   if (thread.sessionId === null) return undefined;
   if (from.harness !== to.harness) return `${to.harness} starts a fresh session: the agent won't see this thread's earlier turns.`;
-  const cold = from.model !== to.model || (from.effort !== to.effort && to.harness === "claude-code");
+  const cold = from.model !== to.model || (from.effort !== to.effort && to.harness !== "fake");
   if (!cold) return undefined;
   const turns = thread.turns.length;
   return `The next turn is a cold cache write of the whole conversation (${turns} turn${turns === 1 ? "" : "s"} so far), so it costs more than a usual turn.`;

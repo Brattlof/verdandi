@@ -6,6 +6,7 @@ import { makeFakeHarness } from "@verdandi/testkit";
 import { Effect, ManagedRuntime, Stream } from "effect";
 import { attachmentsDir } from "./attachments/attachments.ts";
 import { alive, flag, resolveHome, type ServerFile, serverFile } from "./home/home.ts";
+import { nativeHarness } from "./native/native-harness.ts";
 import { hostProblem, isLocalAddress, startLanGate } from "./rpc/lan-gate.ts";
 import { ServerInfo, ServerLayer } from "./rpc/server.ts";
 import { skillsPlugin } from "./skills/skills-config.ts";
@@ -42,10 +43,13 @@ export const start = async (argv: readonly string[]) => {
       throw new Error(`verdandid is already running for ${home} (pid ${running.pid}). Stop it before starting another.`);
   }
   const claudePath = findClaude();
+  // Only with an Anthropic API key configured; a malformed one stops here, naming the fix.
+  const native = await nativeHarness(home);
   const harnesses: Partial<Record<HarnessId, HarnessAdapter>> = {
     "claude-code": claudePath
       ? makeClaudeCodeAdapter({ claudePath, additionalDirectories: [attachmentsDir(home)], plugins: [skillsPlugin(home)] })
       : claudeMissing,
+    ...(native.adapter && { native: native.adapter }),
     // The fake harness answers without any model call: for trying the loop end to end.
     ...(argv.includes("--dev-fake-harness") ? { fake: makeFakeHarness() } : {}),
   };
@@ -60,6 +64,7 @@ export const start = async (argv: readonly string[]) => {
   writeFileSync(file, JSON.stringify({ port: info.port, token: info.token, pid: process.pid } satisfies ServerFile), { mode: 0o600 });
   console.log(`verdandid listening on 127.0.0.1:${info.port} (home: ${home}). Open the web UI with: verdandi open`);
   if (!claudePath) console.log("Claude Code CLI not found on PATH; claude-code turns will fail until it is installed.");
+  console.log(native.status);
   const gate = lan && host ? startLanGate(host, port === undefined ? 0 : Number(port), info.port) : undefined;
   if (gate) {
     const addresses = host === "0.0.0.0" || host === "::" ? lanAddresses() : [host ?? ""];

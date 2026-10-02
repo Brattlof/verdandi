@@ -8,6 +8,7 @@
     { "path": "packages/decisions" },
     { "path": "packages/tools" },
     { "path": "packages/harness-claude-code" },
+    { "path": "packages/harness-native" },
     { "path": "apps/server" },
     { "path": "apps/web" }
   ]

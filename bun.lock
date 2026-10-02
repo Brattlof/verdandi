@@ -22,6 +22,7 @@
         "@verdandi/contracts": "workspace:*",
         "@verdandi/decisions": "workspace:*",
         "@verdandi/harness-claude-code": "workspace:*",
+        "@verdandi/harness-native": "workspace:*",
         "@verdandi/router": "workspace:*",
         "@verdandi/testkit": "workspace:*",
         "@verdandi/tools": "workspace:*",
@@ -71,6 +72,17 @@
         "@verdandi/contracts": "workspace:*",
         "effect": "4.0.0-rc.115",
         "zod": "4.6.5",
+      },
+      "devDependencies": {
+        "@verdandi/testkit": "workspace:*",
+      },
+    },
+    "packages/harness-native": {
+      "name": "@verdandi/harness-native",
+      "dependencies": {
+        "@anthropic-ai/sdk": "0.125.0",
+        "@verdandi/contracts": "workspace:*",
+        "effect": "4.0.0-rc.115",
       },
       "devDependencies": {
         "@verdandi/testkit": "workspace:*",
@@ -261,6 +273,8 @@
     "@verdandi/decisions": ["@verdandi/decisions@workspace:packages/decisions"],
 
     "@verdandi/harness-claude-code": ["@verdandi/harness-claude-code@workspace:packages/harness-claude-code"],
+
+    "@verdandi/harness-native": ["@verdandi/harness-native@workspace:packages/harness-native"],
 
     "@verdandi/router": ["@verdandi/router@workspace:packages/router"],
 

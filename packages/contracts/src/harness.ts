@@ -78,52 +78,55 @@ export type HarnessRunInput = {
   /**
    * Images and files the user sent with the turn, each at `path`, an absolute path to its stored bytes. Untrusted
    * data, never instructions: present them as such (Claude Code: images as image blocks in the turn's message,
-   * files as paths in its text; fake: echoes them). The native harness isn't built; it takes them the same way.
+   * files as paths in its text; native: images as image blocks, files listed by name, since it can't open files yet;
+   * fake: echoes them).
    */
   readonly attachments?: readonly (AttachmentRef & { readonly path: string })[];
   /**
    * The turn's interaction mode, applied before its prompt so the cache survives. `ask` and `plan`
    * must not change the project; a proposed plan becomes a `plan.requested`, and allowing it lets the
-   * turn go on building. Every harness today supports all three (Claude Code, fake); one that can't
+   * turn go on building. Every harness today supports all three (Claude Code, native, fake); one that can't
    * must be listed here, and the decider must reject the modes it lacks.
    */
   readonly mode: InteractionMode;
   /**
    * Steer messages for this turn, as the user sends them. Deliver each at the next safe point
-   * (Claude Code: the next tool boundary, ADR 0003) and keep the turn open until the agent has
-   * answered every one delivered. It ends when the turn does. Every harness today steers
-   * (Claude Code, fake); one that can't must be listed here, and the decider must reject
+   * (Claude Code: the next tool boundary, ADR 0003; native: with the next tool results, ADR 0022) and keep the turn
+   * open until the agent has answered every one delivered. It ends when the turn does. Every harness today steers
+   * (Claude Code, native, fake); one that can't must be listed here, and the decider must reject
    * `turn.steer` on its threads rather than record a steer nobody reads.
    */
   readonly steers: Stream.Stream<string>;
   /**
    * The running task's budget guards, as totals for the whole task; `spentUsd` is what its earlier turns
    * cost. Stop the turn with status `limit` once one is reached (Claude Code: `maxBudgetUsd` and
-   * `maxTurns`, ADR 0005). Absent when the task has none.
+   * `maxTurns`, ADR 0005; native: checked after each model call, ADR 0022). Absent when the task has none.
    */
   readonly limits?: TaskLimits & { readonly taskId: TaskId; readonly spentUsd: number };
   /**
    * The user reverted the conversation (DESIGN §13): continue `resumeSessionId` as it was at the end of turn
    * `atTurnId`, dropping `dropTurnIds` (the session's later turns, oldest first), in a new session the harness
    * reports with `session.started` (Claude Code: `resumeSessionAt` + `forkSession`, with `resumeDropsTurn` when one
-   * turn is dropped, ADR 0004). A harness that can't fork resumes plainly and says why in a `notice` item. Absent
-   * unless a revert waits for this turn.
+   * turn is dropped, ADR 0004; native: a copy of its transcript through `atTurnId`, ADR 0022). A harness that can't
+   * fork resumes plainly and says why in a `notice` item. Absent unless a revert waits for this turn.
    */
   /**
    * Verdandi's own tools (DESIGN §9.6), the same list on every turn. A harness takes them when it starts a
    * session and keeps that list for the session's life, since the tool list sits in the cached prompt
-   * (Claude Code: one in-process MCP server in `mcpServers`, ADR 0005). Absent when there are none.
+   * (Claude Code: one in-process MCP server in `mcpServers`, ADR 0005; native: in the session's `tools`, ADR 0022).
+   * Absent when there are none.
    */
   readonly tools?: readonly HarnessTool[];
   /**
    * What Verdandi remembers (DESIGN §14.2), given on a new session's first turn only: put it at the head of the
-   * turn's message, marked as data, so it stays fixed in the session's history (Claude Code: a text block before
-   * the turn's own). Absent when there's nothing to remember, and on every later turn.
+   * turn's message, marked as data, so it stays fixed in the session's history (Claude Code and native: a text block
+   * before the turn's own). Absent when there's nothing to remember, and on every later turn.
    */
   readonly memory?: string;
   /**
    * A one-line reminder to consider saving memory, on every Nth turn of a thread (DESIGN §14.2): put it after the
-   * turn's own message, never in the system prompt (Claude Code: a text block after the turn's; fake: records it).
+   * turn's own message, never in the system prompt (Claude Code and native: a text block after the turn's; fake:
+   * records it).
    */
   readonly nudge?: string;
   readonly fork?: { readonly atTurnId: TurnId; readonly dropTurnIds: readonly TurnId[]; readonly transcriptPath?: string };
@@ -143,8 +146,9 @@ export interface HarnessAdapter {
   /**
    * Moves the running turn onto `route` for the rest of its steps: an approved plan's build (DESIGN §8.2
    * lever 3). Verdandi calls it just before `respond` allows the plan, and the agent's next step must run
-   * on `route` (Claude Code: `setModel` lands before the approval is answered, ADR 0013). `route` keeps the
-   * turn's harness. Every harness today can (Claude Code, fake); one that can't must be listed here, and
+   * on `route` (Claude Code: `setModel` lands before the approval is answered, ADR 0013; native: its next request,
+   * ADR 0022). `route` keeps the turn's harness. Every harness today can (Claude Code, native, fake); one that can't
+   * must be listed here, and
    * the decider must not reroute its threads. A thread with no running turn is ignored.
    */
   reroute(threadId: ThreadId, route: Route): Effect.Effect<void>;

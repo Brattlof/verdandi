@@ -11,7 +11,7 @@ import {
 
 // ponytail: each harness talks to one provider today. The native harness (M4) routes to many, and will
 // report the provider per turn instead.
-const providerOf: Record<HarnessId, Provider> = { "claude-code": "anthropic", fake: "fake" };
+const providerOf: Record<HarnessId, Provider> = { "claude-code": "anthropic", native: "anthropic", fake: "fake" };
 
 /**
  * Pure: the trajectory of `turnId` from its thread's events in `seq` order, or undefined until the turn
