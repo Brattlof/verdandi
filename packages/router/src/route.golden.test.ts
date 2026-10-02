@@ -120,23 +120,29 @@ test("every taxonomy class has a golden", () => {
 });
 
 // Stage 3 reads intent words, not names: `docs/DESIGN.md` or a URL is no cue, so it neither picks a class nor makes one unsure.
-// A README or changelog is the exception: it is the docs it names.
-const NAMED: { text: string; taskClass: TaskClass; route: string }[] = [
-  { text: "Fix the typo in docs/DESIGN.md", taskClass: "code.edit.local", route: "sonnet medium" },
-  { text: "Fix the date parsing bug in src/review/dates.ts:42", taskClass: "code.edit.local", route: "sonnet medium" },
+// A README or changelog is the exception: it is the docs it names. The reason quotes what it read.
+const NAMED: { text: string; taskClass: TaskClass; read: string; route: string }[] = [
+  { text: "Fix the typo in docs/DESIGN.md", taskClass: "code.edit.local", read: `"fix", "typo"`, route: "sonnet medium" },
+  { text: "Fix the date parsing bug in src/review/dates.ts:42", taskClass: "code.edit.local", read: `"fix"`, route: "sonnet medium" },
   {
     text: "Should we use SQLite or Postgres for the event store? See docs/DESIGN.md",
     taskClass: "design.architecture",
+    read: `"should we use"`,
     route: "opus high",
   },
-  { text: "Where is the auth middleware? See https://example.com/docs/design", taskClass: "ask.search", route: "haiku low" },
-  { text: "Update README.md with the new install steps", taskClass: "docs.write", route: "sonnet low" },
+  {
+    text: "Where is the auth middleware? See https://example.com/docs/design",
+    taskClass: "ask.search",
+    read: `"where is"`,
+    route: "haiku low",
+  },
+  { text: "Update README.md with the new install steps", taskClass: "docs.write", read: "a readme or changelog", route: "sonnet low" },
 ];
 
 for (const g of NAMED) {
   test(`${g.taskClass}, naming a file or URL: ${g.text}`, () => {
     const d = route({ text: g.text, mode: "build" }, loadPolicy(), rules);
-    expect([d.taskClass, d.reason]).toEqual([g.taskClass, `Looks like ${g.taskClass}, so it runs on ${said(g.route)}.`]);
+    expect([d.taskClass, d.reason]).toEqual([g.taskClass, `Looks like ${g.taskClass} (${g.read}), so it runs on ${said(g.route)}.`]);
   });
 }
 
@@ -195,8 +201,8 @@ test("a restricted file cited with a line, a column or closing punctuation still
     return [text, `${d.target.model} ${d.effort}`, d.trace.find((t) => t.stage === "signals")?.note, d.reason];
   };
   const lifted =
-    "Looks like code.edit.local, but sonnet is unavailable, so it runs on opus at medium effort, the cheapest capable target left.";
-  const kept = "Looks like code.edit.local, so it runs on sonnet at medium effort.";
+    'Looks like code.edit.local ("fix"), but sonnet is unavailable, so it runs on opus at medium effort, the cheapest capable target left.';
+  const kept = 'Looks like code.edit.local ("fix"), so it runs on sonnet at medium effort.';
   for (const cite of ["", ".", ":42", ":42.", ":42:7!", ":42?", ":42: it"]) {
     const text = `Fix the expired-session bug in src/auth/session.ts${cite}`;
     expect(routed(text)).toEqual([text, "opus medium", "build mode, 1 file reference", lifted]);

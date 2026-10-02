@@ -104,7 +104,7 @@ describe("candidates and fallbacks", () => {
     expect(d.confidence).toBeLessThan(0.6);
     expect(`${d.target.model} ${d.effort}`).toBe("sonnet medium");
     expect(d.reason).toBe(
-      "Not sure what kind of task this is (best guess code.edit.mechanical, confidence 0.33), so it runs on the balanced default, sonnet at medium effort.",
+      `Not sure what kind of task this is (best guess code.edit.mechanical, confidence 0.33: "refactor"; "refactor" for code.refactor.large), so it runs on the balanced default, sonnet at medium effort.`,
     );
   });
 
@@ -123,7 +123,7 @@ describe("candidates and fallbacks", () => {
     expect(d.trace[0]?.note).toContain("cc-haiku: its 200K context can't hold 400K");
     expect(d.target.model).toBe("sonnet");
     expect(d.reason).toBe(
-      "Looks like ask.search, but haiku is unavailable, so it runs on sonnet at low effort, the cheapest capable target left.",
+      'Looks like ask.search ("where is"), but haiku is unavailable, so it runs on sonnet at low effort, the cheapest capable target left.',
     );
   });
 
@@ -154,7 +154,7 @@ describe("candidates and fallbacks", () => {
     const d = route({ text: SEARCH, mode: "build", harnesses: ["fake"] }, withFake, rules);
     expect(d.target).toEqual({ harness: "fake", provider: "fake", model: "fake", access: "local" });
     expect(d.trace[0]?.note).toContain("cc-haiku: the claude-code harness isn't running");
-    expect(d.reason).toBe("Looks like ask.search, so it runs on fake at low effort.");
+    expect(d.reason).toBe('Looks like ask.search ("where is"), so it runs on fake at low effort.');
     expect(() => route({ text: SEARCH, mode: "build", harnesses: ["fake"] }, policy, rules)).toThrow(
       "cc-sonnet: the claude-code harness isn't running",
     );

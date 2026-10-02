@@ -111,7 +111,7 @@ describe("routing each new task", () => {
     expect(v?.task).toEqual({
       taskId: turnId as string as TaskId,
       source: "policy",
-      reason: "Looks like ask.search, so it runs on fake-small at low effort.",
+      reason: 'Looks like ask.search (rules: "where is"), so it runs on fake-small at low effort.',
     });
     expect(fake.calls.map((c) => c.route.model)).toEqual(["fake-small"]);
   });
@@ -227,7 +227,7 @@ fallback: { prefer: [small], effort: low }
     // Set mid-turn: the running turn keeps its route, and the next turn starts a task routed under it.
     expect(during).toMatchObject({ budgetMode: "max", task: null, busy: true });
     expect(fake.calls.map((c) => c.route.model)).toEqual(["fake-small", "fake-large", "fake-large"]);
-    expect(routed.reason).toBe("Looks like ask.search, so in max mode it runs on fake-large at low effort.");
+    expect(routed.reason).toBe('Looks like ask.search (rules: "where is"), so in max mode it runs on fake-large at low effort.');
     expect(v?.budgetMode).toBeNull();
     expect(cleared.trace.find((t) => t.stage === "policy")?.note).toContain("in balanced mode");
   });

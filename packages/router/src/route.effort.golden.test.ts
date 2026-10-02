@@ -35,7 +35,7 @@ test("a route the policy asks at an effort its model doesn't take runs at the ne
   const d = route({ text: REVIEW, mode: "build", harnesses: ["fake"] }, policy, rules);
   expect(`${d.target.model} ${d.effort}`).toBe("fake-old high");
   expect(d.reason).toBe(
-    "Looks like review, but fable is unavailable, so it runs on fake-old at high effort, the cheapest capable target left.",
+    'Looks like review ("review"), but fable is unavailable, so it runs on fake-old at high effort, the cheapest capable target left.',
   );
   expect(d.trace.findLast((t) => t.stage === "policy")?.note).toBe("fake-old takes low, medium, high, so xhigh is clamped to high");
 });
@@ -50,5 +50,5 @@ test("a pin at an effort its model doesn't take is clamped too", () => {
 
 test("a model without effort levels names no effort in its reason", () => {
   const d = route({ text: "Where is the auth middleware?", mode: "build" }, loadPolicy(), rules);
-  expect(d.reason).toBe("Looks like ask.search, so it runs on haiku.");
+  expect(d.reason).toBe('Looks like ask.search ("where is"), so it runs on haiku.');
 });
