@@ -10,7 +10,7 @@ DESIGN §14.2 adds a capped snapshot of what Verdandi remembers "to the prompt a
 
 ## Decision
 
-1. When a turn starts a new harness session (the thread has no session bound), the decider records `memory.snapshot.taken` with the snapshot: each store's most recently confirmed entries that fit its cap (user 1,500 characters, project 2,000), inside a `<verdandi-memory>` block marked as facts to weigh, not instructions. Nothing is recorded when memory is empty.
+1. When a turn starts a new harness session (the thread has no session bound), the decider records `memory.snapshot.taken` with the snapshot: each store's entries that fit its cap, the most relevant to the turn's text first, then the most recently confirmed (relevance added by issue #142) (user 1,500 characters, project 2,000), inside a `<verdandi-memory>` block marked as facts to weigh, not instructions. Nothing is recorded when memory is empty.
 2. The harness gets it as `memory` on that turn only, and puts it at the head of the turn's message (Claude Code: a text block before the turn's own). From then on it is part of the session's history: a resumed or forked session already has it, and nothing about the session's prompt changes.
 3. Saves during the session show from the next session on. `memory_search` sees them at once; its results are tool output in the conversation, never the system prompt.
 4. Memory writes are events (`memory.saved`, `memory.edited`, `memory.deleted`). The decider scans every save and edit (secrets, with the trajectory redactor's patterns; instructions aimed at an agent; ways to send data out) and refuses one that would pass the store's cap, asking the agent to consolidate with `replaces`.

@@ -51,21 +51,43 @@ export const sameAs = (entries: readonly Stored[], scope: MemoryScope, text: str
   return entries.find((e) => e.scope === scope && key(e.text) === key(text));
 };
 
+/** The character trigrams inside each word of `text`, ignoring case. */
+const trigrams = (text: string) => {
+  const grams = new Set<string>();
+  for (const word of text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []) {
+    const chars = [...word];
+    for (let i = 0; i + 3 <= chars.length; i++) grams.add(chars.slice(i, i + 3).join(""));
+  }
+  return grams;
+};
+
+/** How relevant `text` is to a message with trigrams `message`: the share of its own trigrams the message has. */
+const relevance = (text: string, message: ReadonlySet<string>) => {
+  const own = trigrams(text);
+  let shared = 0;
+  for (const g of own) if (message.has(g)) shared++;
+  return own.size === 0 ? 0 : shared / own.size;
+};
+
 /**
- * The snapshot a new session starts with (DESIGN §14.2): each store's most recently confirmed entries that fit
- * its cap, marked as data. Empty when there's nothing to remember.
+ * The snapshot a new session starts with (DESIGN §14.2): each store's entries most relevant to the session's first
+ * message, then the most recently confirmed, that fit its cap, marked as data. Empty when there's nothing to remember.
  */
-export const memorySnapshot = (entries: readonly Stored[], projectPath: string) => {
+// ponytail: relevance is trigram overlap with the first message. Upgrade: the decision layer's relevance score (DESIGN §9.8) once it has one.
+export const memorySnapshot = (entries: readonly Stored[], projectPath: string, message: string) => {
+  const asked = trigrams(message);
+  const scored = entries.map((e) => ({ ...e, score: relevance(e.text, asked) }));
   const section = (scope: MemoryScope, title: string) => {
-    const newest = entries
+    const ranked = scored
       .filter((e) => e.scope === scope)
-      .toSorted((a, b) => (a.confirmedAt < b.confirmedAt ? 1 : a.confirmedAt > b.confirmedAt ? -1 : 0));
-    // Newest first, until the next would pass the cap (only when the cap was lowered, or entries edited past it).
+      .toSorted((a, b) => b.score - a.score || (a.confirmedAt < b.confirmedAt ? 1 : a.confirmedAt > b.confirmedAt ? -1 : 0));
+    // Best first, skipping any that would pass the cap (only when the cap was lowered, or entries edited past it).
     const lines: string[] = [];
     let room = memoryCaps[scope];
-    for (const e of newest) {
-      room -= [...e.text].length;
-      if (room < 0) break;
+    for (const e of ranked) {
+      const size = [...e.text].length;
+      if (size > room) continue;
+      room -= size;
       lines.push(`- ${e.text.replace(/\s*\n\s*/g, " ")}`);
     }
     return lines.length > 0 ? [`## ${title}`, ...lines] : [];
@@ -79,3 +101,12 @@ export const memorySnapshot = (entries: readonly Stored[], projectPath: string) 
     "</verdandi-memory>",
   ].join("\n");
 };
+
+/**
+ * The reminder to consider saving memory that every `every`th turn of a thread carries after its own message
+ * (`nudgeEvery` in the home's `memory.yaml`, DESIGN §14.2); undefined on other turns, and on all when `every` is 0.
+ */
+export const memoryNudge = (turnNumber: number, every: number) =>
+  every > 0 && turnNumber % every === 0
+    ? "<verdandi-reminder>If this session has taught you a lasting fact about the user or this project, consider saving it with memory_save.</verdandi-reminder>"
+    : undefined;

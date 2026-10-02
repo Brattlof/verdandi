@@ -289,9 +289,10 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       mode: c.mode,
       ...attachments,
     };
-    // A new harness session starts with what Verdandi remembers now; the session keeps it (DESIGN §14.2).
+    // A new harness session starts with what Verdandi remembers now, most relevant to its first message first; the
+    // session keeps it (DESIGN §14.2). The event records the text, so the choice never has to be recomputed.
     const snapshot =
-      state.memory && state.thread.sessionId === null ? memorySnapshot(memoryEntries(state.memory), state.memory.projectPath) : "";
+      state.memory && state.thread.sessionId === null ? memorySnapshot(memoryEntries(state.memory), state.memory.projectPath, text) : "";
     const turn: Event[] = snapshot
       ? [{ type: "memory.snapshot.taken", v: 1, threadId: c.threadId, turnId: c.turnId, text: snapshot }, started]
       : [started];

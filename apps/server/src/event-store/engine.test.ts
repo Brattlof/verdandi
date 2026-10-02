@@ -488,7 +488,7 @@ describe("engine", () => {
       Layer.provideMerge(Layer.succeed(HarnessRegistry, { fake: makeFakeHarness() })),
       Layer.provideMerge(Layer.succeed(AttachmentsDir, "unused")),
       Layer.provideMerge(Layer.succeed(WorktreesDir, "unused")),
-      Layer.provideMerge(Layer.succeed(ToolSettings, { approveMemorySaves: false })),
+      Layer.provideMerge(Layer.succeed(ToolSettings, { approveMemorySaves: false, memoryNudgeEvery: 0 })),
       Layer.provideMerge(Layer.succeed(ProjectVerifiers, () => Effect.succeed([]))),
       Layer.provideMerge(SqlLive(newHome())),
     );

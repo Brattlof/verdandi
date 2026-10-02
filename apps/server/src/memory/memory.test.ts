@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Command, CommandId, Item, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
@@ -6,7 +8,7 @@ import { AppLayer } from "../event-store/app.ts";
 import { Engine } from "../event-store/engine.ts";
 import { loadMemory, loadThreadView } from "../event-store/projector.ts";
 import { Reactor } from "../event-store/reactor.ts";
-import { scanMemory } from "./memory.ts";
+import { memorySnapshot, scanMemory } from "./memory.ts";
 
 const homes: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];
@@ -18,9 +20,11 @@ let n = 0;
 const id = <T>() => `id-${++n}` as T;
 const route = { harness: "fake", model: "fake", effort: "low" } as const;
 
-const setup = () => {
+/** `memoryYaml`: the home's `memory.yaml`, written before verdandid reads it. */
+const setup = (memoryYaml?: string) => {
   const home = makeTempHome();
   homes.push(home);
+  if (memoryYaml) writeFileSync(join(home, "memory.yaml"), memoryYaml);
   const fake = makeFakeHarness();
   const runtime = ManagedRuntime.make(AppLayer(home, { fake }));
   runtimes.push(runtime as never);
@@ -37,7 +41,8 @@ const setup = () => {
     await runtime.runPromise(Effect.flatMap(Reactor, (r) => r.drain));
     const items = (await runtime.runPromise(loadThreadView(threadId)))?.turns.at(-1)?.items ?? [];
     const result = items.find((i): i is Extract<Item, { kind: "tool.result" }> => i.kind === "tool.result");
-    return { content: result?.content ?? "", isError: result?.isError ?? false, memory: fake.calls.at(-1)?.memory };
+    const call = fake.calls.at(-1);
+    return { content: result?.content ?? "", isError: result?.isError ?? false, memory: call?.memory, nudge: call?.nudge };
   };
   const save = (threadId: ThreadId, text: string, replaces?: string[]): Command => ({
     type: "memory.save",
@@ -102,4 +107,25 @@ test("a scanned secret, injection or exfiltration is refused with the reason; sa
   expect((await memory(threadId))?.project.map((e) => e.text)).toEqual(["Prefers spaces."]);
   await dispatch({ type: "memory.delete", commandId: id<CommandId>(), threadId, entryId: entry?.entryId ?? "" });
   expect((await memory(threadId))?.project).toEqual([]);
+});
+
+test("every Nth turn of a thread carries the nudge to save memory, apart from the user's text", async () => {
+  const { thread, turn } = setup("nudgeEvery: 3\n");
+  const threadId = await thread();
+  expect((await turn(threadId, "one")).nudge).toBeUndefined();
+  expect((await turn(threadId, "two")).nudge).toBeUndefined();
+  expect((await turn(threadId, "three")).nudge).toContain("memory_save");
+  expect((await turn(threadId, "four")).nudge).toBeUndefined();
+  expect((await turn(await thread(), "a new thread counts from one")).nudge).toBeUndefined();
+});
+
+test("a snapshot the cap forces to choose keeps an older entry relevant to the first message over a newer unrelated one", () => {
+  const entry = (entryId: string, text: string, confirmedAt: string) => ({ entryId, scope: "project" as const, text, confirmedAt });
+  const relevant = entry("old", "Deploy to staging with scripts/deploy.ts --staging. ".repeat(25).trim(), "2026-01-01T00:00:00Z");
+  const unrelated = entry("new", "The web UI styles with Tailwind colour tokens. ".repeat(25).trim(), "2026-09-01T00:00:00Z");
+  const snapshot = memorySnapshot([relevant, unrelated], "/work/app", "How do I deploy this to staging?");
+  expect(snapshot).toContain("Deploy to staging");
+  expect(snapshot).not.toContain("Tailwind");
+  // With nothing relevant, the newest wins.
+  expect(memorySnapshot([relevant, unrelated], "/work/app", "hello")).toContain("Tailwind");
 });
