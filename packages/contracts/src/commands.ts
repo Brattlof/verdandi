@@ -238,6 +238,13 @@ export const HarnessReport = Schema.Struct({
   turnId: TurnId,
   event: HarnessEvent,
 });
+/** Internal: the reactor saying the agent of the running turn `turnId` finished and its verifiers are about to run. */
+export const VerifiersStart = Schema.Struct({
+  type: Schema.Literal("verifiers.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+});
 /** Internal: the reactor reporting a verifier it ran for the running turn `turnId`. Clients cannot send it. */
 export const VerifierReport = Schema.Struct({
   type: Schema.Literal("verifier.report"),
@@ -320,6 +327,7 @@ export const Command = Schema.Union([
   FilesReport,
   TaskBlock,
   WorktreeReported,
+  VerifiersStart,
   VerifierReport,
   TaskEscalate,
   TurnRecover,

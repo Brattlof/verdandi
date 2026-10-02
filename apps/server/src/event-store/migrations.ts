@@ -299,6 +299,12 @@ const taskRatings = Effect.gen(function* () {
   yield* sql`alter table tasks add column rating integer`;
 });
 
+/** Whether a turn's agent has finished and its verifiers run (DESIGN §8.7): such a turn takes no more steers. */
+const turnVerifying = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table turns add column verifying integer not null default 0`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -320,4 +326,5 @@ export const migrations = {
   "18_session_index": sessionIndex,
   "19_memory": memory,
   "20_task_ratings": taskRatings,
+  "21_turn_verifying": turnVerifying,
 };

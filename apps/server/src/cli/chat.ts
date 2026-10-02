@@ -305,10 +305,14 @@ export const chat = async (argv: readonly string[]) => {
     return resolve(request, { decision: "answer", answers });
   };
 
-  /** Steers the running turn. False when that turn finished first, so the line goes out as the next turn. */
+  /**
+   * Steers the running turn, saying whether it went or why not. False when that turn finished first, so the line goes
+   * out as the next turn.
+   */
   const steer = (turnId: TurnId, text: string) =>
     runtime.runPromise(
       client.CommandDispatch({ type: "turn.steer", commandId: uuid<CommandId>(), threadId, turnId, text }).pipe(
+        Effect.andThen(Effect.sync(() => process.stdout.write("[steer sent: the agent reads it at its next step]\n"))),
         Effect.as(true),
         Effect.catchTag("CommandRejected", (e) =>
           e.reason === "TurnNotRunning"
@@ -460,8 +464,7 @@ export const chat = async (argv: readonly string[]) => {
       if (!running) prompt();
     } else if (!text) {
       if (!running) prompt();
-    } else if (running && (await steer(running, text))) process.stdout.write("[steer sent: the agent reads it at its next step]\n");
-    else {
+    } else if (!running || !(await steer(running, text))) {
       const turnId = uuid<TurnId>();
       running = turnId;
       const attachments = attached.length > 0 ? { attachments: attached } : {};

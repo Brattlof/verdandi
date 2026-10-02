@@ -62,6 +62,8 @@ export type DeciderState = {
         readonly projectId: ProjectId;
         readonly projectPath: string;
         readonly runningTurnId: string | null;
+        /** The running turn's agent has finished and its verifiers run: it takes no more steers. */
+        readonly verifying: boolean;
         /** Put away by the user: it takes no turns until unarchived. */
         readonly archived: boolean;
         /** The git worktree the thread runs in; null when it runs in the project folder. */
@@ -595,6 +597,12 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (state.thread.runningTurnId !== c.turnId) {
       return reject("TurnNotRunning", `Turn ${c.turnId} is not running, so it can't be steered. Send the message as a new turn instead.`);
     }
+    if (state.thread.verifying) {
+      return reject(
+        "TurnVerifying",
+        "The agent has finished this turn and Verdandi is running the project's verifiers, so the turn can't be steered. Send your message as a new turn once they finish.",
+      );
+    }
     return accept({ type: "turn.steered", v: 1, threadId: c.threadId, turnId: c.turnId, text: c.text });
   },
   "turn.interrupt": (state, c) => {
@@ -614,7 +622,11 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     c.event.type === "session.started" || state.thread?.runningTurnId === c.turnId
       ? fromHarness(state, c.threadId, c.turnId, c.event)
       : accept(),
-  // A verifier of a turn that has ended, interrupted while it ran, is dropped like a late harness report.
+  // Verifiers of a turn that has ended, interrupted while they ran, are dropped like a late harness report.
+  "verifiers.start": (state, c) =>
+    state.thread?.runningTurnId === c.turnId
+      ? accept({ type: "verifiers.started", v: 1, threadId: c.threadId, turnId: c.turnId })
+      : accept(),
   "verifier.report": (state, c) =>
     state.thread?.runningTurnId === c.turnId
       ? accept({ type: "verifier.ran", v: 1, threadId: c.threadId, turnId: c.turnId, ...c.run })

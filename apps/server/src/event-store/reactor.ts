@@ -97,7 +97,7 @@ export const ReactorLive = Layer.effect(
     const turns = yield* FiberSet.make();
     /** The adapter running each thread's current turn: where answers to its requests go. */
     const live = new Map<ThreadId, HarnessAdapter>();
-    // ponytail: a steer accepted in the moment between the harness finishing and turn.completed
+    // ponytail: a steer accepted in the moment between the harness finishing and verifiers.started or turn.completed
     // committing is recorded but never delivered, since its turn is over. Upgrade: have the harness report delivery.
     const steerQueues = new Map<TurnId, Queue.Queue<string>>();
     /**
@@ -172,7 +172,11 @@ export const ReactorLive = Layer.effect(
      */
     const verify = (threadId: ThreadId, turnId: TurnId, projectPath: string, cwd: string) =>
       Effect.gen(function* () {
-        for (const command of yield* projectVerifiers(projectPath)) {
+        const commands = yield* projectVerifiers(projectPath);
+        // Before the first runs, so the decider refuses a steer the finished agent would never read.
+        if (commands.length > 0)
+          yield* engine.dispatch({ type: "verifiers.start", commandId: randomUUID() as CommandId, threadId, turnId });
+        for (const command of commands) {
           const run = yield* runVerifier(command, cwd);
           yield* engine.dispatch({ type: "verifier.report", commandId: randomUUID() as CommandId, threadId, turnId, run });
           if (!run.passed) return run;
@@ -271,8 +275,6 @@ export const ReactorLive = Layer.effect(
               if (event.type === "item" && event.item.kind === "tool.call") calls.push(event.item);
               if (event.type !== "turn.finished") return report(threadId, turnId, event);
               finished = true;
-              // ponytail: a steer sent while verifiers run is recorded but never reaches the agent, which has finished.
-              // Upgrade: hand it to the escalation's follow-up turn, or show it as unsent.
               return Effect.gen(function* () {
                 const failed =
                   event.status === "success" && editedPaths(cwd, calls).length > 0

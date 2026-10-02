@@ -20,6 +20,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "ThreadExists",
     "ThreadBusy",
     "TurnNotRunning",
+    "TurnVerifying",
     "RequestNotPending",
     "InvalidResolution",
     "InvalidProjectPath",
