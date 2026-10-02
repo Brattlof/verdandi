@@ -14,6 +14,7 @@ import {
   type RouteStats,
   type RouteTarget,
   type SpendCapped,
+  type UntrustedInput,
 } from "@verdandi/contracts";
 import {
   classificationOf,
@@ -70,8 +71,9 @@ export type RoutingContext = {
 };
 
 /**
- * The thread facts routing reads. `cachedTokens` sizes its warm session for the switch-cost gate, and
- * `budgetMode`, the user's pick, replaces the policy's mode when set.
+ * The thread facts routing reads. `cachedTokens` sizes its warm session for the switch-cost gate,
+ * `budgetMode`, the user's pick, replaces the policy's mode when set, and `untrusted`, what the warm session
+ * read that it could do harm with, holds its route at the policy's floor (DESIGN §17).
  */
 export type RoutingThread = {
   readonly route: Route;
@@ -79,6 +81,7 @@ export type RoutingThread = {
   readonly budgetMode: BudgetMode | null;
   readonly sessionId: string | null;
   readonly cachedTokens: number;
+  readonly untrusted: UntrustedInput | null;
 };
 
 /** What `decideRoute` reads about the thread and the running verdandid, recorded on `task.started` for offline replay. */
@@ -91,6 +94,7 @@ export const routeInputs = (thread: RoutingThread, routing: RoutingContext): Rou
   harnesses: routing.harnesses,
   ...(routing.memory && { memory: routing.memory }),
   ...(routing.capped && { capped: routing.capped }),
+  ...(thread.untrusted && { untrusted: thread.untrusted }),
 });
 
 /** The inverse of `routeInputs`: the thread and routing context a recorded task was decided with, under `policy` now. */
@@ -104,6 +108,7 @@ export const replayed = (
     budgetMode: inputs.budgetMode,
     sessionId: inputs.warm ? "recorded session" : null,
     cachedTokens: inputs.cachedTokens,
+    untrusted: inputs.untrusted ?? null,
   },
   routing: {
     ...policy,
@@ -151,6 +156,9 @@ export const routingFor = (harnesses: Partial<Record<HarnessId, unknown>>) =>
 
 /** The subagent routes a warm session started with, which it keeps. */
 const warmSubagents = (thread: RoutingThread) => (thread.route.subagents ? { subagents: thread.route.subagents } : {});
+
+/** The untrusted input a warm session holds, which floors any route that keeps it (DESIGN §17). */
+const warmUntrusted = (thread: RoutingThread) => (thread.sessionId !== null && thread.untrusted ? { untrusted: thread.untrusted } : {});
 
 /** The catalog's target for a route. A model it doesn't know keeps its harness's provider and access mode. */
 export const targetOf = (r: Route, catalog: Catalog): RouteTarget => {
@@ -214,6 +222,7 @@ export const decideExecuteRoute = (
         harnesses: [thread.route.harness],
         ...(routing.capped ? { capped: routing.capped } : {}),
         ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens, ...warmSubagents(thread) } }),
+        ...warmUntrusted(thread),
       },
       policy,
       classify,
@@ -260,6 +269,7 @@ export const decideRoute = (
           ...(thread.pinned ? { pin: current } : {}),
           ...(at === undefined ? {} : { at }),
           ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens, ...warmSubagents(thread) } }),
+          ...warmUntrusted(thread),
         },
         policy,
         () => classification,
@@ -300,6 +310,7 @@ export const decideDeescalation = (
         text,
         current: { target, effort: thread.route.effort, cachedTokens, ...warmSubagents(thread) },
         ...(routing.capped ? { capped: routing.capped } : {}),
+        ...warmUntrusted(thread),
       },
       policy,
       () => classification,

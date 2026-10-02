@@ -590,12 +590,18 @@ const SkillApproval = ({ request, sending, respond }: CardProps<"skill.proposed"
   );
 };
 
-/** A fact a background review of this thread's task proposes remembering (DESIGN §14.5): kept only if allowed. */
+/**
+ * A fact proposed for memory: by a background review of this thread's task (DESIGN §14.5), or the agent's own save in a
+ * turn that read untrusted input (§17). Kept only if allowed.
+ */
 const MemoryApproval = ({ request, sending, respond }: CardProps<"memory.proposed">) => (
   <>
     <h3 className="font-serif text-lg font-semibold">Remember this {request.scope === "user" ? "about you" : "about this project"}?</h3>
     <p className="text-xs text-muted">
-      A background review of this task proposes it. Nothing is remembered unless you allow it; you can edit it later in Memory.
+      {request.untrusted
+        ? `The agent saved it after reading untrusted input (${request.untrusted.source}, turn ${request.untrusted.turn}), which may have planted it.`
+        : "A background review of this task proposes it."}{" "}
+      Nothing is remembered unless you allow it; you can edit it later in Memory.
     </p>
     <blockquote className="mt-2 border-l-2 border-line pl-3 whitespace-pre-wrap">{request.text}</blockquote>
     <div className="mt-3 flex flex-wrap items-center justify-end gap-2">

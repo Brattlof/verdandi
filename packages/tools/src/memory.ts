@@ -4,8 +4,16 @@ import { defineTool, type Screen, type ToolAt, ToolFailed } from "./define.ts";
 
 /** What memory_save and memory_search need from verdandid. */
 export type MemoryServices = {
-  /** Saves `text`, replacing `replaces`; fails with why it was refused (a scan hit, a full store). */
-  readonly save: (scope: MemoryScope, text: string, replaces: readonly string[], at: ToolAt) => Effect.Effect<void, ToolFailed>;
+  /**
+   * Saves `text`, replacing `replaces`, or, in a turn that read untrusted input, proposes it to the user; fails with
+   * why it was refused (a scan hit, a full store).
+   */
+  readonly save: (
+    scope: MemoryScope,
+    text: string,
+    replaces: readonly string[],
+    at: ToolAt,
+  ) => Effect.Effect<"saved" | "proposed", ToolFailed>;
   readonly entries: (at: ToolAt) => Effect.Effect<readonly MemoryEntry[]>;
 };
 
@@ -32,7 +40,11 @@ export const memorySaveTool = (memory: MemoryServices, ask: boolean) =>
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
-      return Effect.as(memory.save(where, args.text, replaces, at), `Remembered in ${where} memory. It shows in the next session.`);
+      return Effect.map(memory.save(where, args.text, replaces, at), (done) =>
+        done === "saved"
+          ? `Remembered in ${where} memory. It shows in the next session.`
+          : "Not remembered yet: this turn read untrusted input, so the user decides whether to keep it. Go on with the task, and don't save it again.",
+      );
     },
   });
 

@@ -32,7 +32,7 @@ const events = stored([
   // A turn from before tasks existed belongs to none.
   [0, started(u0)],
   [0, completed(u0, "success")],
-  [10, { type: "task.started", v: 2, threadId, taskId: u1 as string as TaskId, route: sonnet }],
+  [10, { type: "task.started", v: 3, threadId, taskId: u1 as string as TaskId, route: sonnet }],
   [10, started(u1)],
   [11, { type: "turn.steered", v: 1, threadId, turnId: u1, text: "left" }],
   [11, usage(u1, "sonnet", 0.25)],
@@ -45,7 +45,7 @@ const events = stored([
   [21, usage(u2, "haiku", 0.5)],
   [21, completed(u2, "success")],
   [30, { type: "thread.route.changed", v: 1, threadId, from: sonnet, to: opus, by: "user" }],
-  [40, { type: "task.started", v: 2, threadId, taskId: u3 as string as TaskId, route: opus }],
+  [40, { type: "task.started", v: 3, threadId, taskId: u3 as string as TaskId, route: opus }],
   [40, started(u3)],
   [45, completed(u3, "interrupted")],
   [50, started(u4)],
@@ -86,7 +86,7 @@ test("approving a plan with the user's edit is a correction; approving it as pro
   const planned = (resolution: Resolution) =>
     buildTaskOutcomes(
       stored([
-        [0, { type: "task.started", v: 2, threadId, taskId: u1 as string as TaskId, route: sonnet }],
+        [0, { type: "task.started", v: 3, threadId, taskId: u1 as string as TaskId, route: sonnet }],
         [0, started(u1)],
         [1, { type: "plan.requested", v: 1, threadId, turnId: u1, requestId: "r1", plan: "1. Edit" }],
         [2, { type: "approval.resolved", v: 1, threadId, turnId: u1, requestId: "r1", resolution }],
@@ -109,7 +109,7 @@ test("a follow-up the decision layer calls a correction counts against the task 
         { type: "noul", kind: "follow-up.correcting", probability, confidence: lowConfidence ? 0.4 : 0.8, lowConfidence, backend: "rules" },
       ],
     }) as const;
-  const task = (taskId: TurnId) => ({ type: "task.started", v: 2, threadId, taskId: taskId as string as TaskId, route: sonnet }) as const;
+  const task = (taskId: TurnId) => ({ type: "task.started", v: 3, threadId, taskId: taskId as string as TaskId, route: sonnet }) as const;
   const outcomes = buildTaskOutcomes(
     stored([
       [0, task(u1)],
@@ -141,7 +141,7 @@ test("only the user's last route pick counts, and changing back to the task's ow
   const picked = (...picks: Route[]) =>
     buildTaskOutcomes(
       stored([
-        [0, { type: "task.started", v: 2, threadId, taskId: u1 as string as TaskId, route: routed }],
+        [0, { type: "task.started", v: 3, threadId, taskId: u1 as string as TaskId, route: routed }],
         [0, started(u1)],
         [1, completed(u1, "success")],
         ...picks.map((to, i): [number, Event] => [

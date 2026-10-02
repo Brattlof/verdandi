@@ -32,6 +32,7 @@ const idle: DeciderState = {
     archived: false,
     worktree: null,
     turnList: [],
+    untrusted: null,
     pendingFork: false,
     sessionFirstTurn: null,
     revert: null,
@@ -61,6 +62,7 @@ const running: DeciderState = {
     archived: false,
     worktree: null,
     turnList: [],
+    untrusted: null,
     pendingFork: false,
     sessionFirstTurn: null,
     revert: null,
@@ -90,6 +92,7 @@ const waiting: DeciderState = {
     archived: false,
     worktree: null,
     turnList: [],
+    untrusted: null,
     pendingFork: false,
     sessionFirstTurn: null,
     revert: null,
@@ -148,7 +151,7 @@ describe("decide", () => {
   test("starts a turn on an idle thread, and a task named after it when none is open", () => {
     const started = { type: "turn.started", v: 2, threadId, turnId, text: "hi", mode: "plan" } as const;
     expect(events(decide(idle, send))).toEqual([
-      { type: "task.started", v: 2, threadId, taskId: turnId as string as TaskId, route },
+      { type: "task.started", v: 3, threadId, taskId: turnId as string as TaskId, route },
       started,
     ]);
     expect(events(decide({ thread: { ...(idle.thread as NonNullable<DeciderState["thread"]>), taskId } }, send))).toEqual([started]);
@@ -250,6 +253,7 @@ describe("decide", () => {
         archived: false,
         worktree: null,
         turnList: [],
+        untrusted: null,
         pendingFork: false,
         sessionFirstTurn: null,
         revert: null,

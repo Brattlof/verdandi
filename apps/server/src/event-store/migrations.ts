@@ -1,5 +1,7 @@
+import type { Item } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { untrustedSource } from "../routing/untrusted.ts";
 
 // Append-only: never edit a migration that has shipped; add the next number instead.
 
@@ -366,6 +368,23 @@ const trustedCommands = Effect.gen(function* () {
   )`;
 });
 
+/**
+ * Untrusted input (DESIGN §17): each turn's first, e.g. `WebFetch`, null for none. Filled from the items turns already
+ * have, by the same rule the projector applies to new ones.
+ */
+const turnUntrusted = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table turns add column untrusted text`;
+  const items = yield* sql<{ turn_id: string; payload: string }>`
+    select turn_id, payload from items where json_extract(payload, '$.kind') in ('tool.call', 'injection') order by turn_id, idx`;
+  const first = new Map<string, string>();
+  for (const { turn_id, payload } of items) {
+    const source = untrustedSource(JSON.parse(payload) as Item);
+    if (source !== undefined && !first.has(turn_id)) first.set(turn_id, source);
+  }
+  for (const [turnId, source] of first) yield* sql`update turns set untrusted = ${source} where id = ${turnId}`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -392,4 +411,5 @@ export const migrations = {
   "23_skills": skills,
   "24_review": review,
   "25_trusted_commands": trustedCommands,
+  "26_turn_untrusted": turnUntrusted,
 };

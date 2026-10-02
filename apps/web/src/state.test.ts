@@ -277,7 +277,7 @@ test("a routed task moves the thread to its route with its reason; a pick pins i
     reason: "Looks like ask.search, so it runs on fake-small at low effort.",
     trace: [],
   } as const;
-  const started = fold([auto, event(2, { type: "task.started", v: 2, threadId, taskId, route: routed, decision })]);
+  const started = fold([auto, event(2, { type: "task.started", v: 3, threadId, taskId, route: routed, decision })]);
   expect(started).toMatchObject({
     route: routed,
     pinned: false,
@@ -292,7 +292,7 @@ test("a routed task moves the thread to its route with its reason; a pick pins i
 
 test("a budget mode change ends a routed thread's task but keeps a pinned one's, matching the projector", () => {
   const taskId = turnId as string as TaskId;
-  const task = event(2, { type: "task.started", v: 2, threadId, taskId, route });
+  const task = event(2, { type: "task.started", v: 3, threadId, taskId, route });
   const budget = event(3, { type: "thread.budget.changed", v: 1, threadId, mode: "max" });
   const routed = fold([{ ...snapshot, thread: { ...snapshot.thread, pinned: false } }, task, budget]);
   expect(routed).toMatchObject({ budgetMode: "max", task: null });
@@ -303,8 +303,8 @@ test("each task joins the thread's list unrated, and a rating or its clearing ch
   const [one, two] = ["task-1" as TaskId, "task-2" as TaskId];
   const rate = (seq: number, taskId: TaskId, rating: 1 | -1 | null) => event(seq, { type: "task.rated", v: 1, threadId, taskId, rating });
   const tasks = [
-    event(2, { type: "task.started", v: 2, threadId, taskId: one, route }),
-    event(3, { type: "task.started", v: 2, threadId, taskId: two, route }),
+    event(2, { type: "task.started", v: 3, threadId, taskId: one, route }),
+    event(3, { type: "task.started", v: 3, threadId, taskId: two, route }),
   ];
   expect(fold([snapshot, ...tasks, rate(4, one, -1)])?.tasks).toEqual([
     { taskId: one, rating: -1 },

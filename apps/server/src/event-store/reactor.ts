@@ -170,12 +170,17 @@ export const ReactorLive = Layer.effect(
           Effect.catchTag("SqlError", Effect.die),
         ),
       memory: {
-        save: (scope, text, replaces, at) =>
-          engine.dispatch({ type: "memory.save", commandId: randomUUID() as CommandId, ...at, scope, text, replaces }).pipe(
-            Effect.asVoid,
+        save: (scope, text, replaces, at) => {
+          const commandId = randomUUID() as CommandId;
+          return engine.dispatch({ type: "memory.save", commandId, ...at, scope, text, replaces }).pipe(
+            Effect.andThen(
+              sql<{ n: number }>`select count(*) as n from events where command_id = ${commandId} and type = 'memory.proposed'`,
+            ),
+            Effect.map(([proposed]) => (proposed?.n ? ("proposed" as const) : ("saved" as const))),
             Effect.catchTag("CommandRejected", (e) => Effect.fail(new ToolFailed({ message: e.message }))),
             Effect.catchTag("SqlError", Effect.die),
-          ),
+          );
+        },
         entries: (at) =>
           loadMemory(at.threadId).pipe(
             Effect.map((m) => (m ? [...m.user, ...m.project] : [])),

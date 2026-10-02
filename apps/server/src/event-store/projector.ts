@@ -29,6 +29,7 @@ import type {
 import { clip, injectionItem, nextWorktree } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
+import { sessionUntrusted, untrustedSource } from "../routing/untrusted.ts";
 import { skillUsed } from "../skills/skills.ts";
 import type { DeciderState, PendingRequest } from "./decider.ts";
 
@@ -63,12 +64,16 @@ const indexMessage = (threadId: ThreadId, turnId: TurnId, kind: SessionHit["kind
       select ${text}, ${threadId}, ${turnId}, ${kind}, ${at} where (select review from threads where id = ${threadId}) is null`,
   );
 
+/** Adds an item to a turn, and keeps the turn's first untrusted input (DESIGN §17). */
 const addItem = (turnId: TurnId, item: Item) =>
-  withSql(
-    (sql) =>
-      sql`insert into items (turn_id, idx, payload)
-          values (${turnId}, (select count(*) from items where turn_id = ${turnId}), ${JSON.stringify(item)})`,
-  );
+  withSql((sql) => {
+    const source = untrustedSource(item);
+    const added = sql`insert into items (turn_id, idx, payload)
+          values (${turnId}, (select count(*) from items where turn_id = ${turnId}), ${JSON.stringify(item)})`;
+    return source === undefined
+      ? added
+      : Effect.andThen(added, sql`update turns set untrusted = coalesce(untrusted, ${source}) where id = ${turnId}`);
+  });
 
 /** The thread's latest revert as `threads.revert` keeps it: what undoing it needs, and what its view shows. */
 export type StoredRevert = {
@@ -463,25 +468,34 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         purpose: TrustPurpose | null;
         commands: string | null;
         hash: string | null;
+        replaces: string | null;
       }>`
         select id, turn_id, kind, json_extract(payload, '$.plan') as plan, json_extract(payload, '$.execute') as execute,
           json_extract(payload, '$.scope') as scope, json_extract(payload, '$.text') as text,
-          json_extract(payload, '$.purpose') as purpose, json_extract(payload, '$.commands') as commands, json_extract(payload, '$.hash') as hash
+          json_extract(payload, '$.purpose') as purpose, json_extract(payload, '$.commands') as commands, json_extract(payload, '$.hash') as hash,
+          json_extract(payload, '$.replaces') as replaces
         from requests where thread_id = ${threadId} and resolution is null`;
       const trusted = yield* sql<{ hash: string }>`select hash from trusted_commands where project_id = ${row.project_id}`;
-      const turnList = yield* sql<{ id: TurnId; reverted: 0 | 1 | 2 }>`
-        select id, reverted from turns where thread_id = ${threadId} order by started_at, rowid`;
+      const turnList = (yield* sql<{ id: TurnId; reverted: 0 | 1 | 2; untrusted: string | null }>`
+        select id, reverted, untrusted from turns where thread_id = ${threadId} order by started_at, rowid`).map((t) => ({
+        turnId: t.id,
+        reverted: t.reverted,
+        untrusted: t.untrusted,
+      }));
+      const route = JSON.parse(row.route) as Route;
+      const session = { harness: route.harness, sessionId: row.session_id, sessionFirstTurn: row.session_first_turn };
       return {
         thread: {
           tasks: yield* loadTasks(sql, threadId),
-          turnList: turnList.map((t) => ({ turnId: t.id, reverted: t.reverted })),
+          turnList,
+          untrusted: sessionUntrusted(turnList, session) ?? null,
           pendingFork: row.pending_fork === 1,
           sessionFirstTurn: row.session_first_turn,
           revert: row.revert === null ? null : (JSON.parse(row.revert) as StoredRevert),
           ...(row.review === null ? {} : { review: JSON.parse(row.review) as Extract<Event, { type: "review.started" }> }),
           projectId: row.project_id,
           projectPath: row.path,
-          route: JSON.parse(row.route) as Route,
+          route,
           runningTurnId: row.running_turn_id,
           verifying: row.verifying === 1,
           sessionId: row.session_id,
@@ -503,7 +517,9 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
             kind: r.kind,
             ...(r.plan === null ? {} : { plan: r.plan }),
             ...(r.execute === null ? {} : { execute: JSON.parse(r.execute) as RouteDecision }),
-            ...(r.kind === "memory" && r.scope !== null && r.text !== null ? { memory: { scope: r.scope, text: r.text } } : {}),
+            ...(r.kind === "memory" && r.scope !== null && r.text !== null
+              ? { memory: { scope: r.scope, text: r.text, replaces: r.replaces === null ? [] : (JSON.parse(r.replaces) as string[]) } }
+              : {}),
             ...(r.kind === "trust" && r.purpose !== null && r.commands !== null && r.hash !== null
               ? { trust: { purpose: r.purpose, commands: JSON.parse(r.commands) as string[], hash: r.hash } }
               : {}),
@@ -622,7 +638,11 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
           afterTurns: r.after_turns,
           ...(r.reason === null ? {} : { reason: r.reason }),
         })),
-        pendingRequests: pending.map((r) => JSON.parse(r.payload) as ThreadView["pendingRequests"][number]),
+        // A request recorded before its event's current version reads as that version, as the event itself would.
+        pendingRequests: pending.map((r) => {
+          const request = JSON.parse(r.payload) as ThreadView["pendingRequests"][number];
+          return request.type === "memory.proposed" ? { ...request, v: 2 as const } : request;
+        }),
       };
     }),
   );

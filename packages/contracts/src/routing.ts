@@ -142,6 +142,9 @@ export const RouteRule = Schema.Struct({
 });
 export type RouteRule = typeof RouteRule.Type;
 
+/** The weakest targets a route may take: none with a forbidden access mode, none below `minTier`. */
+const Floor = Schema.Struct({ forbid: Schema.optionalKey(Schema.Array(Access)), minTier: Schema.optionalKey(Tier) });
+
 /**
  * One layer of routing policy (DESIGN §8.6): built-in defaults, then profile, then project
  * (`.verdandi/routing.yaml`). Unknown keys are errors, so a typo never silently does nothing.
@@ -183,11 +186,12 @@ export const Policy = Schema.Struct({
     }),
   ),
   /** When a task touches a path matching `match` (a glob), drop targets with a forbidden access mode or below `minTier`. */
-  restrictions: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({ match: Schema.String, forbid: Schema.optionalKey(Schema.Array(Access)), minTier: Schema.optionalKey(Tier) }),
-    ),
-  ),
+  restrictions: Schema.optionalKey(Schema.Array(Schema.Struct({ match: Schema.String, ...Floor.fields }))),
+  /**
+   * While a warm session holds untrusted input (DESIGN §17) and has tools that write files or run commands, no route
+   * keeps it on a target with a forbidden access mode or below `minTier`: smaller models are easier to hijack.
+   */
+  untrusted: Schema.optionalKey(Floor),
 });
 export type Policy = typeof Policy.Type;
 
@@ -225,10 +229,14 @@ export const spendsMetered = (target: Pick<RouteTarget, "harness" | "access">, p
   target.access === "metered" || paying.includes(target.harness);
 
 /**
- * What the router read about a new task besides its text and mode (kept in its `task.started`), so offline
- * replay (DESIGN §8.8 level 2) can route it again exactly. Provider health and quota aren't router inputs yet.
+ * The first untrusted input a harness session took in (DESIGN §17): `source`, e.g. `WebFetch`, in the thread's turn
+ * number `turn`, counting from 1.
  */
-export const RouteInputs = Schema.Struct({
+export const UntrustedInput = Schema.Struct({ source: Schema.String, turn: Schema.Int });
+export type UntrustedInput = typeof UntrustedInput.Type;
+
+/** `task.started` v2's inputs; read as today's without `untrusted`. */
+export const RouteInputsV1 = Schema.Struct({
   /** The thread's route when the task started: the pin, or the warm session's. */
   route: Route,
   pinned: Schema.Boolean,
@@ -245,6 +253,16 @@ export const RouteInputs = Schema.Struct({
   capped: Schema.optionalKey(SpendCapped),
   /** The model the task's message named with a leading `@name`, which pinned the task; the stored text is without it. */
   at: Schema.optionalKey(Schema.String),
+});
+
+/**
+ * What the router read about a new task besides its text and mode (kept in its `task.started`), so offline
+ * replay (DESIGN §8.8 level 2) can route it again exactly. Provider health and quota aren't router inputs yet.
+ */
+export const RouteInputs = Schema.Struct({
+  ...RouteInputsV1.fields,
+  /** The untrusted input the warm session held, when it could do harm with it, which floors the route. */
+  untrusted: Schema.optionalKey(UntrustedInput),
 });
 export type RouteInputs = typeof RouteInputs.Type;
 

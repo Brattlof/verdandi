@@ -298,6 +298,7 @@ export const estimateBatch = async (
         budgetMode: null,
         sessionId: null,
         cachedTokens: 0,
+        untrusted: null,
       };
       const decided = decideRoute(thread, context, task.prompt, task.mode ?? "build", answers);
       if (Result.isFailure(decided)) {

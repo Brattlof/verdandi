@@ -10,7 +10,7 @@ const route = { harness: "fake", model: "fake", effort: "low" } as const;
 const samples: Event[] = [
   { type: "thread.created", v: 1, threadId, projectId: "p1" as never, projectPath: "C:/Users/a b/repo", route },
   { type: "thread.route.changed", v: 1, threadId, from: route, to: { ...route, model: "fake-2" }, by: "user" },
-  { type: "task.started", v: 2, threadId, taskId: turnId as string as TaskId, route },
+  { type: "task.started", v: 3, threadId, taskId: turnId as string as TaskId, route },
   { type: "thread.archived", v: 1, threadId },
   { type: "thread.unarchived", v: 1, threadId },
   { type: "turn.started", v: 2, threadId, turnId, text: "hi" },
@@ -80,14 +80,34 @@ describe("stored events", () => {
     expect(result.message).toContain("newer");
   });
 
-  test("reads a v1 task.started as v2 without router inputs, and keeps a v2 task's inputs", async () => {
+  test("reads a v1 task.started as v3 without router inputs, a v2 as v3 without untrusted input, and keeps a v3 task's", async () => {
     const taskId = turnId as string as TaskId;
     const v1 = { type: "task.started", v: 1, threadId, taskId, route } as const;
     const read = await Effect.runPromise(decodeStoredEvent({ type: "task.started", v: 1, payload: JSON.stringify(v1) }));
-    expect(read).toEqual({ ...v1, v: 2 });
+    expect(read).toEqual({ ...v1, v: 3 });
     const inputs = { route, pinned: false, budgetMode: "thrifty", warm: true, cachedTokens: 1200, harnesses: ["fake"] } as const;
-    const v2: Event = { type: "task.started", v: 2, threadId, taskId, route, inputs };
-    expect(await roundTrip(v2)).toEqual(v2);
+    const v2 = { type: "task.started", v: 2, threadId, taskId, route, inputs } as const;
+    expect(await Effect.runPromise(decodeStoredEvent({ type: "task.started", v: 2, payload: JSON.stringify(v2) }))).toEqual({
+      ...v2,
+      v: 3,
+    });
+    const v3: Event = { ...v2, v: 3, inputs: { ...inputs, untrusted: { source: "WebFetch", turn: 3 } } };
+    expect(await roundTrip(v3)).toEqual(v3);
+  });
+
+  test("reads a v1 memory.proposed, always a background review's, as v2", async () => {
+    const v1 = {
+      type: "memory.proposed",
+      v: 1,
+      threadId,
+      turnId,
+      requestId: "r1",
+      scope: "project",
+      text: "Tests run with bun test",
+      reviewThreadId: threadId,
+    } as const;
+    const read = await Effect.runPromise(decodeStoredEvent({ type: "memory.proposed", v: 1, payload: JSON.stringify(v1) }));
+    expect(read).toEqual({ ...v1, v: 2 });
   });
 
   test("reads a v1 turn.started as v2 without attachments, and keeps a v2 turn's references", async () => {
