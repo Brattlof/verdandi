@@ -61,6 +61,12 @@ export class RoutingUnavailable extends Schema.TaggedError<RoutingUnavailable>()
   message: Schema.String,
 }) {}
 
+/** Why the OS folder dialog couldn't open. The message names the cause and the fix. */
+export class FolderPickUnavailable extends Schema.TaggedError<FolderPickUnavailable>()("FolderPickUnavailable", {
+  reason: Schema.Literals(["NoDialog", "DialogFailed"]),
+  message: Schema.String,
+}) {}
+
 /** Why a diff can't be shown. The message names the cause and the fix. */
 export class DiffUnavailable extends Schema.TaggedError<DiffUnavailable>()("DiffUnavailable", {
   reason: Schema.Literals(["ThreadNotFound", "TurnNotFound", "NotAGitRepo", "NoCheckpoint", "GitFailed"]),
@@ -307,6 +313,11 @@ export class Api extends RpcGroup.make(
    * task to with `@name`, and the route picker's choices.
    */
   Rpc.make("ModelsList", { success: Schema.Array(CatalogModel) }),
+  /**
+   * Opens the OS folder dialog on verdandid's machine and answers with the chosen folder's path, or null when the user
+   * cancels. A browser can't give a page a folder's full path, so the dialog is verdandid's.
+   */
+  Rpc.make("FolderPick", { success: Schema.NullOr(Schema.String), error: FolderPickUnavailable }),
   /** What `turnId` changed in the project, or without it, everything since the thread's first turn. */
   Rpc.make("DiffGet", {
     payload: { threadId: ThreadId, turnId: Schema.optionalKey(TurnId) },

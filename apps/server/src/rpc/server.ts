@@ -26,6 +26,7 @@ import { Engine } from "../event-store/engine.ts";
 import { loadDeciderState, loadMemory } from "../event-store/projector.ts";
 import { HarnessRegistry, ProfileSkills } from "../event-store/reactor.ts";
 import { Gc, GcLive, GcScheduleLive } from "../gc/gc.ts";
+import { pickFolder } from "../projects/folder-picker.ts";
 import { resolveProjectPath } from "../projects/project.ts";
 import { catalogFor, decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
@@ -103,6 +104,7 @@ const Handlers = (home: string) =>
                 efforts,
               })),
           ),
+        FolderPick: () => pickFolder,
         DiffGet: ({ threadId, turnId }) =>
           threadDiff(threadId, turnId).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
         SpendCapsGet: ({ threadId }) =>

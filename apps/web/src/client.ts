@@ -5,6 +5,7 @@ import {
   CommandRejected,
   DiffUnavailable,
   type DiffView,
+  FolderPickUnavailable,
   type InteractionMode,
   type MemoryView,
   type RouteDecision,
@@ -123,6 +124,16 @@ export const connect = (token: string) => {
     const exit = await run((rpc) => rpc.DiffGet(turnId === undefined ? { threadId } : { threadId, turnId }));
     if (Exit.isSuccess(exit)) return { ok: true, view: exit.value };
     const unavailable = failure(exit.cause, DiffUnavailable);
+    return unavailable ? { ok: false, message: unavailable.message } : disconnected;
+  };
+
+  /** The folder the user chose in the OS dialog on verdandid's machine, or null when they cancelled. */
+  const pickFolder = async (): Promise<
+    { readonly ok: true; readonly path: string | null } | { readonly ok: false; readonly message: string }
+  > => {
+    const exit = await run((rpc) => rpc.FolderPick());
+    if (Exit.isSuccess(exit)) return { ok: true, path: exit.value };
+    const unavailable = failure(exit.cause, FolderPickUnavailable);
     return unavailable ? { ok: false, message: unavailable.message } : disconnected;
   };
 
@@ -264,6 +275,6 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, search, memory, skills, terminals, follow, models, lost };
+  return { dispatch, diff, pickFolder, explain, simulate, attachmentUrl, spendCaps, usage, search, memory, skills, terminals, follow, models, lost };
 };
 export type Connection = ReturnType<typeof connect>;

@@ -629,17 +629,19 @@ const Home = ({ connection, data }: { connection: Connection; data: SidebarData 
   );
 };
 
-/** Starts a thread in any folder; verdandid checks the path and resolves it, so a known folder gets a new thread, not a new project. */
+/** The OS folder dialog is verdandid's, so it only makes sense when the page runs on the same machine, not over `--host`. */
+const sameMachine = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
+
+/**
+ * Starts a thread in any folder, typed or chosen with Browse; verdandid checks the path and resolves it, so a known folder
+ * gets a new thread, not a new project.
+ */
 const OpenFolder = ({ connection }: { connection: Connection }) => {
   const [error, setError] = useState<string>();
-  const open = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    const projectPath = String(data.get("path")).trim();
-    if (!projectPath) return;
+  const [picking, setPicking] = useState(false);
+  const start = async (form: HTMLFormElement, projectPath: string) => {
     const threadId = uuid<ThreadId>();
-    const worktree = data.get("worktree") === "on";
+    const worktree = new FormData(form).get("worktree") === "on";
     const result = await connection.dispatch({
       type: "thread.create",
       commandId: uuid<CommandId>(),
@@ -652,6 +654,19 @@ const OpenFolder = ({ connection }: { connection: Connection }) => {
     form.reset();
     openThread(threadId);
   };
+  const open = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const projectPath = String(new FormData(event.currentTarget).get("path")).trim();
+    if (projectPath) void start(event.currentTarget, projectPath);
+  };
+  const browse = async (form: HTMLFormElement | null) => {
+    if (!form) return;
+    setPicking(true);
+    const picked = await connection.pickFolder();
+    setPicking(false);
+    if (!picked.ok) setError(picked.message);
+    else if (picked.path !== null) await start(form, picked.path);
+  };
   return (
     <form onSubmit={open} className="mt-8 max-w-2xl">
       <label htmlFor="open-folder-path" className="eyebrow mb-2 block text-muted">
@@ -663,7 +678,7 @@ const OpenFolder = ({ connection }: { connection: Connection }) => {
           id="open-folder-path"
           type="text"
           name="path"
-          placeholder="Full path to a project folder"
+          placeholder={sameMachine ? "Full path to a project folder, or Browse" : "Full path to a project folder"}
           required
           autoComplete="off"
           spellCheck={false}
@@ -671,9 +686,16 @@ const OpenFolder = ({ connection }: { connection: Connection }) => {
           aria-invalid={error !== undefined}
           aria-describedby={error ? "open-folder-error" : undefined}
         />
-        <button type="submit" className="min-h-8 px-4">
-          Open
-        </button>
+        {sameMachine ? (
+          // Enter in the path still submits the form: a form with one text field submits without a submit button.
+          <button type="button" onClick={(e) => void browse(e.currentTarget.form)} disabled={picking} className="min-h-8 px-4">
+            Browse…
+          </button>
+        ) : (
+          <button type="submit" className="min-h-8 px-4">
+            Open
+          </button>
+        )}
       </div>
       <label className="mt-2 flex items-center text-xs text-muted">
         <input type="checkbox" name="worktree" />

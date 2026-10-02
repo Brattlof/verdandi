@@ -11,6 +11,7 @@
     "lint": "biome check .",
     "test": "bun test",
     "dev": "bun apps/server/src/bin.ts start --home ./.verdandi-dev",
+    "open:dev": "bun apps/server/src/bin.ts open --home ./.verdandi-dev",
     "verdandi": "bun apps/server/src/bin.ts"
   },
   "devDependencies": {
