@@ -168,9 +168,11 @@ export const EngineLive = (options: EngineOptions = {}) =>
             const untrusted =
               command.type === "memory.save" || command.type === "memory.edit"
                 ? command.text.trim()
-                : escalates && command.type === "task.escalate"
-                  ? handedText(command.trigger)
-                  : undefined;
+                : command.type === "skill.propose"
+                  ? (command.change.after ?? undefined)
+                  : escalates && command.type === "task.escalate"
+                    ? handedText(command.trigger)
+                    : undefined;
             const [injection] =
               untrusted === undefined ? [] : (yield* decider.decide({ state: untrusted, questions: [injectionQuestion] })).answers;
             const decision = decide(

@@ -127,7 +127,13 @@ export const runBatch = async (options: BatchOptions): Promise<{ results: BatchR
   await run(
     Effect.flatMap(Engine, (engine) =>
       engine.react(({ event: e }) => {
-        if (e.type !== "approval.requested" && e.type !== "user-input.requested" && e.type !== "plan.requested") return Effect.void;
+        if (
+          e.type !== "approval.requested" &&
+          e.type !== "user-input.requested" &&
+          e.type !== "plan.requested" &&
+          e.type !== "skill.proposed"
+        )
+          return Effect.void;
         const allow = options.approve && e.type !== "user-input.requested";
         return engine
           .dispatch({

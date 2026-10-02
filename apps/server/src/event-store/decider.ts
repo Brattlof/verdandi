@@ -44,13 +44,14 @@ import {
   routeOf,
   targetOf,
 } from "../routing/routing.ts";
+import { changeProblem, scanSkill } from "../skills/skills.ts";
 import type { SpendState } from "../spend/spend.ts";
 import type { StoredRevert } from "./projector.ts";
 
 export type PendingRequest = {
   readonly requestId: string;
   readonly turnId: TurnId;
-  readonly kind: "approval" | "user-input" | "plan";
+  readonly kind: "approval" | "user-input" | "plan" | "skill";
   /** A plan's text as proposed, which an approval's edit is compared with. */
   readonly plan?: string;
   /** A plan's route for the build, when approving it moves the task (`plan.requested`'s `execute`). */
@@ -110,7 +111,7 @@ export type DeciderState = {
   readonly memory?: MemoryView;
   /**
    * The decision layer's answer to `injectionQuestion` about the untrusted text the command carries, asked by the
-   * engine: a memory save's or edit's text, or what an escalation hands the agent (`handedText`).
+   * engine: a memory save's or edit's text, a skill proposal's new file, or what an escalation hands the agent (`handedText`).
    */
   readonly injection?: DecisionAnswer;
 };
@@ -136,6 +137,7 @@ const fits: Record<PendingRequest["kind"], readonly Resolution["decision"][]> = 
   approval: ["allow", "deny"],
   "user-input": ["answer", "deny"],
   plan: ["allow", "deny"],
+  skill: ["allow", "deny"],
 };
 
 const configKey: Record<CapScope, Record<CapPeriod, string>> = {
@@ -563,6 +565,22 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     return memoryEntries(state.memory).some((e) => e.entryId === c.entryId)
       ? accept({ type: "memory.deleted", v: 1, threadId: c.threadId, entryId: c.entryId })
       : accept();
+  },
+  // The disk is the reactor's: it writes the change once the user allows it.
+  "skill.propose": (state, c) => {
+    if (state.thread?.runningTurnId !== c.turnId) {
+      return reject("TurnNotRunning", `Turn ${c.turnId} isn't running, so there's no agent to propose a skill.`);
+    }
+    const problem = changeProblem(c.change);
+    if (problem) return reject("InvalidSkill", problem);
+    const refused = c.change.after === null ? undefined : scanSkill(c.change.after, state.injection);
+    if (refused) return reject("SkillRejected", `Not proposed. ${refused}`);
+    return accept({ type: "skill.proposed", v: 1, threadId: c.threadId, turnId: c.turnId, requestId: c.commandId, change: c.change });
+  },
+  "skill.report": (state, c) => {
+    if (!state.thread) return accept();
+    const { type: _, commandId: _c, ...report } = c;
+    return accept({ ...report, type: "skill.applied", v: 1 });
   },
   "files.report": (state, c) =>
     state.thread

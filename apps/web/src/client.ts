@@ -11,6 +11,7 @@ import {
   RoutingUnavailable,
   type SessionHit,
   type SessionQuery,
+  type SkillsView,
   type SpendCap,
   SpendCapsUnavailable,
   type TaskId,
@@ -191,6 +192,14 @@ export const connect = (token: string) => {
     return undefined;
   };
 
+  /** The profile's skills and those in its extra folders; undefined when the connection is lost. */
+  const skills = async (): Promise<SkillsView | undefined> => {
+    const exit = await run((rpc) => rpc.SkillsList());
+    if (Exit.isSuccess(exit)) return exit.value;
+    lost.set(true); // it has no errors of its own
+    return undefined;
+  };
+
   /** Past sessions' messages containing `query`, newest first. Under 3 characters, none. */
   const search = async (query: SessionQuery): Promise<readonly SessionHit[] | undefined> => {
     const exit = await run((rpc) => rpc.SessionSearch(query));
@@ -255,6 +264,6 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, search, memory, terminals, follow, models, lost };
+  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, search, memory, skills, terminals, follow, models, lost };
 };
 export type Connection = ReturnType<typeof connect>;

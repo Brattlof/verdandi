@@ -225,6 +225,7 @@ const openSession = (
   claudePath: string,
   input: HarnessRunInput,
   additionalDirectories: readonly string[],
+  plugins: readonly string[],
   fork?: Fork,
 ): Session => {
   const queue: SDKUserMessage[] = [];
@@ -277,6 +278,9 @@ const openSession = (
       cwd: input.cwd,
       // Where attached files live, so reading one doesn't ask for approval. Fixed at spawn, like the tool list.
       ...(additionalDirectories.length > 0 && { additionalDirectories: [...additionalDirectories] }),
+      // The profile's skills, loaded as a local plugin (ADR 0020). Fixed at spawn: a session's skill list never changes
+      // under it. Verdandi serves its own MCP server, so the plugin brings none.
+      ...(plugins.length > 0 && { plugins: plugins.map((path) => ({ type: "local" as const, path, skipMcpDiscovery: true })) }),
       model: input.route.model,
       effort: input.route.effort,
       ...(input.resumeSessionId ? { resume: input.resumeSessionId } : {}),
@@ -435,6 +439,8 @@ export const makeClaudeCodeAdapter = (options: {
   readonly query?: QueryFn;
   /** Folders Claude Code may read besides the project, e.g. the profile's attachments. */
   readonly additionalDirectories?: readonly string[];
+  /** Local plugin folders every session loads, e.g. the Verdandi home, whose `skills/` holds the profile's skills (ADR 0020). */
+  readonly plugins?: readonly string[];
 }): HarnessAdapter => {
   const sessions = new Map<ThreadId, Session>();
   const end = (threadId: ThreadId) => {
@@ -564,7 +570,14 @@ export const makeClaudeCodeAdapter = (options: {
               : [];
           if (reverted) end(input.threadId);
           const open = (f?: Fork) => {
-            const opened = openSession(options.query ?? query, options.claudePath, input, options.additionalDirectories ?? [], f);
+            const opened = openSession(
+              options.query ?? query,
+              options.claudePath,
+              input,
+              options.additionalDirectories ?? [],
+              options.plugins ?? [],
+              f,
+            );
             sessions.set(input.threadId, opened);
             return opened;
           };

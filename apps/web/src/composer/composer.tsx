@@ -6,12 +6,14 @@ import {
   type Question,
   type Resolution,
   type RouteTarget,
+  type SkillChange,
   type ThreadId,
   type ThreadView,
   type TurnId,
 } from "@verdandi/contracts";
 import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { type Connection, type Routed, uuid } from "../client.ts";
+import { TextDiff } from "../diffs/diff.tsx";
 import { RouteChip } from "../routing/route.tsx";
 import { SpendCaps } from "../spend/spend.tsx";
 import type { LiveThread } from "../state.ts";
@@ -486,6 +488,7 @@ const RequestCard = ({
         {request.type === "approval.requested" && <Approval request={request} sending={sending} respond={respond} />}
         {request.type === "user-input.requested" && <Questions request={request} sending={sending} respond={respond} />}
         {request.type === "plan.requested" && <PlanApproval request={request} sending={sending} respond={respond} />}
+        {request.type === "skill.proposed" && <SkillApproval request={request} sending={sending} respond={respond} />}
         {error && (
           <p role="alert" className="mt-2 text-error">
             {error}
@@ -523,6 +526,66 @@ const Approval = ({ request, sending, respond }: CardProps<"approval.requested">
     </div>
   </>
 );
+
+const skillTitles = {
+  create: (c: SkillChange) => (
+    <>
+      Create the skill <span className="font-mono">{c.skill}</span>?
+    </>
+  ),
+  patch: (c: SkillChange) => (
+    <>
+      Change <span className="font-mono">{`${c.skill}/${c.path}`}</span>?
+    </>
+  ),
+  write_file: (c: SkillChange) => (
+    <>
+      Write <span className="font-mono">{`${c.skill}/${c.path}`}</span>?
+    </>
+  ),
+  delete: (c: SkillChange) => (
+    <>
+      Delete the skill <span className="font-mono">{c.skill}</span> and its folder?
+    </>
+  ),
+} as const;
+
+/** A skill change the agent proposes (DESIGN §14.4): its diff, allowed as shown or declined with a reason for the agent. */
+const SkillApproval = ({ request, sending, respond }: CardProps<"skill.proposed">) => {
+  const [feedback, setFeedback] = useState("");
+  const id = useId();
+  const { change } = request;
+  return (
+    <>
+      <h3 className="font-serif text-lg font-semibold">{skillTitles[change.action](change)}</h3>
+      <p className="text-xs text-muted">Into your profile's skills folder. Nothing is written unless you allow it.</p>
+      <section aria-label="Proposed change" className="max-h-[30vh] overflow-y-auto border border-line bg-bg">
+        <TextDiff before={change.before ?? ""} after={change.after ?? ""} />
+      </section>
+      <label htmlFor={id} className="mt-2 mb-1 block text-xs font-medium text-muted">
+        Why you decline it, for the agent (optional)
+      </label>
+      <textarea id={id} rows={2} className="w-full" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+        <button
+          type="button"
+          disabled={sending}
+          onClick={() => respond(feedback.trim() ? { decision: "deny", feedback: feedback.trim() } : { decision: "deny" })}
+        >
+          Decline
+        </button>
+        <button
+          type="button"
+          className="border-go bg-go text-on-go hover:bg-go-hover"
+          disabled={sending}
+          onClick={() => respond({ decision: "allow" })}
+        >
+          Allow
+        </button>
+      </div>
+    </>
+  );
+};
 
 /** Approve the plan, edit it first (the agent builds from the edit), or keep planning with feedback. */
 const PlanApproval = ({ request, sending, respond }: CardProps<"plan.requested">) => {

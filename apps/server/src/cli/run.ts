@@ -22,7 +22,7 @@ import { flag, readServerFile, resolveHome, type ServerFile } from "../home/home
 import { expandHome } from "../projects/project.ts";
 import { connect } from "../rpc/client.ts";
 import { spendSplit } from "../spend/usage.ts";
-import type { PendingRequest } from "./requests.ts";
+import { type PendingRequest, skillChangeTitle } from "./requests.ts";
 
 /** How `verdandi run` ends, as its usage line in `bin.ts` documents. Any other error (verdandid not running, the turn rejected) exits 1. */
 export const exitCodes = { completed: 0, usage: 2, failed: 3, limit: 4, request: 5, interrupted: 130 } as const;
@@ -95,7 +95,9 @@ const describeRequest = (r: PendingRequest) =>
     ? `approval to use ${r.toolName} ${clip(JSON.stringify(r.input), 400)}`
     : r.type === "user-input.requested"
       ? `an answer to: ${r.questions.map((q) => `${q.question} (${q.options.map((o) => o.label).join(", ")})`).join(" ")}`
-      : `approval of its plan:\n${r.plan}`;
+      : r.type === "skill.proposed"
+        ? `approval to ${skillChangeTitle(r.change)}`
+        : `approval of its plan:\n${r.plan}`;
 
 const uuid = <T>() => crypto.randomUUID() as T;
 type Signal = ThreadFeed | { readonly kind: "sigint" } | { readonly kind: "ended" };
@@ -261,7 +263,12 @@ const runTurn = (server: ServerFile, o: Options) =>
       if (e.type === "turn.usage.recorded") usage.push(e);
       if (e.type === "task.blocked") blocked = true;
       if (e.type === "verifier.ran") verifier = e;
-      if (e.type === "approval.requested" || e.type === "user-input.requested" || e.type === "plan.requested") {
+      if (
+        e.type === "approval.requested" ||
+        e.type === "user-input.requested" ||
+        e.type === "plan.requested" ||
+        e.type === "skill.proposed"
+      ) {
         if (o.deny) {
           process.stderr.write(`[denied ${describeRequest(e)}]\n`);
           const resolution = { decision: "deny" } as const;
