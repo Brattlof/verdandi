@@ -242,7 +242,9 @@ export const chat = async (argv: readonly string[]) => {
           }
           if (e.type === "task.escalated") {
             const moved = e.to ? `escalated to ${e.to.model} ${e.to.effort}` : "not escalated";
-            process.stdout.write(`[${moved}: ${e.reason}]\n`);
+            // The way back is picking the route it escalated from, which pins the thread like any route pick.
+            const undo = e.to ? ` To undo it: verdandi chat --thread ${threadId} --model ${e.from.model} --effort ${e.from.effort}` : "";
+            process.stdout.write(`[${moved}: ${e.reason}${undo}]\n`);
           }
           if (e.type === "thread.reverted") {
             const n = shown.indexOf(e.toTurnId) + 1;

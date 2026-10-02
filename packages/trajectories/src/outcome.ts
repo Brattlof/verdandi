@@ -1,8 +1,7 @@
 import {
-  type DecisionAnswer,
-  decisionKinds,
   describeRouteChange,
   type Event,
+  isCorrection,
   type Route,
   type StoredEvent,
   type TaskId,
@@ -36,10 +35,6 @@ type Draft = {
   readonly usage: Map<string, Usage>;
   rating: TaskRating | null;
 };
-
-/** The decision layer says a follow-up pushes back on the agent. Unsure answers take the safe default: it doesn't. */
-const corrects = (a: DecisionAnswer) =>
-  a.type === "noul" && a.kind === decisionKinds.correcting && !a.lowConfidence && a.probability >= 0.5;
 
 /** The event types `buildTaskOutcomes` reads, so a caller can load only these: a turn's items are most of a thread. */
 export const outcomeEventTypes = [
@@ -140,7 +135,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         task.verifierRuns.push({ command: e.command, passed: e.passed });
         break;
       case "decision.recorded":
-        if (current && e.answers.some(corrects)) current.corrections++;
+        if (current && e.answers.some(isCorrection)) current.corrections++;
         break;
       case "plan.requested":
         plans.add(e.requestId);

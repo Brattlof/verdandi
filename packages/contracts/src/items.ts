@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { TurnId } from "./ids.ts";
 import { Route } from "./route.ts";
-import { EscalationStep, EscalationTrigger } from "./routing.ts";
+import { EscalationStep } from "./routing.ts";
 
 /** Set on a subagent's steps: the tool call that started the subagent. Absent on the main agent's. */
 const parentToolUseId = Schema.optionalKey(Schema.String);
@@ -21,9 +21,10 @@ export type VerifierRun = typeof VerifierRun.Type;
 
 /**
  * Untrusted text Verdandi itself hands the agent (DESIGN §17): what an escalation's trigger hands its turn (a
- * verifier's output, the agent's own blocked reason, a repeated tool error), or a Verdandi tool's result.
+ * verifier's output, the agent's own blocked reason, a repeated tool error), or a Verdandi tool's result. A
+ * `correction` escalation hands nothing: the user's own message is the turn.
  */
-export const HandedSource = Schema.Literals([...EscalationTrigger.literals, "session_search", "memory_search"]);
+export const HandedSource = Schema.Literals(["verifier", "blocked", "repeated-error", "session_search", "memory_search"]);
 export type HandedSource = typeof HandedSource.Type;
 /** What each source is, for the user. */
 export const handedSourceLabel: Record<HandedSource, string> = {
@@ -67,8 +68,9 @@ export const Item = Schema.Union([
   /** The router moved the rest of the turn to another route when the user approved its plan (DESIGN §8.2 lever 3). */
   Schema.Struct({ kind: Schema.Literal("route.switch"), from: Route, to: Route, reason: Schema.String }),
   /**
-   * A verifier failed on a routed task, and Verdandi escalated it (DESIGN §8.7): the task goes on at `to`, starting
-   * with the turn `nextTurnId` Verdandi sent, or, at `ask`, stops for the user. Both absent at `ask`.
+   * An escalation trigger fired on a routed task, and Verdandi escalated it (DESIGN §8.7): the task goes on at `to`,
+   * starting with the turn `nextTurnId` Verdandi sent, or the user's own after a correction (no `nextTurnId`), or, at
+   * `ask`, stops for the user. Both absent at `ask`.
    */
   Schema.Struct({
     kind: Schema.Literal("escalation"),
