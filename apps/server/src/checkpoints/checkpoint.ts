@@ -58,6 +58,21 @@ export const checkpoint = (cwd: string, ref: string) =>
     return commit;
   });
 
+/**
+ * Whether the files under `cwd` differ from checkpoint `ref`, by any means: untracked files count, ignored ones don't.
+ * Undefined outside a git repo, or when `ref` doesn't exist (saving it failed), so the caller falls back on what it saw.
+ */
+export const changedSince = (cwd: string, ref: string) =>
+  Effect.gen(function* () {
+    const tree = yield* snapshot(cwd);
+    if (tree === undefined) return undefined;
+    if ((yield* git(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).code !== 0) return undefined;
+    // From `cwd`, `.` limits it to the project's folder, as `restore` does.
+    const diff = yield* git(cwd, ["diff", "--quiet", "--no-ext-diff", ref, tree, "--", "."]);
+    if (diff.code > 1) return yield* gitFailed("diff", diff);
+    return diff.code === 1;
+  });
+
 /** The checkpoint refs of `threadId` that exist, by name. */
 export const listCheckpoints = (cwd: string, threadId: ThreadId) =>
   Effect.map(

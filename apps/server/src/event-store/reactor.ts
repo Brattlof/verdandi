@@ -25,7 +25,7 @@ import { Decide, flagged, injectionQuestion, injectionWarning } from "@verdandi/
 import { ToolFailed, verdandiTools } from "@verdandi/tools";
 import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
+import { changedSince, checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
 import { editedPaths } from "../diffs/diff.ts";
 import { memoryNudge } from "../memory/memory.ts";
 import { loadTaskDigest, parseReview, reviewPrompt } from "../review/review.ts";
@@ -334,6 +334,18 @@ export const ReactorLive = Layer.effect(
         if (cwd && existsSync(cwd) && thread.review === null) yield* checkpoint(cwd, checkpointRef(threadId, turnId, at));
       }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not save the ${at} checkpoint of turn ${turnId}.`, cause)));
 
+    /**
+     * Whether turn `turnId` changed the files under `cwd`, by any means: its start checkpoint against the tree now, the
+     * same for every harness. Outside git, or without a start checkpoint, the turn's file-tool calls say.
+     */
+    const changedFiles = (threadId: ThreadId, turnId: TurnId, cwd: string, calls: readonly Item[]) =>
+      changedSince(cwd, checkpointRef(threadId, turnId, "start")).pipe(
+        Effect.catchCause((cause) =>
+          Effect.as(Effect.logWarning(`Could not compare turn ${turnId}'s files with its start checkpoint.`, cause), undefined),
+        ),
+        Effect.map((changed) => changed ?? editedPaths(cwd, calls).length > 0),
+      );
+
     const runTurn = (
       threadId: ThreadId,
       turnId: TurnId,
@@ -386,7 +398,7 @@ export const ReactorLive = Layer.effect(
         const review =
           thread.review === null ? null : (JSON.parse(thread.review) as Extract<StoredEvent["event"], { type: "review.started" }>);
         const nudge = review ? undefined : memoryNudge(thread.turn_number, toolSettings.memoryNudgeEvery);
-        // The turn's file-tool calls: once its agent is done, a turn that changed files is verified before it completes.
+        // The turn's file-tool calls, which say whether it changed files in a folder without checkpoints.
         const calls: Item[] = [];
         // Whether a tool call failed, so the task's tool errors are counted at the turn's end.
         let toolFailed = false;
@@ -424,7 +436,7 @@ export const ReactorLive = Layer.effect(
               finished = true;
               return Effect.gen(function* () {
                 const failed =
-                  event.status === "success" && !review && editedPaths(cwd, calls).length > 0
+                  event.status === "success" && !review && (yield* changedFiles(threadId, turnId, cwd, calls))
                     ? yield* verify(threadId, turnId, thread.path, cwd)
                     : undefined;
                 yield* report(threadId, turnId, event);

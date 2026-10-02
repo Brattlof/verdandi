@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Command, CommandId, Item, TaskOutcome, ThreadId, TurnId } from "@verdandi/contracts";
-import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
+import { makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AppLayer } from "../event-store/app.ts";
@@ -26,9 +26,10 @@ let n = 0;
 const id = <T>() => `id-${++n}` as T;
 const threadId = "thread-1" as ThreadId;
 
-/** A project whose routing policy sets `verifiers`, with one pinned thread on the fake harness. */
-const setup = async (verifiers?: string[]) => {
-  const projectPath = tempDir();
+/** A project whose routing policy sets `verifiers`, with one pinned thread on the fake harness; a git repo holding `repo`'s files when given. */
+const setup = async (verifiers?: string[], repo?: Record<string, string>) => {
+  const projectPath = repo ? makeTempRepo(repo) : tempDir();
+  if (repo) dirs.push(projectPath);
   if (verifiers) {
     mkdirSync(join(projectPath, ".verdandi"));
     writeFileSync(join(projectPath, ".verdandi", "routing.yaml"), `escalation:\n  verifiers: ${JSON.stringify(verifiers)}\n`);
@@ -60,6 +61,7 @@ const setup = async (verifiers?: string[]) => {
 
 const verifierItems = (items: readonly Item[] | undefined) => (items ?? []).filter((i) => i.kind === "verifier");
 
+// Outside git there are no checkpoints, so the turn's file-tool calls say whether it changed files.
 test("a turn that edits a file runs the verifiers until one fails, and its task fails", async () => {
   const { projectPath, turn } = await setup(["echo checked", "exit 1", "echo never"]);
   const { turn: t, outcome } = await turn(`edit ${join(projectPath, "a.txt")}`);
@@ -88,6 +90,18 @@ test("a turn that changes no files runs no verifiers", async () => {
   const { turn: t, outcome } = await turn("hello");
   expect(verifierItems(t?.items)).toEqual([]);
   expect(outcome).toMatchObject({ status: "completed", verifierRuns: [] });
+});
+
+test("in git, a turn that changes files without a file tool runs the verifiers", async () => {
+  const { turn } = await setup(["echo checked"], { "a.txt": "same" });
+  const { turn: t } = await turn("write a.txt changed");
+  expect(verifierItems(t?.items)).toMatchObject([{ command: "echo checked", passed: true }]);
+});
+
+test("in git, a turn that leaves the files as they were runs no verifiers", async () => {
+  const { turn } = await setup(["echo checked"], { "a.txt": "same" });
+  const { turn: t } = await turn("write a.txt same");
+  expect(verifierItems(t?.items)).toEqual([]);
 });
 
 test("a project without verifiers runs none", async () => {

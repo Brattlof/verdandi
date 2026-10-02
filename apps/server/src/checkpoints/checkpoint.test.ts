@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { ThreadId, TurnId } from "@verdandi/contracts";
 import { git, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Effect } from "effect";
-import { checkpoint, checkpointRef, listCheckpoints } from "./checkpoint.ts";
+import { changedSince, checkpoint, checkpointRef, listCheckpoints } from "./checkpoint.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -44,4 +44,16 @@ test("a folder outside git has no checkpoint", async () => {
   const dir = makeTempHome();
   dirs.push(dir);
   expect(await Effect.runPromise(checkpoint(dir, checkpointRef("t" as ThreadId, "u" as TurnId, "start")))).toBeUndefined();
+});
+
+test("files changed since a checkpoint: untracked ones count, ignored ones don't", async () => {
+  const dir = makeTempRepo({ "a.txt": "one\n", ".gitignore": "*.log\n" });
+  dirs.push(dir);
+  const ref = checkpointRef("t" as ThreadId, "u" as TurnId, "start");
+  await Effect.runPromise(checkpoint(dir, ref));
+  writeFileSync(join(dir, "debug.log"), "ignored\n");
+  expect(await Effect.runPromise(changedSince(dir, ref))).toBe(false);
+  writeFileSync(join(dir, "new.txt"), "untracked\n");
+  expect(await Effect.runPromise(changedSince(dir, ref))).toBe(true);
+  expect(await Effect.runPromise(changedSince(dir, checkpointRef("t" as ThreadId, "missing" as TurnId, "start")))).toBeUndefined();
 });

@@ -25,7 +25,7 @@ const real = (path: string): string => {
 
 /**
  * The project-relative paths, `/`-separated, a turn's file tools touched; paths outside the project are
- * dropped. Verifiers run when this is non-empty, which works in folders outside git too.
+ * dropped. In a folder outside git, which has no checkpoints, verifiers run when this is non-empty.
  */
 export const editedPaths = (projectPath: string, items: readonly Item[]) => {
   const root = real(projectPath);

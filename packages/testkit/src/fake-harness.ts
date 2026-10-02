@@ -1,4 +1,4 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type {
   AccessMode,
@@ -18,7 +18,8 @@ import { Effect, Stream } from "effect";
  * A scripted harness for tests. Text "fail" fails the turn, "hang" runs until interrupted, "gate" waits for
  * `release()`, "overage" reports a used-up subscription window and answers on metered usage, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan (echoing the user's edit when approved with one), each
  * finishing once `respond` answers on the model of the route `reroute` last moved the turn to, "steer" waits for the first steer and answers it, "edit <path>"
- * appends a line to that file, relative to the turn's folder, through an Edit tool call, and a turn Verdandi sends to escalate a failed verifier ("Verdandi ran the
+ * appends a line to that file, relative to the turn's folder, through an Edit tool call, "write <path> <text>" writes the text to that file through a
+ * Bash call, the way an agent's `cat >` would, and a turn Verdandi sends to escalate a failed verifier ("Verdandi ran the
  * project's verifier …") edits the thread's last edited file again, the way an agent fixing it would; "subagent" delegates a read to a subagent whose
  * steps carry `parentToolUseId`, "background" does the same in a background subagent that reports after the main
  * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back, with its attachments' names, kinds and sizes, and fixed usage on the route's model.
@@ -169,6 +170,18 @@ export const makeFakeHarness = () => {
         ]);
       });
       return Stream.concat(Stream.fromIterable(start), Stream.concat(edit, reply(input.route.model, `edited ${path}`)));
+    }
+    if (input.text.startsWith("write ")) {
+      const [, path = "", ...words] = input.text.split(" ");
+      const command = `cat > ${path}`;
+      const write = Stream.suspend(() => {
+        writeFileSync(resolve(input.cwd, path), words.join(" "));
+        return Stream.fromIterable<HarnessEvent>([
+          { type: "item", item: { kind: "tool.call", toolUseId: "fake-write", name: "Bash", input: { command } } },
+          { type: "item", item: { kind: "tool.result", toolUseId: "fake-write", isError: false, content: "" } },
+        ]);
+      });
+      return Stream.concat(Stream.fromIterable(start), Stream.concat(write, reply(input.route.model, `wrote ${path}`)));
     }
     if (input.text.startsWith("tool ")) {
       // `tool <name> <json args>` calls one of Verdandi's tools the run was given, as Claude Code's MCP client would.
