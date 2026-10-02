@@ -427,7 +427,7 @@ Research shows that turn count alone is barely better than chance at predicting 
 2. then move to a stronger model on the same harness,
 3. then ask you.
 
-By default, at most one step happens per task without asking you. A step changes the running task's route and Verdandi sends the next turn itself, handing the agent the failed verifier's output as data; the task stays one task, so routing memory counts the escalation against the route it started on (ADR 0015). Only routed tasks escalate: a pinned route is yours. Built so far: trigger 1, on the project's `escalation.verifiers`.
+By default, at most one step happens per task without asking you. A step changes the running task's route and Verdandi sends the next turn itself, handing the agent the failed verifier's output as data; the task stays one task, so routing memory counts the escalation against the route it started on (ADR 0018). Only routed tasks escalate: a pinned route is yours. Built so far: trigger 1, on the project's `escalation.verifiers`.
 
 **De-escalation** happens after you approve a plan, and after the verifiers pass when only mechanical work is left.
 
