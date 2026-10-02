@@ -13,15 +13,22 @@ import { AttachmentsDir, HarnessRegistry, ProjectVerifiers, ReactorLive, ToolSet
 export const AppLayer = (
   home: string,
   harnesses: Partial<Record<HarnessId, HarnessAdapter>>,
-  /** `spendCapsHome`: the home whose `spend-caps.yaml` applies, when not `home` (a batch run's own home). */
-  options: { readonly project?: Projector; readonly spendCapsHome?: string } = {},
+  /**
+   * `spendCapsHome`: the home whose `spend-caps.yaml` applies, when not `home` (a batch run's own home).
+   * `defaultVerifiers`: verifiers for a project whose policy names none (a batch task's `verify`, kept out of its copy).
+   */
+  options: {
+    readonly project?: Projector;
+    readonly spendCapsHome?: string;
+    readonly defaultVerifiers?: (projectPath: string) => readonly string[];
+  } = {},
 ) => {
   const routing = routingFor(harnesses);
   // A broken policy runs no verifiers; it already rejects the next routed turn, naming the file and key.
   const verifiers = (projectPath: string) =>
     Effect.flatMap(routing(projectPath), ({ policy }) =>
       Result.isSuccess(policy)
-        ? Effect.succeed(policy.success.verifiers)
+        ? Effect.succeed(policy.success.verifiers.length > 0 ? policy.success.verifiers : (options.defaultVerifiers?.(projectPath) ?? []))
         : Effect.as(Effect.logWarning(`Skipped the project's verifiers: ${policy.failure}`), []),
     );
   return ReactorLive.pipe(

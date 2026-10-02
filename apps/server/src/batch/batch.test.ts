@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { git, makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { checkout, estimateBatch, loadEvalSet, parseBatchRoute, runBatch, summarize } from "./batch.ts";
@@ -109,6 +109,42 @@ test(
     });
     expect(results).toHaveLength(1);
     expect(stopped).toContain("daily cap of metered spend is reached");
+  },
+  SLOW,
+);
+
+test(
+  "a task's verify command never lands in its copy, yet still escalates the run and grades it",
+  async () => {
+    const { file } = evalSet();
+    const home = track(makeTempHome());
+    const copies = join(home, "copies.txt");
+    // Notes the copy it ran in, so the test can search it afterwards; passes once a.txt has two lines.
+    const marker = "hidden-verify-marker";
+    const verify = `"${process.execPath}" -e "const f = require('fs'); f.appendFileSync(${JSON.stringify(copies).replaceAll('"', "'")}, process.cwd() + '\\n'); const m = '${marker}'; process.exit(f.existsSync('a.txt') && f.readFileSync('a.txt', 'utf8').trim().split('\\n').length >= 2 ? 0 : 1)"`;
+    const tasks = loadEvalSet(file)
+      .filter((t) => t.id === "two-edits")
+      .map((t) => ({ ...t, verify }));
+    const { results } = await runBatch({
+      tasks,
+      routes: ["auto"],
+      home,
+      runHome: join(home, "batch", "run"),
+      harnesses: { fake: makeFakeHarness() },
+      approve: false,
+      taskTimeoutMs: 60_000,
+      keep: true,
+    });
+    // The verifier ran in the run (it failed, so the task escalated), and graded the final tree.
+    expect(results.map((r) => [r.passed, r.escalations])).toEqual([[true, 1]]);
+    const dirs = new Set(readFileSync(copies, "utf8").trim().split("\n"));
+    expect(dirs.size).toBe(1);
+    for (const copy of dirs) {
+      track(copy);
+      expect(git(copy, "status", "--porcelain", "--ignored").trim()).toBe("?? a.txt");
+      const files = readdirSync(copy, { recursive: true, encoding: "utf8" }).filter((f) => statSync(join(copy, f)).isFile());
+      expect(files.filter((f) => readFileSync(join(copy, f), "utf8").includes(marker))).toEqual([]);
+    }
   },
   SLOW,
 );

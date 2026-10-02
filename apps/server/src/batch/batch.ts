@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -67,8 +67,6 @@ const git = (cwd: string, args: string[], input = "") => {
  * ponytail: later commits' objects are still borrowed through `.git/objects/info/alternates`, so an agent that lists
  * every object (`git fsck --lost-found`) can find them. Upgrade: fetch only the task's commit into an empty repository
  * when an eval needs a sealed copy.
- * The task's `verify` becomes the copy's project verifier, so a routed run can escalate, unless its policy names
- * verifiers of its own.
  */
 export const checkout = (task: LoadedTask) => {
   const dir = mkdtempSync(join(tmpdir(), "verdandi batch "));
@@ -77,16 +75,6 @@ export const checkout = (task: LoadedTask) => {
   git(dir, ["remote", "remove", "origin"]);
   git(dir, ["update-ref", "--no-deref", "--stdin"], git(dir, ["for-each-ref", "--format=delete %(refname)"]));
   git(dir, ["reflog", "expire", "--expire=now", "--all"]);
-  const file = join(dir, ".verdandi", "routing.yaml");
-  const tracked = existsSync(file);
-  const policy = tracked ? ((Bun.YAML.parse(readFileSync(file, "utf8")) ?? {}) as Record<string, unknown>) : {};
-  const escalation = (policy.escalation ?? {}) as Record<string, unknown>;
-  if (!escalation.verifiers) {
-    mkdirSync(join(dir, ".verdandi"), { recursive: true });
-    // JSON is YAML, and keeps the repository's keys as they were.
-    writeFileSync(file, JSON.stringify({ ...policy, escalation: { ...escalation, verifiers: [task.verify] } }, null, 2));
-    if (!tracked) appendFileSync(join(dir, ".git", "info", "exclude"), "\n.verdandi/\n");
-  }
   return dir;
 };
 
@@ -120,7 +108,18 @@ export type BatchOptions = {
  */
 export const runBatch = async (options: BatchOptions): Promise<{ results: BatchResult[]; stopped?: string }> => {
   mkdirSync(options.runHome, { recursive: true });
-  const runtime = ManagedRuntime.make(AppLayer(options.runHome, options.harnesses, { spendCapsHome: options.home }));
+  // Each copy's task `verify` is its project verifier, so a routed run can escalate, unless its policy names verifiers
+  // of its own. It's handed to the run here, never written into the copy, where the agent could read it.
+  const verifyIn = new Map<string, string>();
+  const runtime = ManagedRuntime.make(
+    AppLayer(options.runHome, options.harnesses, {
+      spendCapsHome: options.home,
+      defaultVerifiers: (projectPath) => {
+        const verify = verifyIn.get(projectPath);
+        return verify ? [verify] : [];
+      },
+    }),
+  );
   const run = <A, E>(effect: Effect.Effect<A, E, Engine | Reactor | SqlClient.SqlClient>) => runtime.runPromise(effect);
   const dispatch = (command: Parameters<Engine["Service"]["dispatch"]>[0]) =>
     run(Effect.flatMap(Engine, (engine) => engine.dispatch(command)));
@@ -158,6 +157,7 @@ export const runBatch = async (options: BatchOptions): Promise<{ results: BatchR
       ...fields,
     });
     const dir = checkout(task);
+    verifyIn.set(dir, task.verify);
     const threadId = randomUUID() as ThreadId;
     try {
       if (task.setup) {
@@ -227,6 +227,7 @@ export const runBatch = async (options: BatchOptions): Promise<{ results: BatchR
       await Effect.runPromise(
         Effect.forEach(Object.values(options.harnesses), (harness) => harness?.close(threadId) ?? Effect.void, { discard: true }),
       );
+      verifyIn.delete(dir);
       if (!options.keep) rmSync(dir, { recursive: true, force: true });
     }
   };
