@@ -24,12 +24,13 @@ import { AppLayer } from "../event-store/app.ts";
 import { reachedCap } from "../event-store/decider.ts";
 import { Engine } from "../event-store/engine.ts";
 import { loadDeciderState, loadMemory } from "../event-store/projector.ts";
-import { HarnessRegistry } from "../event-store/reactor.ts";
+import { HarnessRegistry, ProfileSkills } from "../event-store/reactor.ts";
 import { Gc, GcLive, GcScheduleLive } from "../gc/gc.ts";
 import { resolveProjectPath } from "../projects/project.ts";
 import { catalogFor, decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
 import { searchSessions } from "../search/search.ts";
+import { listSkills } from "../skills/skill-files.ts";
 import { loadSpendState } from "../spend/spend.ts";
 import { loadSpendCaps } from "../spend/spend-caps.ts";
 import { loadUsageReport } from "../spend/usage.ts";
@@ -48,6 +49,7 @@ const Handlers = (home: string) =>
       const registry = yield* HarnessRegistry;
       const terminals = yield* Terminals;
       const gc = yield* Gc;
+      const skillFolders = yield* ProfileSkills;
       const harnesses = Object.keys(registry) as HarnessId[];
       const routing = routingFor(registry);
       const subscriptions = new Map<string, Deferred.Deferred<void>>();
@@ -127,6 +129,8 @@ const Handlers = (home: string) =>
                 : Effect.fail(new CommandRejected({ reason: "ThreadNotFound", message: `Thread ${threadId} does not exist.` })),
             ),
           ),
+        // Read from disk on each call: the user may add or edit skills by hand.
+        SkillsList: () => Effect.sync(() => listSkills(skillFolders)),
         SessionSearch: (query) =>
           searchSessions(query).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
         TaskCostsList: () => loadTaskCosts.pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),

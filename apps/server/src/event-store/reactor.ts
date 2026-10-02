@@ -28,6 +28,8 @@ import { editedPaths } from "../diffs/diff.ts";
 import { memoryNudge } from "../memory/memory.ts";
 import { repeatedError } from "../routing/repeated-error.ts";
 import { searchSessions } from "../search/search.ts";
+import type { SkillFolders } from "../skills/skill-files.ts";
+import { makeSkillProposals } from "../skills/skill-proposals.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "../tasks/task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "../tasks/trajectory.ts";
 import { runVerifier } from "../verifiers/verify.ts";
@@ -47,6 +49,9 @@ export class ToolSettings extends Context.Service<
   ToolSettings,
   { readonly approveMemorySaves: boolean; readonly memoryNudgeEvery: number }
 >()("verdandi/ToolSettings") {}
+
+/** The profile's skills folder, which approved skill proposals are written to, and the read-only extra folders (DESIGN §14.4). */
+export class ProfileSkills extends Context.Service<ProfileSkills, SkillFolders>()("verdandi/ProfileSkills") {}
 
 /** Where the profile keeps threads' git worktrees, as `<repo>/<branch>` (DESIGN §13). */
 export class WorktreesDir extends Context.Service<WorktreesDir, string>()("verdandi/WorktreesDir") {}
@@ -100,6 +105,7 @@ export const ReactorLive = Layer.effect(
     const toolSettings = yield* ToolSettings;
     const projectEscalation = yield* ProjectEscalation;
     const decide = yield* Decide;
+    const skillFolders = yield* ProfileSkills;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
     /** The adapter running each thread's current turn: where answers to its requests go. */
@@ -130,6 +136,7 @@ export const ReactorLive = Layer.effect(
     const report = (threadId: ThreadId, turnId: TurnId, event: HarnessEvent) =>
       engine.dispatch({ type: "harness.report", commandId: randomUUID() as CommandId, threadId, turnId, event });
 
+    const skills = makeSkillProposals(engine.dispatch, skillFolders, sql);
     /** Verdandi's own tools (DESIGN §9.6), built once: every turn gets this same list, so a session's never changes. */
     const tools = verdandiTools({
       search: (query, allProjects, at) =>
@@ -169,6 +176,7 @@ export const ReactorLive = Layer.effect(
             .pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record the injection flag on turn ${at.turnId}.`, cause)));
           return `${injectionWarning}\n\n${text}`;
         }),
+      proposeSkill: skills.propose,
     });
 
     // A failed write is retried by the sweep below when verdandid next starts.
@@ -460,7 +468,12 @@ export const ReactorLive = Layer.effect(
       }
       // Committed right before the approval it goes with, so the harness switches before the agent's next step.
       if (e.type === "task.rerouted") return live.get(e.threadId)?.reroute(e.threadId, e.to) ?? Effect.void;
-      if (e.type === "approval.resolved") return live.get(e.threadId)?.respond(e.threadId, e.requestId, e.resolution) ?? Effect.void;
+      // A skill proposal is Verdandi's own request: its answer writes the skill, in `turns` so `drain` waits for it.
+      if (e.type === "approval.resolved")
+        return Effect.andThen(
+          live.get(e.threadId)?.respond(e.threadId, e.requestId, e.resolution) ?? Effect.void,
+          FiberSet.run(turns, skills.settle(e)),
+        ).pipe(Effect.asVoid);
       if (e.type === "turn.completed") {
         const turn = latest.get(e.threadId);
         // Forked into `turns`, so the dispatch doesn't wait for the harness to stop or the trajectory to be written, and `drain` does.

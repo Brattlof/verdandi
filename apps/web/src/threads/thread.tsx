@@ -134,6 +134,15 @@ export const ThreadPane = ({
               <Rune name="mannaz" className="size-3.5" />
               Memory
             </button>
+            <button
+              type="button"
+              className={headerButton}
+              aria-pressed={panel.open && panel.tab === "skills"}
+              onClick={() => setPanel(panel.open && panel.tab === "skills" ? { type: "close" } : { type: "tab", tab: "skills" })}
+            >
+              <Rune name="ansuz" className="size-3.5" />
+              Skills
+            </button>
             {!thread.busy && (
               <ArchiveButton
                 connection={connection}

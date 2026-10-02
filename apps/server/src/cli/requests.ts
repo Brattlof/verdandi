@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clip, type Question, type ThreadView } from "@verdandi/contracts";
+import { clip, lineDiff, type Question, type ThreadView } from "@verdandi/contracts";
 import { shell } from "../verifiers/verify.ts";
 
 export type PendingRequest = ThreadView["pendingRequests"][number];
@@ -10,7 +10,22 @@ export type PendingRequest = ThreadView["pendingRequests"][number];
 export const approvalPrompt = (r: Extract<PendingRequest, { type: "approval.requested" }>) =>
   `\n[approval] ${r.toolName} ${clip(JSON.stringify(r.input), 400)}\nAllow? [y/n] `;
 
-/** A plan prints in full: the user approves what they read. */
+const marks = { context: " ", del: "-", add: "+" } as const;
+
+/** What a skill proposal would do, in a few words. */
+export const skillChangeTitle = ({ action, skill, path }: Extract<PendingRequest, { type: "skill.proposed" }>["change"]) =>
+  action === "create"
+    ? `create the skill ${skill}`
+    : action === "delete"
+      ? `delete the skill ${skill} (its whole folder)`
+      : `${action === "patch" ? "patch" : "write"} ${skill}/${path}`;
+
+/** A skill proposal prints its whole diff, like a plan: the user approves what they read. */
+export const skillPrompt = (r: Extract<PendingRequest, { type: "skill.proposed" }>) => {
+  const diff = lineDiff(r.change.before ?? "", r.change.after ?? "").map((l) => `${marks[l.line]} ${l.text}`);
+  return `\n[skill] The agent proposes to ${skillChangeTitle(r.change)}:\n${diff.join("\n")}\nAllow? [y/n] `;
+};
+
 /** A plan and, when approving it moves the build to another route, where and why. */
 export const planPrompt = (r: Extract<PendingRequest, { type: "plan.requested" }>) => {
   const moves = r.execute ? `[approving moves the build to ${r.execute.target.model} ${r.execute.effort}: ${r.execute.reason}]\n` : "";

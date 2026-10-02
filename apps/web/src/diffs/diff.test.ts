@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { diffRows, lineDiff } from "./diff.tsx";
+import { diffRows } from "./diff.tsx";
 
 const diff = [
   "diff --git a/a.txt b/a.txt",
@@ -27,16 +27,6 @@ test("header lines are headers, and hunk lines starting with --- or +++ are remo
     "note",
   ]);
   expect(rows.at(-1)).toMatchObject({ text: expect.stringContaining("2 more changed files") });
-});
-
-test("a line diff keeps shared lines and marks the removed and added ones in order", () => {
-  expect(lineDiff("1. Read\n2. Edit a\n3. Test", "1. Read\n2. Edit b\n3. Test\n4. Commit")).toEqual([
-    { line: "context", text: "1. Read" },
-    { line: "del", text: "2. Edit a" },
-    { line: "add", text: "2. Edit b" },
-    { line: "context", text: "3. Test" },
-    { line: "add", text: "4. Commit" },
-  ]);
 });
 
 test("a collapsed file shows only its header", () => {

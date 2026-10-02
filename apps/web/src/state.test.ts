@@ -135,6 +135,27 @@ test("events the snapshot already includes are skipped", () => {
   expect(thread?.turns).toEqual([]);
 });
 
+test("a skill proposal waits as a pending request until answered", () => {
+  const change = {
+    action: "create",
+    skill: "deploy-notes",
+    path: "SKILL.md",
+    before: null,
+    after: "---\nname: deploy-notes\n---\n",
+  } as const;
+  const feeds = [
+    snapshot,
+    event(2, { type: "turn.started", v: 2, threadId, turnId, text: "learn this" }),
+    event(3, { type: "skill.proposed", v: 1, threadId, turnId, requestId: "r1", change }),
+  ];
+  expect(fold(feeds)?.pendingRequests).toMatchObject([{ type: "skill.proposed", requestId: "r1", change }]);
+  const answered = fold([
+    ...feeds,
+    event(4, { type: "approval.resolved", v: 1, threadId, turnId, requestId: "r1", resolution: { decision: "deny" } }),
+  ]);
+  expect(answered?.pendingRequests).toEqual([]);
+});
+
 test("a plan waits as a pending request and leaves a plan item once answered", () => {
   const feeds = [
     snapshot,

@@ -82,6 +82,18 @@ describe("Claude Code adapter", () => {
     expect(spawns).toHaveLength(0);
   });
 
+  test("the profile's skills load as a local plugin, fixed at spawn and without its MCP servers (ADR 0020)", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery();
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query, plugins: [home] });
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "hi", U1))));
+      expect(spawns[0]?.options.plugins).toEqual([{ type: "local", path: home, skipMcpDiscovery: true }]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
   test("a pasted image reaches Claude Code as an image block, and a file as its path, both marked as data", async () => {
     const home = makeTempHome();
     try {

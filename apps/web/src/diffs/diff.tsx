@@ -1,9 +1,10 @@
 import { Tabs } from "@base-ui/react/tabs";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { DiffView, ThreadId, TurnId } from "@verdandi/contracts";
+import { type DiffView, lineDiff, type TextLine, type ThreadId, type TurnId } from "@verdandi/contracts";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Connection } from "../client.ts";
 import { MemoryTab } from "../memory/memory.tsx";
+import { SkillsTab } from "../skills/skills.tsx";
 import type { OpenPanel, Shelf } from "../state.ts";
 import { TerminalTab } from "../terminals/terminal.tsx";
 import { ChevronIcon, CloseIcon } from "../ui/icons.tsx";
@@ -65,38 +66,6 @@ const rowClass: Record<LineKind | "file" | "note", string> = {
   note: "py-1 font-sans italic text-muted",
 };
 
-export type TextLine = { readonly line: "context" | "del" | "add"; readonly text: string };
-
-/** `after` against `before` line by line, shared lines as context: for short texts like a plan. */
-// ponytail: an O(n·m) table of common lines, fine for plans of tens of lines. Upgrade to Myers' diff if it diffs files.
-export const lineDiff = (before: string, after: string): TextLine[] => {
-  const a = before.trimEnd().split(/\r?\n/);
-  const b = after.trimEnd().split(/\r?\n/);
-  const w = b.length + 1;
-  // How many lines a[i..] and b[j..] share, in order.
-  const common = new Uint32Array((a.length + 1) * w);
-  const at = (i: number, j: number) => common[i * w + j] ?? 0;
-  for (let i = a.length - 1; i >= 0; i--)
-    for (let j = b.length - 1; j >= 0; j--) common[i * w + j] = a[i] === b[j] ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1));
-  const lines: TextLine[] = [];
-  let [i, j] = [0, 0];
-  while (i < a.length || j < b.length) {
-    const [x, y] = [a[i], b[j]];
-    if (x !== undefined && x === y) {
-      lines.push({ line: "context", text: x });
-      i++;
-      j++;
-    } else if (x !== undefined && (y === undefined || at(i + 1, j) >= at(i, j + 1))) {
-      lines.push({ line: "del", text: x });
-      i++;
-    } else {
-      lines.push({ line: "add", text: y ?? "" });
-      j++;
-    }
-  }
-  return lines;
-};
-
 const marks: Record<TextLine["line"], string> = { context: " ", del: "-", add: "+" };
 
 /** The user's edit of a plan against the agent's proposal. */
@@ -121,7 +90,7 @@ const tabClass =
   "eyebrow rounded-none border-0 border-b-2 border-transparent bg-transparent px-1 text-muted hover:bg-transparent hover:text-fg data-active:border-fg data-active:text-fg";
 
 /**
- * The right panel: the Diff, Terminal and Memory tabs. The diff is fetched when asked, never on its own,
+ * The right panel: the Diff, Terminal, Memory and Skills tabs. The diff is fetched when asked, never on its own,
  * and renders only the rows in view. `turnLabel` names `panel.turnId`. Escape closes the panel, except
  * inside a terminal, where it goes to the shell.
  */
@@ -166,7 +135,9 @@ export const SidePanel = ({
     >
       <Tabs.Root
         value={panel.tab}
-        onValueChange={(tab) => (tab === "terminal" || tab === "memory" ? onTab(tab) : onFetch(panel.turnId, panel.all))}
+        onValueChange={(tab) =>
+          tab === "terminal" || tab === "memory" || tab === "skills" ? onTab(tab) : onFetch(panel.turnId, panel.all)
+        }
         className="flex min-w-0 flex-1 flex-col"
       >
         <div className="flex min-h-14 items-center justify-between border-b border-line px-4">
@@ -179,6 +150,9 @@ export const SidePanel = ({
             </Tabs.Tab>
             <Tabs.Tab value="memory" className={tabClass}>
               Memory
+            </Tabs.Tab>
+            <Tabs.Tab value="skills" className={tabClass}>
+              Skills
             </Tabs.Tab>
           </Tabs.List>
           <button type="button" className="border-transparent bg-transparent px-2 text-xs text-muted hover:text-fg" onClick={onClose}>
@@ -226,6 +200,9 @@ export const SidePanel = ({
         </Tabs.Panel>
         <Tabs.Panel value="memory" className="flex min-h-0 flex-1 flex-col">
           <MemoryTab connection={connection} threadId={threadId} />
+        </Tabs.Panel>
+        <Tabs.Panel value="skills" className="flex min-h-0 flex-1 flex-col">
+          <SkillsTab connection={connection} />
         </Tabs.Panel>
       </Tabs.Root>
     </aside>

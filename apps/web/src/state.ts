@@ -104,6 +104,8 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "decision.recorded": (thread) => thread, // logged for the lab; the route shows through task.started
   "approval.requested": addRequest,
   "user-input.requested": addRequest,
+  "skill.proposed": addRequest,
+  "skill.applied": (thread) => thread, // the skill is on disk; the Skills tab reads it from there
   "plan.requested": (thread, e) =>
     addRequest(
       addItem(thread, e.turnId, {
@@ -245,13 +247,13 @@ export const groupByRecency = (threads: readonly ThreadSummary[], now: Date) => 
 };
 
 /**
- * The right panel, on its Diff, Terminal or Memory tab. The diff is what `turnId` changed, or with `all` everything since
+ * The right panel, on its Diff, Terminal, Memory or Skills tab. The diff is what `turnId` changed, or with `all` everything since
  * the thread's first turn. `turnId` is kept while `all` is on, so switching back shows the same turn. Each fetch
  * has its own `request`, and a result for any other request is dropped, so a slow answer never
- * replaces a newer one. Opened on the Terminal or Memory tab, no diff is fetched (`request` is empty) until the Diff tab is chosen.
+ * replaces a newer one. Opened on another tab, no diff is fetched (`request` is empty) until the Diff tab is chosen.
  */
 /** The panel's tabs that fetch nothing when opened: they load their own content. */
-export type Shelf = "terminal" | "memory";
+export type Shelf = "terminal" | "memory" | "skills";
 
 export type Panel =
   | { readonly open: false }

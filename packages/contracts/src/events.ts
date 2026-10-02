@@ -7,6 +7,7 @@ import { MemoryScope } from "./memory.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInputs } from "./routing.ts";
+import { SkillAction, SkillChange } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 import { TaskRating } from "./task.ts";
 
@@ -465,6 +466,35 @@ export const MemorySnapshotTaken = Schema.Struct({
   turnId: TurnId,
   text: Schema.String,
 });
+/**
+ * The agent of running turn `turnId` proposed `change` to a profile skill with `skill_manage` (DESIGN §14.4), and
+ * waits for the user to allow or deny it with `approval.resolved`: a pending request, like an approval. Scanned
+ * before it was recorded; nothing is written until it is allowed.
+ */
+export const SkillProposed = Schema.Struct({
+  type: Schema.Literal("skill.proposed"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  requestId: Schema.String,
+  change: SkillChange,
+});
+/**
+ * The reactor wrote the allowed proposal `requestId` to the profile's skills folder, or `error` says why it
+ * couldn't (the file changed since it was proposed, a guard refused the path). With `skill.proposed` and its
+ * `approval.resolved`, the skill's provenance: who proposed what, in which turn, and who allowed it.
+ */
+export const SkillApplied = Schema.Struct({
+  type: Schema.Literal("skill.applied"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  requestId: Schema.String,
+  action: SkillAction,
+  skill: Schema.String,
+  path: Schema.String,
+  error: Schema.optionalKey(Schema.String),
+});
 /** `limit`: a budget guard of the task (its `maxCost` or `maxTurns`) stopped the turn, which ends the task. */
 export const TurnStatus = Schema.Literals(["success", "error", "interrupted", "limit"]);
 export const TurnCompleted = Schema.Struct({
@@ -520,6 +550,8 @@ export const Event = Schema.Union([
   MemoryEdited,
   MemoryDeleted,
   MemorySnapshotTaken,
+  SkillProposed,
+  SkillApplied,
 ]);
 export type Event = typeof Event.Type;
 
@@ -591,6 +623,8 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "memory.edited@1": MemoryEdited,
   "memory.deleted@1": MemoryDeleted,
   "memory.snapshot.taken@1": MemorySnapshotTaken,
+  "skill.proposed@1": SkillProposed,
+  "skill.applied@1": SkillApplied,
 };
 
 /** The row shape an event is stored as. */

@@ -10,7 +10,16 @@ import { SqlLive } from "./db.ts";
 import { Engine, EngineLive } from "./engine.ts";
 import { migrations } from "./migrations.ts";
 import { loadThreadView, project } from "./projector.ts";
-import { AttachmentsDir, HarnessRegistry, ProjectEscalation, Reactor, ReactorLive, ToolSettings, WorktreesDir } from "./reactor.ts";
+import {
+  AttachmentsDir,
+  HarnessRegistry,
+  ProfileSkills,
+  ProjectEscalation,
+  Reactor,
+  ReactorLive,
+  ToolSettings,
+  WorktreesDir,
+} from "./reactor.ts";
 
 const homes: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];
@@ -494,6 +503,7 @@ describe("engine", () => {
       Layer.provideMerge(Layer.succeed(ToolSettings, { approveMemorySaves: false, memoryNudgeEvery: 0 })),
       Layer.provideMerge(Layer.succeed(ProjectEscalation, () => Effect.succeed({ verifiers: [], repeatedErrors: 0 }))),
       Layer.provideMerge(Layer.succeed(Decide, rulesDecide)),
+      Layer.provideMerge(Layer.succeed(ProfileSkills, { profile: "unused", extra: [] })),
       Layer.provideMerge(SqlLive(newHome())),
     );
     const runtime = ManagedRuntime.make(layer);

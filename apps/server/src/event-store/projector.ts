@@ -38,7 +38,12 @@ type Projection<T extends Event["type"]> = (
 
 const withSql = <A>(f: (sql: SqlClient.SqlClient) => Effect.Effect<A, SqlError.SqlError>) => Effect.flatMap(SqlClient.SqlClient, f);
 
-const requestKind = { "approval.requested": "approval", "user-input.requested": "user-input", "plan.requested": "plan" } as const;
+const requestKind = {
+  "approval.requested": "approval",
+  "user-input.requested": "user-input",
+  "plan.requested": "plan",
+  "skill.proposed": "skill",
+} as const;
 
 const insertRequest = (e: Extract<Event, { type: keyof typeof requestKind }>, at: string) =>
   withSql(
@@ -244,6 +249,9 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     ),
   "approval.requested": insertRequest,
   "user-input.requested": insertRequest,
+  "skill.proposed": insertRequest,
+  // Provenance only: the skill itself is on disk.
+  "skill.applied": () => Effect.void,
   "plan.requested": (e, at) =>
     Effect.andThen(
       addItem(e.turnId, {

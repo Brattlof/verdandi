@@ -4,9 +4,11 @@ import type { Screen, ToolAt, ToolFailed } from "./define.ts";
 import { type MemoryServices, memorySaveTool, memorySearchTool } from "./memory.ts";
 import { reportBlockedTool } from "./report-blocked.ts";
 import { sessionSearchTool } from "./session-search.ts";
+import { type ProposeSkill, skillManageTool } from "./skill-manage.ts";
 
 export { type Args, defineTool, type Screen, type ToolAt, ToolFailed } from "./define.ts";
 export { hitsForAgent } from "./session-search.ts";
+export type { ProposeSkill, SkillEdit } from "./skill-manage.ts";
 
 /** What Verdandi's tools need from verdandid. */
 export type ToolServices = {
@@ -17,6 +19,8 @@ export type ToolServices = {
   readonly approveMemorySaves: boolean;
   /** Scans the search tools' results for injection before the agent gets them. */
   readonly screen: Screen;
+  /** Proposes a skill change and waits for the user's answer (DESIGN §14.4). */
+  readonly proposeSkill: ProposeSkill;
 };
 
 /** Every Verdandi tool, in a fixed order: harnesses serve this list unchanged for a session's life (DESIGN §9.6). */
@@ -25,4 +29,5 @@ export const verdandiTools = (services: ToolServices): readonly HarnessTool[] =>
   reportBlockedTool(services.block),
   memorySaveTool(services.memory, services.approveMemorySaves),
   memorySearchTool(services.memory, services.screen),
+  skillManageTool(services.proposeSkill),
 ];

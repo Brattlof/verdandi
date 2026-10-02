@@ -8,6 +8,7 @@ import { MemoryScope } from "./memory.ts";
 import { Resolution } from "./requests.ts";
 import { InteractionMode, Route } from "./route.ts";
 import { BudgetMode } from "./routing.ts";
+import { SkillAction, SkillChange } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 import { TaskRating } from "./task.ts";
 import { WorktreeReport } from "./worktree.ts";
@@ -239,6 +240,31 @@ export const MemoryDelete = Schema.Struct({
   entryId: Schema.String,
 });
 
+/**
+ * Internal: the agent of running turn `turnId` proposes `change` to a profile skill (`skill_manage`, DESIGN §14.4).
+ * verdandid read the file as it is (`before`) and checked the path didn't leave the skills folder; the decider checks
+ * the change and scans it, then records it as a pending request. Its id is the command's. Clients cannot send it.
+ */
+export const SkillPropose = Schema.Struct({
+  type: Schema.Literal("skill.propose"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  change: SkillChange,
+});
+/** Internal: the reactor reporting that it wrote the allowed skill proposal `requestId`, or why it couldn't. */
+export const SkillReport = Schema.Struct({
+  type: Schema.Literal("skill.report"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  requestId: Schema.String,
+  action: SkillAction,
+  skill: Schema.String,
+  path: Schema.String,
+  error: Schema.optionalKey(Schema.String),
+});
+
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
   type: Schema.Literal("harness.report"),
@@ -357,5 +383,7 @@ export const Command = Schema.Union([
   TaskEscalate,
   InjectionFlag,
   TurnRecover,
+  SkillPropose,
+  SkillReport,
 ]);
 export type Command = typeof Command.Type;

@@ -8,6 +8,7 @@ import { attachmentsDir } from "./attachments/attachments.ts";
 import { alive, flag, resolveHome, type ServerFile, serverFile } from "./home/home.ts";
 import { hostProblem, isLocalAddress, startLanGate } from "./rpc/lan-gate.ts";
 import { ServerInfo, ServerLayer } from "./rpc/server.ts";
+import { skillsPlugin } from "./skills/skills-config.ts";
 
 const claudeMissing: HarnessAdapter = {
   id: "claude-code",
@@ -42,7 +43,9 @@ export const start = async (argv: readonly string[]) => {
   }
   const claudePath = findClaude();
   const harnesses: Partial<Record<HarnessId, HarnessAdapter>> = {
-    "claude-code": claudePath ? makeClaudeCodeAdapter({ claudePath, additionalDirectories: [attachmentsDir(home)] }) : claudeMissing,
+    "claude-code": claudePath
+      ? makeClaudeCodeAdapter({ claudePath, additionalDirectories: [attachmentsDir(home)], plugins: [skillsPlugin(home)] })
+      : claudeMissing,
     // The fake harness answers without any model call: for trying the loop end to end.
     ...(argv.includes("--dev-fake-harness") ? { fake: makeFakeHarness() } : {}),
   };
