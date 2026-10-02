@@ -55,7 +55,7 @@ const setup = async (verifiers?: string[]) => {
       }),
     );
   };
-  return { projectPath, turn };
+  return { projectPath, turn, dispatch, runtime };
 };
 
 const verifierItems = (items: readonly Item[] | undefined) => (items ?? []).filter((i) => i.kind === "verifier");
@@ -94,4 +94,54 @@ test("a project without verifiers runs none", async () => {
   const { projectPath, turn } = await setup();
   const { turn: t } = await turn(`edit ${join(projectPath, "a.txt")}`);
   expect(verifierItems(t?.items)).toEqual([]);
+});
+
+test("a steer sent while the verifiers run is rejected, not dropped", async () => {
+  // The verifier calls in when it starts and finishes when the test answers, so nothing waits on a clock.
+  let started!: () => void;
+  const verifying = new Promise<void>((r) => {
+    started = r;
+  });
+  const release = Promise.withResolvers<Response>();
+  const server = Bun.serve({
+    port: 0,
+    fetch: () => {
+      started();
+      return release.promise;
+    },
+  });
+  try {
+    const verifier = `"${process.execPath}" -e "await fetch('http://127.0.0.1:${server.port}')"`;
+    const { projectPath, dispatch, runtime } = await setup([verifier]);
+    const turnId = id<TurnId>();
+    await dispatch({
+      type: "turn.send",
+      commandId: id<CommandId>(),
+      threadId,
+      turnId,
+      text: `edit ${join(projectPath, "a.txt")}`,
+      mode: "build",
+    });
+    await verifying;
+    const steered = await dispatch({ type: "turn.steer", commandId: id<CommandId>(), threadId, turnId, text: "also b.txt" }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(steered).toMatchObject({
+      reason: "TurnVerifying",
+      message:
+        "The agent has finished this turn and Verdandi is running the project's verifiers, so the turn can't be steered. Send your message as a new turn once they finish.",
+    });
+    release.resolve(new Response("ok"));
+    const t = await runtime.runPromise(
+      Effect.gen(function* () {
+        yield* (yield* Reactor).drain;
+        return (yield* loadThreadView(threadId))?.turns.at(-1);
+      }),
+    );
+    expect(t?.status).toBe("success");
+    expect(t?.items.some((i) => i.kind === "user.steer")).toBe(false);
+  } finally {
+    server.stop(true);
+  }
 });

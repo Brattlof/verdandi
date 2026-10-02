@@ -172,6 +172,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "thread.worktree.setup.ran": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
   "thread.worktree.removal.requested": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
   "thread.worktree.removed": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
+  "verifiers.started": (thread) => thread, // only closes the turn to steers, which the server refuses
   "verifier.ran": (thread, { type: _, v: _v, threadId: _t, turnId, ...run }) => addItem(thread, turnId, { kind: "verifier", ...run }),
 };
 

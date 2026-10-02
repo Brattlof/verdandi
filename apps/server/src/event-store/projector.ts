@@ -291,6 +291,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "thread.worktree.setup.ran": projectWorktree,
   "thread.worktree.removal.requested": projectWorktree,
   "thread.worktree.removed": projectWorktree,
+  "verifiers.started": (e) => withSql((sql) => sql`update turns set verifying = 1 where id = ${e.turnId}`),
   "verifier.ran": ({ type: _, v: _v, threadId: _t, turnId, ...run }) => addItem(turnId, { kind: "verifier", ...run }),
   // A plan approved with the user's edit keeps both versions on its item.
   "approval.resolved": (e, at) =>
@@ -350,6 +351,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         path: string;
         route: string;
         running_turn_id: string | null;
+        verifying: number | null;
         session_id: string | null;
         task_id: TaskId | null;
         pinned: number;
@@ -366,7 +368,8 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         session_first_turn: TurnId | null;
         revert: string | null;
       }>`
-        select t.project_id, p.path, t.route, t.running_turn_id, t.session_id, t.task_id, t.pinned, t.budget_mode, t.worktree,
+        select t.project_id, p.path, t.route, t.running_turn_id, t.session_id,
+          (select verifying from turns where id = t.running_turn_id) as verifying, t.task_id, t.pinned, t.budget_mode, t.worktree,
           t.pending_fork is not null as pending_fork, t.session_first_turn, t.revert,
           t.archived_at is not null as archived,
           (select count(*) from turns n where n.thread_id = t.id) as turns,
@@ -402,6 +405,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           projectPath: row.path,
           route: JSON.parse(row.route) as Route,
           runningTurnId: row.running_turn_id,
+          verifying: row.verifying === 1,
           sessionId: row.session_id,
           taskId: row.task_id,
           turns: row.turns,

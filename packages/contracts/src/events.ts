@@ -246,6 +246,16 @@ export const SpendCapRaised = Schema.Struct({
   toUsd: Schema.Number,
 });
 /**
+ * Turn `turnId`'s agent finished after changing files, and Verdandi is about to run the project's verifiers before the
+ * turn completes (DESIGN §8.7). From here the turn takes no more steers: its agent can't read them.
+ */
+export const VerifiersStarted = Schema.Struct({
+  type: Schema.Literal("verifiers.started"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+});
+/**
  * Verdandi ran one of the project's verifiers after turn `turnId`'s agent finished changing files, before the
  * turn completed. Projected as a `verifier` item of that turn; the task's outcome reads it (DESIGN §8.7, §8.8).
  */
@@ -443,6 +453,7 @@ export const Event = Schema.Union([
   TurnCompleted,
   DecisionRecorded,
   SpendCapRaised,
+  VerifiersStarted,
   VerifierRan,
   TaskEscalated,
   ThreadWorktreeRequested,
@@ -510,6 +521,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "turn.completed@1": TurnCompleted,
   "decision.recorded@1": DecisionRecorded,
   "spend.cap.raised@1": SpendCapRaised,
+  "verifiers.started@1": VerifiersStarted,
   "verifier.ran@1": VerifierRan,
   "task.escalated@2": TaskEscalated,
   "thread.worktree.requested@1": ThreadWorktreeRequested,
