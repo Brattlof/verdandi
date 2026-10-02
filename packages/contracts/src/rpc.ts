@@ -7,7 +7,7 @@ import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { AccessMode, Item, Quota, Usage } from "./items.ts";
 import { MemoryView } from "./memory.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
-import { BudgetMode, RouteDecision, RouteTarget, TaskClass } from "./routing.ts";
+import { BudgetMode, CatalogModel, RouteDecision, TaskClass } from "./routing.ts";
 import { SessionHit, SessionQuery } from "./search.ts";
 import { SpendCap } from "./spend.ts";
 import { RouteCost, TaskRating } from "./task.ts";
@@ -288,8 +288,11 @@ export class Api extends RpcGroup.make(
   Rpc.make("Unsubscribe", { payload: { subscriptionId: Schema.String } }),
   /** The harnesses this verdandid runs, so clients offer only those. */
   Rpc.make("HarnessesList", { success: Schema.Array(HarnessId) }),
-  /** The catalog's models on the harnesses this verdandid runs: the names a message can pin its task to with `@name`. */
-  Rpc.make("ModelsList", { success: Schema.Array(RouteTarget) }),
+  /**
+   * The catalog's models on the harnesses this verdandid runs, with their effort levels: the names a message can pin its
+   * task to with `@name`, and the route picker's choices.
+   */
+  Rpc.make("ModelsList", { success: Schema.Array(CatalogModel) }),
   /** What `turnId` changed in the project, or without it, everything since the thread's first turn. */
   Rpc.make("DiffGet", {
     payload: { threadId: ThreadId, turnId: Schema.optionalKey(TurnId) },

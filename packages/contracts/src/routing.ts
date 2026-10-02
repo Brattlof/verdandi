@@ -49,6 +49,10 @@ export const CatalogEntry = Schema.Struct({
 });
 export type CatalogEntry = typeof CatalogEntry.Type;
 
+/** A catalog model as clients offer it: its target and the effort levels it takes. */
+export const CatalogModel = Schema.Struct({ ...RouteTarget.fields, efforts: Schema.Array(Effort) });
+export type CatalogModel = typeof CatalogModel.Type;
+
 /** What these tokens cost at `price`, a catalog entry's $/MTok list prices. */
 export const listCost = (
   price: CatalogEntry["price"],

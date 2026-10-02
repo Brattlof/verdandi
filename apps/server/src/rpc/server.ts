@@ -91,7 +91,13 @@ const Handlers = (home: string) =>
           Effect.succeed(
             catalogFor(registry)
               .filter((e) => harnesses.includes(e.harness))
-              .map(({ harness, provider, model, access }) => ({ harness, provider, model, access })),
+              .map(({ harness, provider, model, access, efforts }) => ({
+                harness,
+                provider,
+                model,
+                access,
+                efforts,
+              })),
           ),
         DiffGet: ({ threadId, turnId }) =>
           threadDiff(threadId, turnId).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
