@@ -73,7 +73,9 @@ export const App = ({ connection }: { connection: Connection }) => {
     let current = true;
     const stop = connection.follow(
       (rpc, subscriptionId) => rpc.ProjectsSubscribe({ subscriptionId, archived }),
-      (feed) => current && sidebar.set(applyProjectsFeed(sidebar.get(), feed, archived)),
+      (feed) => {
+        if (current) sidebar.set(applyProjectsFeed(sidebar.get(), feed, archived));
+      },
       () => {},
     );
     return () => {

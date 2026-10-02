@@ -32,11 +32,17 @@ export type TerminalView = typeof TerminalView.Type;
 
 /**
  * A terminal's output as UTF-8 text with its escape sequences, for a terminal emulator to render.
- * The snapshot replays the output kept for reattaching (the last ~256 KiB); live output follows, a message per ~16 ms frame.
+ * The snapshot replays the output kept for reattaching (the last ~256 KiB); live output follows, a message per ~16 ms
+ * frame or, for a client that reads slower than that, all that has come since it last read.
  */
 export const TerminalFeed = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("snapshot"), terminal: TerminalView, output: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal("output"), data: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("output"),
+    data: Schema.String,
+    /** Characters of output skipped just before `data`, because this client read too slowly to keep up; the client shows a marker. */
+    skipped: Schema.optionalKey(Schema.Int),
+  }),
   /** The shell exited, or was lost with the PTY host. */
   Schema.Struct({ kind: Schema.Literal("ended"), terminal: TerminalView }),
 ]);
