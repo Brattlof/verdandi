@@ -1,23 +1,36 @@
 import type { HarnessId, RouteCost, ThreadId } from "@verdandi/contracts";
-import { buildTaskOutcomes } from "@verdandi/trajectories";
+import { buildTaskOutcomes, outcomeEventTypes } from "@verdandi/trajectories";
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { decodeRows, type StoredEventRow } from "./trajectory.ts";
 
 /**
- * Rebuilds the outcomes of a thread's tasks from its events and saves them (DESIGN §8.8). Like
- * trajectories, an output never read back into state. Each outcome keeps the last event it was built
- * from, and only a newer one replaces it, so running this twice, or two at once, is harmless.
+ * Rebuilds the outcomes of a thread's tasks from its events and saves them (DESIGN §8.8). Like trajectories, an
+ * output never read back into state. It starts at the oldest task whose outcome can still change: the latest; one
+ * built before the next task started (a follow-up's correction, recorded before that task, counts against it); one
+ * without an outcome; or the first, when the user rated a task or reverted turns since the thread's last rebuild.
+ * Each outcome keeps the last event it was built from, and only a newer one replaces it, so running this twice, or
+ * two at once, is harmless.
+ * ponytail: still reads all of the current task's events: 18 ms median, 25 ms p95 for a 1,000-turn task on an M4 Pro
+ * (`apps/server/scripts/bench-rebuilds.ts`, #140). Upgrade to folding only the events since its last outcome, from a saved
+ * builder state, if tasks that long show up.
  */
 export const recordTaskOutcomes = (threadId: ThreadId) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    // ponytail: reads the thread's events since its first task on every turn end, O(thread length).
-    // Upgrade to starting at the oldest task whose outcome can still change once threads grow long.
     const events = yield* decodeRows(
       yield* sql<StoredEventRow>`
+        with built as (
+          select max(o.seq) as seq from task_outcomes o join tasks k on k.id = o.task_id where k.thread_id = ${threadId}),
+        start as (
+          select min(k.seq) as seq from tasks k left join task_outcomes o on o.task_id = k.id
+          where k.thread_id = ${threadId} and (
+            o.seq is null
+            or o.seq < coalesce((select min(n.seq) from tasks n where n.thread_id = ${threadId} and n.seq > k.seq), o.seq + 1)
+            or exists (select 1 from events e where e.thread_id = ${threadId} and e.seq > (select seq from built)
+              and e.type in ('task.rated', 'thread.reverted', 'thread.revert.undone'))))
         select seq, event_id, command_id, at, type, v, payload from events
-        where thread_id = ${threadId} and seq >= (select min(seq) from tasks where thread_id = ${threadId})
+        where thread_id = ${threadId} and type in ${sql.in([...outcomeEventTypes])} and seq >= (select seq from start)
         order by seq`,
     );
     const seq = events.at(-1)?.seq;

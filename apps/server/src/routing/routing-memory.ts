@@ -15,7 +15,8 @@ const counted: Partial<Record<TaskStatus, "completed" | "failed" | "escalated" |
 /**
  * The routing memory of `threadId`'s project (DESIGN §8.8, level 1): how its routed and pinned tasks went,
  * per task class and route, from their outcomes since the memory was last cleared.
- * ponytail: rebuilt from every outcome in the project on each new task; upgrade to a running tally if projects grow large.
+ * ponytail: rebuilt from every outcome in the project on each new task: 8 ms median, 14 ms p95 at 5,000 tasks on an
+ * M4 Pro (`apps/server/scripts/bench-rebuilds.ts`, #140). Upgrade to a running per-class, per-route tally once it passes ~20 ms.
  */
 export const loadRoutingMemory = (threadId: ThreadId) =>
   Effect.flatMap(SqlClient.SqlClient, (sql) =>

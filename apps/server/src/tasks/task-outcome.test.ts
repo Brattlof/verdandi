@@ -146,3 +146,34 @@ test("a rating reaches its task's outcome, an earlier task's too, and clearing i
   expect(result.cleared).toEqual([undefined, undefined]);
   expect(result.foreign.reason).toBe("TaskNotFound");
 });
+
+test("a turn end rebuilds only the outcomes it can change, and a correction counts against the task before it", async () => {
+  const threadId = uuid<ThreadId>();
+  const built = Effect.flatMap(
+    SqlClient.SqlClient,
+    (sql) =>
+      sql<{ seq: number; payload: string }>`select o.seq, o.payload from task_outcomes o join tasks k on k.id = o.task_id order by k.seq`,
+  ).pipe(
+    Effect.map((rows) =>
+      rows.map((r) => ({ seq: r.seq, outcome: Schema.decodeUnknownSync(Schema.fromJsonString(TaskOutcome))(r.payload) })),
+    ),
+  );
+  const result = await withApp(
+    newHome(),
+    Effect.gen(function* () {
+      yield* create(threadId);
+      yield* runTurn(threadId, "hi");
+      yield* dispatch({ type: "thread.route.set", commandId: uuid(), threadId, route: { ...route, model: "fake-2" } });
+      // Starts the second task; the decision layer calls it a correction of the first task's answer.
+      yield* runTurn(threadId, "No, that's not what I asked for");
+      const corrected = yield* built;
+      yield* runTurn(threadId, "hi");
+      return { corrected, later: yield* built };
+    }),
+  );
+  // The route override and the correction: two.
+  expect(result.corrected.map((r) => r.outcome.implicitSatisfaction)).toEqual([-1, 1]);
+  expect(result.later.map((r) => r.outcome.turns)).toEqual([1, 2]);
+  expect(result.later[0]?.seq).toBe(result.corrected[0]?.seq);
+  expect(result.later[1]?.seq).toBeGreaterThan(result.corrected[1]?.seq ?? Infinity);
+});
