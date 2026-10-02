@@ -5,7 +5,7 @@ import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-a
 import type { HarnessRunInput, HarnessTool, InteractionMode, Route, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Fiber, Stream } from "effect";
-import { makeClaudeCodeAdapter, type QueryFn } from "./adapter.ts";
+import { makeClaudeCodeAdapter, promptContent, type QueryFn } from "./adapter.ts";
 import { assistant, init, result, sessionState, textDelta, toolResult, turn1Usage, turn2Usage } from "./fixtures.ts";
 
 const U1 = "00000000-0000-4000-8000-000000000001";
@@ -730,4 +730,13 @@ describe("Claude Code adapter", () => {
       removeTempHome(home);
     }
   });
+});
+
+test("the memory snapshot leads the turn's message and the memory nudge follows it, each a block of its own", () => {
+  expect(promptContent({ text: "hi" })).toBe("hi");
+  expect(promptContent({ text: "hi", memory: "<verdandi-memory>…</verdandi-memory>", nudge: "save?" })).toEqual([
+    { type: "text", text: "<verdandi-memory>…</verdandi-memory>" },
+    { type: "text", text: "hi" },
+    { type: "text", text: "save?" },
+  ]);
 });

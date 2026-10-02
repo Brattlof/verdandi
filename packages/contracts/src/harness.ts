@@ -121,6 +121,11 @@ export type HarnessRunInput = {
    * the turn's own). Absent when there's nothing to remember, and on every later turn.
    */
   readonly memory?: string;
+  /**
+   * A one-line reminder to consider saving memory, on every Nth turn of a thread (DESIGN §14.2): put it after the
+   * turn's own message, never in the system prompt (Claude Code: a text block after the turn's; fake: records it).
+   */
+  readonly nudge?: string;
   readonly fork?: { readonly atTurnId: TurnId; readonly dropTurnIds: readonly TurnId[]; readonly transcriptPath?: string };
 };
 

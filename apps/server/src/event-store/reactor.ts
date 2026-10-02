@@ -24,6 +24,7 @@ import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream }
 import { SqlClient } from "effect/unstable/sql";
 import { checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
 import { editedPaths } from "../diffs/diff.ts";
+import { memoryNudge } from "../memory/memory.ts";
 import { searchSessions } from "../search/search.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "../tasks/task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "../tasks/trajectory.ts";
@@ -36,8 +37,14 @@ export class HarnessRegistry extends Context.Service<HarnessRegistry, Partial<Re
   "verdandi/HarnessRegistry",
 ) {}
 
-/** How Verdandi's tools behave in this profile: whether the user approves each memory save (`memory.yaml`). */
-export class ToolSettings extends Context.Service<ToolSettings, { readonly approveMemorySaves: boolean }>()("verdandi/ToolSettings") {}
+/**
+ * How Verdandi's tools behave in this profile (`memory.yaml`): whether the user approves each memory save, and every
+ * how many turns of a thread the turn nudges the agent to save memory (0 never).
+ */
+export class ToolSettings extends Context.Service<
+  ToolSettings,
+  { readonly approveMemorySaves: boolean; readonly memoryNudgeEvery: number }
+>()("verdandi/ToolSettings") {}
 
 /** Where the profile keeps threads' git worktrees, as `<repo>/<branch>` (DESIGN §13). */
 export class WorktreesDir extends Context.Service<WorktreesDir, string>()("verdandi/WorktreesDir") {}
@@ -206,10 +213,12 @@ export const ReactorLive = Layer.effect(
           task_id: TaskId | null;
           limits: string | null;
           spent_usd: number;
+          turn_number: number;
         }>`
           select t.route, t.session_id, p.path, t.worktree, t.pending_fork, t.memory_snapshot, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
             (select total(u.cost_usd) from usage_ledger u join turns n on n.id = u.turn_id
-              where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId}) as spent_usd
+              where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId}) as spent_usd,
+            (select count(*) from turns n where n.thread_id = t.id and n.rowid <= (select rowid from turns where id = ${turnId})) as turn_number
           from threads t join projects p on p.id = t.project_id
             left join tasks k on k.id = t.task_id left join route_decisions d on d.task_id = t.task_id
           where t.id = ${threadId}`;
@@ -228,6 +237,7 @@ export const ReactorLive = Layer.effect(
           thread.limits && thread.task_id
             ? { ...(JSON.parse(thread.limits) as TaskLimits), taskId: thread.task_id, spentUsd: thread.spent_usd }
             : undefined;
+        const nudge = memoryNudge(thread.turn_number, toolSettings.memoryNudgeEvery);
         // The turn's file-tool calls: once its agent is done, a turn that changed files is verified before it completes.
         const calls: Item[] = [];
         yield* adapter
@@ -244,6 +254,8 @@ export const ReactorLive = Layer.effect(
             tools,
             // The snapshot a new session starts with goes to its first turn only (DESIGN §14.2).
             ...memoryFor(thread.memory_snapshot, turnId),
+            // Every Nth turn of the thread nudges the agent to save memory, in the turn's message, never the system prompt.
+            ...(nudge && { nudge }),
             ...(limits && { limits }),
             // A revert waits to fork the conversation until this turn (ADR 0004).
             ...(thread.pending_fork && {

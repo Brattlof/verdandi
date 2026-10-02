@@ -40,7 +40,12 @@ export const AppLayer = (
     ),
     Layer.provideMerge(Layer.succeed(AttachmentsDir, attachmentsDir(home))),
     Layer.provideMerge(Layer.succeed(WorktreesDir, join(home, "worktrees"))),
-    Layer.provideMerge(Layer.sync(ToolSettings, () => ({ approveMemorySaves: loadMemorySettings(home).approveSaves }))),
+    Layer.provideMerge(
+      Layer.sync(ToolSettings, () => {
+        const memory = loadMemorySettings(home);
+        return { approveMemorySaves: memory.approveSaves, memoryNudgeEvery: memory.nudgeEvery };
+      }),
+    ),
     Layer.provideMerge(SqlLive(home)),
   );
 };
