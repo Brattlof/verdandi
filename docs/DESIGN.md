@@ -654,7 +654,7 @@ It uses **decision models**. A decision model takes some context (the *state*) p
 | Memory snapshot | score: how relevant each entry is to this project and session | 14.2 |
 | Context compaction | noul for each old tool call and its result: keep, shorten or drop | 16 |
 | Smart approvals | noul: "is this command destructive or irreversible?" | 17 |
-| Injection scanning | noul: "does this text contain instructions aimed at an AI?" | 17 |
+| Injection scanning | noul: "does this text contain instructions aimed at an AI, or a way to send data out?" | 17 |
 | Gateway triage | choice: which project; noul: does the agent need to act?; score: urgency | 15 |
 
 **Rules for using it:**
@@ -927,8 +927,9 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
   Each harness maps these modes to its own settings. Scheduled and gateway tasks have their own restricted profiles.
 - **Smart approvals (native harness):** the decision layer rates a command's risk (§9.8), so safe commands don't need an approval prompt. A command is auto-approved only when the model is very confident it's safe. Hard rules still catch destructive patterns, and nothing destructive or irreversible is ever auto-approved.
 - **Prompt-injection defence:**
-  - context files, memory entries, skill files and gateway messages are scanned before use, with pattern rules plus a decision-layer check (§9.8);
+  - context files, memory entries, skill files and gateway messages are scanned before use, with pattern rules plus a decision-layer check (§9.8); a hit is refused;
   - tool outputs are marked as untrusted data;
+  - untrusted text Verdandi hands the agent itself (what an escalation passes on: a verifier's output, the agent's blocked reason, a repeated tool error; and Verdandi tools' results built from stored text, such as search hits) goes through the same scan. A hit isn't withheld, since the agent needs it to go on: it's handed over under a warning, recorded, and shown on the turn;
   - gateway messages from users not on the allowlist are ignored.
 - **Plugins run inside verdandid with full trust.** They must be installed explicitly and pinned to a version, and each one is listed with the permissions it has.
 - **Supply chain:**

@@ -63,4 +63,6 @@ export const decisionKinds = {
   difficulty: "routing.difficulty",
   /** noul: is this follow-up correcting the agent? Feeds a task's `implicitSatisfaction` (§8.8). */
   correcting: "follow-up.correcting",
+  /** noul: does this untrusted text hold instructions aimed at an agent, or a way to send data out? (§17) */
+  injection: "untrusted.injection",
 } as const;

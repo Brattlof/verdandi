@@ -1,11 +1,11 @@
 import type { HarnessTool, SessionHit } from "@verdandi/contracts";
 import type { Effect } from "effect";
-import type { ToolAt, ToolFailed } from "./define.ts";
+import type { Screen, ToolAt, ToolFailed } from "./define.ts";
 import { type MemoryServices, memorySaveTool, memorySearchTool } from "./memory.ts";
 import { reportBlockedTool } from "./report-blocked.ts";
 import { sessionSearchTool } from "./session-search.ts";
 
-export { type Args, defineTool, type ToolAt, ToolFailed } from "./define.ts";
+export { type Args, defineTool, type Screen, type ToolAt, ToolFailed } from "./define.ts";
 export { hitsForAgent } from "./session-search.ts";
 
 /** What Verdandi's tools need from verdandid. */
@@ -15,12 +15,14 @@ export type ToolServices = {
   readonly memory: MemoryServices;
   /** The user approves each memory save (DESIGN §14.2). */
   readonly approveMemorySaves: boolean;
+  /** Scans the search tools' results for injection before the agent gets them. */
+  readonly screen: Screen;
 };
 
 /** Every Verdandi tool, in a fixed order: harnesses serve this list unchanged for a session's life (DESIGN §9.6). */
 export const verdandiTools = (services: ToolServices): readonly HarnessTool[] => [
-  sessionSearchTool(services.search),
+  sessionSearchTool(services.search, services.screen),
   reportBlockedTool(services.block),
   memorySaveTool(services.memory, services.approveMemorySaves),
-  memorySearchTool(services.memory),
+  memorySearchTool(services.memory, services.screen),
 ];

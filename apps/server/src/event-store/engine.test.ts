@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Command, CommandId, InteractionMode, Resolution, StoredEvent, ThreadId, TurnId } from "@verdandi/contracts";
+import { Decide } from "@verdandi/decisions";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { rulesDecide } from "../routing/routing.ts";
 import { AppLayer } from "./app.ts";
 import { SqlLive } from "./db.ts";
 import { Engine, EngineLive } from "./engine.ts";
@@ -491,6 +493,7 @@ describe("engine", () => {
       Layer.provideMerge(Layer.succeed(WorktreesDir, "unused")),
       Layer.provideMerge(Layer.succeed(ToolSettings, { approveMemorySaves: false, memoryNudgeEvery: 0 })),
       Layer.provideMerge(Layer.succeed(ProjectEscalation, () => Effect.succeed({ verifiers: [], repeatedErrors: 0 }))),
+      Layer.provideMerge(Layer.succeed(Decide, rulesDecide)),
       Layer.provideMerge(SqlLive(newHome())),
     );
     const runtime = ManagedRuntime.make(layer);

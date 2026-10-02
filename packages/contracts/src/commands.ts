@@ -1,8 +1,9 @@
 import { Schema } from "effect";
 import { AttachmentRef, AttachmentUpload } from "./attachments.ts";
+import { DecisionAnswer } from "./decisions.ts";
 import { HarnessEvent } from "./harness.ts";
 import { CommandId, TaskId, ThreadId, TurnId } from "./ids.ts";
-import { VerifierRun } from "./items.ts";
+import { HandedSource, VerifierRun } from "./items.ts";
 import { MemoryScope } from "./memory.ts";
 import { Resolution } from "./requests.ts";
 import { InteractionMode, Route } from "./route.ts";
@@ -279,6 +280,19 @@ export const TaskEscalate = Schema.Struct({
     Schema.Struct({ kind: Schema.Literal("repeated-error"), tool: Schema.String, error: Schema.String, count: Schema.Int }),
   ]),
 });
+/**
+ * Internal: the decision layer flagged a Verdandi tool's result (`answer`) before it reached the agent running
+ * `turnId`, which got it under a warning. Records `injection.flagged`.
+ */
+export const InjectionFlag = Schema.Struct({
+  type: Schema.Literal("injection.flag"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  source: HandedSource,
+  text: Schema.String,
+  answer: DecisionAnswer,
+});
 /** Internal: marks a turn left running by a previous verdandid as interrupted. */
 export const TurnRecover = Schema.Struct({
   type: Schema.Literal("turn.recover"),
@@ -341,6 +355,7 @@ export const Command = Schema.Union([
   VerifiersStart,
   VerifierReport,
   TaskEscalate,
+  InjectionFlag,
   TurnRecover,
 ]);
 export type Command = typeof Command.Type;

@@ -19,6 +19,7 @@ import type {
   WorktreeReport,
   WorktreeView,
 } from "@verdandi/contracts";
+import { Decide, flagged, injectionQuestion, injectionWarning } from "@verdandi/decisions";
 import { ToolFailed, verdandiTools } from "@verdandi/tools";
 import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -98,6 +99,7 @@ export const ReactorLive = Layer.effect(
     const worktreesDir = yield* WorktreesDir;
     const toolSettings = yield* ToolSettings;
     const projectEscalation = yield* ProjectEscalation;
+    const decide = yield* Decide;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
     /** The adapter running each thread's current turn: where answers to its requests go. */
@@ -157,6 +159,16 @@ export const ReactorLive = Layer.effect(
           ),
       },
       approveMemorySaves: toolSettings.approveMemorySaves,
+      // A flagged result still reaches the agent, under the warning; recording it is best effort.
+      screen: (source, text, at) =>
+        Effect.gen(function* () {
+          const [answer] = (yield* decide.decide({ state: text, questions: [injectionQuestion] })).answers;
+          if (!answer || !flagged(answer)) return text;
+          yield* engine
+            .dispatch({ type: "injection.flag", commandId: randomUUID() as CommandId, ...at, source, text, answer })
+            .pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record the injection flag on turn ${at.turnId}.`, cause)));
+          return `${injectionWarning}\n\n${text}`;
+        }),
     });
 
     // A failed write is retried by the sweep below when verdandid next starts.

@@ -11,7 +11,7 @@ import type {
   TurnId,
   TurnView,
 } from "@verdandi/contracts";
-import { nextWorktree } from "@verdandi/contracts";
+import { injectionItem, nextWorktree } from "@verdandi/contracts";
 
 /** A turn as the UI shows it: the stored view plus the main agent's text streamed since its last message. */
 export type LiveTurn = TurnView & { readonly streaming: string };
@@ -172,6 +172,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "memory.deleted": (thread) => thread,
   "memory.snapshot.taken": (thread) => thread,
   "task.blocked": (thread, e) => addItem(thread, e.turnId, { kind: "blocked", reason: e.reason }),
+  "injection.flagged": (thread, e) => addItem(thread, e.turnId, injectionItem(e)),
   "thread.files.restored": (thread, e) => ({
     ...thread,
     revert: thread.revert && (e.error ? { ...thread.revert, filesError: e.error } : thread.revert),

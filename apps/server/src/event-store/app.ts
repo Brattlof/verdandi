@@ -1,9 +1,10 @@
 import { join } from "node:path";
 import type { HarnessAdapter, HarnessId } from "@verdandi/contracts";
+import { Decide } from "@verdandi/decisions";
 import { Effect, Layer, Result } from "effect";
 import { attachmentsDir } from "../attachments/attachments.ts";
 import { loadMemorySettings } from "../memory/memory-config.ts";
-import { catalogFor, routingFor } from "../routing/routing.ts";
+import { catalogFor, routingFor, rulesDecide } from "../routing/routing.ts";
 import { loadSpendCaps } from "../spend/spend-caps.ts";
 import { SqlLive } from "./db.ts";
 import { EngineLive, type Projector } from "./engine.ts";
@@ -39,9 +40,17 @@ export const AppLayer = (
     );
   return ReactorLive.pipe(
     Layer.provideMerge(
-      EngineLive({ ...options, routing, catalog: catalogFor(harnesses), spendCaps: loadSpendCaps(options.spendCapsHome ?? home) }),
+      EngineLive({
+        ...options,
+        routing,
+        decide: rulesDecide,
+        catalog: catalogFor(harnesses),
+        spendCaps: loadSpendCaps(options.spendCapsHome ?? home),
+      }),
     ),
     Layer.provideMerge(Layer.succeed(ProjectEscalation, escalation)),
+    // The reactor scans Verdandi's tool results with the same decision layer as the engine.
+    Layer.provideMerge(Layer.succeed(Decide, rulesDecide)),
     // Stopping closes the sessions harnesses keep warm between turns, so no harness process outlives verdandid.
     Layer.provideMerge(
       Layer.effect(

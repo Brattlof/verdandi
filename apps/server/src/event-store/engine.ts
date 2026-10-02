@@ -14,14 +14,14 @@ import {
   type ThreadId,
   type TurnId,
 } from "@verdandi/contracts";
-import { correctingQuestion, type Decide } from "@verdandi/decisions";
+import { correctingQuestion, type Decide, injectionQuestion } from "@verdandi/decisions";
 import { Context, Effect, Layer, PubSub, Result, Stream } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { type RoutingContext, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
 import { loadSpendState } from "../spend/spend.ts";
 import type { SpendCaps } from "../spend/spend-caps.ts";
-import { decide } from "./decider.ts";
+import { decide, handedText } from "./decider.ts";
 import { loadDeciderState, loadMemory, loadProjects, loadQuotas, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
 
 type FeedMessage = { readonly threadId: ThreadId; readonly feed: ThreadFeed };
@@ -164,8 +164,23 @@ export const EngineLive = (options: EngineOptions = {}) =>
             // Memory: read for memory commands, and for a turn whose new harness session starts with a snapshot of it.
             const remembers = command.type.startsWith("memory.") || (send !== undefined && current?.sessionId === null);
             const memory = remembers ? yield* loadMemory(command.threadId) : null;
+            // Untrusted text the command would keep or hand the agent is scanned for injection (DESIGN §17).
+            const untrusted =
+              command.type === "memory.save" || command.type === "memory.edit"
+                ? command.text.trim()
+                : escalates && command.type === "task.escalate"
+                  ? handedText(command.trigger)
+                  : undefined;
+            const [injection] =
+              untrusted === undefined ? [] : (yield* decider.decide({ state: untrusted, questions: [injectionQuestion] })).answers;
             const decision = decide(
-              { ...state, ...(routing && { routing }), ...(decisions && { decisions }), ...(memory && { memory }) },
+              {
+                ...state,
+                ...(routing && { routing }),
+                ...(decisions && { decisions }),
+                ...(memory && { memory }),
+                ...(injection && { injection }),
+              },
               command,
             );
             if (Result.isFailure(decision)) return yield* Effect.fail(decision.failure);

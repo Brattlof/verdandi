@@ -14,7 +14,15 @@ import {
   type RouteTarget,
   type SpendCapped,
 } from "@verdandi/contracts";
-import { classificationOf, followUpRules, makeDecide, routingQuestions, routingRules, rulesBackend } from "@verdandi/decisions";
+import {
+  classificationOf,
+  followUpRules,
+  injectionRules,
+  makeDecide,
+  routingQuestions,
+  routingRules,
+  rulesBackend,
+} from "@verdandi/decisions";
 import {
   builtInCatalog,
   deescalate,
@@ -33,10 +41,14 @@ import { fakeCatalog } from "@verdandi/testkit";
 import { Effect, Result } from "effect";
 
 /**
- * The decision layer verdandid runs: `rules` for every kind of question (ADR 0009). Routing classification
+ * The decision layer verdandid runs: `rules` for every kind of question (ADR 0009), injection scanning included. Routing classification
  * uses the router's keyword rules, which read only the text: the mode picks a class's plan route, not its class.
  */
-export const verdandiRules = rulesBackend({ ...routingRules((text) => rules(signals(text, "build"))), ...followUpRules });
+export const verdandiRules = rulesBackend({
+  ...routingRules((text) => rules(signals(text, "build"))),
+  ...followUpRules,
+  ...injectionRules,
+});
 export const rulesDecide = makeDecide([verdandiRules]);
 
 /** What routing a task needs from outside the database: the policy that applies and the harnesses that run. */

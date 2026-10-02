@@ -2,7 +2,7 @@ import { Data, Effect, Schema } from "effect";
 import { AttachmentRef } from "./attachments.ts";
 import { DecisionAnswer, DecisionQuestion } from "./decisions.ts";
 import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
-import { Item, Quota, UsageFields, VerifierRun } from "./items.ts";
+import { HandedSource, Item, Quota, UsageFields, VerifierRun } from "./items.ts";
 import { MemoryScope } from "./memory.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
@@ -229,6 +229,27 @@ export const DecisionRecorded = Schema.Struct({
   questions: Schema.Array(DecisionQuestion),
   /** One per question, in the same order. */
   answers: Schema.Array(DecisionAnswer),
+});
+/**
+ * The decision layer flagged `text` from `source` as a likely injection (DESIGN §17) before Verdandi handed it to
+ * the agent: it went over anyway, under a warning. On turn `turnId`, the one that handed it over or, for an
+ * escalation's, the turn it escalated from. `text` is untrusted data, kept as the decision's state for the lab.
+ */
+export const InjectionFlagged = Schema.Struct({
+  type: Schema.Literal("injection.flagged"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  source: HandedSource,
+  text: Schema.String,
+  question: DecisionQuestion,
+  answer: DecisionAnswer,
+});
+/** How an `injection.flagged` shows on its turn, the same in the projection, the web UI and trajectories. */
+export const injectionItem = (e: typeof InjectionFlagged.Type): Extract<Item, { kind: "injection" }> => ({
+  kind: "injection",
+  source: e.source,
+  why: e.answer.why ?? `the ${e.answer.backend} backend gave no reason`,
 });
 /**
  * The user raised a spend cap from `fromUsd` to `toUsd` for the rest of the period `periodKey` (DESIGN §8.9),
@@ -478,6 +499,7 @@ export const Event = Schema.Union([
   ApprovalResolved,
   TurnCompleted,
   DecisionRecorded,
+  InjectionFlagged,
   SpendCapRaised,
   VerifiersStarted,
   VerifierRan,
@@ -548,6 +570,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "approval.resolved@1": ApprovalResolved,
   "turn.completed@1": TurnCompleted,
   "decision.recorded@1": DecisionRecorded,
+  "injection.flagged@1": InjectionFlagged,
   "spend.cap.raised@1": SpendCapRaised,
   "verifiers.started@1": VerifiersStarted,
   "verifier.ran@1": VerifierRan,

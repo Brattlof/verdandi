@@ -1,4 +1,4 @@
-import type { HarnessTool, ThreadId, ToolParam, TurnId } from "@verdandi/contracts";
+import type { HandedSource, HarnessTool, ThreadId, ToolParam, TurnId } from "@verdandi/contracts";
 import { Cause, Data, Effect } from "effect";
 
 /** A tool call that can't be done; the message tells the agent why and what to do instead. */
@@ -9,6 +9,11 @@ export type Args<Ps extends Record<string, ToolParam>> = {
   readonly [K in keyof Ps]: Ps[K]["optional"] extends true ? Value<Ps[K]> | undefined : Value<Ps[K]>;
 };
 export type ToolAt = { readonly threadId: ThreadId; readonly turnId: TurnId };
+/**
+ * Scans a tool result built from untrusted text before it reaches the agent (DESIGN §17). Returns the text to hand
+ * over: under a warning when the scan flags it, which verdandid also records on the turn.
+ */
+export type Screen = (source: HandedSource, text: string, at: ToolAt) => Effect.Effect<string>;
 
 /** Why `args` don't fit `params`, or undefined when they do. Arguments it doesn't name are ignored. */
 const misfit = (params: Readonly<Record<string, ToolParam>>, args: Readonly<Record<string, unknown>>) => {

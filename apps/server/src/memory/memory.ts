@@ -1,31 +1,18 @@
-import { type MemoryScope, memoryCaps } from "@verdandi/contracts";
+import { type DecisionAnswer, type MemoryScope, memoryCaps } from "@verdandi/contracts";
+import { flagged } from "@verdandi/decisions";
 import { containsSecret } from "@verdandi/trajectories";
 
-// ponytail: pattern rules only. Upgrade: add the decision layer's injection check (DESIGN §17) once it has one.
-const injection = [
-  /\b(ignore|disregard|forget|override)\b[^.\n]{0,40}\b(previous|prior|above|earlier|all|any|your|the)\b[^.\n]{0,20}\b(instructions?|rules|prompts?|guidelines)\b/i,
-  /\byou are now\b|\bfrom now on,? you (are|must|will)\b|\bnew instructions\b/i,
-  /<\/?\s*(system|assistant|user|instructions?)\s*>|\[\/?INST\]|^\s*(system|assistant)\s*:/im,
-];
-const exfiltration = [
-  /\b(curl|wget|Invoke-WebRequest|iwr|nc|ncat)\b[^\n]*\bhttps?:\/\//i,
-  /!\[[^\]]*\]\(\s*https?:\/\//i, // a remote image would fetch on render
-  /\b(send|post|upload|forward|exfiltrate|leak)\b[^.\n]{0,60}\b(to|at)\b[^.\n]{0,20}(https?:\/\/|\b[\w.-]+\.(com|net|org|io|xyz|ru)\b|@[\w-]+\.)/i,
-  /https?:\/\/\S+[?&][\w-]*(token|key|secret|data|payload|q)=/i,
-];
-
 /**
- * Why `text` can't be remembered, or undefined when it can: it holds a secret, reads like instructions to the
- * agent, or like a way to send data out (DESIGN §14.2, §17). Memory goes into future sessions' prompts.
+ * Why `text` can't be remembered, or undefined when it can: it holds a secret, or the decision layer's injection
+ * scan (`answer`, to `injectionQuestion`) flags it as instructions to the agent or a way to send data out (DESIGN
+ * §14.2, §17). Memory goes into future sessions' prompts. Without an answer it's refused: nothing unscanned is kept.
  */
-export const scanMemory = (text: string): string | undefined => {
+export const scanMemory = (text: string, answer: DecisionAnswer | undefined): string | undefined => {
   if (!text.trim()) return "There's nothing to remember: the text is empty.";
   if (containsSecret(text))
     return "It looks like it holds a secret (a key, token or password). Secrets are never remembered; save where to find it instead.";
-  if (injection.some((p) => p.test(text)))
-    return "It reads like instructions to an agent rather than a fact. Memory holds facts about the user and the project; state the fact plainly.";
-  if (exfiltration.some((p) => p.test(text)))
-    return "It reads like a way to send data out of this machine (a command or link that would carry it). Memory can't hold that.";
+  if (!answer || flagged(answer))
+    return `Verdandi's injection scan flagged it${answer?.why ? ` (${answer.why})` : ""}. Memory holds facts about the user and the project: state the fact plainly, without instructions, or commands and links that would carry data off this machine.`;
   return undefined;
 };
 

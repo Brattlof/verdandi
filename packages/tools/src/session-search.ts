@@ -1,6 +1,6 @@
 import type { SessionHit } from "@verdandi/contracts";
 import { Effect } from "effect";
-import { defineTool, type ToolAt } from "./define.ts";
+import { defineTool, type Screen, type ToolAt } from "./define.ts";
 
 const who = { user: "user", steer: "user, steering", assistant: "agent" } as const;
 
@@ -23,7 +23,10 @@ export const hitsForAgent = (query: string, hits: readonly SessionHit[]) =>
  * `session_search` (DESIGN §14.3): finds what earlier sessions said about something, so a solution found once
  * isn't worked out again. Searches the thread's project unless `allProjects`.
  */
-export const sessionSearchTool = (search: (query: string, allProjects: boolean, at: ToolAt) => Effect.Effect<readonly SessionHit[]>) =>
+export const sessionSearchTool = (
+  search: (query: string, allProjects: boolean, at: ToolAt) => Effect.Effect<readonly SessionHit[]>,
+  screen: Screen,
+) =>
   defineTool({
     name: "session_search",
     description:
@@ -34,10 +37,10 @@ export const sessionSearchTool = (search: (query: string, allProjects: boolean, 
     },
     // The turn asking already has its own messages in front of it.
     run: ({ query, allProjects }, at) =>
-      Effect.map(search(query, allProjects ?? false, at), (hits) =>
-        hitsForAgent(
-          query,
-          hits.filter((h) => h.turnId !== at.turnId),
-        ),
-      ),
+      Effect.flatMap(search(query, allProjects ?? false, at), (hits) => {
+        const others = hits.filter((h) => h.turnId !== at.turnId);
+        return others.length === 0
+          ? Effect.succeed(hitsForAgent(query, others))
+          : screen("session_search", hitsForAgent(query, others), at);
+      }),
   });
