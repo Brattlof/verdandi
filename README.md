@@ -1,15 +1,18 @@
 <p align="center">
-  <img src="docs/assets/banner.png" alt="Verdandi" width="100%">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.png">
+    <img src="docs/assets/banner.png" alt="Verdandi" width="100%">
+  </picture>
 </p>
 
-# Verdandi ᚹ
+# Verdandi
 
 <p align="center">
-  <a href="docs/DESIGN.md"><img src="https://img.shields.io/badge/Design-docs%2FDESIGN.md-F0B545?style=for-the-badge" alt="Design document"></a>
-  <a href="docs/decisions"><img src="https://img.shields.io/badge/ADRs-docs%2Fdecisions-7E8FC4?style=for-the-badge" alt="Architecture decisions"></a>
-  <img src="https://img.shields.io/badge/Status-pre--alpha-141A33?style=for-the-badge" alt="Status: pre-alpha">
+  <a href="docs/DESIGN.md"><img src="https://img.shields.io/badge/Design-docs%2FDESIGN.md-8C4A2B?style=for-the-badge" alt="Design document"></a>
+  <a href="docs/decisions"><img src="https://img.shields.io/badge/ADRs-docs%2Fdecisions-2A5B8A?style=for-the-badge" alt="Architecture decisions"></a>
+  <img src="https://img.shields.io/badge/Status-pre--alpha-1B1A18?style=for-the-badge" alt="Status: pre-alpha">
   <img src="https://img.shields.io/badge/Runtime-Bun-000000?style=for-the-badge&logo=bun&logoColor=white" alt="Runtime: Bun">
-  <img src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-first--class-2E3A66?style=for-the-badge" alt="Windows, macOS and Linux">
+  <img src="https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-first--class-5C5953?style=for-the-badge" alt="Windows, macOS and Linux">
 </p>
 
 **A local-first workspace and personal agent platform for coding agents.** Verdandi drives *harnesses* (Claude Code first, then its own native agent loop, then others) and routes every task to the harness, provider, model and effort level that finishes it at the lowest *effective* cost. A commit message doesn't need Opus at `xhigh`, and a subtle concurrency bug shouldn't go to a small local model. Verdandi sizes each task, explains the choice in one line, and learns from how it turned out.
