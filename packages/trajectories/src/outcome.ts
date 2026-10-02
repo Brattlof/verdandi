@@ -41,6 +41,29 @@ type Draft = {
 const corrects = (a: DecisionAnswer) =>
   a.type === "noul" && a.kind === decisionKinds.correcting && !a.lowConfidence && a.probability >= 0.5;
 
+/** The event types `buildTaskOutcomes` reads, so a caller can load only these: a turn's items are most of a thread. */
+export const outcomeEventTypes = [
+  "task.started",
+  "task.rated",
+  "thread.reverted",
+  "thread.revert.undone",
+  "thread.route.changed",
+  "task.rerouted",
+  "task.escalated",
+  "task.deescalated",
+  "turn.started",
+  "turn.steered",
+  "verifier.ran",
+  "decision.recorded",
+  "plan.requested",
+  "approval.resolved",
+  "turn.usage.recorded",
+  "turn.completed",
+] as const satisfies readonly Event["type"][];
+const outcomeEvents = new Set<string>(outcomeEventTypes);
+/** Narrows to the listed types, so a case for any other type below fails to typecheck until it's listed. */
+const read = (e: Event): e is Extract<Event, { type: (typeof outcomeEventTypes)[number] }> => outcomeEvents.has(e.type);
+
 /**
  * Pure: the outcome of each task in a thread's events, in `seq` order, whose last turn has ended. A task
  * runs from its `task.started` to the next one; turns from before tasks existed belong to none.
@@ -54,6 +77,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
   /** The task of the latest turn: a follow-up correcting the agent, recorded before its own turn starts, corrects that task. */
   let current: Draft | undefined;
   for (const { event: e, at } of events) {
+    if (!read(e)) continue;
     if (e.type === "task.started") {
       tasks.push({
         ...e,
