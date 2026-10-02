@@ -18,10 +18,10 @@ import {
 } from "@verdandi/contracts";
 import { Effect, Fiber, Queue, Schema, Stream } from "effect";
 import { parseBatchRoute } from "../batch/batch.ts";
-import { flag, readServerFile, resolveHome, type ServerFile } from "../config/home.ts";
-import { spendSplit } from "../orchestration/usage.ts";
+import { flag, readServerFile, resolveHome, type ServerFile } from "../home/home.ts";
+import { expandHome } from "../projects/project.ts";
 import { connect } from "../rpc/client.ts";
-import { expandHome } from "../workspace/project.ts";
+import { spendSplit } from "../spend/usage.ts";
 import type { PendingRequest } from "./requests.ts";
 
 /** How `verdandi run` ends, as its usage line in `bin.ts` documents. Any other error (verdandid not running, the turn rejected) exits 1. */

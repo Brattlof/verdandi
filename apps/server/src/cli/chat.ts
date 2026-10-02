@@ -19,7 +19,7 @@ import {
   type TurnId,
 } from "@verdandi/contracts";
 import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { flag, readServerFile, resolveHome } from "../config/home.ts";
+import { flag, readServerFile, resolveHome } from "../home/home.ts";
 import { connect } from "../rpc/client.ts";
 import { readAttachment } from "./attach.ts";
 import { approvalPrompt, editPlan, type PendingRequest, parseAnswer, planPrompt, questionPrompt } from "./requests.ts";

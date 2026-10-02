@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { ProjectId, SessionHit, ThreadId, ThreadSummary, TurnId } from "@verdandi/contracts";
-import { hitsText } from "./search.ts";
+import { hitsText } from "../search/search-cli.ts";
 import { threadList } from "./thread-list.ts";
 
 const summary = (threadId: string, projectId: string, title: string, busy = false, meteredUsd = 0): ThreadSummary => ({

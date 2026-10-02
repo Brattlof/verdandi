@@ -987,20 +987,21 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
 verdandi/
 ├─ apps/
 │  ├─ server/                    # verdandid + `verdandi` CLI
-│  │  └─ src/
+│  │  └─ src/                    # one folder per feature: its logic, tests and CLI command
 │  │     ├─ bin.ts · main.ts      # CLI entry · service wiring (Layer composition)
-│  │     ├─ config/ · http/ · rpc/
-│  │     ├─ orchestration/        # Engine · decider/ · projector/ · reactors/
-│  │     ├─ routing/              # signal gathering, decision persistence
+│  │     ├─ event-store/          # engine · decider · projector · reactor · sqlite + migrations
+│  │     ├─ routing/ · memory/ · spend/ · tasks/ · search/ · batch/
+│  │     ├─ worktrees/ · checkpoints/ · diffs/ · terminals/ · attachments/ · verifiers/
+│  │     ├─ projects/ · home/ · git/
 │  │     ├─ harnesses/            # registry, capability detection
-│  │     ├─ workspace/            # git, worktrees, checkpoints, diff, terminal
 │  │     ├─ scheduler/
 │  │     ├─ gateway/              # gateway core; platforms come from plugins
 │  │     ├─ surfaces/             # openai-compatible API, ACP server, MCP server
-│  │     └─ persistence/          # sqlite + migrations
-│  ├─ web/                       # React UI (features/: threads, composer, routing,
-│  │                             #   approvals, diff, terminal, usage, memory,
-│  │                             #   skills, automations, settings)
+│  │     ├─ rpc/                  # WebSocket API, LAN gate
+│  │     └─ cli/                  # `verdandi chat`, `run`, `open`, `doctor`
+│  ├─ web/                       # React UI; src/ has one folder per feature: threads,
+│  │                             #   composer, routing, spend, diffs, terminals, memory,
+│  │                             #   worktrees, skills, automations, settings; ui/ is shared
 │  └─ desktop/                   # Electron: main, preload, server manager, tray, updater
 ├─ packages/
 │  ├─ contracts/                 # schemas: ids, commands, events, harness events,

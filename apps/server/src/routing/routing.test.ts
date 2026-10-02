@@ -18,10 +18,10 @@ import {
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { AppLayer } from "../orchestration/app.ts";
-import { Engine } from "../orchestration/engine.ts";
-import { loadThreadView } from "../orchestration/projector.ts";
-import { Reactor } from "../orchestration/reactor.ts";
+import { AppLayer } from "../event-store/app.ts";
+import { Engine } from "../event-store/engine.ts";
+import { loadThreadView } from "../event-store/projector.ts";
+import { Reactor } from "../event-store/reactor.ts";
 
 const dirs: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];

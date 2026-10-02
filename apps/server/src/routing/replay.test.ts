@@ -5,11 +5,11 @@ import type { Command, CommandId, TaskId, ThreadId, TurnId } from "@verdandi/con
 import { loadPolicy } from "@verdandi/router";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime, Result } from "effect";
-import { replayText } from "../cli/routing.ts";
-import { AppLayer } from "../orchestration/app.ts";
-import { Engine } from "../orchestration/engine.ts";
-import { Reactor } from "../orchestration/reactor.ts";
+import { AppLayer } from "../event-store/app.ts";
+import { Engine } from "../event-store/engine.ts";
+import { Reactor } from "../event-store/reactor.ts";
 import { loadSavedTasks, replay, replayTask, type SavedTask } from "./replay.ts";
+import { replayText } from "./routing-cli.ts";
 
 const dirs: string[] = [];
 afterEach(() => {

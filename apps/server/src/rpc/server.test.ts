@@ -6,12 +6,12 @@ import type { CommandId, ProjectsFeed, TaskId, TerminalId, TerminalView, ThreadF
 import { makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Deferred, type Duration, Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { alive } from "../config/home.ts";
-import { spendCapsFile } from "../config/spend-caps.ts";
-import { projectIdFor } from "../orchestration/decider.ts";
-import { Reactor } from "../orchestration/reactor.ts";
-import { attachmentsDir, sweepAttachments } from "../workspace/attachments.ts";
-import { Terminals } from "../workspace/terminals.ts";
+import { attachmentsDir, sweepAttachments } from "../attachments/attachments.ts";
+import { projectIdFor } from "../event-store/decider.ts";
+import { Reactor } from "../event-store/reactor.ts";
+import { alive } from "../home/home.ts";
+import { spendCapsFile } from "../spend/spend-caps.ts";
+import { Terminals } from "../terminals/terminals.ts";
 import { connect } from "./client.ts";
 import { ServerInfo, ServerLayer } from "./server.ts";
 

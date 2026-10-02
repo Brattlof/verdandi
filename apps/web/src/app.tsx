@@ -10,14 +10,14 @@ import {
   type TurnId,
 } from "@verdandi/contracts";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ArchiveButton } from "./archive.tsx";
-import { Engraving, Plait, Raven } from "./art.tsx";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
-import { Dashboard } from "./dashboard.tsx";
-import { BranchIcon, CloseIcon, FolderIcon, MenuIcon, SidebarIcon } from "./icons.tsx";
-import { Rune, RuneMark, type RuneName, RuneText } from "./runes.tsx";
+import { Dashboard } from "./spend/dashboard.tsx";
 import { applyProjectsFeed, groupByRecency, type Sidebar as SidebarData } from "./state.ts";
-import { ThreadPane } from "./thread.tsx";
+import { ArchiveButton } from "./threads/archive.tsx";
+import { ThreadPane } from "./threads/thread.tsx";
+import { Engraving, Plait, Raven } from "./ui/art.tsx";
+import { BranchIcon, CloseIcon, FolderIcon, MenuIcon, SidebarIcon } from "./ui/icons.tsx";
+import { Rune, RuneMark, type RuneName, RuneText } from "./ui/runes.tsx";
 
 /** The open thread lives in the URL hash (`#thread=<id>`), so links, Back and reloads just work. */
 const hashThread = () => new URLSearchParams(location.hash.slice(1)).get("thread") as ThreadId | null;

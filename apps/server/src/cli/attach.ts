@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import type { AttachmentUpload } from "@verdandi/contracts";
-import { expandHome } from "../workspace/project.ts";
+import { expandHome } from "../projects/project.ts";
 
 /**
  * The file `/attach <path>` names, read to go with the next turn. The path is the rest of the line, so

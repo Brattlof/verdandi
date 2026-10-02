@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clip, type Question, type ThreadView } from "@verdandi/contracts";
-import { shell } from "../workspace/verify.ts";
+import { shell } from "../verifiers/verify.ts";
 
 export type PendingRequest = ThreadView["pendingRequests"][number];
 

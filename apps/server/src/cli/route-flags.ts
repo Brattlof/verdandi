@@ -1,6 +1,6 @@
 import { BudgetMode, defaultRoute, Route } from "@verdandi/contracts";
 import { Schema } from "effect";
-import { flag } from "../config/home.ts";
+import { flag } from "../home/home.ts";
 
 /** Whether the flags pick a route, which pins the thread to it. Without them the router picks each task's. */
 export const picksRoute = (argv: readonly string[]) => ["--harness", "--model", "--effort"].some((f) => flag(argv, f) !== undefined);

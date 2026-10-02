@@ -18,11 +18,11 @@ import {
 } from "@verdandi/contracts";
 import { Effect, ManagedRuntime, Option, Result, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { AppLayer } from "../orchestration/app.ts";
-import { Engine } from "../orchestration/engine.ts";
-import { Reactor } from "../orchestration/reactor.ts";
+import { AppLayer } from "../event-store/app.ts";
+import { Engine } from "../event-store/engine.ts";
+import { Reactor } from "../event-store/reactor.ts";
 import { decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
-import { runVerifier } from "../workspace/verify.ts";
+import { runVerifier } from "../verifiers/verify.ts";
 
 /** An eval task with its repository resolved against the eval set's folder. */
 export type LoadedTask = EvalTask & { readonly repoPath: string };
