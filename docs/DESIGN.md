@@ -782,7 +782,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 - **Memory is capped on purpose.** When the cap is reached, a save fails and asks the agent to **consolidate**: merge, rewrite or drop older entries.
 - **Periodic nudges:** every *N* turns the agent is prompted to consider saving memory.
 - **Background review** (§14.5) proposes memories after tasks.
-- **Scanning:** every entry is scanned before it's saved, for secrets, prompt injection and data exfiltration; a hit is refused with the reason. You can require approval for saves (`approveSaves: true` in the home's `memory.yaml`). Everything can be seen, added, edited and deleted in the Memory panel.
+- **Scanning:** every entry is scanned before it's saved, for secrets, prompt injection and data exfiltration; a hit is refused with the reason. The agent's saves ask you first, unless `approveSaves: false` in the home's `memory.yaml` turns that off (ADR 0025). Everything can be seen, added, edited and deleted in the Memory panel.
 - **External memory providers (plugins, M6):** a `MemoryProvider` interface with hooks for:
   - adding a block to the system prompt,
   - prefetching,
@@ -919,12 +919,24 @@ Claude Code manages its own context. The native harness has a pluggable `Context
 
 ## 17. Security and privacy
 
-- **Network:** verdandid listens on `127.0.0.1` only, and requires a token for each profile. `verdandi start --host` opts in to the local network through a gate that relays to it and refuses every request from outside private and loopback ranges; a public `--host` address is refused. Remote access beyond the local network is opt-in, through Tailscale.
+ADR 0025 is the trust model. Everything runs as you, the OS user, and nothing inside the agent process contains a hostile model; only the OS can, and Verdandi has no sandbox before M6. So Verdandi's layers come in two strengths:
+
+- **Boundaries**, where a bypass is a vulnerability: your OS account (the Verdandi home and project folders are trusted local state), the loopback socket and its token, the LAN gate, validation at the RPC boundary (project paths, attachments, skill paths), and the asks Verdandi itself enforces (trusted project commands, Verdandi tools that ask, skill and memory proposals), which nothing may skip.
+- **Heuristics**, which lower risk and can be bypassed by design: the injection and secret scans, redaction, "marked as data" fences, what an approval or plan mode limits (they're consent, not containment), and spend caps (a budget, not a security control).
+
+The ADR also lists what isn't a vulnerability, who the principals are once the gateway exists (the agent never is one), and the defaults below, with the code that holds each. `SECURITY.md` says how to report one.
+
+- **Network:**
+  - verdandid listens on `127.0.0.1` only, and requires the profile's token for each connection.
+  - A WebSocket from a browser page other than verdandid's own is refused before the token is read.
+  - `verdandi start --host` opts in to the local network through a gate that relays to verdandid. The gate refuses every request from outside private and loopback ranges, and every WebSocket from a page it didn't serve. A public `--host` address is refused.
+  - On the local network the token travels over plain HTTP. Remote access beyond a network you trust is opt-in, through Tailscale.
+- **No default outbound calls.** verdandid calls only your harness and the providers you configured, with no telemetry. Fonts are bundled and remote images aren't loaded. Anything more is named in config and off until turned on.
 - **Claude Code credentials are never touched.** The harness drives your own logged-in CLI.
   - Anthropic's Agent SDK docs say third-party developers may not offer claude.ai login or rate limits in their products without approval.
   - For personal use, this is you using your own CLI.
   - **If Verdandi is ever distributed**, check this policy again. The native harness with API keys would be the supported path.
-- **Provider API keys** (native harness) are stored in the OS keychain or fetched through a `keyCommand`, never in plain-text config. They're masked in logs, trajectories and exports.
+- **Provider API keys** (native harness) come from the OS keychain or Verdandi's own environment variable (`.env` included), and later a `keyCommand`, never from a config file. verdandid keeps them in memory and out of every process it starts, harnesses included. They're masked in trajectories and exports.
 - **Permissions:**
 
   | Mode | Behaviour |
@@ -934,13 +946,14 @@ Claude Code manages its own context. The native harness has a pluggable `Context
   | **Auto** | A classifier decides what's allowed |
   | **Full access** | Everything allowed. Must be chosen explicitly. |
 
-  Each harness maps these modes to its own settings. Scheduled and gateway tasks have their own restricted profiles.
+  Each harness maps these modes to its own settings. Scheduled and gateway tasks have their own restricted profiles. An approval is consent to one step, not a limit on what that step can do.
 - **Smart approvals (native harness):** the decision layer rates a command's risk (§9.8), so safe commands don't need an approval prompt. A command is auto-approved only when the model is very confident it's safe. Hard rules still catch destructive patterns, and nothing destructive or irreversible is ever auto-approved.
-- **Prompt-injection defence:**
-  - context files, memory entries, skill files and gateway messages are scanned before use, with pattern rules plus a decision-layer check (§9.8); a hit is refused;
+- **Consent first for self-improvement.** Skill changes, background review's proposals and the agent's memory saves each ask first; `approveSaves: false` in `memory.yaml` lets memory saves through unasked. Background model work runs on a digest, as a routed task with a cost cap, never on the full context.
+- **Prompt-injection defence** (heuristics, ADR 0025):
+  - memory saves and skill changes are scanned before they're recorded, with pattern rules plus a decision-layer check (§9.8), and a hit is refused. Context files, gateway messages, and skills Claude Code loads by itself are to be scanned too;
   - tool outputs are marked as untrusted data;
-  - untrusted text Verdandi hands the agent itself (what an escalation passes on: a verifier's output, the agent's blocked reason, a repeated tool error; and Verdandi tools' results built from stored text, such as search hits) goes through the same scan. A hit isn't withheld, since the agent needs it to go on: it's handed over under a warning, recorded, and shown on the turn;
-  - gateway messages from users not on the allowlist are ignored.
+  - untrusted text that Verdandi hands the agent itself goes through the same scan: what an escalation passes on (a verifier's output, the agent's blocked reason, a repeated tool error), and Verdandi tools' results built from stored text, such as search hits. A hit isn't withheld, since the agent needs the text to go on. It's handed over under a warning, recorded, and shown on the turn;
+  - gateway messages from senders not on the allowlist are ignored.
 - **A project's own commands run only once you trust them.** Its verifiers (`escalation.verifiers` in `.verdandi/routing.yaml`) and worktree setup (`.verdandi/worktree.yaml`) are shell commands a cloned repo's author, or an agent allowed only to edit files, can write. The first time verdandid would run a list, it asks on the turn (a worktree's setup waits for the thread's next turn), showing the exact commands; allowing it records trust in that project for that exact list, by hash, and a changed list asks again, so a turn that rewrites them can't run its new commands unasked. Denying skips them: the turn says so, and the task records no verifier run. Unattended runs only run trusted lists: `verdandi run` stops at the request (exit code 5), and a batch never trusts a repository's own commands, using each task's `verify` instead. The projects page and `verdandi chat`'s `/trusted` and `/untrust` list and revoke them. Like other approvals, this is consent, not containment.
 - **Plugins never run inside verdandid.** In process, a plugin could read the database, the profile token and every key verdandid holds, and a malicious one would be out of reach of any defence. So:
   - content-only bundles (skills, MCP server config, commands) come first; they carry no code verdandid loads;
