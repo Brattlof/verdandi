@@ -264,6 +264,29 @@ export const SkillReport = Schema.Struct({
   path: Schema.String,
   error: Schema.optionalKey(Schema.String),
 });
+/**
+ * Internal: the daily sweep moves skill `skill`, which Verdandi created in thread `threadId`, to `to` for going unused
+ * (DESIGN §14.4). Accepted with no events when the skill is already there, used since, or gone. Clients cannot send it.
+ */
+export const SkillCurate = Schema.Struct({
+  type: Schema.Literal("skill.curate"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skill: Schema.String,
+  to: Schema.Literals(["stale", "archived"]),
+  /** The last use the sweep went by: a skill used since keeps its state. */
+  usedAt: Schema.String,
+});
+/**
+ * The user brings archived skill `skill` back to the folder Claude Code loads, from the Skills panel or `verdandi skills
+ * restore`. `threadId` is the thread that created it (its `curation.threadId`), whose log holds the skill's history.
+ */
+export const SkillRestore = Schema.Struct({
+  type: Schema.Literal("skill.restore"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skill: Schema.String,
+});
 
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
@@ -348,6 +371,7 @@ export const ClientCommand = Schema.Union([
   MemorySave,
   MemoryEdit,
   MemoryDelete,
+  SkillRestore,
   ApprovalRespond,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
@@ -372,6 +396,7 @@ export const Command = Schema.Union([
   MemorySave,
   MemoryEdit,
   MemoryDelete,
+  SkillRestore,
   ApprovalRespond,
   HarnessReport,
   FilesReport,
@@ -385,5 +410,6 @@ export const Command = Schema.Union([
   TurnRecover,
   SkillPropose,
   SkillReport,
+  SkillCurate,
 ]);
 export type Command = typeof Command.Type;

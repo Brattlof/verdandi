@@ -43,6 +43,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "TaskNotFound",
     "InvalidSkill",
     "SkillRejected",
+    "SkillNotArchived",
   ]),
   message: Schema.String,
 }) {}

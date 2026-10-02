@@ -28,6 +28,7 @@ import type {
 import { clip, injectionItem, nextWorktree } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
+import { skillUsed } from "../skills/skills.ts";
 import type { DeciderState, PendingRequest } from "./decider.ts";
 
 type Projection<T extends Event["type"]> = (
@@ -226,13 +227,18 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   // Git holds checkpoints (ADR 0015); the event only records what the cleanup policy removed.
   "thread.checkpoints.removed": () => Effect.void,
   // The main agent's replies are searchable; tool output and subagents' steps aren't (ADR 0006).
-  "turn.item.added": (e, at) =>
-    Effect.andThen(
+  "turn.item.added": (e, at) => {
+    const used = skillUsed(e.item);
+    return Effect.andThen(
       addItem(e.turnId, e.item),
       e.item.kind === "assistant.message" && e.item.parentToolUseId === undefined
         ? indexMessage(e.threadId, e.turnId, "assistant", e.item.text, at)
-        : Effect.void,
-    ),
+        : used === undefined
+          ? Effect.void
+          : // Using a stale skill makes it active again; an archived one isn't loaded, so a call naming it loaded another.
+            withSql((sql) => sql`update skills set used_at = ${at}, state = 'active' where name = ${used} and state != 'archived'`),
+    );
+  },
   "turn.steered": (e, at) =>
     Effect.andThen(addItem(e.turnId, { kind: "user.steer", text: e.text }), indexMessage(e.threadId, e.turnId, "steer", e.text, at)),
   "turn.usage.recorded": (e, at) =>
@@ -250,8 +256,21 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "approval.requested": insertRequest,
   "user-input.requested": insertRequest,
   "skill.proposed": insertRequest,
-  // Provenance only: the skill itself is on disk.
-  "skill.applied": () => Effect.void,
+  // The skill itself is on disk; a skill Verdandi created gets a row, so it can be curated (DESIGN §14.4).
+  "skill.applied": (e, at) =>
+    e.error !== undefined || (e.action !== "create" && e.action !== "delete")
+      ? Effect.void
+      : withSql((sql) =>
+          e.action === "create"
+            ? sql`insert or replace into skills (name, thread_id, state, used_at) values (${e.skill}, ${e.threadId}, 'active', ${at})`
+            : sql`delete from skills where name = ${e.skill}`,
+        ),
+  // A restore starts the skill's clock again.
+  "skill.state.changed": (e, at) =>
+    withSql(
+      (sql) =>
+        sql`update skills set state = ${e.to}, used_at = case when ${e.to} = 'active' then ${at} else used_at end where name = ${e.skill}`,
+    ),
   "plan.requested": (e, at) =>
     Effect.andThen(
       addItem(e.turnId, {

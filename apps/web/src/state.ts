@@ -173,6 +173,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "memory.edited": (thread) => thread,
   "memory.deleted": (thread) => thread,
   "memory.snapshot.taken": (thread) => thread,
+  "skill.state.changed": (thread) => thread, // skills show in their panel, fetched when opened
   "task.blocked": (thread, e) => addItem(thread, e.turnId, { kind: "blocked", reason: e.reason }),
   "injection.flagged": (thread, e) => addItem(thread, e.turnId, injectionItem(e)),
   "thread.files.restored": (thread, e) => ({

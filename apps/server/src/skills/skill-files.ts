@@ -1,11 +1,14 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
-import type { SkillChange, SkillSource, SkillsView } from "@verdandi/contracts";
+import type { SkillChange, SkillCuration, SkillSource, SkillsView } from "@verdandi/contracts";
 import type { SkillEdit } from "@verdandi/tools";
 import { frontmatter, nameProblem, pathProblem } from "./skills.ts";
 
-/** The profile's own skills folder, which Verdandi writes after the user approves, and the read-only extra folders from `skills.yaml`. */
-export type SkillFolders = { readonly profile: string; readonly extra: readonly string[] };
+/**
+ * The profile's own skills folder, which Verdandi writes after the user approves and Claude Code loads, the folder
+ * archived skills are moved to, which nothing loads, and the read-only extra folders from `skills.yaml`.
+ */
+export type SkillFolders = { readonly profile: string; readonly archive: string; readonly extra: readonly string[] };
 
 const real = (path: string) => (existsSync(path) ? realpathSync.native(path) : resolve(path));
 const within = (path: string, folder: string) => path === folder || path.startsWith(folder + sep);
@@ -42,6 +45,15 @@ const isLink = (path: string) => {
   }
 };
 
+const present = (path: string) => {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const readIfFile = (file: string) => (existsSync(file) && lstatSync(file).isFile() ? readFileSync(file, "utf8") : null);
 
 /**
@@ -53,6 +65,10 @@ export const prepareChange = (folders: SkillFolders, edit: SkillEdit): { readonl
   const at = target(folders, edit.skill, path);
   if ("error" in at) return at;
   const exists = existsSync(join(folders.profile, edit.skill));
+  if (edit.action === "create" && present(join(folders.archive, edit.skill)))
+    return {
+      error: `An archived skill is named ${edit.skill}. Ask the user to restore it (the Skills panel, or verdandi skills restore ${edit.skill}) and patch it, or pick another name.`,
+    };
   if (edit.action !== "create" && !exists) {
     const elsewhere = folders.extra.find((f) => existsSync(join(f, edit.skill)));
     return {
@@ -102,9 +118,33 @@ export const applyChange = (folders: SkillFolders, change: SkillChange): string 
   }
 };
 
-/** The profile's skills folder, then each extra folder, with its skills: the folders in it that hold a SKILL.md. */
-export const listSkills = (folders: SkillFolders): SkillsView => {
-  const skillsIn = (folder: string) => {
+/**
+ * Moves skill `name`'s folder where its state puts it (DESIGN §14.4): into the archive folder when `archived`, out of
+ * Claude Code's sight, and back into the skills folder otherwise. Never deletes, and does nothing when it's already
+ * there or gone. Says why it couldn't move it, or nothing. Only the reactor and the sweep call it.
+ */
+export const placeSkill = (folders: SkillFolders, name: string, archived: boolean): string | undefined => {
+  const wrong = nameProblem(name);
+  if (wrong) return wrong;
+  const [loaded, kept] = [join(folders.profile, name), join(folders.archive, name)];
+  const [from, to] = archived ? [loaded, kept] : [kept, loaded];
+  if (!present(from)) return undefined;
+  if (present(to)) return `Couldn't move the skill ${name}: both ${from} and ${to} exist. Rename or move one of them by hand.`;
+  try {
+    mkdirSync(dirname(to), { recursive: true });
+    renameSync(from, to);
+    return undefined;
+  } catch (e) {
+    return `Couldn't move the skill ${name} from ${from} to ${to}: ${e instanceof Error ? e.message : String(e)}`;
+  }
+};
+
+/**
+ * The profile's skills folder, its archive (when it holds any), then each extra folder, with its skills: the folders in
+ * it that hold a SKILL.md, each with its `curation` when Verdandi created it.
+ */
+export const listSkills = (folders: SkillFolders, curation: ReadonlyMap<string, SkillCuration> = new Map()): SkillsView => {
+  const skillsIn = (folder: string, source: SkillSource) => {
     let names: string[];
     try {
       names = readdirSync(folder);
@@ -121,12 +161,23 @@ export const listSkills = (folders: SkillFolders): SkillsView => {
       }
       const data = frontmatter(text);
       const named = typeof data?.name === "string" ? data.name : name;
-      return [{ name: named, description: typeof data?.description === "string" ? data.description : "", path }];
+      const curated = source === "extra" ? undefined : curation.get(name);
+      return [
+        {
+          name: named,
+          description: typeof data?.description === "string" ? data.description : "",
+          path,
+          ...(curated && { curation: curated }),
+        },
+      ];
     });
   };
   const all: { path: string; source: SkillSource }[] = [
     { path: folders.profile, source: "profile" },
+    { path: folders.archive, source: "archived" },
     ...folders.extra.map((path) => ({ path, source: "extra" as const })),
   ];
-  return { folders: all.map((f) => ({ ...f, skills: skillsIn(f.path) })) };
+  return {
+    folders: all.map((f) => ({ ...f, skills: skillsIn(f.path, f.source) })).filter((f) => f.source !== "archived" || f.skills.length > 0),
+  };
 };

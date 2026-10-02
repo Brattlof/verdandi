@@ -22,6 +22,7 @@ import {
   type Route,
   type RouteDecision,
   type RouteTarget,
+  type SkillState,
   type SpendCapped,
   spendsMetered,
   type TaskId,
@@ -115,6 +116,8 @@ export type DeciderState = {
    * engine: a memory save's or edit's text, a skill proposal's new file, or what an escalation hands the agent (`handedText`).
    */
   readonly injection?: DecisionAnswer;
+  /** The skill a `skill.curate` or `skill.restore` names, if Verdandi created it, loaded for those commands. */
+  readonly skill?: { readonly state: SkillState; readonly usedAt: string } | null;
 };
 
 type Decision = Result.Result<Event[], CommandRejected>;
@@ -613,6 +616,21 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (!state.thread) return accept();
     const { type: _, commandId: _c, ...report } = c;
     return accept({ ...report, type: "skill.applied", v: 1 });
+  },
+  // The disk is the reactor's: it moves an archived skill out of the loaded folder, and a restored one back.
+  "skill.curate": (state, c) => {
+    const skill = state.skill;
+    if (!state.thread || !skill || skill.state === c.to || skill.state === "archived" || skill.usedAt !== c.usedAt) return accept();
+    return accept({ type: "skill.state.changed", v: 1, threadId: c.threadId, skill: c.skill, from: skill.state, to: c.to, by: "sweep" });
+  },
+  "skill.restore": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    if (state.skill?.state !== "archived")
+      return reject(
+        "SkillNotArchived",
+        `${c.skill} isn't an archived skill Verdandi created, so there's nothing to restore. The Skills panel and verdandi skills list show the archived ones.`,
+      );
+    return accept({ type: "skill.state.changed", v: 1, threadId: c.threadId, skill: c.skill, from: "archived", to: "active", by: "user" });
   },
   "files.report": (state, c) =>
     state.thread

@@ -815,7 +815,7 @@ Every turn from every harness goes into an FTS5 trigram index (ADR 0006): the us
   2. **Review.** Nothing is added without your approval by default. A linter gives advice.
   3. **Use.** Claude Code picks skills up natively: the project's, and the profile's through a local plugin, as `verdandi:<name>` (ADR 0020). The native harness uses the skills index plus `skill_view`.
   4. **Improve.** When a run of a skill fails, a *patch* is proposed; small patches are preferred over full rewrites.
-  5. **Curate.** A skill Verdandi created moves from *active* to *stale* after 14 days unused, and to *archived* after 30. Archived skills are hidden but never deleted. Merging near-duplicate skills is opt-in.
+  5. **Curate.** A skill Verdandi created moves from *active* to *stale* after 14 days unused, and to *archived* after 30; skills you wrote, extra folders' and projects' are never touched. A use is the harness loading it (Claude Code: its `Skill` tool call), and makes a stale skill active again. A daily sweep records each move as an event. Archived skills leave the folder the harness loads for `<home>/skills-archive/` and are never deleted; the Skills panel and `verdandi skills` show them, and restoring one (an event too) brings it back with a fresh 14 days. Merging near-duplicate skills is opt-in.
 - **Routing link: learn with Opus, repeat with Haiku.** A skill's frontmatter can carry a routing hint, e.g. `verdandi: { route: { prefer: [cc-haiku], effort: low } }`. The hint is checked against outcome tracking like any other route.
 - **Skills hub (M6):** install skills from a curated index, Git repos, or other people's shared folders. Each installed skill is pinned to a version.
 

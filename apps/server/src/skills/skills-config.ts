@@ -10,19 +10,21 @@ const SkillsFile = Schema.Struct({ extraFolders: Schema.optionalKey(Schema.Array
 export const skillsSettingsFile = (home: string) => join(home, "skills.yaml");
 
 /**
- * The profile's skills folder (`<home>/skills`) and the extra folders from `skills.yaml`, read when verdandid starts.
+ * The profile's skills folder (`<home>/skills`), its archive (`<home>/skills-archive`) and the extra folders from `skills.yaml`, read when verdandid starts.
  * A broken file stops it, naming the file and key.
  */
 export const loadSkillFolders = (home: string): SkillFolders => {
   const profile = join(home, "skills");
+  // Not a plugin component's name, so Claude Code never loads it (ADR 0020).
+  const archive = join(home, "skills-archive");
   const file = skillsSettingsFile(home);
-  if (!existsSync(file)) return { profile, extra: [] };
+  if (!existsSync(file)) return { profile, archive, extra: [] };
   try {
     const data = Schema.decodeUnknownSync(SkillsFile)(Bun.YAML.parse(readFileSync(file, "utf8")) ?? {}, { onExcessProperty: "error" });
     const extra = (data.extraFolders ?? []).map(expandHome);
     const relative = extra.find((f) => !isAbsolute(f));
     if (relative !== undefined) throw new Error(`extraFolders: ${relative} isn't an absolute path.`);
-    return { profile, extra: extra.map((f) => resolve(f)) };
+    return { profile, archive, extra: extra.map((f) => resolve(f)) };
   } catch (e) {
     throw new Error(
       `${file}: ${e instanceof Error ? e.message : String(e)}\nFix the file (extraFolders takes a list of absolute folders, e.g. - ~/.agents/skills), or delete it.`,
