@@ -401,6 +401,7 @@ escalation:
   verifiers: ["bun test", "bun run typecheck"]
   ladder: [effort, model, ask]
   maxAutoEscalations: 1
+  repeatedErrors: 3                   # the same tool error this many times in a task escalates it; 0 never
 
 restrictions:
   - match: "packages/billing/**"
@@ -410,7 +411,7 @@ restrictions:
 fallback: { prefer: [cc-sonnet], effort: medium, max: { prefer: [cc-opus] }, maxCost: 5 }   # safe default below minConfidence; maxCost/maxTurns apply to classes that set none (§8.9)
 ```
 
-A class's route is its Balanced route. `thrifty` and `max` change only the keys they set for those modes, and `plan` does the same for tasks started in plan mode. Layers merge key by key, except `restrictions`, which add up, so a project can't lift a profile's restriction. Unknown keys are errors that name the file and the key. `subagents` routes a class's subagent profiles, `explorer` and `reviewer`, each to the cheapest available target it prefers on the main route's harness, at its own effort or the task's. A harness session keeps the subagents it started with, so a new policy reaches a thread at its next fresh session (ADR 0014). `escalation.verifiers` run after a turn whose agent changed files, and `escalation.ladder` and `maxAutoEscalations` set what a routed task tries when one fails (§8.7); `effortBand` and `quota` are rejected until the features behind them land (§8.7, §8.9).
+A class's route is its Balanced route. `thrifty` and `max` change only the keys they set for those modes, and `plan` does the same for tasks started in plan mode. Layers merge key by key, except `restrictions`, which add up, so a project can't lift a profile's restriction. Unknown keys are errors that name the file and the key. `subagents` routes a class's subagent profiles, `explorer` and `reviewer`, each to the cheapest available target it prefers on the main route's harness, at its own effort or the task's. A harness session keeps the subagents it started with, so a new policy reaches a thread at its next fresh session (ADR 0014). `escalation.verifiers` run after a turn whose agent changed files, `escalation.repeatedErrors` says how many times the same tool error comes back in a task before that escalates it, and `escalation.ladder` and `maxAutoEscalations` set what a routed task tries when a trigger fires (§8.7); `effortBand` and `quota` are rejected until the features behind them land (§8.7, §8.9).
 
 ### 8.7 Escalation and de-escalation while a task runs
 
@@ -427,7 +428,7 @@ Research shows that turn count alone is barely better than chance at predicting 
 2. then move to a stronger model on the same harness,
 3. then ask you.
 
-By default, at most one step happens per task without asking you. A step changes the running task's route and Verdandi sends the next turn itself, handing the agent the failed verifier's output, or its own blocked report, as data; the task stays one task, so routing memory counts the escalation against the route it started on (ADR 0018). Only routed tasks escalate: a pinned route is yours. Built so far: trigger 1, on the project's `escalation.verifiers`, and trigger 4; the escalation's reason names the trigger, and the task's outcome records each one that fired.
+By default, at most one step happens per task without asking you. A step changes the running task's route and Verdandi sends the next turn itself, handing the agent the failed verifier's output, its own blocked report, or the repeated error, as data; the task stays one task, so routing memory counts the escalation against the route it started on (ADR 0018). Only routed tasks escalate: a pinned route is yours. Built so far: trigger 1, on the project's `escalation.verifiers`; trigger 2, when the same tool error (paths, numbers and ids stripped) comes back `escalation.repeatedErrors` times across the task's turns since it last escalated, a cheap local count with no model call; and trigger 4. A turn end fires at most one, the strongest. The escalation's reason names the trigger, and the task's outcome records each one that fired.
 
 **De-escalation** moves a routed task down without starting a new one, at two points:
 - **Plan approval.** The build moves to the class's own route (§8.2 lever 3, ADR 0013).

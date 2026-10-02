@@ -34,8 +34,11 @@ export type ResolvedPolicy = {
   readonly restrictions: NonNullable<Policy["restrictions"]>;
   /** Commands that check a task's work, run in order after a turn that changed files (DESIGN §8.7). */
   readonly verifiers: readonly string[];
-  /** What a routed task tries when a verifier fails, and how many steps it takes before asking the user (DESIGN §8.7). */
-  readonly escalation: { readonly ladder: readonly EscalationStep[]; readonly maxAutoEscalations: number };
+  /**
+   * What a routed task tries when a trigger fires, how many steps it takes before asking the user, and how many times the
+   * same tool error comes back before that's a trigger, 0 never (DESIGN §8.7).
+   */
+  readonly escalation: { readonly ladder: readonly EscalationStep[]; readonly maxAutoEscalations: number; readonly repeatedErrors: number };
   readonly catalog: Catalog;
 };
 
@@ -175,6 +178,7 @@ export const loadPolicy = (layers: readonly PolicyLayer[] = [], catalog: Catalog
     escalation: {
       ladder: merged.escalation?.ladder ?? ["effort", "model", "ask"],
       maxAutoEscalations: merged.escalation?.maxAutoEscalations ?? 1,
+      repeatedErrors: merged.escalation?.repeatedErrors ?? 3,
     },
     catalog,
   };

@@ -262,9 +262,9 @@ export const VerifierReport = Schema.Struct({
   run: VerifierRun,
 });
 /**
- * Internal: the reactor asking to escalate the task of turn `turnId`, after which its verifier `run` failed or its
- * agent reported it is blocked for `reason` (DESIGN §8.7). A follow-up turn, if the ladder takes a step, gets
- * `nextTurnId`. Clients cannot send it.
+ * Internal: the reactor asking to escalate the task of turn `turnId`, after which its verifier `run` failed, its
+ * agent reported it is blocked for `reason`, or the same tool error came back once too often (DESIGN §8.7). A
+ * follow-up turn, if the ladder takes a step, gets `nextTurnId`. Clients cannot send it.
  */
 export const TaskEscalate = Schema.Struct({
   type: Schema.Literal("task.escalate"),
@@ -275,6 +275,8 @@ export const TaskEscalate = Schema.Struct({
   trigger: Schema.Union([
     Schema.Struct({ kind: Schema.Literal("verifier"), run: VerifierRun }),
     Schema.Struct({ kind: Schema.Literal("blocked"), reason: Schema.String }),
+    /** Tool `tool` failed with the same error `count` times in the task since it last escalated; `error` is its latest text, untrusted data. */
+    Schema.Struct({ kind: Schema.Literal("repeated-error"), tool: Schema.String, error: Schema.String, count: Schema.Int }),
   ]),
 });
 /** Internal: marks a turn left running by a previous verdandid as interrupted. */

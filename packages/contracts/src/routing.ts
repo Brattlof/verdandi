@@ -90,8 +90,11 @@ export type TaskLimits = typeof TaskLimits.Type;
 export const EscalationStep = Schema.Literals(["effort", "model", "ask"]);
 export type EscalationStep = typeof EscalationStep.Type;
 
-/** What set off an escalation (DESIGN §8.7): a project verifier failed, or the agent called `report_blocked`. */
-export const EscalationTrigger = Schema.Literals(["verifier", "blocked"]);
+/**
+ * What set off an escalation (DESIGN §8.7): a project verifier failed, the agent called `report_blocked`, or the same
+ * tool error came back `escalation.repeatedErrors` times in the task.
+ */
+export const EscalationTrigger = Schema.Literals(["verifier", "blocked", "repeated-error"]);
 export type EscalationTrigger = typeof EscalationTrigger.Type;
 
 /** A partial route: layers merge key by key, so a later layer can change only the effort. */
@@ -153,6 +156,8 @@ export const Policy = Schema.Struct({
       ladder: Schema.optionalKey(Schema.NonEmptyArray(EscalationStep)),
       /** How many steps a task takes without asking the user (default 1); then it stops and leaves the next one to the user. */
       maxAutoEscalations: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+      /** How many times the same tool error (paths, numbers and ids aside) comes back in a task before it escalates (default 3; 0 never). */
+      repeatedErrors: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
     }),
   ),
   /** When a task touches a path matching `match` (a glob), drop targets with a forbidden access mode or below `minTier`. */

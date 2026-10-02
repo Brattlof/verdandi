@@ -32,10 +32,10 @@ const flakyOnce = `const fs = require("fs"); if (fs.existsSync("fixed")) process
 
 /**
  * A project whose policy routes every task to the fake model at medium effort (`minConfidence: 1` sends all to
- * `fallback`), with `verifier` if given, and a thread on it, routed unless `pin` is given, whose first turn sends
- * `text` (by default an edit, so the verifier runs).
+ * `fallback`), with `verifier` if given, and a thread on it, routed unless `pin` is given, whose turns send `texts` one
+ * after another (by default an edit, so the verifier runs).
  */
-const setup = async ({ verifier, pin, text }: { verifier?: string; pin?: Route; text?: string }) => {
+const setup = async ({ verifier, pin, texts }: { verifier?: string; pin?: Route; texts?: readonly string[] }) => {
   const projectPath = tempDir();
   mkdirSync(join(projectPath, ".verdandi"));
   writeFileSync(join(projectPath, "check.js"), flakyOnce);
@@ -54,18 +54,14 @@ const setup = async ({ verifier, pin, text }: { verifier?: string; pin?: Route; 
   runtimes.push(runtime as never);
   const dispatch = (c: Command) => runtime.runPromise(Effect.flatMap(Engine, (e) => e.dispatch(c)));
   await dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId, projectPath, ...(pin && { route: pin }) });
-  await dispatch({
-    type: "turn.send",
-    commandId: id<CommandId>(),
-    threadId,
-    turnId: id<TurnId>(),
-    text: text ?? `edit ${join(projectPath, "a.txt")}`,
-    mode: "build",
-  });
-  // The escalation's follow-up turn starts from the first turn's reactions, so drain until nothing runs.
+  // An escalation's follow-up turn starts from its turn's reactions, so drain until nothing runs before the next.
+  const drain = () => runtime.runPromise(Effect.flatMap(Reactor, (r) => r.drain));
+  for (const text of texts ?? [`edit ${join(projectPath, "a.txt")}`]) {
+    await dispatch({ type: "turn.send", commandId: id<CommandId>(), threadId, turnId: id<TurnId>(), text, mode: "build" });
+    await drain();
+  }
   return runtime.runPromise(
     Effect.gen(function* () {
-      yield* (yield* Reactor).drain;
       const view = yield* loadThreadView(threadId);
       const [row] = yield* (yield* SqlClient.SqlClient)<{ payload: string }>`select payload from task_outcomes`;
       return {
@@ -132,7 +128,7 @@ test("a pinned thread never escalates: the user picked its route", async () => {
 const blocked = 'tool report_blocked {"reason":"The spec contradicts itself ``` about rounding"}';
 
 test("an agent that reports it is blocked raises its routed task's effort once, handed its own reason as data", async () => {
-  const { view, outcome } = await setup({ text: blocked });
+  const { view, outcome } = await setup({ texts: [blocked] });
   const [first, second] = view?.turns ?? [];
   expect(view?.turns).toHaveLength(2);
   expect(first?.items).toContainEqual({ kind: "blocked", reason: "The spec contradicts itself ``` about rounding" });
@@ -151,9 +147,37 @@ test("an agent that reports it is blocked raises its routed task's effort once, 
 });
 
 test("a pinned thread whose agent reports it is blocked only shows that", async () => {
-  const { view, outcome } = await setup({ text: blocked, pin: { harness: "fake", model: "fake", effort: "medium" } });
+  const { view, outcome } = await setup({ texts: [blocked], pin: { harness: "fake", model: "fake", effort: "medium" } });
   expect(view?.turns).toHaveLength(1);
   expect(view?.turns[0]?.items).toContainEqual({ kind: "blocked", reason: "The spec contradicts itself ``` about rounding" });
   expect(escalations(view?.turns[0]?.items)).toEqual([]);
+  expect(outcome).toMatchObject({ escalations: 0, triggers: [] });
+});
+
+const missingTool = "tool missing {}";
+
+test("the same tool error three times in a task raises its effort once, handing the agent the error as data", async () => {
+  const { view, outcome } = await setup({ texts: [missingTool, missingTool, missingTool] });
+  const turns = view?.turns ?? [];
+  expect(turns).toHaveLength(4);
+  expect(turns.slice(0, 2).flatMap((t) => escalations(t.items))).toEqual([]);
+  expect(escalations(turns[2]?.items)).toMatchObject([
+    {
+      step: "effort",
+      to: { model: "fake", effort: "high" },
+      nextTurnId: turns[3]?.turnId,
+      reason:
+        '`mcp__verdandi__missing` hit the same error 3 times ("There\'s no Verdandi tool missing."), so the task goes on at high effort, one step up from medium.',
+    },
+  ]);
+  expect(turns[3]?.text).toContain("```\nThere's no Verdandi tool missing.\n```");
+  expect(escalations(turns[3]?.items)).toEqual([]);
+  expect(outcome).toMatchObject({ escalations: 1, triggers: [{ trigger: "repeated-error", step: "effort" }] });
+});
+
+test("varied tool errors don't escalate", async () => {
+  const { view, outcome } = await setup({ texts: ["tool alpha {}", "tool beta {}", "tool gamma {}", "tool alpha {}"] });
+  expect(view?.turns).toHaveLength(4);
+  expect(view?.turns.flatMap((t) => escalations(t.items))).toEqual([]);
   expect(outcome).toMatchObject({ escalations: 0, triggers: [] });
 });

@@ -25,6 +25,7 @@ import { SqlClient } from "effect/unstable/sql";
 import { checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
 import { editedPaths } from "../diffs/diff.ts";
 import { memoryNudge } from "../memory/memory.ts";
+import { repeatedError } from "../routing/repeated-error.ts";
 import { searchSessions } from "../search/search.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "../tasks/task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "../tasks/trajectory.ts";
@@ -52,10 +53,14 @@ export class WorktreesDir extends Context.Service<WorktreesDir, string>()("verda
 /** Where the profile keeps attachments' bytes, which harness turns read by path. */
 export class AttachmentsDir extends Context.Service<AttachmentsDir, string>()("verdandi/AttachmentsDir") {}
 
-/** The project's verifiers (`escalation.verifiers` in its routing policy), read when a turn needs them. */
-export class ProjectVerifiers extends Context.Service<ProjectVerifiers, (projectPath: string) => Effect.Effect<readonly string[]>>()(
-  "verdandi/ProjectVerifiers",
-) {}
+/**
+ * The project's verifiers and how many times the same tool error repeats before it escalates its task
+ * (`escalation.verifiers` and `escalation.repeatedErrors` in its routing policy), read when a turn needs them.
+ */
+export class ProjectEscalation extends Context.Service<
+  ProjectEscalation,
+  (projectPath: string) => Effect.Effect<{ readonly verifiers: readonly string[]; readonly repeatedErrors: number }>
+>()("verdandi/ProjectEscalation") {}
 
 export class Reactor extends Context.Service<
   Reactor,
@@ -92,7 +97,7 @@ export const ReactorLive = Layer.effect(
     const attachmentsDir = yield* AttachmentsDir;
     const worktreesDir = yield* WorktreesDir;
     const toolSettings = yield* ToolSettings;
-    const projectVerifiers = yield* ProjectVerifiers;
+    const projectEscalation = yield* ProjectEscalation;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
     /** The adapter running each thread's current turn: where answers to its requests go. */
@@ -172,7 +177,7 @@ export const ReactorLive = Layer.effect(
      */
     const verify = (threadId: ThreadId, turnId: TurnId, projectPath: string, cwd: string) =>
       Effect.gen(function* () {
-        const commands = yield* projectVerifiers(projectPath);
+        const commands = (yield* projectEscalation(projectPath)).verifiers;
         // Before the first runs, so the decider refuses a steer the finished agent would never read.
         if (commands.length > 0)
           yield* engine.dispatch({ type: "verifiers.start", commandId: randomUUID() as CommandId, threadId, turnId });
@@ -182,6 +187,28 @@ export const ReactorLive = Layer.effect(
           if (!run.passed) return run;
         }
         return undefined;
+      });
+
+    /**
+     * The tool error that came back the project's `escalation.repeatedErrors` times in the thread's task since it last
+     * escalated, across its turns, as an escalation trigger (DESIGN §8.7); undefined when none did.
+     */
+    const repeatedErrorIn = (threadId: ThreadId, projectPath: string) =>
+      Effect.gen(function* () {
+        const { repeatedErrors } = yield* projectEscalation(projectPath);
+        if (repeatedErrors === 0) return undefined;
+        const errors = yield* sql<{ tool: string; error: string }>`
+          select json_extract(c.payload, '$.name') as tool, json_extract(r.payload, '$.content') as error
+          from threads t join tasks k on k.id = t.task_id
+            join turns n on n.thread_id = t.id and n.started_at >= k.started_at and n.reverted = 0
+            join items r on r.turn_id = n.id and json_extract(r.payload, '$.kind') = 'tool.result' and json_extract(r.payload, '$.isError')
+            join items c on c.turn_id = n.id and json_extract(c.payload, '$.kind') = 'tool.call'
+              and json_extract(c.payload, '$.toolUseId') = json_extract(r.payload, '$.toolUseId')
+          where t.id = ${threadId} and n.rowid > coalesce((
+            select max(u.rowid) from events e join turns u on u.id = json_extract(e.payload, '$.turnId')
+            where e.thread_id = t.id and e.type = 'task.escalated' and json_extract(e.payload, '$.taskId') = k.id), 0)
+          order by n.rowid, r.idx`;
+        return repeatedError(errors, repeatedErrors);
       });
 
     /** Saves the thread's tree as turn `turnId`'s start or end checkpoint (DESIGN §13). A failure is logged, never the turn's. */
@@ -244,6 +271,8 @@ export const ReactorLive = Layer.effect(
         const nudge = memoryNudge(thread.turn_number, toolSettings.memoryNudgeEvery);
         // The turn's file-tool calls: once its agent is done, a turn that changed files is verified before it completes.
         const calls: Item[] = [];
+        // Whether a tool call failed, so the task's tool errors are counted at the turn's end.
+        let toolFailed = false;
         yield* adapter
           .run({
             threadId,
@@ -273,6 +302,7 @@ export const ReactorLive = Layer.effect(
             Stream.runForEach((event) => {
               if (event.type === "text.delta") return engine.publishDelta(threadId, turnId, event.text);
               if (event.type === "item" && event.item.kind === "tool.call") calls.push(event.item);
+              if (event.type === "item" && event.item.kind === "tool.result" && event.item.isError) toolFailed = true;
               if (event.type !== "turn.finished") return report(threadId, turnId, event);
               finished = true;
               return Effect.gen(function* () {
@@ -281,8 +311,9 @@ export const ReactorLive = Layer.effect(
                     ? yield* verify(threadId, turnId, thread.path, cwd)
                     : undefined;
                 yield* report(threadId, turnId, event);
-                // Once the turn has completed, a failed verifier, or else the agent having reported it's blocked, may
-                // escalate its task (DESIGN §8.7); the decider decides whether.
+                // Once the turn has completed, a failed verifier, or else the agent having reported it's blocked, or else the
+                // same tool error repeating in the task, may escalate it (DESIGN §8.7): one trigger per turn end, the
+                // strongest signal first. The decider decides whether.
                 const [blocked] = failed
                   ? []
                   : yield* sql<{ reason: string }>`
@@ -290,7 +321,11 @@ export const ReactorLive = Layer.effect(
                       where turn_id = ${turnId} and json_extract(payload, '$.kind') = 'blocked' order by idx desc limit 1`;
                 const trigger = failed
                   ? ({ kind: "verifier", run: failed } as const)
-                  : blocked && ({ kind: "blocked", reason: blocked.reason } as const);
+                  : blocked
+                    ? ({ kind: "blocked", reason: blocked.reason } as const)
+                    : toolFailed
+                      ? yield* repeatedErrorIn(threadId, thread.path)
+                      : undefined;
                 if (trigger) {
                   yield* engine.dispatch({
                     type: "task.escalate",
