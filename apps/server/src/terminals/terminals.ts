@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { type TerminalFeed, type TerminalId, TerminalUnavailable, type TerminalView, type ThreadId } from "@verdandi/contracts";
 import { Context, Effect, Layer, Queue, Stream } from "effect";
+import { childEnv } from "../home/child-env.ts";
 import { type HostReport, type HostRequest, killTree } from "./pty-host.ts";
 
 /** Output kept per terminal for a client that reattaches: the last 256 KiB or so. */
@@ -75,7 +76,9 @@ export const TerminalsLive = Layer.effect(
     };
 
     const startHost = () => {
-      const proc = Bun.spawn([process.execPath, hostEntry], {
+      // No .env: Bun would load verdandid's own from the folder it runs in, secrets and all, into every terminal.
+      const proc = Bun.spawn([process.execPath, "--no-env-file", hostEntry], {
+        env: childEnv(),
         stdio: ["ignore", "inherit", "inherit"],
         serialization: "json",
         ipc: (report: HostReport) => onReport(report),

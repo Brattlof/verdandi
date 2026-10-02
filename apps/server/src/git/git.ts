@@ -1,4 +1,5 @@
 import { Data, Effect } from "effect";
+import { childEnv } from "../home/child-env.ts";
 
 /** git failed or couldn't start. The message names the cause and the fix. */
 export class GitError extends Data.TaggedError("GitError")<{ readonly message: string }> {}
@@ -16,7 +17,7 @@ const inherited = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIR
 export const git = (cwd: string, args: readonly string[], env: Record<string, string> = {}, input?: string) =>
   Effect.tryPromise({
     try: async (): Promise<GitResult> => {
-      const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => !inherited.includes(k)));
+      const base = Object.fromEntries(Object.entries(childEnv()).filter(([k]) => !inherited.includes(k)));
       const proc = Bun.spawn(
         ["git", "--no-optional-locks", "--literal-pathspecs", "-c", "core.quotePath=false", "-c", "core.longpaths=true", ...args],
         {

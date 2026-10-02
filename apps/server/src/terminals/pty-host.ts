@@ -70,6 +70,7 @@ const serve = async () => {
     try {
       proc = Bun.spawn(shell(), {
         cwd: request.cwd,
+        // verdandid started the host with `childEnv()` and no .env, so its environment holds none of Verdandi's secrets.
         env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" },
         terminal: {
           cols: request.cols,

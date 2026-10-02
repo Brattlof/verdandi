@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { FolderPickUnavailable } from "@verdandi/contracts";
 import { Effect } from "effect";
+import { childEnv } from "../home/child-env.ts";
 
 const title = "Choose a project folder";
 
@@ -27,7 +28,7 @@ const dialogs = (): readonly { readonly cmd: string[]; readonly cancelled: (stde
 
 const spawn = (cmd: string[]) => {
   try {
-    return Bun.spawn({ cmd, stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true });
+    return Bun.spawn({ cmd, env: childEnv(), stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true });
   } catch {
     return undefined; // not installed
   }

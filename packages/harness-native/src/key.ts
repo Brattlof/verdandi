@@ -3,6 +3,8 @@
  * verdandid's environment, and that variable would quietly move its turns from the subscription to metered billing.
  */
 export const keyVariable = "VERDANDI_ANTHROPIC_API_KEY";
+/** Verdandi's own secrets in its environment, kept from every process it starts. Each provider's key variable goes here. */
+export const secretVariables = [keyVariable];
 export const keychainEntry = { service: "verdandi", name: "anthropic-api-key" } as const;
 
 /** The OS keychain as `Bun.secrets` exposes it; tests pass their own, never the real one. */

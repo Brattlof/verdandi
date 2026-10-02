@@ -5,6 +5,7 @@ import { findClaude, makeClaudeCodeAdapter } from "@verdandi/harness-claude-code
 import { makeFakeHarness } from "@verdandi/testkit";
 import { Effect, ManagedRuntime, Stream } from "effect";
 import { attachmentsDir } from "./attachments/attachments.ts";
+import { childEnv } from "./home/child-env.ts";
 import { alive, flag, resolveHome, type ServerFile, serverFile } from "./home/home.ts";
 import { nativeHarness } from "./native/native-harness.ts";
 import { hostProblem, isLocalAddress, startLanGate } from "./rpc/lan-gate.ts";
@@ -47,7 +48,7 @@ export const start = async (argv: readonly string[]) => {
   const native = await nativeHarness(home);
   const harnesses: Partial<Record<HarnessId, HarnessAdapter>> = {
     "claude-code": claudePath
-      ? makeClaudeCodeAdapter({ claudePath, additionalDirectories: [attachmentsDir(home)], plugins: [skillsPlugin(home)] })
+      ? makeClaudeCodeAdapter({ claudePath, additionalDirectories: [attachmentsDir(home)], plugins: [skillsPlugin(home)], env: childEnv() })
       : claudeMissing,
     ...(native.adapter && { native: native.adapter }),
     // The fake harness answers without any model call: for trying the loop end to end.
