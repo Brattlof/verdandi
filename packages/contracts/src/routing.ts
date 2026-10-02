@@ -40,6 +40,11 @@ export const CatalogEntry = Schema.Struct({
   context: Schema.Int,
   /** Whether it reads images: a task with an image attached routes only to targets that do. */
   vision: Schema.Boolean,
+  /**
+   * The effort levels it takes. Empty when it has no effort setting, so its harness ignores one
+   * (Claude Code reports them as `supportedEffortLevels` from `supportedModels()`).
+   */
+  efforts: Schema.Array(Effort),
   price: Schema.Struct({ input: Schema.Number, output: Schema.Number, cacheRead: Schema.Number, cacheWrite: Schema.Number }),
 });
 export type CatalogEntry = typeof CatalogEntry.Type;

@@ -1,5 +1,5 @@
-import type { CatalogEntry, Effort, HarnessId, RouteTarget, Tier } from "@verdandi/contracts";
-import type { ResolvedPolicy } from "./policy.ts";
+import { type CatalogEntry, Effort, type HarnessId, type RouteTarget, type Tier } from "@verdandi/contracts";
+import { clampEffort, type ResolvedPolicy } from "./policy.ts";
 
 export type EscalationInput = {
   /** The task's route now. */
@@ -17,14 +17,13 @@ export type Escalation =
   | { readonly step: "effort" | "model"; readonly target: RouteTarget; readonly effort: Effort; readonly reason: string }
   | { readonly step: "ask"; readonly reason: string };
 
-// ponytail: every model takes every effort level. Upgrade: per-model effort levels in the catalog (DESIGN §8.6).
-const EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh", "max"];
+const level = (e: Effort) => Effort.literals.indexOf(e);
 const TIERS: readonly Tier[] = ["S", "M", "L", "XL"];
 
 /**
  * Pure: the next step of the escalation ladder (DESIGN §8.7) for a routed task whose verifier failed. Steps follow
- * the policy's `ladder`, one per failure, skipping one that can't apply (effort already at max, no stronger model on
- * the task's harness). Once the task has taken `maxAutoEscalations` steps, or the ladder runs out or reaches `ask`, it asks.
+ * the policy's `ladder`, one per failure, skipping one that can't apply (no higher effort level the model takes, no
+ * stronger model on the task's harness). Once the task has taken `maxAutoEscalations` steps, or the ladder runs out or reaches `ask`, it asks.
  * A stronger model stays on the task's harness, so the session and its context carry over.
  */
 export const escalate = (input: EscalationInput, policy: ResolvedPolicy): Escalation => {
@@ -37,10 +36,13 @@ export const escalate = (input: EscalationInput, policy: ResolvedPolicy): Escala
     const n = input.escalations;
     return ask(`this task already escalated ${n === 1 ? "once" : `${n} times`} (maxAutoEscalations ${maxAutoEscalations})`);
   }
+  const entryOf = (t: RouteTarget) =>
+    policy.catalog.find((e) => e.harness === t.harness && e.provider === t.provider && e.model === t.model);
   for (const step of ladder.slice(input.escalations)) {
     if (step === "ask") return ask("the escalation ladder says to ask you");
     if (step === "effort") {
-      const next = EFFORTS[EFFORTS.indexOf(input.effort) + 1];
+      // A model without effort levels, or one the catalog doesn't know, has no level to raise to.
+      const next = entryOf(input.target)?.efforts.find((e) => level(e) > level(input.effort));
       if (next)
         return {
           step,
@@ -50,9 +52,7 @@ export const escalate = (input: EscalationInput, policy: ResolvedPolicy): Escala
         };
       continue;
     }
-    const tierOf = (t: RouteTarget) =>
-      policy.catalog.find((e) => e.harness === t.harness && e.provider === t.provider && e.model === t.model)?.tier;
-    const current = tierOf(input.target);
+    const current = entryOf(input.target)?.tier;
     if (!current) continue;
     const stronger = [...policy.targets.values()].filter(
       (t: CatalogEntry) =>
@@ -68,11 +68,12 @@ export const escalate = (input: EscalationInput, policy: ResolvedPolicy): Escala
     );
     if (to) {
       const { harness, provider, model, access } = to;
+      const effort = clampEffort(to.efforts, input.effort);
       return {
         step,
         target: { harness, provider, model, access },
-        effort: input.effort,
-        reason: `${input.failure}, so the task goes on on the stronger ${model} at ${input.effort} effort.`,
+        effort: effort ?? input.effort,
+        reason: `${input.failure}, so the task goes on on the stronger ${model}${effort ? ` at ${effort} effort` : ""}.`,
       };
     }
   }

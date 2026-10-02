@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { CatalogEntry, TaskId, TaskOutcome, ThreadId } from "@verdandi/contracts";
+import { type CatalogEntry, Effort, type TaskId, type TaskOutcome, type ThreadId } from "@verdandi/contracts";
 import { periodStart, summarizeOutcomes } from "./usage.ts";
 
 const route = { harness: "fake", model: "fake", effort: "low" } as const;
@@ -11,6 +11,7 @@ const baseline: CatalogEntry = {
   tier: "L",
   context: 1_000_000,
   vision: true,
+  efforts: Effort.literals,
   price: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
 };
 const usage = (accessMode: "metered" | "subscription", costUsd: number) => ({

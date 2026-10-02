@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import type { Command, CommandId, HarnessId, ProjectId, Resolution, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
+import {
+  type Command,
+  type CommandId,
+  Effort,
+  type HarnessId,
+  type ProjectId,
+  type Resolution,
+  type TaskId,
+  type ThreadId,
+  type TurnId,
+} from "@verdandi/contracts";
 import { builtInCatalog, loadPolicy, route as routeTask, rules } from "@verdandi/router";
 import { fakeCatalog } from "@verdandi/testkit";
 import { Result } from "effect";
@@ -368,6 +378,7 @@ describe("spend caps", () => {
     tier: "S",
     context: 200_000,
     vision: false,
+    efforts: Effort.literals,
     price: apiPrice,
   } as const;
   const catalog = [...builtInCatalog, ...fakeCatalog, api];

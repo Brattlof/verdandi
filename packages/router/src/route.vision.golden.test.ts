@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Effort } from "@verdandi/contracts";
 import { builtInCatalog, loadPolicy } from "./policy.ts";
 import { route } from "./route.ts";
 import { rules } from "./rules.ts";
@@ -7,8 +8,28 @@ const free = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 /** One fake model that reads images and a cheaper one that doesn't. */
 const catalog = [
   ...builtInCatalog,
-  { harness: "fake", provider: "fake", model: "fake-small", access: "local", tier: "S", context: 200_000, vision: false, price: free },
-  { harness: "fake", provider: "fake", model: "fake", access: "local", tier: "M", context: 1_000_000, vision: true, price: free },
+  {
+    harness: "fake",
+    provider: "fake",
+    model: "fake-small",
+    access: "local",
+    tier: "S",
+    context: 200_000,
+    vision: false,
+    efforts: Effort.literals,
+    price: free,
+  },
+  {
+    harness: "fake",
+    provider: "fake",
+    model: "fake",
+    access: "local",
+    tier: "M",
+    context: 1_000_000,
+    vision: true,
+    efforts: Effort.literals,
+    price: free,
+  },
 ] as const;
 const policy = loadPolicy(
   [

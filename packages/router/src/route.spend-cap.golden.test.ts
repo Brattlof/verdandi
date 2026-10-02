@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Effort } from "@verdandi/contracts";
 import { builtInCatalog, loadPolicy } from "./policy.ts";
 import { route } from "./route.ts";
 import { rules } from "./rules.ts";
@@ -15,9 +16,20 @@ const catalog = [
     tier: "S",
     context: 200_000,
     vision: false,
+    efforts: Effort.literals,
     price: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.12 },
   },
-  { harness: "fake", provider: "fake", model: "fake", access: "local", tier: "M", context: 1_000_000, vision: true, price: free },
+  {
+    harness: "fake",
+    provider: "fake",
+    model: "fake",
+    access: "local",
+    tier: "M",
+    context: 1_000_000,
+    vision: true,
+    efforts: Effort.literals,
+    price: free,
+  },
 ] as const;
 const policy = loadPolicy(
   [

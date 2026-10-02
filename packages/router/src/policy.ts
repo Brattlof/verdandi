@@ -4,9 +4,11 @@ import {
   type CatalogEntry,
   decodeCatalog,
   decodePolicy,
+  Effort,
   type EscalationStep,
   type Policy,
   type RouteRule,
+  type RouteSpec,
 } from "@verdandi/contracts";
 import catalogData from "./catalog.json";
 import builtInPolicy from "./policy.json";
@@ -65,6 +67,66 @@ const preferLists = (layer: Policy) =>
     ...specs("fallback", layer.fallback),
   ].flatMap(([path, spec]) => (spec?.prefer ? [[`${path}.prefer`, spec.prefer] as const] : []));
 
+const level = (e: Effort) => Effort.literals.indexOf(e);
+
+/**
+ * `effort` if `efforts`, a model's levels, has it, else the nearest one it has: the highest below, failing that the
+ * lowest above. Undefined for a model without effort levels, whose harness ignores the effort.
+ */
+export const clampEffort = (efforts: readonly Effort[], effort: Effort): Effort | undefined =>
+  efforts.includes(effort) ? effort : (efforts.findLast((e) => level(e) < level(effort)) ?? efforts.find((e) => level(e) > level(effort)));
+
+/**
+ * A class's route in a budget mode: the balanced route, then the mode's changes, then the plan-phase override and its
+ * mode changes. `preferKey` and `effortKey` are the policy keys under `path` the values came from.
+ */
+export const resolveSpec = (rule: RouteRule, mode: BudgetMode, planning: boolean, path = "") => {
+  const layers: (readonly [string, RouteSpec | undefined])[] = [[path, rule]];
+  if (mode !== "balanced") layers.push([`${path}.${mode}`, rule[mode]]);
+  if (planning)
+    layers.push([`${path}.plan`, rule.plan], ...(mode !== "balanced" ? [[`${path}.plan.${mode}`, rule.plan?.[mode]] as const] : []));
+  const prefer = layers.findLast(([, s]) => s?.prefer);
+  const effort = layers.findLast(([, s]) => s?.effort);
+  return {
+    ...(prefer?.[1]?.prefer && { prefer: prefer[1].prefer, preferKey: `${prefer[0]}.prefer` }),
+    ...(effort?.[1]?.effort && { effort: effort[1].effort, effortKey: `${effort[0]}.effort` }),
+  };
+};
+
+/**
+ * The first effort the merged policy asks of a target whose model doesn't take it, as a message naming the key, or
+ * undefined. A model without effort levels ignores any effort, so it never conflicts.
+ */
+const effortConflict = (merged: Policy, catalog: Catalog) => {
+  const entryOf = (name: string) => {
+    const t = merged.targets?.[name];
+    return t && catalog.find((e) => e.harness === t.harness && e.provider === t.provider && e.model === t.model);
+  };
+  const rules = [
+    ...Object.entries(merged.routes ?? {}).map(([cls, r]) => [`routes.${cls}`, r] as const),
+    ["fallback", merged.fallback] as const,
+  ];
+  for (const [path, rule] of rules) {
+    if (!rule) continue;
+    const specs = (["thrifty", "balanced", "max"] as const).flatMap((mode) =>
+      [false, true].map((plan) => resolveSpec(rule, mode, plan, path)),
+    );
+    const subagents = Object.entries(rule.subagents ?? {}).map(([profile, spec]) => {
+      const key = `${path}.subagents.${profile}`;
+      return { ...spec, preferKey: `${key}.prefer`, effortKey: `${key}.effort` };
+    });
+    for (const { prefer, preferKey, effort, effortKey } of [...specs, ...subagents]) {
+      if (!effort) continue;
+      for (const name of prefer ?? []) {
+        const entry = entryOf(name);
+        if (entry && entry.efforts.length > 0 && !entry.efforts.includes(effort))
+          return `${effortKey}: ${effort} isn't an effort level of ${entry.model} (${name}, from ${preferKey}), which takes ${entry.efforts.join(", ")}. Pick one of those, or another target.`;
+      }
+    }
+  }
+  return undefined;
+};
+
 /**
  * The built-in policy with `layers` merged over it in order (profile, then project: DESIGN §8.6).
  * `data` is the parsed file, e.g. `Bun.YAML.parse` of `.verdandi/routing.yaml`. Restrictions add up
@@ -92,6 +154,8 @@ export const loadPolicy = (layers: readonly PolicyLayer[] = [], catalog: Catalog
       const unknown = names.find((n) => !merged.targets?.[n]);
       if (unknown) throw new PolicyError(`${source}: ${path}: unknown target "${unknown}"; define it under targets.`);
     }
+    const conflict = effortConflict(merged, catalog);
+    if (conflict) throw new PolicyError(`${source}: ${conflict}`);
   }
   const targets = new Map(
     Object.entries(merged.targets ?? {}).flatMap(([name, t]) => {

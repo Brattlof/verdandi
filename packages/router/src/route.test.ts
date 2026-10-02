@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { RouteTarget } from "@verdandi/contracts";
+import { Effort, type RouteTarget } from "@verdandi/contracts";
 import { builtInCatalog, loadPolicy } from "./policy.ts";
 import { PinError, RouterError, route } from "./route.ts";
 import { rules } from "./rules.ts";
@@ -23,7 +23,7 @@ describe("pins", () => {
       rules,
     );
     expect(d).toMatchObject({ source: "pin", target: cc("haiku"), effort: "max", taskClass: "ask.search" });
-    expect(d.reason).toBe("You pinned haiku at max effort.");
+    expect(d.reason).toBe("You pinned haiku.");
   });
 
   test("@name wins over the thread's pin, keeps the warm session's effort on its model, and ignores case", () => {
@@ -134,6 +134,7 @@ describe("candidates and fallbacks", () => {
       access: "local",
       tier: "M",
       vision: true,
+      efforts: Effort.literals,
       context: 1_000_000,
       price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     } as const;
@@ -204,6 +205,7 @@ describe("subagents", () => {
       tier: "S",
       context: 200_000,
       vision: false,
+      efforts: Effort.literals,
       price: free,
     } as const,
   ];
