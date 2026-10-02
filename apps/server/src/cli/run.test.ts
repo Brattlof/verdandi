@@ -1,6 +1,7 @@
 import { afterAll, afterEach, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { CommandId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
 import { Engine } from "../event-store/engine.ts";
@@ -122,6 +123,112 @@ test(
     writeFileSync(join(project, ".verdandi", "routing.yaml"), 'escalation: { verifiers: ["echo broken && exit 1"] }');
     const { stderr, code } = await verdandiRun(home, [...pinned, "--project", project, "edit", "a.txt"]);
     expect(stderr).toContain("The verifier echo broken && exit 1 failed (exit 1):\nbroken");
+    expect(code).toBe(exitCodes.failed);
+  },
+  spawnTimeout,
+);
+
+/** A project whose policy routes every task to the fake model at medium effort, with `verifier` as its verifier. */
+const routedProject = (verifier: string) => {
+  const project = makeTempHome();
+  cleanups.push(async () => removeTempHome(project));
+  mkdirSync(join(project, ".verdandi"));
+  // Fails the first time it runs in a folder and passes after, like a test the agent's fix makes pass.
+  const flakyOnce = `const fs = require("fs"); if (fs.existsSync("fixed")) process.exit(0); fs.writeFileSync("fixed", ""); process.exit(1);`;
+  writeFileSync(join(project, "check.js"), flakyOnce);
+  writeFileSync(
+    join(project, ".verdandi", "routing.yaml"),
+    [
+      "minConfidence: 1",
+      "targets:",
+      "  mid: { harness: fake, provider: fake, model: fake }",
+      "fallback: { prefer: [mid], effort: medium }",
+      `escalation: { verifiers: ${JSON.stringify([verifier])} }`,
+    ].join("\n"),
+  );
+  return project;
+};
+
+test(
+  "follows the task through Verdandi's follow-up turn when a verifier fails and the escalation fixes it",
+  async () => {
+    const project = routedProject(`"${process.execPath}" check.js`);
+    const { home } = await startServer();
+    const { stdout, stderr, code } = await verdandiRun(home, ["--project", project, "edit", "a.txt"]);
+    const edited = `edited ${join(realpathSync.native(project), "a.txt")}\n`;
+    expect(stdout).toBe(edited + edited);
+    expect(stderr).toContain("[escalated to fake high:");
+    expect(stderr).toContain("[completed on fake high via fake");
+    expect(code).toBe(exitCodes.completed);
+  },
+  spawnTimeout,
+);
+
+test(
+  "an escalation that stops to ask exits as failed naming the thread, and --json reports every step and turn's cost",
+  async () => {
+    const project = routedProject("exit 1");
+    const { home } = await startServer();
+    const { stdout, stderr, code } = await verdandiRun(home, ["--project", project, "--json", "edit", "a.txt"]);
+    const result = JSON.parse(stdout) as RunResult;
+    expect(code).toBe(exitCodes.failed);
+    expect(result).toMatchObject({
+      status: "failed",
+      route: { model: "fake", effort: "high" },
+      cost: { subscriptionUsd: 0.02 },
+      escalations: [
+        { step: "effort", from: { effort: "medium" }, to: { effort: "high" }, reason: expect.stringContaining("goes on at high effort") },
+        { step: "ask", from: { effort: "high" }, reason: expect.stringContaining("leaves the next step to you") },
+      ],
+    });
+    expect(result.escalations[1]).not.toHaveProperty("to");
+    expect(stderr).toContain("leaves the next step to you");
+    expect(stderr).toContain(`verdandi chat --thread ${result.threadId}`);
+  },
+  spawnTimeout,
+);
+
+test(
+  "follows the task when its agent reports it is blocked, whatever set off the escalation",
+  async () => {
+    const project = routedProject("exit 1");
+    const { home } = await startServer();
+    const { stdout, code } = await verdandiRun(home, ["--project", project, "--json", 'tool report_blocked {"reason":"stuck"}']);
+    const result = JSON.parse(stdout) as RunResult;
+    expect(code).toBe(exitCodes.completed);
+    expect(result).toMatchObject({ status: "completed", escalations: [{ trigger: "blocked", step: "effort", to: { effort: "high" } }] });
+    expect(result.reply).toStartWith("called report_blocked\necho: You reported that you're blocked on this task.");
+  },
+  spawnTimeout,
+);
+
+test(
+  "stops waiting for Verdandi's decision once the thread is reverted, saying why",
+  async () => {
+    const project = routedProject("exit 1");
+    const { home, runtime } = await startServer();
+    const first = JSON.parse((await verdandiRun(home, ["--project", project, "--json", "hello"])).stdout) as RunResult;
+    // Reverted the moment the run's turn completes, before the reactor asks whether to escalate its failed verifier.
+    await runtime.runPromise(
+      Effect.flatMap(Engine, (engine) =>
+        engine.react(({ event }) =>
+          event.type === "turn.completed" && event.turnId !== first.turnId
+            ? engine
+                .dispatch({
+                  type: "thread.revert",
+                  commandId: crypto.randomUUID() as CommandId,
+                  threadId: first.threadId,
+                  toTurnId: first.turnId,
+                  files: false,
+                })
+                .pipe(Effect.ignore)
+            : Effect.void,
+        ),
+      ),
+    );
+    const { stderr, code } = await verdandiRun(home, ["--thread", first.threadId, "edit", "a.txt"]);
+    expect(stderr).toContain("The verifier exit 1 failed (exit 1)");
+    expect(stderr).toContain("the thread was reverted before Verdandi decided whether to escalate it");
     expect(code).toBe(exitCodes.failed);
   },
   spawnTimeout,

@@ -551,6 +551,17 @@ describe("task.escalate", () => {
     expect(events(decide({ thread: { ...thread, taskDecision }, routing }, escalate))).toEqual([]);
   });
 
+  test("a broken policy asks instead, naming the fault, so a client following the task knows nothing is coming", () => {
+    const broken = { ...routing, policy: Result.fail(".verdandi/routing.yaml: bad ladder") };
+    expect(events(decide({ thread, routing: broken }, escalate))).toMatchObject([
+      {
+        type: "task.escalated",
+        step: "ask",
+        reason: "`bun test` failed (exit 1), and Verdandi didn't escalate: .verdandi/routing.yaml: bad ladder",
+      },
+    ]);
+  });
+
   test("a reached spend cap stops the ladder and asks instead, when the next step would spend metered dollars", () => {
     const cap = { scope: "project", period: "day", periodKey: "2026-09-30", baseUsd: 5, limitUsd: 5, spentUsd: 5 } as const;
     const spent = (paying: HarnessId[]) => ({
