@@ -11,7 +11,7 @@ import { projectIdFor } from "../event-store/decider.ts";
 import { Reactor } from "../event-store/reactor.ts";
 import { alive } from "../home/home.ts";
 import { spendCapsFile } from "../spend/spend-caps.ts";
-import { Terminals } from "../terminals/terminals.ts";
+import { Terminals, waitingOutput } from "../terminals/terminals.ts";
 import { connect } from "./client.ts";
 import { ServerInfo, ServerLayer } from "./server.ts";
 
@@ -69,13 +69,14 @@ type Client = Effect.Success<ReturnType<typeof connect>>;
 const followTerminal = (c: Client, terminalId: TerminalId) =>
   Effect.gen(function* () {
     const subscriptionId = crypto.randomUUID();
-    const seen = { snapshot: undefined as string | undefined, output: "", ended: undefined as TerminalView | undefined };
+    const seen = { snapshot: undefined as string | undefined, output: "", skipped: 0, ended: undefined as TerminalView | undefined };
     const waiters = new Set<{ readonly check: () => boolean; readonly done: Deferred.Deferred<void> }>();
     const wake = Effect.suspend(() => Effect.forEach([...waiters], (w) => (w.check() ? Deferred.succeed(w.done, undefined) : Effect.void)));
     const fiber = yield* c.TerminalSubscribe({ terminalId, subscriptionId }).pipe(
       Stream.runForEach((f) => {
         if (f.kind === "snapshot") seen.snapshot = f.output;
         if (f.kind === "ended") seen.ended = f.terminal;
+        if (f.kind === "output") seen.skipped += f.skipped ?? 0;
         seen.output += f.kind === "snapshot" ? f.output : f.kind === "output" ? f.data : "";
         return wake;
       }),
@@ -837,6 +838,54 @@ describe("rpc server", () => {
       expect(replayed).toContain("verdandi-42");
       expect(after).toEqual([]);
       expect(alive(opened.pid)).toBe(false);
+    },
+    terminalTimeout,
+  );
+
+  test(
+    "a flooding terminal keeps a subscriber that doesn't read under a fixed bound, and one that reads gets everything",
+    async () => {
+      const { info, runtime } = await startServer();
+      const terminals = await runtime.runPromise(
+        Effect.gen(function* () {
+          return yield* Terminals;
+        }),
+      );
+      const lines = 300_000; // ~2 MB of output, past the bound
+      const flood = process.platform === "win32" ? `1..${lines}; ${echo(9)}` : `seq 1 ${lines}; ${echo(9)}`;
+      const [late, read] = await withClient(info.port, info.token, (c) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const threadId = uuid<ThreadId>();
+            yield* step("create", createThread(c, threadId));
+            const { terminalId } = yield* step("open", c.TerminalOpen({ threadId, cols: 80, rows: 24 }), shellStart);
+            const reader = yield* followTerminal(c, terminalId);
+            yield* step(
+              "snapshot",
+              reader.until(() => reader.seen.snapshot !== undefined),
+            );
+            // Subscribed, then never pulled again until the flood is over.
+            const idle = yield* Stream.toPull(terminals.feed(terminalId));
+            yield* step("idle snapshot", idle);
+            yield* c.TerminalWrite({ terminalId, data: flood });
+            yield* step(
+              "flood",
+              reader.until(() => reader.seen.output.includes("verdandi-63")),
+              shellStart,
+            );
+            const late = yield* step("idle pull", idle);
+            yield* step("unsubscribe", reader.stop);
+            return [late, reader.seen] as const;
+          }),
+        ),
+      );
+      const waiting = late.flatMap((f) => (f.kind === "output" ? [f] : []));
+      expect(waiting.reduce((n, f) => n + f.data.length, 0)).toBeLessThanOrEqual(waitingOutput);
+      expect(waiting.at(-1)?.data).toContain("verdandi-63"); // the latest output is kept
+      expect(waiting.some((f) => (f.skipped ?? 0) > 0)).toBe(true);
+      expect(read.skipped).toBe(0);
+      // A PTY may end a line with an extra \r now and then (macOS does).
+      expect(read.output.replace(/\r+\n/g, "\n")).toContain(Array.from({ length: lines }, (_, i) => `${i + 1}\n`).join(""));
     },
     terminalTimeout,
   );

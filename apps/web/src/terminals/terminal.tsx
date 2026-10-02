@@ -11,6 +11,10 @@ const endText = (t: TerminalView) =>
     ? "This terminal was lost: verdandid's PTY host stopped. Close it and open a new one."
     : `The shell exited${t.exitCode === null ? "" : ` with code ${t.exitCode}`}.`;
 
+/** The marker where verdandid skipped output this page read too slowly to keep up with. */
+const skippedText = (chars: number) =>
+  `[About ${Math.max(1, Math.round(chars / 1024))} KiB of output skipped: it came faster than this page could show it.]`;
+
 /**
  * The right panel's Terminal tab: the thread's terminals, which keep running while the page is closed or
  * reloaded, and show their recent output again when it comes back. With none open, the tab starts one.
@@ -159,10 +163,14 @@ const Screen = ({
       term.write(`\r\n\x1b[2m${endText(view)}\x1b[0m\r\n`);
       onEnded(view);
     };
+    const gone = Promise.withResolvers<void>();
+    /** Settles once xterm.js has taken `data` in, which acks the feed: a busy page gets output no faster than it renders. */
+    const written = (data: string) => Promise.race([new Promise<void>((resolve) => term.write(data, resolve)), gone.promise]);
     const stop = connection.follow(
       (rpc, subscriptionId) => rpc.TerminalSubscribe({ terminalId, subscriptionId }),
       (feed) => {
-        if (feed.kind === "output") return term.write(feed.data);
+        if (feed.kind === "output")
+          return written(feed.skipped ? `\r\n\x1b[2m${skippedText(feed.skipped)}\x1b[0m\r\n${feed.data}` : feed.data);
         if (feed.kind === "ended") return end(feed.terminal);
         term.write(feed.output);
         if (feed.terminal.status !== "running") end(feed.terminal);
@@ -172,6 +180,7 @@ const Screen = ({
     );
     return () => {
       disposed = true;
+      gone.resolve(); // xterm.js may never call back once disposed
       stop();
       resize.disconnect();
       cancelAnimationFrame(frame);

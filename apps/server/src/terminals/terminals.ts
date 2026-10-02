@@ -7,6 +7,13 @@ import { type HostReport, type HostRequest, killTree } from "./pty-host.ts";
 /** Output kept per terminal for a client that reattaches: the last 256 KiB or so. */
 export const keptOutput = 256 * 1024;
 
+/** Live output, in characters, one subscriber may have waiting in verdandid; past it, the oldest waiting output is skipped. */
+export const waitingOutput = 1024 * 1024;
+
+/** The last `max` characters of `text` or fewer, cut at a line break where there is one, so it rarely starts inside an escape sequence. */
+const tail = (text: string, max: number) =>
+  text.length <= max ? text : text.slice(text.indexOf("\n", text.length - max) + 1 || text.length - max);
+
 type Terminal = {
   view: TerminalView;
   output: string;
@@ -58,10 +65,7 @@ export const TerminalsLive = Layer.effect(
     const onReport = (report: HostReport) => {
       const terminal = terminals.get(report.id as TerminalId);
       if (report.type === "output" && terminal) {
-        const output = terminal.output + report.data;
-        // Cut at a line break where there is one, so the kept output rarely starts inside an escape sequence.
-        const cut = output.length > keptOutput ? output.indexOf("\n", output.length - keptOutput) + 1 || output.length - keptOutput : 0;
-        terminal.output = output.slice(cut);
+        terminal.output = tail(terminal.output + report.data, keptOutput);
         publish(terminal, { kind: "output", data: report.data });
       } else if (report.type === "exit" && terminal) end(terminal, "exited", report.exitCode);
       else {
@@ -158,23 +162,43 @@ export const TerminalsLive = Layer.effect(
         Effect.map(running(terminalId), (t) => t && request({ type: "resize", id: terminalId, cols, rows })),
       close,
       feed: (terminalId) =>
-        Stream.callback<TerminalFeed, TerminalUnavailable>((queue) =>
-          Effect.acquireRelease(
-            Effect.suspend(() => {
-              const terminal = terminals.get(terminalId);
-              if (!terminal) return Effect.fail(notFound(terminalId));
-              // One synchronous step: nothing can arrive between the snapshot and the listener.
-              Queue.offerUnsafe(queue, { kind: "snapshot", terminal: terminal.view, output: terminal.output });
-              // ponytail: no flow control, so a client that reads slower than a flooding command (`yes`) queues
-              // without bound. Upgrade: VS Code's ack-based pause of the PTY, once a real workload hits it.
-              const listener = (message: TerminalFeed | undefined) =>
-                message ? Queue.offerUnsafe(queue, message) : Queue.endUnsafe(queue);
-              terminal.listeners.add(listener);
-              return Effect.succeed(() => terminal.listeners.delete(listener));
-            }),
-            (unlisten) => Effect.sync(unlisten),
-          ),
-        ),
+        Stream.suspend(() => {
+          // Live output waits here, joined, until the client takes it: the RPC server takes the next message once the
+          // client acks the last (the web acks once xterm.js has taken it in). Past `waitingOutput` the oldest of it is
+          // skipped, so a client that reads slower than a flooding command (`yes`) can't run verdandid out of memory.
+          // ponytail: skips output rather than pausing the shell (Bun's PTY can't pause reading, and one stalled
+          // client would stall every other). Upgrade: VS Code's ack-based PTY pause, if skipping proves too lossy.
+          let waiting = "";
+          let skipped = 0;
+          const take = (): TerminalFeed => {
+            const message = { kind: "output" as const, data: waiting, ...(skipped > 0 && { skipped }) };
+            waiting = "";
+            skipped = 0;
+            return message;
+          };
+          return Stream.callback<TerminalFeed | "output", TerminalUnavailable>((queue) =>
+            Effect.acquireRelease(
+              Effect.suspend(() => {
+                const terminal = terminals.get(terminalId);
+                if (!terminal) return Effect.fail(notFound(terminalId));
+                // One synchronous step: nothing can arrive between the snapshot and the listener.
+                Queue.offerUnsafe(queue, { kind: "snapshot", terminal: terminal.view, output: terminal.output });
+                const listener = (message: TerminalFeed | undefined) => {
+                  if (!message) return Queue.endUnsafe(queue);
+                  if (message.kind !== "output") return Queue.offerUnsafe(queue, message);
+                  // One "output" in the queue stands for all that waits; it's taken as one message.
+                  if (waiting === "") Queue.offerUnsafe(queue, "output");
+                  const joined = waiting + message.data;
+                  waiting = tail(joined, waitingOutput);
+                  skipped += joined.length - waiting.length;
+                };
+                terminal.listeners.add(listener);
+                return Effect.succeed(() => terminal.listeners.delete(listener));
+              }),
+              (unlisten) => Effect.sync(unlisten),
+            ),
+          ).pipe(Stream.map((message) => (message === "output" ? take() : message)));
+        }),
       hostPid: () => host?.pid,
     };
   }),

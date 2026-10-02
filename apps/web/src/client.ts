@@ -210,10 +210,11 @@ export const connect = (token: string) => {
   /**
    * Follows a feed until the returned function is called. It never stops the stream itself: it asks
    * the server to end it (ADR 0008), once the first message shows the server has registered it.
+   * A handler that returns a promise holds the feed until it settles, so the server sends no faster than it's taken in.
    */
   const follow = <A, E>(
     open: (rpc: Rpc, subscriptionId: string) => Stream.Stream<A, E>,
-    onMessage: (message: A) => void,
+    onMessage: (message: A) => void | Promise<void>,
     onRejected: (message: string) => void,
     /** The error class whose message `onRejected` gets; any other failure sets `lost`. */
     known: abstract new (...args: never[]) => { readonly message: string } = CommandRejected,
@@ -224,9 +225,10 @@ export const connect = (token: string) => {
     void run((rpc) =>
       open(rpc, subscriptionId).pipe(
         Stream.runForEach((message) =>
-          Effect.sync(() => {
+          Effect.suspend(() => {
             started.resolve();
-            onMessage(message);
+            const handled = onMessage(message);
+            return handled ? Effect.promise(() => handled) : Effect.void;
           }),
         ),
       ),
