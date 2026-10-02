@@ -696,7 +696,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
   | Learning | `memories` (+ FTS5), `session_index` (FTS5, including a trigram index for Chinese, Japanese and Korean text and for substring search), `skills`, `skill_runs`, `trajectories` |
   | Automation | `schedules`, `schedule_runs`, `channels`, `channel_bindings` |
 
-- **Location:** one database per profile, at `~/.verdandi/profiles/<name>/verdandi.db`, in WAL mode, with numbered migrations.
+- **Location:** one database per profile, at `~/.verdandi/profiles/<name>/verdandi.db`, in WAL mode, with numbered migrations. verdandid is its only writer and keeps the WAL under `journal_size_limit` once a checkpoint has run; `verdandi doctor` shows both files' sizes and warns when the WAL has grown far past it, which means something else is holding the database open.
 
 ---
 
