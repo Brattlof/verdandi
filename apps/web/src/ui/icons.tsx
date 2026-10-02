@@ -40,4 +40,3 @@ const thumb = (
 );
 export const ThumbUpIcon = icon(thumb);
 export const ThumbDownIcon = icon(<g transform="rotate(180 8 8)">{thumb}</g>);
-export const SidebarIcon = icon(<path d="M3.5 2.5h9a1 1 0 011 1v9a1 1 0 01-1 1h-9a1 1 0 01-1-1v-9a1 1 0 011-1zM6.5 2.5v11" />);
