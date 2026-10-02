@@ -144,7 +144,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     ...(e.status === "limit" ? { task: null } : {}),
   }),
   "spend.cap.raised": (thread) => thread, // the caps are fetched with SpendCapsGet
-  // The task goes on at `to`, from the turn Verdandi sends next.
+  // The task goes on at `to` from its next turn: Verdandi's after a verifier, the user's after a correction.
   "task.escalated": (thread, { turnId, step, from, to, nextTurnId, reason }) => ({
     ...addItem(thread, turnId, { kind: "escalation", step, from, ...(to && { to }), ...(nextTurnId && { nextTurnId }), reason }),
     ...(to && { route: to, task: thread.task && { ...thread.task, reason } }),

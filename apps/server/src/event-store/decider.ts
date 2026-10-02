@@ -15,6 +15,7 @@ import {
   type Event,
   formatUsd,
   type HarnessEvent,
+  isCorrection,
   type MemoryView,
   type ProjectId,
   type Resolution,
@@ -240,6 +241,34 @@ const handoff = (trigger: EscalationTrigger, scan: DecisionAnswer | undefined) =
   ].join("\n");
 };
 
+/**
+ * The escalation step a follow-up takes when the decision layer reads it as correcting the agent on routed task
+ * `taskId` (DESIGN §8.7 trigger 3), committed before the follow-up's turn starts so the follow-up runs on the stronger
+ * route; shown on the turn it corrects. Undefined when the task stays put: the thread or task is pinned, the policy
+ * is broken, the ladder says to ask (the user is already steering), or a reached spend cap stops the stronger route.
+ */
+const correctionEscalation = (state: DeciderState, threadId: ThreadId, taskId: TaskId): Event | undefined => {
+  const { thread, routing } = state;
+  const correction = state.decisions?.answers.find(isCorrection);
+  if (!thread?.lastTurnId || !correction || !routing || thread.pinned || thread.taskDecision?.source === "pin") return undefined;
+  const failure = `Your message reads as a correction${correction.why ? ` (${correction.why})` : ""}`;
+  const step = decideEscalation(thread, routing, thread.taskEscalations, failure);
+  if (step.step === "ask" || capped(state.spend, step.target)) return undefined;
+  const { harness, model } = step.target;
+  return {
+    type: "task.escalated",
+    v: 2,
+    trigger: "correction",
+    threadId,
+    taskId,
+    turnId: thread.lastTurnId,
+    step: step.step,
+    from: thread.route,
+    to: { harness, model, effort: step.effort, ...(thread.route.subagents && { subagents: thread.route.subagents }) },
+    reason: step.reason,
+  };
+};
+
 /** Why the thread's worktree can't take a turn now, naming the fix; undefined when it can (or there is none). */
 const worktreeProblem = (threadId: ThreadId, worktree: WorktreeView | null): string | undefined => {
   if (!worktree || worktree.state === "ready" || worktree.state === "creating") return undefined;
@@ -371,6 +400,9 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     const cap = reachedCap(state.spend);
     const { taskId } = state.thread;
     if (taskId && !at) {
+      // A correction escalates the task, so it runs on the stronger route (DESIGN §8.7).
+      const escalated = correctionEscalation(state, c.threadId, taskId);
+      if (escalated) return accept(...recorded, escalated, ...turn);
       // After a turn whose verifiers all passed, mechanical work moves the rest of the task to a cheaper model (DESIGN §8.7).
       const down =
         state.thread.lastTurnVerified && state.routing

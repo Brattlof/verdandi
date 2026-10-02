@@ -3,6 +3,7 @@ import {
   type CommandId,
   describeRouteChange,
   Effort,
+  type Item,
   type Route,
   type RouteChange,
   type TaskId,
@@ -27,11 +28,78 @@ export const switchCost = (thread: Pick<ThreadView, "route" | "sessionId" | "tur
   return `The next turn is a cold cache write of the whole conversation (${turns} turn${turns === 1 ? "" : "s"} so far), so it costs more than a usual turn.`;
 };
 
+type Escalation = Extract<Item, { kind: "escalation" }>;
+
+/**
+ * The escalation the thread's task runs on now (DESIGN §8.7), which the user can undo; undefined when the thread is
+ * pinned, the task never escalated, or its route has moved since.
+ */
+export const escalationToUndo = (
+  thread: Pick<LiveThread, "pinned" | "route"> & {
+    readonly task: { readonly taskId: string } | null;
+    readonly turns: readonly { readonly turnId: string; readonly items: readonly Item[] }[];
+  },
+): Escalation | undefined => {
+  const start = thread.turns.findIndex((t) => t.turnId === thread.task?.taskId);
+  if (thread.pinned || start < 0) return undefined;
+  const last = thread.turns
+    .slice(start)
+    .flatMap((t) => t.items.filter((i): i is Escalation => i.kind === "escalation" && i.to !== undefined))
+    .at(-1);
+  return last?.to && describeRouteChange(last.to, thread.route) === "" ? last : undefined;
+};
+
 /**
  * The thread's route, and why: a routed task's reason, or that the user pinned it. Opening it shows the
- * routing trace and changes the route, applied from the next turn.
+ * routing trace and changes the route, applied from the next turn. An escalated task's route has an Undo next to it.
  */
-export const RouteChip = ({ connection, thread }: { connection: Connection; thread: LiveThread }) => {
+export const RouteChip = ({ connection, thread }: { connection: Connection; thread: LiveThread }) => (
+  <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
+    <RouteDetails connection={connection} thread={thread} />
+    <UndoEscalation connection={connection} thread={thread} />
+  </div>
+);
+
+/**
+ * Undoes the task's escalation in one click: back to the route it escalated from, from the next turn. That's the
+ * user picking a route, so it pins the thread and counts as the task's override, like any route change.
+ */
+const UndoEscalation = ({ connection, thread }: { connection: Connection; thread: LiveThread }) => {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string>();
+  const id = useId();
+  const escalation = escalationToUndo(thread);
+  if (!escalation) return null;
+  const { from } = escalation;
+  const undo = async () => {
+    setSending(true);
+    const result = await connection.dispatch({
+      type: "thread.route.set",
+      commandId: uuid<CommandId>(),
+      threadId: thread.threadId,
+      route: from,
+    });
+    setSending(false);
+    setError(result.ok ? undefined : result.message);
+  };
+  return (
+    <span className="inline-flex items-center gap-2 text-xs">
+      <button type="button" className="text-xs" onClick={undo} disabled={sending} aria-describedby={id}>
+        Undo escalation
+      </button>
+      <span id={id} className="text-muted">
+        back to {from.model} · {from.effort}, pinned
+      </span>
+      {error && (
+        <span role="alert" className="text-error">
+          {error}
+        </span>
+      )}
+    </span>
+  );
+};
+
+const RouteDetails = ({ connection, thread }: { connection: Connection; thread: LiveThread }) => {
   const [open, setOpen] = useState(false);
   const summary = useRef<HTMLElement>(null);
   const close = () => {
@@ -43,7 +111,7 @@ export const RouteChip = ({ connection, thread }: { connection: Connection; thre
   const auto = !thread.pinned && thread.task === null;
   const reason = thread.task?.reason;
   return (
-    <details className="text-xs" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
+    <details className="min-w-0 max-w-full text-xs" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary
         ref={summary}
         className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-line bg-card px-2.5 py-0.5 hover:bg-hover [&::-webkit-details-marker]:hidden"

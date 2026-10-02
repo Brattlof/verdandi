@@ -7,6 +7,7 @@ import {
   CommandRejected,
   type Event,
   encodeEvent,
+  isCorrection,
   type ProjectsFeed,
   type Receipt,
   type StoredEvent,
@@ -161,6 +162,10 @@ export const EngineLive = (options: EngineOptions = {}) =>
               send && questions.length > 0
                 ? { questions, answers: (yield* decider.decide({ state: at ? at.text : send.text, questions })).answers }
                 : undefined;
+            // A follow-up correcting the agent may escalate its routed task (DESIGN §8.7), which reads the project's policy.
+            const corrects =
+              current && send && !routing && !at && current.taskId !== null && !current.pinned && decisions?.answers.some(isCorrection);
+            const policy = routing ?? (current && corrects && options.routing ? yield* options.routing(current.projectPath) : undefined);
             // Memory: read for memory commands, and for a turn whose new harness session starts with a snapshot of it.
             const remembers = command.type.startsWith("memory.") || (send !== undefined && current?.sessionId === null);
             const memory = remembers ? yield* loadMemory(command.threadId) : null;
@@ -178,7 +183,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
             const decision = decide(
               {
                 ...state,
-                ...(routing && { routing }),
+                ...(policy && { routing: policy }),
                 ...(decisions && { decisions }),
                 ...(memory && { memory }),
                 ...(injection && { injection }),

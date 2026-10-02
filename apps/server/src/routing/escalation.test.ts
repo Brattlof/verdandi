@@ -63,20 +63,23 @@ const setup = async ({ verifier, pin, texts }: { verifier?: string; pin?: Route;
     await dispatch({ type: "turn.send", commandId: id<CommandId>(), threadId, turnId: id<TurnId>(), text, mode: "build" });
     await drain();
   }
-  return runtime.runPromise(
-    Effect.gen(function* () {
-      const view = yield* loadThreadView(threadId);
-      const sql = yield* SqlClient.SqlClient;
-      const [row] = yield* sql<{ payload: string }>`select payload from task_outcomes`;
-      const flagged = yield* sql<{ payload: string }>`select payload from events where type = 'injection.flagged' order by seq`;
-      return {
-        view,
-        flags: flagged.map((f) => JSON.parse(f.payload) as unknown),
-        outcome: row && (JSON.parse(row.payload) as TaskOutcome),
-        memory: yield* loadRoutingMemory(threadId),
-      };
-    }),
-  );
+  const read = () =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        yield* (yield* Reactor).drain;
+        const view = yield* loadThreadView(threadId);
+        const sql = yield* SqlClient.SqlClient;
+        const [row] = yield* sql<{ payload: string }>`select payload from task_outcomes`;
+        const flagged = yield* sql<{ payload: string }>`select payload from events where type = 'injection.flagged' order by seq`;
+        return {
+          view,
+          flags: flagged.map((f) => JSON.parse(f.payload) as unknown),
+          outcome: row && (JSON.parse(row.payload) as TaskOutcome),
+          memory: yield* loadRoutingMemory(threadId),
+        };
+      }),
+    );
+  return { dispatch, read, ...(await read()) };
 };
 
 const escalations = (items: readonly Item[] | undefined) => (items ?? []).filter((i) => i.kind === "escalation");
@@ -211,4 +214,61 @@ test("varied tool errors don't escalate", async () => {
   expect(view?.turns).toHaveLength(4);
   expect(view?.turns.flatMap((t) => escalations(t.items))).toEqual([]);
   expect(outcome).toMatchObject({ escalations: 0, triggers: [] });
+});
+
+const pin: Route = { harness: "fake", model: "fake", effort: "medium" };
+
+test("a follow-up correcting the agent raises a routed task's effort one step before it runs", async () => {
+  const { view, outcome } = await setup({ texts: ["rename the helper", "no, that's wrong: keep the old name"] });
+  const [first, second] = view?.turns ?? [];
+  expect(view?.turns).toHaveLength(2);
+  // Shown on the turn the user pushed back on; the correction is still the user's own turn.
+  const reason = `Your message reads as a correction ("no" pushes back), so the task goes on at high effort, one step up from medium.`;
+  expect(escalations(first?.items)).toEqual([
+    {
+      kind: "escalation",
+      step: "effort",
+      from: { harness: "fake", model: "fake", effort: "medium" },
+      to: { harness: "fake", model: "fake", effort: "high" },
+      reason,
+    },
+  ]);
+  expect(escalations(second?.items)).toEqual([]);
+  expect(second?.text).toBe("no, that's wrong: keep the old name");
+  expect(view?.route).toMatchObject({ model: "fake", effort: "high" });
+  expect(view?.pinned).toBe(false);
+  expect(view?.task?.reason).toBe(reason);
+  expect(outcome).toMatchObject({
+    escalations: 1,
+    turns: 2,
+    route: { effort: "medium" },
+    triggers: [{ trigger: "correction", step: "effort" }],
+  });
+});
+
+test("a follow-up that doesn't correct the agent leaves the route alone", async () => {
+  const { view } = await setup({ texts: ["rename the helper", "now also add a test"] });
+  expect(view?.turns.flatMap((t) => escalations(t.items))).toEqual([]);
+  expect(view?.route).toMatchObject({ effort: "medium" });
+});
+
+test("a pinned thread never escalates on a correction: the user picked its route", async () => {
+  const { view, outcome } = await setup({ texts: ["rename the helper", "no, that's wrong"], pin });
+  expect(view?.turns.flatMap((t) => escalations(t.items))).toEqual([]);
+  expect(view?.route).toMatchObject({ effort: "medium" });
+  expect(outcome).toMatchObject({ escalations: 0, triggers: [] });
+});
+
+test("undoing an escalation puts the task back on its route, recorded as the user's override", async () => {
+  const { view, dispatch, read } = await setup({ texts: ["rename the helper", "that's not what i asked"] });
+  const [escalation] = escalations(view?.turns[0]?.items);
+  if (escalation?.kind !== "escalation") throw new Error("expected an escalation");
+  await dispatch({ type: "thread.route.set", commandId: id<CommandId>(), threadId, route: escalation.from });
+  const after = await read();
+  expect(after.view?.route).toMatchObject({ model: "fake", effort: "medium" });
+  expect(after.view?.routeChanges).toMatchObject([{ from: { effort: "high" }, to: { effort: "medium" }, by: "user" }]);
+  expect(after.outcome).toMatchObject({
+    escalations: 1,
+    userOverride: { from: { model: "fake", effort: "high" }, to: { model: "fake", effort: "medium" } },
+  });
 });

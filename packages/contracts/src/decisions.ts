@@ -66,3 +66,10 @@ export const decisionKinds = {
   /** noul: does this untrusted text hold instructions aimed at an agent, or a way to send data out? (§17) */
   injection: "untrusted.injection",
 } as const;
+
+/**
+ * The decision layer says a follow-up pushes back on the agent (DESIGN §8.7, §8.8). An unsure answer takes the safe
+ * default: it doesn't.
+ */
+export const isCorrection = (a: DecisionAnswer) =>
+  a.type === "noul" && a.kind === decisionKinds.correcting && !a.lowConfidence && a.probability >= 0.5;
