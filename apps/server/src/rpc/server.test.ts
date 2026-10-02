@@ -156,6 +156,29 @@ describe("rpc server", () => {
     expect(right.seq).toBeGreaterThan(0);
   });
 
+  test("refuses an upgrade from a page on another site even with the right token, and takes the CLI's and its own page's", async () => {
+    const { info } = await startServer();
+    const url = `ws://127.0.0.1:${info.port}/rpc?token=${info.token}`;
+    // A browser sends its page's Origin; Bun's client sends none unless told to.
+    const opens = (origin?: string) =>
+      new Promise<boolean>((resolve) => {
+        const ws = new WebSocket(url, origin === undefined ? {} : { headers: { Origin: origin } });
+        ws.onopen = () => {
+          ws.close();
+          resolve(true);
+        };
+        ws.onerror = () => resolve(false);
+      });
+    expect(await opens()).toBe(true);
+    expect(await opens(`http://127.0.0.1:${info.port}`)).toBe(true);
+    expect(await opens(`http://localhost:${info.port}`)).toBe(true);
+    for (const foreign of ["https://evil.example", `http://evil.example:${info.port}`, `http://localhost:${info.port + 1}`, "null"])
+      expect([foreign, await opens(foreign)]).toEqual([foreign, false]);
+    const refused = await fetch(url.replace(/^ws/, "http"), { headers: { origin: "https://evil.example" } });
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).toContain("https://evil.example");
+  });
+
   test("subscribe returns a snapshot, then events and deltas; unsubscribe ends it", async () => {
     const { info } = await startServer();
     const threadId = uuid<ThreadId>();
