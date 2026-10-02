@@ -506,12 +506,21 @@ describe("task.escalate", () => {
     threadId,
     turnId,
     nextTurnId: "turn-2" as TurnId,
-    run: { command: "bun test", passed: false, exitCode: 1, durationMs: 5, output: "1 fail ``` not a fence" },
+    trigger: {
+      kind: "verifier",
+      run: { command: "bun test", passed: false, exitCode: 1, durationMs: 5, output: "1 fail ``` not a fence" },
+    },
   };
 
   test("a routed task's latest turn escalates, handing the next turn the output inside a fence it can't close", () => {
     const [escalated, next] = events(decide({ thread, routing }, escalate));
-    expect(escalated).toMatchObject({ type: "task.escalated", step: "effort", to: { effort: "medium" }, nextTurnId: "turn-2" });
+    expect(escalated).toMatchObject({
+      type: "task.escalated",
+      trigger: "verifier",
+      step: "effort",
+      to: { effort: "medium" },
+      nextTurnId: "turn-2",
+    });
     expect(next).toMatchObject({ type: "turn.started", turnId: "turn-2", mode: "build" });
     expect(next?.type === "turn.started" && next.text).toContain("````\n1 fail ``` not a fence\n````");
   });

@@ -427,7 +427,7 @@ Research shows that turn count alone is barely better than chance at predicting 
 2. then move to a stronger model on the same harness,
 3. then ask you.
 
-By default, at most one step happens per task without asking you. A step changes the running task's route and Verdandi sends the next turn itself, handing the agent the failed verifier's output as data; the task stays one task, so routing memory counts the escalation against the route it started on (ADR 0018). Only routed tasks escalate: a pinned route is yours. Built so far: trigger 1, on the project's `escalation.verifiers`.
+By default, at most one step happens per task without asking you. A step changes the running task's route and Verdandi sends the next turn itself, handing the agent the failed verifier's output, or its own blocked report, as data; the task stays one task, so routing memory counts the escalation against the route it started on (ADR 0018). Only routed tasks escalate: a pinned route is yours. Built so far: trigger 1, on the project's `escalation.verifiers`, and trigger 4; the escalation's reason names the trigger, and the task's outcome records each one that fired.
 
 **De-escalation** happens after you approve a plan, and after the verifiers pass when only mechanical work is left.
 
@@ -457,13 +457,14 @@ interface TaskOutcome {
   userOverride?: { from: RouteTarget & { effort: Effort }; to: RouteTarget & { effort: Effort } };
   verifierRuns: { command: string; passed: boolean }[];
   escalations: number;
+  triggers: { trigger: "verifier" | "blocked"; step: "effort" | "model" | "ask" }[];
   usage: UsageBreakdown;          // tokens, cache read/write, cost, quota units, by model
   wallMs: number;
   rating?: 1 | -1;
 }
 ```
 
-Outcomes are recorded from M1 on, before the router exists, so the always-default baseline is measured on real work (`packages/contracts/src/task.ts`). The status is the task's last turn's, except that a task whose last verifier run failed is `failed`; satisfaction counts only the corrections Verdandi sees (steers, interrupts, rejected or edited plans, a route override, and follow-ups the decision layer judges to be correcting the agent); `verifierRuns` lists the project's verifiers as they ran; `escalations` counts the task's escalation steps; `rating` is the user's latest thumbs up or down on the task (`task.rate`), and quota units stay empty. `verdandi costs` shows cost per completed task by route.
+Outcomes are recorded from M1 on, before the router exists, so the always-default baseline is measured on real work (`packages/contracts/src/task.ts`). The status is the task's last turn's, except that a task whose last verifier run failed is `failed`; satisfaction counts only the corrections Verdandi sees (steers, interrupts, rejected or edited plans, a route override, and follow-ups the decision layer judges to be correcting the agent); `verifierRuns` lists the project's verifiers as they ran; `escalations` counts the task's escalation steps, and `triggers` lists each escalation trigger that fired and the step it took; `rating` is the user's latest thumbs up or down on the task (`task.rate`), and quota units stay empty. `verdandi costs` shows cost per completed task by route.
 
 These outcomes are used at three levels:
 1. **Routing memory per project** (M2), e.g. "debug tasks on Sonnet escalated 7 times out of 10, so start on Opus". A task the user rated down counts as one that didn't succeed.
@@ -768,10 +769,10 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 ### 14.2 Memory
 
 - **Built-in stores:** `user` (preferences, conventions) and `project` (architecture facts, gotchas, commands). Each entry records its source (thread and turn) and a last-confirmed date.
-- **Fixed-size snapshot:** a capped snapshot leads the first message of each new harness session, so it stays in the session's history (ADR 0016). The caps are per scope (2,000 characters for project memory and 1,500 for user memory), and the stores themselves are capped the same. It doesn't change for the rest of the session, which protects the cache. Anything written during the session shows up in the next session's snapshot. Entries are chosen by relevance to the session's first message (the share of an entry's word trigrams the message has), then by recency; a relevance score from the decision layer (§9.8) replaces the trigram overlap once that exists. The snapshot's text is recorded in its event, so the choice never has to be recomputed.
+- **Fixed-size snapshot:** a capped snapshot leads the first message of each new harness session, so it stays in the session's history (ADR 0016). The caps are per scope (2,000 characters for project memory and 1,500 for user memory), and the stores themselves are capped the same. It doesn't change for the rest of the session, which protects the cache. Anything written during the session shows up in the next session's snapshot. Entries are chosen by recency today; relevance, using a score from the decision layer (§9.8), comes first once that exists.
 - **Lookups:** `memory_search` results are added to the current user turn, never to the system prompt.
 - **Memory is capped on purpose.** When the cap is reached, a save fails and asks the agent to **consolidate**: merge, rewrite or drop older entries.
-- **Periodic nudges:** every *N*th turn of a thread (`nudgeEvery` in the home's `memory.yaml`, default 10, 0 for never) carries a one-line reminder to consider `memory_save` after the turn's message, never in the system prompt (Claude Code: a text block of its own).
+- **Periodic nudges:** every *N* turns the agent is prompted to consider saving memory.
 - **Background review** (§14.5) proposes memories after tasks.
 - **Scanning:** every entry is scanned before it's saved, for secrets, prompt injection and data exfiltration; a hit is refused with the reason. You can require approval for saves (`approveSaves: true` in the home's `memory.yaml`). Everything can be seen, added, edited and deleted in the Memory panel.
 - **External memory providers (plugins, M6):** a `MemoryProvider` interface with hooks for:

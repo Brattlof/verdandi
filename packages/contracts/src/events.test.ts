@@ -103,6 +103,18 @@ describe("stored events", () => {
     expect((await Effect.runPromise(Effect.flip(decodeStoredEvent(encodeEvent(traversal))))).message).toContain("malformed");
   });
 
+  test("reads a v1 task.escalated as v2 set off by a failed verifier, the only trigger v1 had", async () => {
+    const taskId = turnId as string as TaskId;
+    const v1 = { type: "task.escalated", v: 1, threadId, taskId, turnId, step: "ask", from: route, reason: "`bun test` failed" } as const;
+    expect(await Effect.runPromise(decodeStoredEvent({ type: "task.escalated", v: 1, payload: JSON.stringify(v1) }))).toEqual({
+      ...v1,
+      v: 2,
+      trigger: "verifier",
+    });
+    const v2: Event = { ...v1, v: 2, trigger: "blocked", step: "effort", to: { ...route, effort: "high" }, nextTurnId: turnId };
+    expect(await roundTrip(v2)).toEqual(v2);
+  });
+
   test("round-trips CRLF and unicode text", async () => {
     const e: Event = { type: "turn.started", v: 2, threadId, turnId, text: "räksmörgås\r\n日本語 \u{1F600}" };
     expect(await roundTrip(e)).toEqual(e);

@@ -32,6 +32,7 @@ type Draft = {
   override: { readonly from: Route; readonly to: Route } | undefined;
   readonly verifierRuns: { command: string; passed: boolean }[];
   escalations: number;
+  readonly triggers: TaskOutcome["triggers"][number][];
   readonly usage: Map<string, Usage>;
   rating: TaskRating | null;
 };
@@ -65,6 +66,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         override: undefined,
         verifierRuns: [],
         escalations: 0,
+        triggers: [],
         usage: new Map(),
         rating: null,
       });
@@ -92,6 +94,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         break;
       // At `ask` nothing moved.
       case "task.escalated":
+        task.triggers.push({ trigger: e.trigger, step: e.step });
         if (e.to) {
           task.current = e.to;
           task.escalations++;
@@ -158,7 +161,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         : taskStatus[t.last];
     return [
       {
-        v: 2,
+        v: 3,
         taskId: t.taskId,
         threadId: t.threadId,
         route: t.route,
@@ -168,6 +171,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         ...(t.override ? { userOverride: t.override } : {}),
         verifierRuns: t.verifierRuns,
         escalations: t.escalations,
+        triggers: t.triggers,
         usage: [...t.usage.values()],
         wallMs: t.wallMs,
         ...(t.rating === null ? {} : { rating: t.rating }),

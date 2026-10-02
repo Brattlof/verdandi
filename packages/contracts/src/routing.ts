@@ -81,6 +81,10 @@ export type TaskLimits = typeof TaskLimits.Type;
 export const EscalationStep = Schema.Literals(["effort", "model", "ask"]);
 export type EscalationStep = typeof EscalationStep.Type;
 
+/** What set off an escalation (DESIGN §8.7): a project verifier failed, or the agent called `report_blocked`. */
+export const EscalationTrigger = Schema.Literals(["verifier", "blocked"]);
+export type EscalationTrigger = typeof EscalationTrigger.Type;
+
 /** A partial route: layers merge key by key, so a later layer can change only the effort. */
 export const RouteSpec = Schema.Struct({
   /** Acceptable targets by name; the router picks the cheapest available one, ties going to the earlier. */
