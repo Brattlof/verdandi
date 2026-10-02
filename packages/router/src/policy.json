@@ -84,7 +84,8 @@
       "max": { "prefer": ["cc-fable"] },
       "tokens": 200000
     },
-    "chat.general": { "prefer": ["cc-haiku"], "effort": "low", "max": { "prefer": ["cc-sonnet"] }, "tokens": 10000 }
+    "chat.general": { "prefer": ["cc-haiku"], "effort": "low", "max": { "prefer": ["cc-sonnet"] }, "tokens": 10000 },
+    "aux.review": { "prefer": ["cc-haiku"], "effort": "low", "tokens": 30000, "maxCost": 0.25 }
   },
   "fallback": {
     "prefer": ["cc-sonnet"],

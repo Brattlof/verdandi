@@ -101,7 +101,7 @@ test("a follow-up the decision layer calls a correction counts against the task 
   const correcting = (turnId: TurnId, probability: number, lowConfidence = false) =>
     ({
       type: "decision.recorded",
-      v: 1,
+      v: 2,
       threadId,
       turnId,
       questions: [{ type: "noul", kind: "follow-up.correcting", question: "Correcting?", minConfidence: 0.6 }],

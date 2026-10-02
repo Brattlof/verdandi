@@ -97,7 +97,9 @@ const describeRequest = (r: PendingRequest) =>
       ? `an answer to: ${r.questions.map((q) => `${q.question} (${q.options.map((o) => o.label).join(", ")})`).join(" ")}`
       : r.type === "skill.proposed"
         ? `approval to ${skillChangeTitle(r.change)}`
-        : `approval of its plan:\n${r.plan}`;
+        : r.type === "memory.proposed"
+          ? `approval to remember: ${r.text}`
+          : `approval of its plan:\n${r.plan}`;
 
 const uuid = <T>() => crypto.randomUUID() as T;
 type Signal = ThreadFeed | { readonly kind: "sigint" } | { readonly kind: "ended" };

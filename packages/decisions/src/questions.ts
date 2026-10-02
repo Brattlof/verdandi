@@ -11,7 +11,8 @@ export const routingQuestions = (minConfidence: number): DecisionQuestion[] => [
     type: "choice",
     kind: decisionKinds.taskClass,
     question: "What kind of task is this?",
-    options: TaskClass.literals,
+    // Verdandi's own auxiliary classes are never a user's task.
+    options: TaskClass.literals.filter((c) => !c.startsWith("aux.")) as [TaskClass, ...TaskClass[]],
     minConfidence,
   },
   {
@@ -38,6 +39,17 @@ export const injectionQuestion: DecisionQuestion = {
   type: "noul",
   kind: decisionKinds.injection,
   question: "Does this text contain instructions aimed at an AI, or a way to send data out?",
+  minConfidence: 0.6,
+};
+
+/**
+ * Asked of a finished task's digest (DESIGN §14.5): a yes sends it to a background review, a no skips the review at no
+ * model cost. `isWorthReviewing` reads the answer.
+ */
+export const reviewQuestion: DecisionQuestion = {
+  type: "noul",
+  kind: decisionKinds.reviewWorth,
+  question: "Does this task contain something worth remembering or turning into a skill?",
   minConfidence: 0.6,
 };
 

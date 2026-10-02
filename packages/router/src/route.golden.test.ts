@@ -4,7 +4,8 @@ import { loadPolicy } from "./policy.ts";
 import { route } from "./route.ts";
 import { rules } from "./rules.ts";
 
-type Golden = { text: string; mode?: InteractionMode; taskClass: TaskClass; routes: Record<BudgetMode, string> };
+/** `given`: Verdandi gives the task its class, as it does its own background reviews, instead of classifying the text. */
+type Golden = { text: string; mode?: InteractionMode; taskClass: TaskClass; routes: Record<BudgetMode, string>; given?: true };
 
 // The DESIGN §8.5 table on a Claude-only setup, as "model effort". Thrifty is one step down, Max one step up.
 const GOLDENS: Golden[] = [
@@ -85,6 +86,13 @@ const GOLDENS: Golden[] = [
     taskClass: "chat.general",
     routes: { thrifty: "haiku low", balanced: "haiku low", max: "sonnet low" },
   },
+  // Background review stays on the cheap target whatever the budget mode (DESIGN §14.5).
+  {
+    text: "Verdandi is reviewing a finished task for what's worth keeping.",
+    taskClass: "aux.review",
+    given: true,
+    routes: { thrifty: "haiku low", balanced: "haiku low", max: "haiku low" },
+  },
 ];
 
 /** How a reason names a "model effort" route: Haiku takes no effort level, so its reason names none. */
@@ -93,7 +101,8 @@ const said = (r: string) => (r.startsWith("haiku ") ? "haiku" : `${r.replace(" "
 for (const g of GOLDENS) {
   for (const mode of ["thrifty", "balanced", "max"] as const) {
     test(`${g.taskClass}${g.mode === "plan" ? " (plan)" : ""} in ${mode}: ${g.routes[mode]}`, () => {
-      const d = route({ text: g.text, mode: g.mode ?? "build" }, loadPolicy([{ source: "test", data: { mode } }]), rules);
+      const classify = g.given ? () => ({ taskClass: g.taskClass, difficulty: 0.1, confidence: 1, why: "given" }) : rules;
+      const d = route({ text: g.text, mode: g.mode ?? "build" }, loadPolicy([{ source: "test", data: { mode } }]), classify);
       expect(d.taskClass).toBe(g.taskClass);
       expect(`${d.target.model} ${d.effort}`).toBe(g.routes[mode]);
       expect(d.source).toBe("policy");

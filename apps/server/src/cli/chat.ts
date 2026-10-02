@@ -24,7 +24,16 @@ import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { flag, readServerFile, resolveHome } from "../home/home.ts";
 import { connect } from "../rpc/client.ts";
 import { readAttachment } from "./attach.ts";
-import { approvalPrompt, editPlan, type PendingRequest, parseAnswer, planPrompt, questionPrompt, skillPrompt } from "./requests.ts";
+import {
+  approvalPrompt,
+  editPlan,
+  memoryPrompt,
+  type PendingRequest,
+  parseAnswer,
+  planPrompt,
+  questionPrompt,
+  skillPrompt,
+} from "./requests.ts";
 import { budgetFromFlags, picksRoute, routeFromFlags } from "./route-flags.ts";
 import { threadList } from "./thread-list.ts";
 
@@ -178,6 +187,7 @@ export const chat = async (argv: readonly string[]) => {
     if (!r) return;
     if (r.type === "approval.requested") process.stdout.write(approvalPrompt(r));
     else if (r.type === "skill.proposed") process.stdout.write(skillPrompt(r));
+    else if (r.type === "memory.proposed") process.stdout.write(memoryPrompt(r));
     else if (r.type === "plan.requested") {
       process.stdout.write(answered.length ? "Feedback for the agent to keep planning with (empty rejects without): " : planPrompt(r));
     } else {
@@ -273,7 +283,8 @@ export const chat = async (argv: readonly string[]) => {
             e.type === "approval.requested" ||
             e.type === "user-input.requested" ||
             e.type === "plan.requested" ||
-            e.type === "skill.proposed"
+            e.type === "skill.proposed" ||
+            e.type === "memory.proposed"
           )
             addRequest(e);
           if (e.type === "skill.applied")
@@ -298,7 +309,7 @@ export const chat = async (argv: readonly string[]) => {
 
   /** A line typed while a request is waiting answers it. */
   const answer = async (request: PendingRequest, line: string) => {
-    if (request.type === "approval.requested" || request.type === "skill.proposed") {
+    if (request.type === "approval.requested" || request.type === "skill.proposed" || request.type === "memory.proposed") {
       const yes = /^y(es)?$/i.test(line);
       if (yes || /^no?$/i.test(line)) return resolve(request, { decision: yes ? "allow" : "deny" });
       return process.stdout.write("Answer y or n: ");

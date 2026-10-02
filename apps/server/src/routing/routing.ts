@@ -4,6 +4,7 @@ import {
   type BudgetMode,
   type Catalog,
   type DecisionAnswer,
+  decisionKinds,
   describeRouteChange,
   type HarnessId,
   type InteractionMode,
@@ -19,6 +20,7 @@ import {
   followUpRules,
   injectionRules,
   makeDecide,
+  reviewRules,
   routingQuestions,
   routingRules,
   rulesBackend,
@@ -42,13 +44,15 @@ import { fakeCatalog } from "@verdandi/testkit";
 import { Effect, Result } from "effect";
 
 /**
- * The decision layer verdandid runs: `rules` for every kind of question (ADR 0009), injection scanning included. Routing classification
+ * The decision layer verdandid runs: `rules` for every kind of question (ADR 0009), injection scanning and whether a
+ * finished task is worth a background review included. Routing classification
  * uses the router's keyword rules, which read only the text: the mode picks a class's plan route, not its class.
  */
 export const verdandiRules = rulesBackend({
   ...routingRules((text) => rules(signals(text, "build"))),
   ...followUpRules,
   ...injectionRules,
+  ...reviewRules,
 });
 export const rulesDecide = makeDecide([verdandiRules]);
 
@@ -164,6 +168,21 @@ export const routeOf = (d: RouteDecision): Route => ({
 /** The decision layer's routing questions for a new task, at the confidence the project's policy asks for. */
 export const taskQuestions = (routing: RoutingContext) =>
   routingQuestions(Result.getOrElse(routing.policy, () => routing.builtIn).minConfidence);
+
+/**
+ * A background review's class (DESIGN §14.5), which Verdandi knows without asking: given to the router in place of the
+ * decision layer's answers, never recorded as one.
+ */
+export const reviewClassification: DecisionAnswer = {
+  type: "choice",
+  kind: decisionKinds.taskClass,
+  answer: "aux.review",
+  probabilities: { "aux.review": 1 },
+  confidence: 1,
+  lowConfidence: false,
+  backend: "verdandi",
+  why: "a background review of a finished task",
+};
 
 /** When the answers hold no classification, the router takes its safe default. */
 const unclassified = { taskClass: "chat.general", difficulty: 0, confidence: 0, lowConfidence: true, why: "no classification" } as const;

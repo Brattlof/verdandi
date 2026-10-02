@@ -107,3 +107,19 @@ export const injectionRules: Record<string, Rule> = {
     };
   },
 };
+
+/** The user states a lasting preference or fact, or the task turned up a lesson: worth a review. */
+const LASTING =
+  /\b(remember|from now on|going forward|(always|never) (use|run|do|call|commit|push|add|put|write|edit|test)|don'?t forget|keep in mind|note that|make sure to|i prefer|we prefer|we use|we always|our convention|the convention|in this (repo|project|codebase))\b/i;
+const LESSON = /\b(turns out|the trick (is|was)|root cause|workaround|gotcha|the fix (is|was)|caveat)\b/i;
+
+// ponytail: phrase rules over the digest. Upgrade: a decision model on this kind once one beats them on logged decisions (ADR 0009).
+/** Rules for "does this task hold something worth remembering or turning into a skill?" (DESIGN §14.5), over its digest. */
+export const reviewRules: Record<string, Rule> = {
+  [decisionKinds.reviewWorth]: (state) => {
+    const match = LASTING.exec(state) ?? LESSON.exec(state);
+    return match
+      ? { type: "noul", kind: decisionKinds.reviewWorth, probability: 0.8, confidence: 0.7, why: `"${match[0]}" may be worth keeping` }
+      : { type: "noul", kind: decisionKinds.reviewWorth, probability: 0.1, confidence: 0.7, why: "nothing that reads as lasting" };
+  },
+};

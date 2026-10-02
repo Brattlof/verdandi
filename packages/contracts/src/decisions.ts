@@ -65,6 +65,8 @@ export const decisionKinds = {
   correcting: "follow-up.correcting",
   /** noul: does this untrusted text hold instructions aimed at an agent, or a way to send data out? (§17) */
   injection: "untrusted.injection",
+  /** noul: does this finished task hold something worth remembering or turning into a skill? Gates background review (§14.5). */
+  reviewWorth: "task.review-worth",
 } as const;
 
 /**
@@ -73,3 +75,10 @@ export const decisionKinds = {
  */
 export const isCorrection = (a: DecisionAnswer) =>
   a.type === "noul" && a.kind === decisionKinds.correcting && !a.lowConfidence && a.probability >= 0.5;
+
+/**
+ * The decision layer says a finished task is worth a background review (DESIGN §14.5). An unsure answer takes the safe
+ * default: it isn't, which costs nothing.
+ */
+export const isWorthReviewing = (a: DecisionAnswer) =>
+  a.type === "noul" && a.kind === decisionKinds.reviewWorth && !a.lowConfidence && a.probability >= 0.5;

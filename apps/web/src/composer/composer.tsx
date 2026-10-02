@@ -489,6 +489,7 @@ const RequestCard = ({
         {request.type === "user-input.requested" && <Questions request={request} sending={sending} respond={respond} />}
         {request.type === "plan.requested" && <PlanApproval request={request} sending={sending} respond={respond} />}
         {request.type === "skill.proposed" && <SkillApproval request={request} sending={sending} respond={respond} />}
+        {request.type === "memory.proposed" && <MemoryApproval request={request} sending={sending} respond={respond} />}
         {error && (
           <p role="alert" className="mt-2 text-error">
             {error}
@@ -586,6 +587,30 @@ const SkillApproval = ({ request, sending, respond }: CardProps<"skill.proposed"
     </>
   );
 };
+
+/** A fact a background review of this thread's task proposes remembering (DESIGN §14.5): kept only if allowed. */
+const MemoryApproval = ({ request, sending, respond }: CardProps<"memory.proposed">) => (
+  <>
+    <h3 className="font-serif text-lg font-semibold">Remember this {request.scope === "user" ? "about you" : "about this project"}?</h3>
+    <p className="text-xs text-muted">
+      A background review of this task proposes it. Nothing is remembered unless you allow it; you can edit it later in Memory.
+    </p>
+    <blockquote className="mt-2 border-l-2 border-line pl-3 whitespace-pre-wrap">{request.text}</blockquote>
+    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+      <button type="button" disabled={sending} onClick={() => respond({ decision: "deny" })}>
+        Decline
+      </button>
+      <button
+        type="button"
+        className="border-go bg-go text-on-go hover:bg-go-hover"
+        disabled={sending}
+        onClick={() => respond({ decision: "allow" })}
+      >
+        Remember
+      </button>
+    </div>
+  </>
+);
 
 /** Approve the plan, edit it first (the agent builds from the edit), or keep planning with feedback. */
 const PlanApproval = ({ request, sending, respond }: CardProps<"plan.requested">) => {

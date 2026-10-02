@@ -334,7 +334,7 @@ Stages 1–5 are pure and fast, so the composer shows a **live routing preview w
 | `review` | Code or security review | Opus · medium |
 | `design.architecture` | Designs, trade-offs | Opus · high (Fable in Max mode) |
 | `chat.general` | Gateway chit-chat, quick questions | Cheapest acceptable (local or Haiku) |
-| `aux.*` | Titles, commit messages, handoffs, compression, vision, background review, judging whether a command is safe, classification | Set per aux task (§9.7) |
+| `aux.*` | Titles, commit messages, handoffs, compression, vision, background review, judging whether a command is safe, classification | Set per aux task (§9.7); `aux.review`: Haiku · low |
 
 **Budget modes:**
 - **Thrifty** moves routes one step down and makes local models acceptable more often.
@@ -821,10 +821,11 @@ Every turn from every harness goes into an FTS5 trigram index (ADR 0006): the us
 
 ### 14.5 Background review
 
-After a task finishes, the decision layer first checks whether it contains anything worth remembering or turning into a skill (§9.8). Most tasks don't, and those skip the review, which saves an LLM call each time. Otherwise, a background job reviews the task on a cheap auxiliary target, working from a short **digest** rather than the full transcript. It proposes:
-- memories to save,
-- skills to create or patch,
-- routing notes.
+Memory and skills grow without the agent having to remember `memory_save` mid-task. Off by default until it's measured: `enabled: true` in the home's `review.yaml` turns it on (read when verdandid starts; a broken file stops it, naming the file and key).
+
+- **When:** after a turn of a task finishes successfully and Verdandi doesn't escalate it, the decision layer reads a short **digest** of the task's turns since its last review, not the transcript: what the user asked and steered, the tools the main agent used and which failed, the verifiers, and the agent's last reply. It answers one typed question (§9.8): "does this task contain something worth remembering or turning into a skill?" The answer is logged like every decision (`decision.recorded`, with the digest as its state). Most tasks answer no, and stop there at no model cost.
+- **The review:** a yes starts a **review thread**: a thread in the same project, hidden from thread lists and search, whose one turn is a routed task of its own class, `aux.review` (the built-in policy: Haiku at low effort, with a cost limit). Its cost is that class's in the spend dashboard, apart from the task it reviewed. Spend caps apply like any task's. It never spends metered dollars unless `review.yaml` sets `allowMetered: true`, and it skips a harness whose subscription window is nearly or fully used up. It runs in ask mode with no Verdandi tools, and anything it asks is denied, since nobody is watching (ADR 0023).
+- **What it proposes:** its reply is JSON, read as untrusted data: memories to save, routing notes, and skills to create or patch. Each is scanned like a memory save or skill proposal and becomes a pending request on the reviewed thread, which the user allows or declines in the web UI or `verdandi chat`. A memory is saved when allowed (`memory.proposed`); a skill change goes through the skill proposal flow (§14.4). Routing notes are kept as project memory until the router reads notes (§8.8).
 
 With the native harness, the review can be a *fork* of the session that keeps the same tool list, so it reuses the session's prompt cache.
 
