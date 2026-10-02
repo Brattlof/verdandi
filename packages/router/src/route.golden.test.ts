@@ -87,6 +87,9 @@ const GOLDENS: Golden[] = [
   },
 ];
 
+/** How a reason names a "model effort" route: Haiku takes no effort level, so its reason names none. */
+const said = (r: string) => (r.startsWith("haiku ") ? "haiku" : `${r.replace(" ", " at ")} effort`);
+
 for (const g of GOLDENS) {
   for (const mode of ["thrifty", "balanced", "max"] as const) {
     test(`${g.taskClass}${g.mode === "plan" ? " (plan)" : ""} in ${mode}: ${g.routes[mode]}`, () => {
@@ -97,8 +100,8 @@ for (const g of GOLDENS) {
       expect(d.reason).toStartWith(`Looks like ${g.taskClass}`);
       // The mode is named exactly when it moved the route off the balanced one.
       const moved = g.routes[mode] !== g.routes.balanced;
-      expect(d.reason.includes(`so in ${mode} mode it runs on ${g.routes[mode].replace(" ", " at ")} effort.`)).toBe(moved);
-      if (!moved) expect(d.reason).toEndWith(`so it runs on ${g.routes[mode].replace(" ", " at ")} effort.`);
+      expect(d.reason.includes(`so in ${mode} mode it runs on ${said(g.routes[mode])}.`)).toBe(moved);
+      if (!moved) expect(d.reason).toEndWith(`so it runs on ${said(g.routes[mode])}.`);
     });
   }
 }
@@ -124,10 +127,7 @@ const NAMED: { text: string; taskClass: TaskClass; route: string }[] = [
 for (const g of NAMED) {
   test(`${g.taskClass}, naming a file or URL: ${g.text}`, () => {
     const d = route({ text: g.text, mode: "build" }, loadPolicy(), rules);
-    expect([d.taskClass, d.reason]).toEqual([
-      g.taskClass,
-      `Looks like ${g.taskClass}, so it runs on ${g.route.replace(" ", " at ")} effort.`,
-    ]);
+    expect([d.taskClass, d.reason]).toEqual([g.taskClass, `Looks like ${g.taskClass}, so it runs on ${said(g.route)}.`]);
   });
 }
 
@@ -148,7 +148,7 @@ for (const g of PLANNED) {
       );
       expect(`${d.target.model} ${d.effort}`).toBe(g.routes[mode]);
       expect(d.reason).toStartWith(`The plan for this ${g.taskClass} task is approved, so`);
-      expect(d.reason).toEndWith(`it runs on ${g.routes[mode].replace(" ", " at ")} effort.`);
+      expect(d.reason).toEndWith(`it runs on ${said(g.routes[mode])}.`);
     });
   }
 }

@@ -360,7 +360,7 @@ Current Claude entries:
 | L | Claude Opus 5.5 | `opus` | 4 · 20 | 1M | **medium** |
 | XL | Claude Fable 5.1 | `fable` | 10 · 50 | 1M | high |
 
-Defaults differ between models, so **the router always sets effort explicitly**.
+Defaults differ between models, so **the router always sets effort explicitly**. Levels differ too: Haiku 4.5 takes none, so its harness ignores the effort, and the others take `low` to `max` (read from Claude Code 2.1.272's model table). The router never routes to a level a model doesn't take: it moves to the nearest one the model does, with a note in the trace, and a policy that asks for one fails to load, naming the key.
 
 **Policy.** Policies are layered, and each layer overrides the one before:
 1. built-in defaults
@@ -423,7 +423,7 @@ A class's route is its Balanced route. `thrifty` and `max` change only the keys 
 Research shows that turn count alone is barely better than chance at predicting failure, so it is used **only as a budget guard**.
 
 **The escalation ladder:**
-1. raise effort one step,
+1. raise effort to the next level the model takes,
 2. then move to a stronger model on the same harness,
 3. then ask you.
 

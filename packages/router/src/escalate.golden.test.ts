@@ -28,7 +28,8 @@ test.each([
   ["sonnet", "medium", 1, undefined, "ask"],
   // Effort already at its top: the effort step can't apply, so the next one does.
   ["sonnet", "max", 0, undefined, "model: opus max"],
-  ["haiku", "max", 0, undefined, "model: sonnet max"],
+  // Haiku takes no effort level, so raising it would change nothing.
+  ["haiku", "low", 0, undefined, "model: sonnet low"],
   ["opus", "high", 1, { maxAutoEscalations: 2 }, "model: fable high"],
   ["fable", "max", 0, undefined, "ask"],
   ["sonnet", "low", 0, { ladder: ["model"] }, "model: opus low"],
@@ -50,4 +51,32 @@ test("each reason says what failed and what happens next", () => {
   expect(again.reason).toBe(
     "`bun test` failed (exit 1), and this task already escalated once (maxAutoEscalations 1), so Verdandi leaves the next step to you: send a follow-up, or pick a stronger route.",
   );
+});
+
+test("the effort step skips a level the model doesn't take, and a stronger model's effort is one it takes", () => {
+  const free = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const fake = (model: string, tier: "M" | "L", efforts: readonly Effort[]) =>
+    ({ harness: "fake", provider: "fake", model, access: "local", tier, context: 1_000_000, vision: true, efforts, price: free }) as const;
+  const catalog = [...builtInCatalog, fake("fake", "M", ["low", "medium", "high", "max"]), fake("fake-large", "L", ["low", "medium"])];
+  const policy = loadPolicy(
+    [
+      {
+        source: "test",
+        data: {
+          targets: {
+            m: { harness: "fake", provider: "fake", model: "fake" },
+            l: { harness: "fake", provider: "fake", model: "fake-large" },
+          },
+        },
+      },
+    ],
+    catalog,
+  );
+  const at = { harness: "fake", provider: "fake", model: "fake", access: "local" } as const;
+  const up = escalate({ target: at, effort: "high", escalations: 0, failure }, policy);
+  expect(up).toMatchObject({ step: "effort", effort: "max" });
+  expect(up.reason).toBe("`bun test` failed (exit 1), so the task goes on at max effort, one step up from high.");
+  const over = escalate({ target: at, effort: "max", escalations: 0, failure }, policy);
+  expect(over).toMatchObject({ step: "model", target: { model: "fake-large" }, effort: "medium" });
+  expect(over.reason).toBe("`bun test` failed (exit 1), so the task goes on on the stronger fake-large at medium effort.");
 });

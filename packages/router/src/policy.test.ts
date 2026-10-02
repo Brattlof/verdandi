@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { loadPolicy, PolicyError } from "./policy.ts";
+import { builtInCatalog, loadPolicy, PolicyError } from "./policy.ts";
 
 const project = (yaml: string) => ({ source: ".verdandi/routing.yaml", data: Bun.YAML.parse(yaml) });
 
@@ -51,4 +51,27 @@ test.each([
 ])("bad policy fails loudly, naming the file and the key: %s", (yaml, message) => {
   expect(() => loadPolicy([project(yaml)])).toThrow(PolicyError);
   expect(() => loadPolicy([project(yaml)])).toThrow(message);
+});
+
+test("a policy that asks for an effort its model doesn't take fails loudly, naming the file and the key", () => {
+  const old = {
+    harness: "claude-code",
+    provider: "claude-subscription",
+    model: "opus-4-6",
+    access: "subscription",
+    tier: "L",
+    context: 1_000_000,
+    vision: true,
+    efforts: ["low", "medium", "high", "max"],
+    price: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  } as const;
+  const yaml =
+    "targets:\n  cc-old: { harness: claude-code, provider: claude-subscription, model: opus-4-6 }\n" +
+    "routes:\n  review: { prefer: [cc-old], max: { effort: xhigh } }\n";
+  const load = () => loadPolicy([project(yaml)], [...builtInCatalog, old]);
+  expect(load).toThrow(PolicyError);
+  expect(load).toThrow(
+    ".verdandi/routing.yaml: routes.review.max.effort: xhigh isn't an effort level of opus-4-6 (cc-old, from routes.review.prefer), " +
+      "which takes low, medium, high, max. Pick one of those, or another target.",
+  );
 });

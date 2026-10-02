@@ -1,12 +1,10 @@
 import {
-  type BudgetMode,
   type CatalogEntry,
   type Effort,
   type HarnessId,
   type InteractionMode,
   type RouteDecision,
   type RouteRule,
-  type RouteSpec,
   type RouteStats,
   type RouteTarget,
   type RuleTrace,
@@ -15,7 +13,7 @@ import {
   spendsMetered,
   type Tier,
 } from "@verdandi/contracts";
-import type { ResolvedPolicy } from "./policy.ts";
+import { clampEffort, type ResolvedPolicy, resolveSpec } from "./policy.ts";
 import type { Classifier } from "./rules.ts";
 import { describeSignals, signals } from "./signals.ts";
 
@@ -81,15 +79,6 @@ const effectiveCost = (t: CatalogEntry, tokens: number, input: RouteInput, price
   return (tokens / 1e6) * perMTok * access;
 };
 
-/** Balanced route, then the budget mode's changes, then the plan-phase override and its mode changes. */
-const resolveSpec = (rule: RouteRule, mode: BudgetMode, planning: boolean): RouteSpec => {
-  const pick = (r: RouteRule | NonNullable<RouteRule["plan"]> | undefined) => (r && mode !== "balanced" ? r[mode] : undefined);
-  const layers = [rule, pick(rule), ...(planning ? [rule.plan, pick(rule.plan)] : [])].reverse();
-  const prefer = layers.find((s) => s?.prefer)?.prefer;
-  const effort = layers.find((s) => s?.effort)?.effort;
-  return { ...(prefer && { prefer }), ...(effort && { effort }) };
-};
-
 const describeSubagents = (routes: SubagentRoutes | undefined) =>
   Object.entries(routes ?? {})
     .map(([profile, r]) => `${profile} on ${r?.model} at ${r?.effort}`)
@@ -125,7 +114,8 @@ const routeSubagents = (
   for (const [profile, spec] of specs) {
     const options = (spec?.prefer ?? []).flatMap((n) => candidates.get(n) ?? []).filter((t) => t.harness === target.harness);
     const best = options.length > 0 ? options.reduce((a, b) => (cost(b) < cost(a) ? b : a)) : undefined;
-    if (best) picked[profile] = { model: best.model, effort: spec?.effort ?? effort };
+    const wanted = spec?.effort ?? effort;
+    if (best) picked[profile] = { model: best.model, effort: clampEffort(best.efforts, wanted) ?? wanted };
     else missing.push(`${profile}: none of ${spec?.prefer?.join(", ") || "its targets"} is available on ${target.harness}`);
   }
   const subagents = picked as SubagentRoutes;
@@ -135,7 +125,6 @@ const routeSubagents = (
 
 const dollars = (n: number) => `$${n < 0.01 ? n.toPrecision(1) : n.toFixed(2)}`;
 const kTokens = (n: number) => `${Math.round(n / 1000)}K`;
-const describe = (t: RouteTarget, effort: Effort) => `${t.model} at ${effort} effort`;
 
 type Pin = Pinned & { readonly reason: string; readonly note: string };
 
@@ -170,6 +159,16 @@ const atPinned = (input: RouteInput, name: string, catalog: readonly CatalogEntr
  */
 export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Classifier): RouteDecision => {
   const trace: RuleTrace[] = [];
+  const effortsOf = (t: RouteTarget) => policy.catalog.find((e) => same(e, t))?.efforts;
+  // A model without effort levels ignores the effort, so its reason names none.
+  const describe = (t: RouteTarget, effort: Effort) => (effortsOf(t)?.length === 0 ? t.model : `${t.model} at ${effort} effort`);
+  /** The effort `t` runs `effort` at: the nearest level its model takes, with a note for `stage` when that moved it. */
+  const fit = (t: RouteTarget, effort: Effort, stage: RuleTrace["stage"], notes = trace): Effort => {
+    const levels = effortsOf(t) ?? [];
+    const to = clampEffort(levels, effort) ?? effort;
+    if (to !== effort) notes.push({ stage, note: `${t.model} takes ${levels.join(", ")}, so ${effort} is clamped to ${to}` });
+    return to;
+  };
   const planning = input.mode === "plan" && !input.planApproved;
 
   // Stages 2 and 3 run even for pins, so the decision records what the user overrode.
@@ -203,7 +202,9 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
           note: `pinned ${input.pin.target.harness} · ${input.pin.target.model} · ${input.pin.effort}; routing skipped`,
         };
   if (pin) {
-    const { target, effort } = pin;
+    const { target } = pin;
+    const clamped: RuleTrace[] = [];
+    const effort = fit(target, pin.effort, "pin", clamped);
     const entry = policy.catalog.find((e) => same(e, target));
     // The policy's subagents don't apply to a pin; a warm session still keeps its own.
     const sub = routeSubagents(input, {}, target, effort, new Map(), () => 0);
@@ -214,8 +215,8 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
       effort,
       ...(sub.subagents && { subagents: sub.subagents }),
       ...(entry && { estimate: { tokens, cost: effectiveCost(entry, tokens, input), switchCost: 0 } }),
-      reason: pin.reason,
-      trace: [{ stage: "pin", note: pin.note }, ...signalNotes, ...(sub.trace ? [sub.trace] : [])],
+      reason: effort === pin.effort ? pin.reason : `${pin.reason.slice(0, -1)}, which it doesn't take, so it runs at ${effort}.`,
+      trace: [{ stage: "pin", note: pin.note }, ...clamped, ...signalNotes, ...(sub.trace ? [sub.trace] : [])],
       ...limits,
     };
   }
@@ -283,6 +284,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
     stage: "policy",
     note: `${unsure ? "fallback" : c.taskClass}${planning ? " (plan)" : input.planApproved ? " (build after its plan)" : ""} in ${policy.mode} mode accepts ${accepted.join(", ") || "nothing"} at ${effort}; picked ${pick.model}, ~${kTokens(tokens)} tokens for ${dollars(cost(pick))}`,
   });
+  effort = fit(pick, effort, "policy");
   // The cap moved the task when, without it, the class would have run on a target the cap dropped.
   const skipped = capped ? accepted.flatMap((n) => (dropped.get(n) === capped ? (policy.targets.get(n) ?? []) : [])) : [];
   const instead = skipped.length > 0 ? cheapest([...preferred, ...skipped]) : undefined;
@@ -303,6 +305,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
             s.taskClass === c.taskClass && s.route.harness === pick.harness && s.route.model === pick.model && s.route.effort === effort,
         );
   let remembered = false;
+  const moved: RuleTrace[] = [];
   if (memory) {
     const { minTasks, minShare } = policy.memory;
     const n = memory.tasks;
@@ -318,20 +321,22 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
       // An effort-only move names the effort it moved off.
       const off = to?.model === pick.model ? describe(pick, effort) : pick.model;
       if (to && !why) {
+        const e = fit(to, top.to.effort, "memory", moved);
         move = {
           to,
-          effort: top.to.effort,
-          why: `${c.taskClass} tasks here were moved off ${off} by you ${top.count} of ${n} times, so it starts on ${describe(to, top.to.effort)}.`,
+          effort: e,
+          why: `${c.taskClass} tasks here were moved off ${off} by you ${top.count} of ${n} times, so it starts on ${describe(to, e)}.`,
         };
       } else note += `you moved most to ${top.to.model} at ${top.to.effort} effort, but ${why}`;
     } else if (failures / n >= minShare) {
       const stronger = others.filter((t) => rank(t.tier) > rank(pick.tier));
       if (stronger.length > 0) {
         const to = cheapest(stronger);
+        const e = fit(to, effort, "memory", moved);
         move = {
           to,
-          effort,
-          why: `${c.taskClass} tasks here didn't succeed on ${pick.model} ${failures} of ${n} times, so it starts on the stronger ${describe(to, effort)}.`,
+          effort: e,
+          why: `${c.taskClass} tasks here didn't succeed on ${pick.model} ${failures} of ${n} times, so it starts on the stronger ${describe(to, e)}.`,
         };
       } else note += "most didn't succeed, but no stronger target is available";
     } else note += `below the ${minShare} share that moves it`;
@@ -342,7 +347,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
       reason = move.why;
       remembered = true;
     }
-    trace.push({ stage: "memory", note });
+    trace.push({ stage: "memory", note }, ...moved);
   }
 
   // Stage 5: switch-cost gate. Leave a warm session only for a more capable target, or when the savings beat re-reading the cached context.
@@ -367,7 +372,8 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
         stage: "switch",
         note: `stay: saves ${dollars(savings)}, less than the ${dollars(moveCost)} to move ${kTokens(cachedTokens)} of context`,
       });
-      reason = `${lead}, which would run on ${pick.model}, but it stays on the warm ${currentEntry.model} session at ${effort} effort: switching would cost ${dollars(moveCost)} to save ${dollars(savings)}.`;
+      effort = fit(currentEntry, effort, "switch");
+      reason = `${lead}, which would run on ${pick.model}, but it stays on the warm ${currentEntry.model} session${currentEntry.efforts.length === 0 ? "" : ` at ${effort} effort`}: switching would cost ${dollars(moveCost)} to save ${dollars(savings)}.`;
       target = currentEntry;
     }
     if (target === pick) switchCost = moveCost;
