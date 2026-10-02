@@ -101,8 +101,8 @@ export const replayTask = (task: SavedTask, policy: Pick<RoutingContext, "policy
   });
 };
 
-/** The home's database, opened read-only: replay never writes, and verdandid may be running on it. */
-const openReadOnly = (home: string) => {
+/** The home's database, opened read-only: replay and export never write, and verdandid may be running on it. */
+export const openReadOnly = (home: string) => {
   const file = join(home, "verdandi.db");
   if (!existsSync(file))
     throw new Error(`No Verdandi database in ${home}. Pass the profile's home with --home, or run verdandi start once.`);
