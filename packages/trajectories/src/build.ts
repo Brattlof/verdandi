@@ -1,4 +1,13 @@
-import type { HarnessId, Item, Provider, StoredEvent, TaskId, Trajectory, TurnId } from "@verdandi/contracts";
+import {
+  type HarnessId,
+  type Item,
+  injectionItem,
+  type Provider,
+  type StoredEvent,
+  type TaskId,
+  type Trajectory,
+  type TurnId,
+} from "@verdandi/contracts";
 
 // ponytail: each harness talks to one provider today. The native harness (M4) routes to many, and will
 // report the provider per turn instead.
@@ -89,6 +98,9 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
         break;
       case "task.blocked":
         items.push({ kind: "blocked", reason: e.reason });
+        break;
+      case "injection.flagged":
+        items.push(injectionItem(e));
         break;
       case "verifier.ran": {
         const { type: _type, v: _v, threadId: _threadId, turnId: _turnId, ...run } = e;

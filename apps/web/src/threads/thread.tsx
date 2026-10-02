@@ -4,6 +4,7 @@ import {
   clip,
   codePointStart,
   describeRouteChange,
+  handedSourceLabel,
   type InteractionMode,
   type Item,
   type TaskId,
@@ -544,6 +545,14 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
     <p role="note" className="my-2 border border-line border-l-2 border-l-warn bg-card px-3 py-1.5 text-xs">
       <span className="font-medium text-warn">The agent is blocked: </span>
       {item.reason}
+    </p>
+  ),
+  injection: ({ item }) => (
+    <p role="note" className="my-2 border border-line border-l-2 border-l-warn bg-card px-3 py-1.5 text-xs">
+      <span className="font-medium text-warn">
+        Possible prompt injection in {handedSourceLabel[item.source]}, handed to the agent under a warning:{" "}
+      </span>
+      {item.why}
     </p>
   ),
   notice: ({ item }) => (

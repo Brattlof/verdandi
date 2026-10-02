@@ -25,7 +25,7 @@ import type {
   Usage,
   WorktreeView,
 } from "@verdandi/contracts";
-import { clip, nextWorktree } from "@verdandi/contracts";
+import { clip, injectionItem, nextWorktree } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import type { DeciderState, PendingRequest } from "./decider.ts";
@@ -211,6 +211,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       (sql) => sql`update threads set memory_snapshot = ${JSON.stringify({ turnId: e.turnId, text: e.text })} where id = ${e.threadId}`,
     ),
   "task.blocked": (e) => addItem(e.turnId, { kind: "blocked", reason: e.reason }),
+  "injection.flagged": (e) => addItem(e.turnId, injectionItem(e)),
   "thread.files.restored": (e) =>
     withSql(
       (sql) =>

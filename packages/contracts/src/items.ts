@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { TurnId } from "./ids.ts";
 import { Route } from "./route.ts";
-import { EscalationStep } from "./routing.ts";
+import { EscalationStep, EscalationTrigger } from "./routing.ts";
 
 /** Set on a subagent's steps: the tool call that started the subagent. Absent on the main agent's. */
 const parentToolUseId = Schema.optionalKey(Schema.String);
@@ -18,6 +18,21 @@ export const VerifierRun = Schema.Struct({
   output: Schema.String,
 });
 export type VerifierRun = typeof VerifierRun.Type;
+
+/**
+ * Untrusted text Verdandi itself hands the agent (DESIGN §17): what an escalation's trigger hands its turn (a
+ * verifier's output, the agent's own blocked reason, a repeated tool error), or a Verdandi tool's result.
+ */
+export const HandedSource = Schema.Literals([...EscalationTrigger.literals, "session_search", "memory_search"]);
+export type HandedSource = typeof HandedSource.Type;
+/** What each source is, for the user. */
+export const handedSourceLabel: Record<HandedSource, string> = {
+  verifier: "the verifier's output",
+  blocked: "the agent's blocked report",
+  "repeated-error": "the repeated tool error",
+  session_search: "a session_search result",
+  memory_search: "a memory_search result",
+};
 
 /** A persisted piece of a turn. Text deltas are never items: they are broadcast and dropped. */
 export const Item = Schema.Union([
@@ -67,6 +82,11 @@ export const Item = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("verifier"), ...VerifierRun.fields }),
   /** The agent reported, through Verdandi's `report_blocked` tool, that it can't finish the task as asked. */
   Schema.Struct({ kind: Schema.Literal("blocked"), reason: Schema.String }),
+  /**
+   * Verdandi's injection scan flagged text from `source` it handed the agent in this turn, or in the turn it sent after
+   * it (an escalation's). The agent got it under a warning; `why` is what the scan saw.
+   */
+  Schema.Struct({ kind: Schema.Literal("injection"), source: HandedSource, why: Schema.String }),
   /** Something the harness or Verdandi tells the user about the turn, e.g. why a revert couldn't fork the conversation. */
   Schema.Struct({ kind: Schema.Literal("notice"), text: Schema.String }),
 ]);
