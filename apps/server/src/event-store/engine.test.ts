@@ -503,7 +503,7 @@ describe("engine", () => {
       Layer.provideMerge(Layer.succeed(ToolSettings, { approveMemorySaves: false, memoryNudgeEvery: 0 })),
       Layer.provideMerge(Layer.succeed(ProjectEscalation, () => Effect.succeed({ verifiers: [], repeatedErrors: 0 }))),
       Layer.provideMerge(Layer.succeed(Decide, rulesDecide)),
-      Layer.provideMerge(Layer.succeed(ProfileSkills, { profile: "unused", extra: [] })),
+      Layer.provideMerge(Layer.succeed(ProfileSkills, { profile: "unused", archive: "unused", extra: [] })),
       Layer.provideMerge(SqlLive(newHome())),
     );
     const runtime = ManagedRuntime.make(layer);

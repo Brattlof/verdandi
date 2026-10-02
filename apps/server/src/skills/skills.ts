@@ -1,4 +1,4 @@
-import { type DecisionAnswer, type SkillChange, skillFileCap } from "@verdandi/contracts";
+import { type DecisionAnswer, type Item, type SkillChange, skillFileCap } from "@verdandi/contracts";
 import { flagged } from "@verdandi/decisions";
 import { containsSecret } from "@verdandi/trajectories";
 
@@ -76,4 +76,15 @@ export const scanSkill = (text: string, answer: DecisionAnswer | undefined) => {
   if (!answer || flagged(answer))
     return `Verdandi's injection scan flagged it${answer?.why ? ` (${answer.why})` : ""}. Write the skill as plain steps for its task, without text that overrides the agent's instructions or poses as the system, or commands and links that would carry data off this machine.`;
   return undefined;
+};
+
+/**
+ * The profile skill `item` shows the agent loading, or undefined. Claude Code: a `Skill` tool call, which names a
+ * profile skill `verdandi:<name>` (ADR 0020); a bare name counts too, so a use is never missed. The fake harness
+ * reports the same call; other harnesses report no skill use yet, so the skills they'd use go stale.
+ */
+export const skillUsed = (item: Item) => {
+  if (item.kind !== "tool.call" || item.name !== "Skill" || typeof item.input !== "object" || item.input === null) return undefined;
+  const { skill } = item.input as { readonly skill?: unknown };
+  return typeof skill === "string" ? skill.replace(/^verdandi:/, "") : undefined;
 };

@@ -10,6 +10,7 @@ import {
   isCorrection,
   type ProjectsFeed,
   type Receipt,
+  type SkillState,
   type StoredEvent,
   type ThreadFeed,
   type ThreadId,
@@ -180,6 +181,12 @@ export const EngineLive = (options: EngineOptions = {}) =>
                     : undefined;
             const [injection] =
               untrusted === undefined ? [] : (yield* decider.decide({ state: untrusted, questions: [injectionQuestion] })).answers;
+            // A skill Verdandi created has a row in `skills`; any other is never curated or restored.
+            const skill =
+              command.type === "skill.curate" || command.type === "skill.restore"
+                ? ((yield* sql<{ state: SkillState; usedAt: string }>`
+                    select state, used_at as usedAt from skills where name = ${command.skill}`)[0] ?? null)
+                : undefined;
             const decision = decide(
               {
                 ...state,
@@ -187,6 +194,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ...(decisions && { decisions }),
                 ...(memory && { memory }),
                 ...(injection && { injection }),
+                ...(skill !== undefined && { skill }),
               },
               command,
             );

@@ -311,6 +311,37 @@ const routeChangeReasons = Effect.gen(function* () {
   yield* sql`alter table route_changes add column reason text`;
 });
 
+/**
+ * The skills Verdandi created (DESIGN §14.4), from `skill.applied`: their state, when each was last used through Claude
+ * Code's Skill tool (or created or restored), and the thread that created it. Skills without a row are the user's.
+ * Filled from the log as the projector would: each skill whose latest successful create or delete is a create,
+ * active, last used at its latest `Skill` call since that create, or else when it was created.
+ */
+const skills = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table skills (
+    name text primary key,
+    thread_id text not null,
+    state text not null,
+    used_at text not null
+  )`;
+  yield* sql`insert into skills (name, thread_id, state, used_at)
+    select c.name, c.thread_id, 'active', coalesce(
+      (select max(i.at) from events i
+        where i.type = 'turn.item.added' and i.seq > c.seq
+          and json_extract(i.payload, '$.item.kind') = 'tool.call' and json_extract(i.payload, '$.item.name') = 'Skill'
+          and json_extract(i.payload, '$.item.input.skill') in (c.name, 'verdandi:' || c.name)),
+      c.at)
+    from (
+      select json_extract(payload, '$.skill') as name, json_extract(payload, '$.action') as action, thread_id, at, seq,
+        row_number() over (partition by json_extract(payload, '$.skill') order by seq desc) as latest
+      from events
+      where type = 'skill.applied' and json_extract(payload, '$.error') is null
+        and json_extract(payload, '$.action') in ('create', 'delete')
+    ) c
+    where c.latest = 1 and c.action = 'create'`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -334,4 +365,5 @@ export const migrations = {
   "20_task_ratings": taskRatings,
   "21_turn_verifying": turnVerifying,
   "22_route_change_reasons": routeChangeReasons,
+  "23_skills": skills,
 };

@@ -185,6 +185,15 @@ export const makeFakeHarness = () => {
       );
       return Stream.concat(Stream.fromIterable(start), called);
     }
+    if (input.text.startsWith("skill ")) {
+      // `skill <name>` reports loading a skill the way Claude Code's Skill tool call shows; the fake harness loads nothing.
+      const skill = input.text.slice("skill ".length);
+      const steps: HarnessEvent[] = [
+        { type: "item", item: { kind: "tool.call", toolUseId: "fake-skill", name: "Skill", input: { skill } } },
+        { type: "item", item: { kind: "tool.result", toolUseId: "fake-skill", isError: false, content: `Launching skill: ${skill}` } },
+      ];
+      return Stream.concat(Stream.fromIterable([...start, ...steps]), reply(input.route.model, `used ${skill}`));
+    }
     if (input.text === "steer") {
       const answer = input.steers.pipe(
         Stream.take(1),

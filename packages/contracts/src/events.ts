@@ -7,7 +7,7 @@ import { MemoryScope } from "./memory.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInputs } from "./routing.ts";
-import { SkillAction, SkillChange } from "./skills.ts";
+import { SkillAction, SkillChange, SkillState } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 import { TaskRating } from "./task.ts";
 
@@ -497,6 +497,20 @@ export const SkillApplied = Schema.Struct({
   path: Schema.String,
   error: Schema.optionalKey(Schema.String),
 });
+/**
+ * Skill `skill`, which Verdandi created in thread `threadId`, moved from `from` to `to` (DESIGN §14.4): the daily
+ * sweep staled or archived it for going unused, or the user restored it. Archived skills leave the folder Claude
+ * Code loads for `<home>/skills-archive`, and come back on restore; the reactor moves them.
+ */
+export const SkillStateChanged = Schema.Struct({
+  type: Schema.Literal("skill.state.changed"),
+  v: v1,
+  threadId: ThreadId,
+  skill: Schema.String,
+  from: SkillState,
+  to: SkillState,
+  by: Schema.Literals(["sweep", "user"]),
+});
 /** `limit`: a budget guard of the task (its `maxCost` or `maxTurns`) stopped the turn, which ends the task. */
 export const TurnStatus = Schema.Literals(["success", "error", "interrupted", "limit"]);
 export const TurnCompleted = Schema.Struct({
@@ -554,6 +568,7 @@ export const Event = Schema.Union([
   MemorySnapshotTaken,
   SkillProposed,
   SkillApplied,
+  SkillStateChanged,
 ]);
 export type Event = typeof Event.Type;
 
@@ -627,6 +642,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "memory.snapshot.taken@1": MemorySnapshotTaken,
   "skill.proposed@1": SkillProposed,
   "skill.applied@1": SkillApplied,
+  "skill.state.changed@1": SkillStateChanged,
 };
 
 /** The row shape an event is stored as. */

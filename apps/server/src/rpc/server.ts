@@ -30,7 +30,7 @@ import { resolveProjectPath } from "../projects/project.ts";
 import { catalogFor, decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
 import { searchSessions } from "../search/search.ts";
-import { listSkills } from "../skills/skill-files.ts";
+import { loadSkillsView, SkillCurationScheduleLive } from "../skills/skill-curation.ts";
 import { loadSpendState } from "../spend/spend.ts";
 import { loadSpendCaps } from "../spend/spend-caps.ts";
 import { loadUsageReport } from "../spend/usage.ts";
@@ -130,7 +130,12 @@ const Handlers = (home: string) =>
             ),
           ),
         // Read from disk on each call: the user may add or edit skills by hand.
-        SkillsList: () => Effect.sync(() => listSkills(skillFolders)),
+        SkillsList: () =>
+          loadSkillsView.pipe(
+            Effect.provideService(ProfileSkills, skillFolders),
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.catchTag("SqlError", Effect.die),
+          ),
         SessionSearch: (query) =>
           searchSessions(query).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
         TaskCostsList: () => loadTaskCosts.pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
@@ -287,7 +292,7 @@ export const ServerLayer = (
       return { port: address.port, token };
     }),
   );
-  return Layer.mergeAll(info, AttachmentSweepLive(home), GcScheduleLive).pipe(
+  return Layer.mergeAll(info, AttachmentSweepLive(home), GcScheduleLive, SkillCurationScheduleLive).pipe(
     Layer.provideMerge(http),
     Layer.provideMerge(TerminalsLive),
     Layer.provideMerge(GcLive(home)),

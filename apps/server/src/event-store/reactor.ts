@@ -28,7 +28,7 @@ import { editedPaths } from "../diffs/diff.ts";
 import { memoryNudge } from "../memory/memory.ts";
 import { repeatedError } from "../routing/repeated-error.ts";
 import { searchSessions } from "../search/search.ts";
-import type { SkillFolders } from "../skills/skill-files.ts";
+import { placeSkill, type SkillFolders } from "../skills/skill-files.ts";
 import { makeSkillProposals } from "../skills/skill-proposals.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "../tasks/task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "../tasks/trajectory.ts";
@@ -468,6 +468,11 @@ export const ReactorLive = Layer.effect(
       }
       // Committed right before the approval it goes with, so the harness switches before the agent's next step.
       if (e.type === "task.rerouted") return live.get(e.threadId)?.reroute(e.threadId, e.to) ?? Effect.void;
+      // An archived skill leaves the folder Claude Code loads, and a restored one goes back (DESIGN §14.4).
+      if (e.type === "skill.state.changed") {
+        const error = placeSkill(skillFolders, e.skill, e.to === "archived");
+        return error ? Effect.logWarning(`${error} The next skill curation sweep tries again.`) : Effect.void;
+      }
       // A skill proposal is Verdandi's own request: its answer writes the skill, in `turns` so `drain` waits for it.
       if (e.type === "approval.resolved")
         return Effect.andThen(

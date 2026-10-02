@@ -110,7 +110,7 @@ test("the agent proposes a skill, the user approves it, and it's on disk with it
   expect(wrote.isError).toBe(false);
   expect(readFileSync(join(skills, "deploy-notes", "scripts", "deploy.sh"), "utf8")).toBe("bun run deploy\n");
 
-  expect(listSkills({ profile: skills, extra: [] }).folders[0]?.skills).toEqual([
+  expect(listSkills({ profile: skills, archive: `${skills}-archive`, extra: [] }).folders[0]?.skills).toEqual([
     { name: "deploy-notes", description: "How this user deploys.", path: join(skills, "deploy-notes") },
   ]);
   expect((await turn(tool({ action: "delete", name: "deploy-notes" }))).isError).toBe(false);
@@ -189,7 +189,7 @@ test("the skills list shows each skill with its source", async () => {
   writeFileSync(join(extra, "theirs", "SKILL.md"), "---\nname: theirs\ndescription: Theirs.\n---\n");
   mkdirSync(join(extra, "not-a-skill"));
 
-  expect(listSkills({ profile, extra: [extra, join(extra, "missing")] })).toEqual({
+  expect(listSkills({ profile, archive: join(profile, "missing"), extra: [extra, join(extra, "missing")] })).toEqual({
     folders: [
       { path: profile, source: "profile", skills: [{ name: "mine", description: "Mine.", path: join(profile, "mine") }] },
       { path: extra, source: "extra", skills: [{ name: "theirs", description: "Theirs.", path: join(extra, "theirs") }] },
