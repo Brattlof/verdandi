@@ -79,7 +79,7 @@ export const restore = (cwd: string, ref: string) =>
     if (current === undefined) return yield* new GitError({ message: `${cwd} is not in a git repository, so it has no checkpoints.` });
     if ((yield* git(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`])).code !== 0) {
       return yield* new GitError({
-        message: `There's no checkpoint ${ref}: its turn ran before Verdandi saved checkpoints, or saving it failed. The files were left as they are.`,
+        message: `There's no checkpoint ${ref}: its turn ran before Verdandi saved checkpoints, saving it failed, or the cleanup policy in gc.yaml removed it. The files were left as they are.`,
       });
     }
     const top = resolve(yield* gitOk(cwd, ["rev-parse", "--show-toplevel"]));

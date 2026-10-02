@@ -15,7 +15,7 @@ ADR 0010 diffed the working tree against `HEAD`, so a turn's diff showed the use
 3. `DiffGet` with a `turnId` diffs that turn's start checkpoint against its end (a running turn's end is the working tree now). Without one, it diffs the thread's first checkpoint against the working tree, snapshotted the same way. A thread from before checkpoints falls back to `HEAD`; a turn from before them fails with `NoCheckpoint`.
 4. Checkpoints are refs, not events: git is their store, and the ref name says which turn each belongs to. A failed checkpoint is logged and never fails the turn.
 5. A folder outside git has no checkpoints, and its diffs fail with `NotAGitRepo` as before. The payload limits of ADR 0010 stay.
-6. Refs of archived threads are kept. Pruning them is a later cleanup policy.
+6. Refs of archived threads are kept. Pruning them is a later cleanup policy (ADR 0021).
 
 ## Consequences
 

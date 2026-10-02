@@ -166,6 +166,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     ...thread,
     revert: thread.revert && (e.error ? { ...thread.revert, filesError: e.error } : thread.revert),
   }),
+  "thread.checkpoints.removed": (thread) => thread,
   "thread.worktree.requested": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
   "thread.worktree.created": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),
   "thread.worktree.failed": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),

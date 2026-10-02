@@ -150,7 +150,7 @@ export const threadDiff = (
     if (!saved.has(start) || (turn.status !== "running" && !saved.has(end))) {
       return yield* new DiffUnavailable({
         reason: "NoCheckpoint",
-        message: `Turn ${turnId} has no checkpoint: it ran before Verdandi saved them, or saving one failed (verdandid's log says why). The thread's whole diff still works.`,
+        message: `Turn ${turnId} has no checkpoint: it ran before Verdandi saved them, saving one failed (verdandid's log says why), or the cleanup policy in gc.yaml removed it. The thread's whole diff still works.`,
       });
     }
     return yield* diffTrees(cwd, start, turn.status === "running" ? yield* workingTree(threadFolder(thread.path, thread.worktree)) : end);

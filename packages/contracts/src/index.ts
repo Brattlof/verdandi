@@ -5,6 +5,7 @@ export * from "./batch.ts";
 export * from "./commands.ts";
 export * from "./decisions.ts";
 export * from "./events.ts";
+export * from "./gc.ts";
 export * from "./harness.ts";
 export * from "./ids.ts";
 export * from "./items.ts";

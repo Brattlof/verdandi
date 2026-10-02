@@ -1,11 +1,13 @@
 import { Database } from "bun:sqlite";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { formatBytes } from "@verdandi/contracts";
 import { findClaude } from "@verdandi/harness-claude-code";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { attachmentFiles, attachmentsDir, referencedAttachmentsSql } from "../attachments/attachments.ts";
 import { migrations } from "../event-store/migrations.ts";
+import { loadGcPolicy, planGc } from "../gc/gc.ts";
 import { requireBun } from "../home/bun-version.ts";
 import { alive, resolveHome, type ServerFile, serverFile } from "../home/home.ts";
 import { connect } from "../rpc/client.ts";
@@ -123,6 +125,44 @@ const attachments = (home: string): Check => {
   }
 };
 
+// ponytail: walks every file, so a worktree with a huge node_modules makes doctor slow. Upgrade to a sampled or cached size if it bites.
+const folderBytes = (dir: string) =>
+  existsSync(dir)
+    ? readdirSync(dir, { recursive: true, withFileTypes: true }).reduce(
+        (sum, d) => sum + (d.isFile() ? (statSync(join(d.parentPath, d.name), { throwIfNoEntry: false })?.size ?? 0) : 0),
+        0,
+      )
+    : 0;
+
+const plural = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+
+/** What the cleanup policy (ADR 0021) finds at `now`, and what the next sweep would remove. Read-only, like `database`. */
+export const cleanup = async (home: string, now = Date.now()): Promise<Check> => {
+  const name = "Cleanup";
+  const policy = loadGcPolicy(home);
+  if (Result.isFailure(policy)) return { name, status: "fail", detail: policy.failure };
+  const file = join(home, "verdandi.db");
+  if (!existsSync(file)) return { name, status: "ok", detail: "nothing to clean up yet" };
+  try {
+    const plan = await Effect.runPromise(
+      planGc(policy.success, now).pipe(Effect.provide(SqliteClient.layer({ filename: file, readonly: true }))),
+    );
+    const refs = plan.removed.reduce((sum, r) => sum + r.refs.length, 0);
+    const worktrees = plan.worktrees.filter((w) => !w.kept).length;
+    const kept = plan.worktrees.length - worktrees;
+    return {
+      name,
+      status: "ok",
+      detail:
+        `${plural(plan.refs, "checkpoint ref")}, worktrees using ${formatBytes(folderBytes(join(home, "worktrees")))}. ` +
+        `The next sweep removes ${refs} of them and ${plural(worktrees, "worktree")}` +
+        (kept > 0 ? `, and keeps ${kept} with uncommitted changes (see \`verdandi gc --dry-run\`)` : ""),
+    };
+  } catch (e) {
+    return { name, status: "warn", detail: `can't tell what the next sweep removes (${message(e)}). See the Database line.` };
+  }
+};
+
 /** The token must be accepted, so this calls the API with it; the token itself is never printed. */
 const server = async (home: string): Promise<Check> => {
   const name = "verdandid";
@@ -174,6 +214,7 @@ export const diagnose = async (
   writable(home),
   database(home),
   attachments(home),
+  await cleanup(home),
   await server(home),
 ];
 

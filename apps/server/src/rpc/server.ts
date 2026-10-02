@@ -25,6 +25,7 @@ import { reachedCap } from "../event-store/decider.ts";
 import { Engine } from "../event-store/engine.ts";
 import { loadDeciderState, loadMemory } from "../event-store/projector.ts";
 import { HarnessRegistry } from "../event-store/reactor.ts";
+import { Gc, GcLive, GcScheduleLive } from "../gc/gc.ts";
 import { resolveProjectPath } from "../projects/project.ts";
 import { catalogFor, decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
@@ -46,6 +47,7 @@ const Handlers = (home: string) =>
       const sql = yield* SqlClient.SqlClient;
       const registry = yield* HarnessRegistry;
       const terminals = yield* Terminals;
+      const gc = yield* Gc;
       const harnesses = Object.keys(registry) as HarnessId[];
       const routing = routingFor(registry);
       const subscriptions = new Map<string, Deferred.Deferred<void>>();
@@ -167,6 +169,7 @@ const Handlers = (home: string) =>
             if (Result.isFailure(decided)) return yield* new RoutingUnavailable(decided.failure);
             return decided.success;
           }),
+        Gc: ({ dryRun }) => gc.run({ dryRun, now: Date.now() }),
         TerminalOpen: ({ threadId, cols, rows }) =>
           loadThreadFolder(threadId).pipe(
             Effect.provideService(SqlClient.SqlClient, sql),
@@ -280,9 +283,10 @@ export const ServerLayer = (
       return { port: address.port, token };
     }),
   );
-  return Layer.mergeAll(info, AttachmentSweepLive(home)).pipe(
+  return Layer.mergeAll(info, AttachmentSweepLive(home), GcScheduleLive).pipe(
     Layer.provideMerge(http),
     Layer.provideMerge(TerminalsLive),
+    Layer.provideMerge(GcLive(home)),
     Layer.provideMerge(AppLayer(home, harnesses)),
   );
 };
