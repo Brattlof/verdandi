@@ -241,15 +241,11 @@ export const decideRoute = (
 
 /**
  * Pure: the escalation ladder's next step for a routed task in `thread` that has taken `escalations` steps, after
- * `failure` (DESIGN §8.7). Undefined when the project's policy is broken: then nothing escalates.
+ * `failure` (DESIGN §8.7). A broken policy asks, naming the fault, so every escalation is decided and recorded.
  */
-export const decideEscalation = (
-  thread: RoutingThread,
-  routing: RoutingContext,
-  escalations: number,
-  failure: string,
-): Escalation | undefined => {
-  if (Result.isFailure(routing.policy)) return undefined;
+export const decideEscalation = (thread: RoutingThread, routing: RoutingContext, escalations: number, failure: string): Escalation => {
+  if (Result.isFailure(routing.policy))
+    return { step: "ask", reason: `${failure}, and Verdandi didn't escalate: ${routing.policy.failure}` };
   const policy = thread.budgetMode ? { ...routing.policy.success, mode: thread.budgetMode } : routing.policy.success;
   const target = targetOf(thread.route, policy.catalog);
   return escalate({ target, effort: thread.route.effort, escalations, failure, harnesses: routing.harnesses }, policy);

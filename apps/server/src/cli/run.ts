@@ -28,9 +28,14 @@ import type { PendingRequest } from "./requests.ts";
 export const exitCodes = { completed: 0, usage: 2, failed: 3, limit: 4, request: 5, interrupted: 130 } as const;
 type RunStatus = Exclude<keyof typeof exitCodes, "usage">;
 type TurnStatus = Extract<Event, { type: "turn.completed" }>["status"];
+type Escalation = Pick<Extract<Event, { type: "task.escalated" }>, "trigger" | "step" | "from" | "to" | "reason">;
 const runStatus: Record<TurnStatus, RunStatus> = { success: "completed", error: "failed", interrupted: "interrupted", limit: "limit" };
 
-/** `--json`'s one object. `cost` is what this run's turn cost, metered and subscription kept apart. */
+/**
+ * `--json`'s one object. `turnId` is the turn the run sent; the run follows its task through the turns Verdandi sends
+ * after it (`escalations`, each step's trigger and route before and after), so `status`, `route`, `cost` (metered and subscription
+ * kept apart) and `reply` cover them all.
+ */
 export type RunResult = {
   readonly threadId: ThreadId;
   readonly turnId: TurnId;
@@ -39,6 +44,7 @@ export type RunResult = {
   readonly route: Route;
   readonly cost: SpendSplit;
   readonly reply: string;
+  readonly escalations: readonly Escalation[];
   readonly error?: string;
 };
 
@@ -95,9 +101,10 @@ const uuid = <T>() => crypto.randomUUID() as T;
 type Signal = ThreadFeed | { readonly kind: "sigint" } | { readonly kind: "ended" };
 
 /**
- * Sends the turn on a new thread or `--thread`, follows the thread's feed until that turn completes, and says how it went.
- * ponytail: ends with its own turn, so the follow-up turn of an escalation (DESIGN §8.7) runs unwatched. Upgrade: follow
- * `task.escalated`'s `nextTurnId` once the decider records every escalate decision, so the run knows when none is coming.
+ * Sends the turn on a new thread or `--thread`, follows the thread's feed until its task stops, and says how it went.
+ * After a turn of a routed task that set off an escalation trigger (a failed verifier, or the agent reporting it's
+ * blocked) it waits for Verdandi's decision (DESIGN §8.7), which the decider records for every such turn, and follows
+ * the turn it sends (`nextTurnId`) the same way.
  */
 const runTurn = (server: ServerFile, o: Options) =>
   Effect.gen(function* () {
@@ -134,8 +141,10 @@ const runTurn = (server: ServerFile, o: Options) =>
     }
 
     const turnId = uuid<TurnId>();
+    // The turn followed now: the run's own, then each one Verdandi sends to go on with the task.
+    let current = turnId;
     const interrupt = () =>
-      dispatch({ type: "turn.interrupt", commandId: uuid<CommandId>(), threadId, turnId }).pipe(
+      dispatch({ type: "turn.interrupt", commandId: uuid<CommandId>(), threadId, turnId: current }).pipe(
         Effect.catchTag("CommandRejected", () => Effect.void), // it ended first
       );
     // Ctrl+C interrupts the turn and waits for it to end; a second one quits at once.
@@ -151,10 +160,17 @@ const runTurn = (server: ServerFile, o: Options) =>
 
     let route = thread.route;
     let taskId = thread.task?.taskId ?? null;
+    // Only a routed task escalates: neither the thread nor the task pinned (as the decider's `task.escalate` checks).
+    let pinned = thread.pinned;
+    let taskPinned = thread.task?.source === "pin";
     const usage: Usage[] = [];
     const reply: string[] = [];
+    const escalations: Escalation[] = [];
     let verifier: VerifierRun | undefined;
+    let blocked = false;
     let asked: PendingRequest | undefined;
+    // Set once the followed turn has completed after a trigger, until Verdandi decides whether the task goes on.
+    let awaiting: { readonly status: RunStatus; readonly error: string | undefined } | undefined;
     // Deltas stream the agent's text; a message that came without them (a harness that doesn't stream) prints whole.
     let streamed = false;
     let atLineStart = true;
@@ -163,11 +179,28 @@ const runTurn = (server: ServerFile, o: Options) =>
       process.stdout.write(text);
       atLineStart = text.endsWith("\n");
     };
+    const finish = (status: RunStatus, error: string | undefined) =>
+      Effect.gen(function* () {
+        if (!atLineStart) write("\n");
+        yield* client.Unsubscribe({ subscriptionId });
+        yield* Fiber.join(feed);
+        return {
+          threadId,
+          turnId,
+          taskId,
+          status,
+          route,
+          cost: spendSplit(usage),
+          reply: reply.join("\n"),
+          escalations,
+          ...(error && { error }),
+        } satisfies RunResult;
+      });
     for (;;) {
       const s = yield* Queue.take(signals);
       if (s.kind === "ended") return yield* ended;
       if (s.kind === "sigint") yield* interrupt();
-      if (s.kind === "delta" && s.turnId === turnId) {
+      if (s.kind === "delta" && s.turnId === current) {
         write(s.text);
         streamed = true;
       }
@@ -177,9 +210,48 @@ const runTurn = (server: ServerFile, o: Options) =>
       if (e.type === "task.started") {
         taskId = e.taskId;
         route = e.route;
+        taskPinned = e.decision?.source === "pin";
       }
       if (e.type === "task.rerouted") route = e.to;
-      if (!("turnId" in e) || e.turnId !== turnId) continue;
+      if (e.type === "thread.route.changed") pinned = true;
+      if (e.type === "thread.route.unpinned") pinned = false;
+      if (e.type === "task.escalated" && e.turnId === current) {
+        const { trigger, step, from, to, reason } = e;
+        escalations.push({ trigger, step, from, ...(to && { to }), reason });
+        // At `ask` the task stopped short of done, even when its last turn succeeded (an agent that reported it's blocked).
+        if (!to || !e.nextTurnId) {
+          const error = `${awaiting?.error ?? ""}\n${reason} Continue the thread with verdandi chat --thread ${threadId}.`.trimStart();
+          return yield* finish(awaiting && awaiting.status !== "completed" ? awaiting.status : "failed", error);
+        }
+        if (!atLineStart) write("\n");
+        if (!o.json) process.stderr.write(`[escalated to ${to.model} ${to.effort}: ${reason}]\n`);
+        route = to;
+        current = e.nextTurnId;
+        verifier = undefined;
+        blocked = false;
+        awaiting = undefined;
+        // A run that is stopping, for a Ctrl+C or a request, stops the turn Verdandi sent too.
+        if (interrupting || asked) yield* interrupt();
+        continue;
+      }
+      // No decision is coming once the task was pinned or ended, or another turn started, before Verdandi decided.
+      // Otherwise one always is: the decider never rejects `task.escalate`, so only a failing database loses it.
+      const preempted = !awaiting
+        ? undefined
+        : pinned || taskPinned
+          ? "the task was pinned"
+          : e.type === "thread.archived"
+            ? "the thread was archived"
+            : e.type === "thread.reverted"
+              ? "the thread was reverted"
+              : e.type === "turn.started" && e.turnId !== current
+                ? "another turn started"
+                : undefined;
+      if (awaiting && preempted) {
+        const why = `The task stopped here: ${preempted} before Verdandi decided whether to escalate it.`;
+        return yield* finish(awaiting.status, `${awaiting.error ?? ""}\n${why}`.trimStart());
+      }
+      if (!("turnId" in e) || e.turnId !== current) continue;
       if (e.type === "turn.item.added" && e.item.kind === "assistant.message" && !e.item.parentToolUseId) {
         reply.push(e.item.text);
         if (!streamed) write(e.item.text);
@@ -187,6 +259,7 @@ const runTurn = (server: ServerFile, o: Options) =>
         streamed = false;
       }
       if (e.type === "turn.usage.recorded") usage.push(e);
+      if (e.type === "task.blocked") blocked = true;
       if (e.type === "verifier.ran") verifier = e;
       if (e.type === "approval.requested" || e.type === "user-input.requested" || e.type === "plan.requested") {
         if (o.deny) {
@@ -201,9 +274,6 @@ const runTurn = (server: ServerFile, o: Options) =>
         }
       }
       if (e.type !== "turn.completed") continue;
-      if (!atLineStart) write("\n");
-      yield* client.Unsubscribe({ subscriptionId });
-      yield* Fiber.join(feed);
       const verifierFailed = e.status === "success" && verifier?.passed === false;
       const status: RunStatus = asked && e.status === "interrupted" ? "request" : verifierFailed ? "failed" : runStatus[e.status];
       const tail = verifier?.output.trimEnd().split(/\r?\n/).slice(-10).join("\n");
@@ -213,22 +283,16 @@ const runTurn = (server: ServerFile, o: Options) =>
           : verifierFailed && verifier
             ? `The verifier ${verifier.command} failed${verifier.exitCode === null ? "" : ` (exit ${verifier.exitCode})`}:\n${tail}`
             : e.error;
-      return {
-        threadId,
-        turnId,
-        taskId,
-        status,
-        route,
-        cost: spendSplit(usage),
-        reply: reply.join("\n"),
-        ...(error && { error }),
-      } satisfies RunResult;
+      // The reactor asks to escalate after a failed verifier, or else a blocked report, whatever the turn's status.
+      if ((verifierFailed || blocked) && !pinned && !taskPinned) awaiting = { status, error };
+      else return yield* finish(status, error);
     }
   });
 
 /**
  * `verdandi run "<task>"`: sends one turn without a person at the keyboard, prints the agent's text as it streams (or
- * one JSON object with `--json`), and exits with the code for how the turn ended (`exitCodes`). Never approves anything.
+ * one JSON object with `--json`), follows the turns Verdandi sends to escalate its task, and exits with the code for how
+ * the task stopped (`exitCodes`). Never approves anything.
  */
 export const run = async (argv: readonly string[]) => {
   let options: Options;
