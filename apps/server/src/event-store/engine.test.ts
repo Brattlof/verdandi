@@ -217,6 +217,7 @@ describe("engine", () => {
         const sql = yield* SqlClient.SqlClient;
         yield* sql`drop table route_changes`;
         yield* migrations["5_route_changes"];
+        yield* migrations["22_route_change_reasons"];
         return [live, yield* view] as const;
       }),
     );

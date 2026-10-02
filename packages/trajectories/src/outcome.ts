@@ -89,7 +89,9 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         // The user's last pick counts. Pinning the route the task runs on, or changing back to it, overrides nothing.
         task.override = describeRouteChange(task.current, e.to) === "" ? undefined : { from: task.current, to: e.to };
         break;
+      // Neither moves the task off the route it started on, nor overrides it.
       case "task.rerouted":
+      case "task.deescalated":
         task.current = e.to;
         break;
       // At `ask` nothing moved.

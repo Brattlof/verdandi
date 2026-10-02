@@ -106,6 +106,30 @@ test("a route change lands after the turns so far, and a new harness drops the s
   expect(thread?.routeChanges).toEqual([{ from: route, to, by: "user", at, afterTurns: 1 }]);
 });
 
+test("a de-escalation lands after the turns so far as the router's, and keeps the task, its session and the thread routed", () => {
+  const taskId = turnId as string as TaskId;
+  const from: Route = { harness: "fake", model: "fake-large", effort: "high" };
+  const to: Route = { harness: "fake", model: "fake-small", effort: "low" };
+  const reason = "The verifiers passed and what's left looks like chore.git, so it runs on fake-small at low effort.";
+  const decision = {
+    source: "policy",
+    taskClass: "chore.git",
+    difficulty: 0.1,
+    confidence: 0.75,
+    target: { harness: "fake", provider: "fake", model: "fake-small", access: "local" },
+    effort: "low",
+    reason,
+    trace: [],
+  } as const;
+  const thread = fold([
+    { ...snapshot, thread: { ...snapshot.thread, route: from, pinned: false, sessionId: "s1", task: { taskId, source: "policy" } } },
+    event(2, { type: "turn.started", v: 2, threadId, turnId, text: "edit a.txt" }),
+    event(3, { type: "task.deescalated", v: 1, threadId, taskId, turnId: "turn-2" as TurnId, from, to, decision }),
+  ]);
+  expect(thread).toMatchObject({ route: to, pinned: false, sessionId: "s1", task: { taskId, reason } });
+  expect(thread?.routeChanges).toEqual([{ from, to, by: "router", reason, at: "", afterTurns: 1 }]);
+});
+
 test("events the snapshot already includes are skipped", () => {
   const thread = fold([{ ...snapshot, seq: 3 }, event(3, { type: "turn.started", v: 2, threadId, turnId, text: "replayed" })]);
   expect(thread?.turns).toEqual([]);

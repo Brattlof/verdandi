@@ -51,6 +51,11 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
       if (thread && !turn && e.to) thread = { ...thread, route: e.to };
       continue;
     }
+    // A de-escalation moves the task from the turn it was committed before, on the same session.
+    if (e.type === "task.deescalated") {
+      if (thread && !turn) thread = { ...thread, route: e.to };
+      continue;
+    }
     if (e.type === "harness.session.bound") {
       session = e;
       continue;

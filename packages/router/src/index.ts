@@ -1,3 +1,4 @@
+export { type DeescalationInput, deescalate } from "./deescalate.ts";
 export { type Escalation, type EscalationInput, escalate } from "./escalate.ts";
 export { builtInCatalog, loadPolicy, PolicyError, type PolicyLayer, type ResolvedPolicy } from "./policy.ts";
 export { PinError, type Pinned, type RouteInput, RouterError, route } from "./route.ts";

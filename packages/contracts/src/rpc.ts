@@ -92,11 +92,15 @@ export const TurnView = Schema.Struct({
 });
 export type TurnView = typeof TurnView.Type;
 
-/** A route change between turns: `afterTurns` turns had started when it was made, at `at` (ISO). */
+/**
+ * A route change between turns: `afterTurns` turns had started when it was made, at `at` (ISO). `by: "user"` pins the
+ * thread; `by: "router"` is a de-escalation of the running task (DESIGN §8.7), and `reason` says why.
+ */
 export const RouteChange = Schema.Struct({
   from: Route,
   to: Route,
-  by: Schema.Literal("user"),
+  by: Schema.Literals(["user", "router"]),
+  reason: Schema.optionalKey(Schema.String),
   at: Schema.String,
   afterTurns: Schema.Number,
 });

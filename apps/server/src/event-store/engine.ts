@@ -141,13 +141,17 @@ export const EngineLive = (options: EngineOptions = {}) =>
               current.taskPlanned;
             // An escalation's next step comes from the project's policy too.
             const escalates = command.type === "task.escalate" && current?.pinned === false;
-            // Routing reads the project's policy file, so only when this command starts a task, routes a planned task's build or escalates.
+            const starts = send && current && (current.taskId === null || at);
+            // A routed task's turn after one whose verifiers all passed is classified too: mechanical work de-escalates it.
+            const deescalates = send && !starts && current?.pinned === false && current.lastTurnVerified;
+            // Routing reads the project's policy file, so only when this command starts a task, routes a planned task's build,
+            // escalates or may de-escalate.
             const routing =
-              current && ((send && (current.taskId === null || at)) || plans || escalates) && options.routing
+              current && (starts || plans || escalates || deescalates) && options.routing
                 ? {
                     ...(yield* options.routing(current.projectPath)),
-                    // Routing memory moves where a task starts, not an approved plan's build.
-                    ...(send ? { memory: yield* loadRoutingMemory(command.threadId) } : {}),
+                    // Routing memory moves where a task starts, not an approved plan's build or a running task.
+                    ...(starts ? { memory: yield* loadRoutingMemory(command.threadId) } : {}),
                   }
                 : undefined;
             // A new task is classified, and a later turn is asked whether it corrects the agent's last answer.

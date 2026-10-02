@@ -305,6 +305,12 @@ const turnVerifying = Effect.gen(function* () {
   yield* sql`alter table turns add column verifying integer not null default 0`;
 });
 
+/** Why the router changed a route between turns: a de-escalation (DESIGN §8.7). Null for the user's own changes. */
+const routeChangeReasons = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table route_changes add column reason text`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -327,4 +333,5 @@ export const migrations = {
   "19_memory": memory,
   "20_task_ratings": taskRatings,
   "21_turn_verifying": turnVerifying,
+  "22_route_change_reasons": routeChangeReasons,
 };

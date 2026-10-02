@@ -429,7 +429,11 @@ Research shows that turn count alone is barely better than chance at predicting 
 
 By default, at most one step happens per task without asking you. A step changes the running task's route and Verdandi sends the next turn itself, handing the agent the failed verifier's output, or its own blocked report, as data; the task stays one task, so routing memory counts the escalation against the route it started on (ADR 0018). Only routed tasks escalate: a pinned route is yours. Built so far: trigger 1, on the project's `escalation.verifiers`, and trigger 4; the escalation's reason names the trigger, and the task's outcome records each one that fired.
 
-**De-escalation** happens after you approve a plan, and after the verifiers pass when only mechanical work is left.
+**De-escalation** moves a routed task down without starting a new one, at two points:
+- **Plan approval.** The build moves to the class's own route (§8.2 lever 3, ADR 0013).
+- **After the verifiers pass.** When a turn's verifiers all passed, the decision layer classifies the next turn of the task. If it is mechanical work (`chore.git`, `code.edit.mechanical`, `docs.write`: a commit, a rename, a changelog), the router routes it as that class on the task's harness. The task moves only to a *less capable* model, never up and never by effort alone, and only through the switch-cost gate (§8.4 stage 5). The gate weighs what the chore saves against re-reading the cached context on the new model. On Claude Code that blocks most moves: the policy's chore is small (`tokens`), and the session's cached context soon outgrows it. The router's trace then says it stays and why. An allowed move is recorded as `task.deescalated` and shown between the turns as a route change by the router, with its reason. The task stays one task on the same session, so routing memory counts it on the route it started on.
+
+Pinned threads, and tasks pinned with `@name`, never de-escalate.
 
 **Auto effort within a task.** The model is chosen per task, because switching it breaks the cache. Effort is cheaper to move, so on harnesses that can change it mid-session without a cache miss, the router also sets effort **per turn**, inside the band the task's route allows:
 - **Down** for turns that are clearly light: a confirmation, "yes, go on", a rename the agent already planned, a commit after verifiers pass.
