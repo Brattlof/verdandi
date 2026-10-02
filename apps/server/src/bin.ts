@@ -4,6 +4,7 @@ import { chat } from "./cli/chat.ts";
 import { doctor } from "./cli/doctor.ts";
 import { open } from "./cli/open.ts";
 import { run } from "./cli/run.ts";
+import { decisions } from "./decisions/decisions-cli.ts";
 import { requireBun } from "./home/bun-version.ts";
 import { start } from "./main.ts";
 import { routing } from "./routing/routing-cli.ts";
@@ -24,7 +25,8 @@ const usage = `Usage:
   verdandi search <query> [--project <path>] [--home <dir>]   find past sessions' messages containing the query (3 characters or more), newest first, archived threads included
   verdandi batch <evalset.yaml> [--route auto|<harness>/<model>/<effort>]... [--dry-run] [--approve] [--timeout <minutes>] [--keep] [--home <dir>]   run an eval set's tasks on each route (default: auto, claude-code/opus/medium, claude-code/sonnet/high) in throwaway copies of their repositories, and compare success rate and cost per passed task; --dry-run only estimates, --approve allows what agents ask to do (otherwise denied)
   verdandi routing replay [--policy <file>] [--project <path>] [--home <dir>]   how saved tasks would route under a proposed policy (or each project's current one), with the estimated cost change; reads the database read-only
-  verdandi trajectories export --format jsonl|routing [--project <path>] [--since <date>] [--out <file>] [--home <dir>]   saved tasks as chat conversations with tool calls (jsonl) or as what the router knew, the route and how it went (routing), one JSON line per task, secrets masked; projects listed under excludeProjects in the home's trajectories.yaml are left out; reads the database read-only`;
+  verdandi trajectories export --format jsonl|routing [--project <path>] [--since <date>] [--out <file>] [--home <dir>]   saved tasks as chat conversations with tool calls (jsonl) or as what the router knew, the route and how it went (routing), one JSON line per task, secrets masked; projects listed under excludeProjects in the home's trajectories.yaml are left out; reads the database read-only
+  verdandi decisions eval [--candidate <module>] [--home <dir>]   replay logged decisions through a candidate backend (a module default-exporting a decision Backend; default: today's rules) and print, per question kind, its agreement with the logged answers and, where the task's outcome is known, accuracy and Brier score; reads the database read-only`;
 
 const commands: Record<string, (argv: readonly string[]) => Promise<void>> = {
   start,
@@ -34,6 +36,7 @@ const commands: Record<string, (argv: readonly string[]) => Promise<void>> = {
   doctor,
   costs,
   routing,
+  decisions,
   batch,
   search,
   trajectories,

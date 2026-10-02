@@ -655,7 +655,7 @@ It uses **decision models**. A decision model takes some context (the *state*) p
 **Rules for using it:**
 - **Simple questions only.** Decision models are weak at anything that needs extended reasoning or weighing several factors. A complex judgment is split into simpler questions, or goes to an LLM.
 - **Measure each kind of question on an eval set before relying on it.** Out of the box, Laya is only 36% accurate on its typed-decisions benchmark. Fine-tuned on examples from the same kind of task, it reaches 77%.
-- **Log every decision** with its probabilities and the eventual outcome. This is the fine-tuning data for `lab/` (§14.7).
+- **Log every decision** with its probabilities and the eventual outcome. This is the fine-tuning data for `lab/` (§14.7), and `verdandi decisions eval` measures a candidate backend against it (ADR 0019).
 - **Send non-English text to the multilingual model.** Laya's English model can be confidently wrong on other writing systems.
 - **Privacy:** local backends are the default. Jev would receive code and transcripts, so it's turned on per profile, and some projects can be excluded from it entirely.
 
@@ -1180,5 +1180,5 @@ Everything that makes Hermes Agent good, and where it lives in Verdandi.
 - [x] `bun:sqlite`: FTS5 and trigram tokenizer support on all three OSes. → ADR 0006: yes on all three, checked in CI.
 - [x] Effect 4 RC on `@effect/platform-bun`: stability of RPC over WebSocket, SQL and Stream. → ADR 0008: works; stopping a stream early wedges the connection in rc.115, avoided by design until fixed.
 - [x] The PTY host on Windows 11 (ConPTY): resizing, heavy output, Ctrl+C, killing process trees. → ADR 0007: Bun's built-in PTY, with fixes for Ctrl+C, tree kill and output batching.
-- [x] `laya-ts` under Bun: `onnxruntime-node`, or `onnxruntime-web` (WASM) as a fallback; CPU latency of a routing request. → ADR 0009: `onnxruntime-node` works; p50 1.45 s, 1.7 GB.
+- [x] `laya-ts` under Bun: `onnxruntime-node`, or `onnxruntime-web` (WASM) as a fallback; CPU latency of a routing request. → ADR 0009: `onnxruntime-node` works; p50 1.45 s, 1.7 GB. ADR 0019: no `laya-ts` package exists; `@receptron/laya` runs under Bun 1.4.2 at ~0.4 s per request on Apple silicon, not yet a dependency.
 - [x] Laya's accuracy out of the box on our task taxonomy, compared with `rules`. → ADR 0009: 63% vs 81% (n = 52); `rules` is the default.
