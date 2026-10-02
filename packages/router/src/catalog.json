@@ -30,7 +30,7 @@
     "context": 1000000,
     "vision": true,
     "efforts": ["low", "medium", "high", "xhigh", "max"],
-    "price": { "input": 4, "output": 20, "cacheRead": 0.4, "cacheWrite": 5 }
+    "price": { "input": 4, "output": 20, "cacheRead": 0.2, "cacheWrite": 5 }
   },
   {
     "harness": "claude-code",
@@ -41,6 +41,6 @@
     "context": 1000000,
     "vision": true,
     "efforts": ["low", "medium", "high", "xhigh", "max"],
-    "price": { "input": 10, "output": 50, "cacheRead": 1, "cacheWrite": 12.5 }
+    "price": { "input": 10, "output": 50, "cacheRead": 0.25, "cacheWrite": 12.5 }
   }
 ]

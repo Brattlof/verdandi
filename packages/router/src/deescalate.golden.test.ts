@@ -34,7 +34,7 @@ test("a de-escalation the gate allows says the verifiers passed and what it save
   const d = after("Write a commit message for these changes", "opus", "high", 10_000);
   expect(d).toMatchObject({ source: "policy", taskClass: "chore.git", target: { model: "haiku" }, effort: "low" });
   expect(d?.reason).toBe("The verifiers passed and what's left looks like chore.git, so it runs on haiku.");
-  expect(gate(d)).toEqual(["switch: saves $0.006, more than the $0.003 to move 10K of context"]);
+  expect(gate(d)).toEqual(["switch: saves $0.005, more than the $0.003 to move 10K of context"]);
   expect(d?.estimate?.switchCost).toBeGreaterThan(0);
 });
 
@@ -42,9 +42,9 @@ test("a de-escalation the gate blocks stays on the warm session at its effort, a
   const d = after("Write a commit message for these changes", "opus", "high", 150_000);
   expect(d).toMatchObject({ taskClass: "chore.git", target: { model: "opus" }, effort: "high", estimate: { switchCost: 0 } });
   expect(d?.reason).toBe(
-    "The verifiers passed and what's left looks like chore.git, which would run on haiku, but it stays on the warm opus session at high effort: switching would cost $0.04 to save $0.006.",
+    "The verifiers passed and what's left looks like chore.git, which would run on haiku, but it stays on the warm opus session at high effort: switching would cost $0.04 to save $0.005.",
   );
-  expect(gate(d)).toEqual(["stay: saves $0.006, less than the $0.04 to move 150K of context"]);
+  expect(gate(d)).toEqual(["stay: saves $0.005, less than the $0.04 to move 150K of context"]);
 });
 
 test("a chore whose class runs on no cheaper model stays put, and the trace says why", () => {
