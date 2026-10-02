@@ -5,9 +5,11 @@ import { escalationToUndo, switchCost } from "./route.tsx";
 const route: Route = { harness: "claude-code", model: "sonnet", effort: "medium" };
 const warm = { route, sessionId: "s1", turns: [] };
 
-test("a model or Claude Code effort change on a warm session warns of the cold cache", () => {
+test("a model or effort change on a warm Claude Code or native session warns of the cold cache", () => {
   expect(switchCost(warm, { ...route, model: "opus" })).toContain("cold cache write");
   expect(switchCost(warm, { ...route, effort: "high" })).toContain("cold cache write");
+  const native: Route = { harness: "native", model: "claude-sonnet-5-5", effort: "medium" };
+  expect(switchCost({ ...warm, route: native }, { ...native, effort: "high" })).toContain("cold cache write");
   expect(switchCost({ ...warm, sessionId: null }, { ...route, model: "opus" })).toBeUndefined();
 });
 

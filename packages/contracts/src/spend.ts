@@ -52,7 +52,7 @@ export const describeCost = ({ meteredUsd, subscriptionUsd }: ThreadSummary["cos
     .filter(Boolean)
     .join(" · ");
 
-const harnessNames: Record<HarnessId, string> = { "claude-code": "Claude Code", fake: "Fake harness" };
+const harnessNames: Record<HarnessId, string> = { "claude-code": "Claude Code", native: "Native (Anthropic API)", fake: "Fake harness" };
 const windowNames: Record<string, string> = {
   five_hour: "5-hour",
   seven_day: "weekly",

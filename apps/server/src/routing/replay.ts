@@ -15,6 +15,7 @@ import {
   type TaskOutcome,
   type Usage,
 } from "@verdandi/contracts";
+import { nativeCatalog } from "@verdandi/harness-native";
 import { builtInCatalog, loadPolicy, PolicyError } from "@verdandi/router";
 import { fakeCatalog } from "@verdandi/testkit";
 import { Effect, Result } from "effect";
@@ -58,8 +59,8 @@ export type Replay = {
   readonly assumed: string | undefined;
 };
 
-/** The router always read the fake harness's models alongside the built-in ones when it ran; replay knows both. */
-const catalog: Catalog = [...builtInCatalog, ...fakeCatalog];
+/** Every model a recorded task could have run on: the built-in ones, and the native and fake harnesses'. */
+const catalog: Catalog = [...builtInCatalog, ...nativeCatalog, ...fakeCatalog];
 
 /** What the router is assumed to have read for a task from before its inputs were recorded. */
 const assumedHarnesses: readonly HarnessId[] = ["claude-code"];

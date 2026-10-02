@@ -1,3 +1,4 @@
+export { type FakeBlock, type FakeReply, makeFakeAnthropic } from "./fake-anthropic.ts";
 export { fakeCatalog } from "./fake-catalog.ts";
 export { makeFakeHarness } from "./fake-harness.ts";
 export { makeTempHome, removeTempHome } from "./temp-home.ts";

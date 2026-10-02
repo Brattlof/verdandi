@@ -1,0 +1,16 @@
+{
+  "name": "@verdandi/harness-native",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.125.0",
+    "@verdandi/contracts": "workspace:*",
+    "effect": "4.0.0-rc.115"
+  },
+  "devDependencies": {
+    "@verdandi/testkit": "workspace:*"
+  }
+}

@@ -8,6 +8,7 @@ import { decisions } from "./decisions/decisions-cli.ts";
 import { gc } from "./gc/gc-cli.ts";
 import { requireBun } from "./home/bun-version.ts";
 import { start } from "./main.ts";
+import { key } from "./native/key-cli.ts";
 import { routing } from "./routing/routing-cli.ts";
 import { search } from "./search/search-cli.ts";
 import { skills } from "./skills/skills-cli.ts";
@@ -28,6 +29,7 @@ const usage = `Usage:
   verdandi search <query> [--project <path>] [--home <dir>]   find past sessions' messages containing the query (3 characters or more), newest first, archived threads included
   verdandi skills list | restore <name> [--home <dir>]   list the profile's skills (which the agent proposes with skill_manage and you approve; those Verdandi created show stale after 14 days unused), the ones archived after 30 (kept, not loaded), and those in the read-only extra folders of skills.yaml; restore brings an archived skill back, through the running verdandid
   verdandi batch <evalset.yaml> [--route auto|<harness>/<model>/<effort>]... [--dry-run] [--approve] [--timeout <minutes>] [--keep] [--home <dir>]   run an eval set's tasks on each route (default: auto, claude-code/opus/medium, claude-code/sonnet/high) in throwaway copies of their repositories, and compare success rate and cost per passed task; --dry-run only estimates, --approve allows what agents ask to do (otherwise denied)
+  verdandi key set anthropic | key delete anthropic   store the native harness's Anthropic API key in the OS keychain (read without echo, or piped in), or remove it; restart verdandid after. VERDANDI_ANTHROPIC_API_KEY in the environment or .env wins over it
   verdandi routing replay [--policy <file>] [--project <path>] [--home <dir>]   how saved tasks would route under a proposed policy (or each project's current one), with the estimated cost change; reads the database read-only
   verdandi trajectories export --format jsonl|routing [--project <path>] [--since <date>] [--out <file>] [--home <dir>]   saved tasks as chat conversations with tool calls (jsonl) or as what the router knew, the route and how it went (routing), one JSON line per task, secrets masked; projects listed under excludeProjects in the home's trajectories.yaml are left out; reads the database read-only
   verdandi decisions eval [--candidate <module>] [--home <dir>]   replay logged decisions through a candidate backend (a module default-exporting a decision Backend; default: today's rules) and print, per question kind, its agreement with the logged answers and, where the task's outcome is known, accuracy and Brier score; reads the database read-only`;
@@ -46,6 +48,7 @@ const commands: Record<string, (argv: readonly string[]) => Promise<void>> = {
   trajectories,
   gc,
   skills,
+  key,
 };
 
 const [name, ...argv] = Bun.argv.slice(2);

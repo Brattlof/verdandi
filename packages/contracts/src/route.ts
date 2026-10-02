@@ -10,7 +10,7 @@ export type Effort = typeof Effort.Type;
 export const InteractionMode = Schema.Literals(["ask", "plan", "build"]);
 export type InteractionMode = typeof InteractionMode.Type;
 
-export const HarnessId = Schema.Literals(["claude-code", "fake"]);
+export const HarnessId = Schema.Literals(["claude-code", "native", "fake"]);
 export type HarnessId = typeof HarnessId.Type;
 
 /**
