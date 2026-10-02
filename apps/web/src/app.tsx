@@ -1,27 +1,31 @@
+import { Dialog } from "@base-ui/react/dialog";
 import {
   type CommandId,
   describeCost,
   describeQuota,
   type ProjectSummary,
   type QuotaView,
-  type SessionHit,
   type ThreadId,
   type ThreadSummary,
   type TurnId,
 } from "@verdandi/contracts";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
+import { SearchPage } from "./search/search.tsx";
 import { Dashboard } from "./spend/dashboard.tsx";
 import { applyProjectsFeed, groupByRecency, type Sidebar as SidebarData } from "./state.ts";
 import { ArchiveButton } from "./threads/archive.tsx";
 import { ThreadPane } from "./threads/thread.tsx";
 import { Engraving, Plait, Raven } from "./ui/art.tsx";
-import { BranchIcon, CloseIcon, FolderIcon, MenuIcon, SidebarIcon } from "./ui/icons.tsx";
+import { BranchIcon, CloseIcon, FolderIcon, MenuIcon } from "./ui/icons.tsx";
 import { Rune, RuneMark, type RuneName, RuneText } from "./ui/runes.tsx";
 
 /** The open thread lives in the URL hash (`#thread=<id>`), so links, Back and reloads just work. */
 const hashThread = () => new URLSearchParams(location.hash.slice(1)).get("thread") as ThreadId | null;
-/** `#view=spend` opens the spend dashboard instead of a thread; `#view=projects`, or no thread and no view, the projects page. */
+/**
+ * `#view=spend` opens the spend dashboard instead of a thread, `#view=search` the search page; `#view=projects`, or no
+ * thread and no view, the projects page.
+ */
 const hashView = () => new URLSearchParams(location.hash.slice(1)).get("view");
 const onHashChange = (listener: () => void) => {
   addEventListener("hashchange", listener);
@@ -33,40 +37,40 @@ export const openThread = (threadId: ThreadId) => {
   location.hash = `thread=${threadId}`;
 };
 
-type Page = "home" | "thread" | "spend";
+/** Starts a thread in a folder, routed by the router, and opens it; the result says why not if verdandid refused. */
+const startThread = async (connection: Connection, projectPath: string, worktree: boolean) => {
+  const threadId = uuid<ThreadId>();
+  const result = await connection.dispatch({
+    type: "thread.create",
+    commandId: uuid<CommandId>(),
+    threadId,
+    projectPath,
+    ...(worktree && { worktree }),
+  });
+  if (result.ok) openThread(threadId);
+  return result;
+};
 
-/** Whether the sidebar is folded away beside the rail, on screens wide enough to show both. Kept per browser. */
-const sidebarKey = "verdandi.sidebar";
+type Page = "home" | "thread" | "spend" | "search";
 
 export const App = ({ connection }: { connection: Connection }) => {
   const [sidebar] = useState(() => createStore<SidebarData | undefined>(undefined));
   const threadId = useSyncExternalStore(onHashChange, hashThread);
   const view = useSyncExternalStore(onHashChange, hashView);
   const turn = useSyncExternalStore(onHashChange, hashTurn);
-  const page: Page = view === "spend" ? "spend" : threadId ? "thread" : "home";
+  const page: Page = view === "spend" || view === "search" ? view : threadId ? "thread" : "home";
   const data = useStore(sidebar);
   const lost = useStore(connection.lost);
   // Showing archived threads asks verdandid for a feed that includes them; hiding them goes back to one that doesn't.
   const [archived, setArchived] = useState(false);
   // Below the md breakpoint the sidebar is a drawer over the page; it closes on navigation and on Escape.
   const [navOpen, setNavOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(sidebarKey) === "collapsed");
-  // Bumped to show the search field and move focus into it.
-  const [searchRequests, setSearchRequests] = useState(0);
   const menuButton = useRef<HTMLButtonElement>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: navigating is the trigger, not an input.
   useEffect(() => setNavOpen(false), [threadId, view]);
   const closeNav = () => {
     setNavOpen(false);
     menuButton.current?.focus();
-  };
-  const fold = (fold: boolean) => {
-    setCollapsed(fold);
-    localStorage.setItem(sidebarKey, fold ? "collapsed" : "open");
-  };
-  const search = () => {
-    fold(false);
-    setSearchRequests((n) => n + 1);
   };
   useEffect(() => {
     // A message the previous feed sends after this one started must not be folded in with the new setting.
@@ -113,7 +117,7 @@ export const App = ({ connection }: { connection: Connection }) => {
           onClick={closeNav}
         />
       )}
-      <Rail page={page} sidebarOpen={!collapsed} onSidebar={() => fold(!collapsed)} onSearch={search} />
+      <Rail page={page} />
       <Sidebar
         connection={connection}
         data={data}
@@ -123,10 +127,6 @@ export const App = ({ connection }: { connection: Connection }) => {
         archived={archived}
         onArchived={setArchived}
         open={navOpen}
-        collapsed={collapsed}
-        searchRequests={searchRequests}
-        onSearch={search}
-        onFold={() => fold(true)}
         onClose={closeNav}
       />
       <main id="main" tabIndex={-1} className="flex min-h-0 min-w-0 flex-1 flex-col outline-none">
@@ -145,6 +145,8 @@ export const App = ({ connection }: { connection: Connection }) => {
         </div>
         {page === "spend" ? (
           <Dashboard connection={connection} projects={data?.projects ?? []} />
+        ) : page === "search" ? (
+          <SearchPage connection={connection} />
         ) : threadId ? (
           <ThreadPane key={threadId} connection={connection} threadId={threadId} focusTurn={turn} />
         ) : (
@@ -171,8 +173,8 @@ const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ??
 /** The current page's link or button: the pale sky surface, as in the sidebar reference. */
 const currentItem = "hover:bg-hover aria-[current=page]:bg-user aria-[current=page]:font-medium";
 
-/** Rail buttons: a rune over its name; the current page on the sky surface, a pressed toggle (the sidebar shown) only in ink. */
-const railItem = `flex h-14 w-14 flex-col items-center justify-center gap-1.5 rounded-md border-0 bg-transparent p-0 text-muted hover:text-fg aria-[current=page]:text-accent aria-pressed:text-fg ${currentItem}`;
+/** Rail links: a rune over its name; the current page on the sky surface. */
+const railItem = `flex h-14 w-14 flex-col items-center justify-center gap-1.5 rounded-md border-0 bg-transparent p-0 text-muted hover:text-fg aria-[current=page]:text-accent ${currentItem}`;
 
 /** A rail entry's rune and name; the rune's own name and meaning show on hover. */
 const RailLabel = ({ rune, label }: { rune: RuneName; label: string }) => (
@@ -183,37 +185,23 @@ const RailLabel = ({ rune, label }: { rune: RuneName; label: string }) => (
 );
 
 /**
- * The narrow column of destinations beside the sidebar, on screens wide enough for both. It stays when the
- * sidebar is folded away, so every page is one click from anywhere.
+ * The narrow column of pages beside the threads sidebar, on screens wide enough for both.
  */
-const Rail = ({
-  page,
-  sidebarOpen,
-  onSidebar,
-  onSearch,
-}: {
-  page: Page;
-  sidebarOpen: boolean;
-  onSidebar: () => void;
-  onSearch: () => void;
-}) => (
+const Rail = ({ page }: { page: Page }) => (
   <nav aria-label="Main" className="hidden w-[72px] shrink-0 flex-col items-center gap-1 border-r border-line bg-panel py-3 md:flex">
     <RuneMark className="mb-4 size-8" />
     <a href="#view=projects" title="Projects (ingwaz: the hearth)" aria-current={page === "home" ? "page" : undefined} className={railItem}>
       <RailLabel rune="ingwaz" label="Projects" />
     </a>
-    <button type="button" title="Threads (laguz: the well)" aria-pressed={sidebarOpen} className={railItem} onClick={onSidebar}>
-      <RailLabel rune="laguz" label="Threads" />
-    </button>
-    <button
-      type="button"
+    <a
+      href="#view=search"
       aria-label="Search past sessions"
       title="Search past sessions (kenaz: the torch)"
+      aria-current={page === "search" ? "page" : undefined}
       className={railItem}
-      onClick={onSearch}
     >
       <RailLabel rune="kenaz" label="Search" />
-    </button>
+    </a>
     <a
       href="#view=spend"
       aria-label="Spend dashboard"
@@ -235,27 +223,18 @@ const Sidebar = ({
   archived,
   onArchived,
   open,
-  collapsed,
-  searchRequests,
-  onSearch,
-  onFold,
   onClose,
 }: {
   connection: Connection;
   data: SidebarData | undefined;
   page: Page;
   current: ThreadId | null;
-  /** The open thread's project, where New thread starts one. */
+  /** The open thread's project, marked in New thread's list. */
   currentProject: ThreadSummary["projectId"] | undefined;
   archived: boolean;
   onArchived: (archived: boolean) => void;
   /** Whether the drawer is open, on screens too narrow to show the sidebar beside the page. */
   open: boolean;
-  /** Whether the sidebar is folded away beside the rail, on wider screens. */
-  collapsed: boolean;
-  searchRequests: number;
-  onSearch: () => void;
-  onFold: () => void;
   onClose: () => void;
 }) => {
   const nav = useRef<HTMLElement>(null);
@@ -263,53 +242,36 @@ const Sidebar = ({
   useEffect(() => {
     if (open) nav.current?.focus();
   }, [open]);
-  const project = data?.projects.find((p) => p.projectId === currentProject);
   return (
     <nav
       ref={nav}
       aria-label="Threads"
       tabIndex={-1}
-      onKeyDown={(e) => open && e.key === "Escape" && onClose()}
-      className={`${open ? "fixed inset-y-0 left-0 z-40 flex shadow-2xl" : "hidden"} ${collapsed ? "" : "md:flex"} w-72 max-w-[85vw] shrink-0 flex-col border-r border-line bg-panel outline-none md:static md:w-64 md:max-w-none md:shadow-none`}
+      // A dialog opened from the sidebar renders outside it, but React still bubbles its keys here.
+      onKeyDown={(e) => open && e.key === "Escape" && nav.current?.contains(e.target as Node) && onClose()}
+      className={`${open ? "fixed inset-y-0 left-0 z-40 flex shadow-2xl" : "hidden"} w-72 max-w-[85vw] shrink-0 flex-col border-r border-line bg-panel outline-none md:static md:flex md:w-64 md:max-w-none md:shadow-none`}
     >
       <div className="flex h-16 shrink-0 items-center justify-between gap-2 pr-2 pl-4">
         <Wordmark rail />
-        <span className="flex">
-          <button type="button" aria-label="Close menu" className={`${ghostIcon} md:hidden`} onClick={onClose}>
-            <CloseIcon />
-          </button>
-          <button
-            type="button"
-            aria-label="Hide the sidebar"
-            title="Hide the sidebar"
-            className={`${ghostIcon} hidden md:flex`}
-            onClick={onFold}
-          >
-            <SidebarIcon />
-          </button>
-        </span>
-      </div>
-      <div className="px-2">
-        <NewThread connection={connection} project={project} />
-        <a href="#view=projects" aria-current={page === "home" ? "page" : undefined} className={`${row} ${currentItem}`}>
-          <Rune name="ingwaz" className="text-muted" />
-          Projects
-        </a>
-        <a href="#view=spend" aria-current={page === "spend" ? "page" : undefined} className={`${row} ${currentItem}`}>
-          <Rune name="fehu" className="text-muted" />
-          Spend dashboard
-        </a>
-        {/* A row, not a header icon: kenaz alone reads as a Back arrow. */}
-        <button
-          type="button"
-          className={`${row} w-full justify-start border-0 bg-transparent font-normal hover:bg-hover`}
-          onClick={onSearch}
-        >
-          <Rune name="kenaz" className="text-muted" />
-          Search past sessions
+        <button type="button" aria-label="Close menu" className={`${ghostIcon} md:hidden`} onClick={onClose}>
+          <CloseIcon />
         </button>
       </div>
-      <SearchSessions connection={connection} requests={searchRequests} />
+      <div className="px-2">
+        <NewThread connection={connection} data={data} current={currentProject} />
+        {/* Below md the rail is hidden, so the drawer carries its pages. */}
+        {pages.map((p) => (
+          <a
+            key={p.page}
+            href={`#view=${p.view}`}
+            aria-current={page === p.page ? "page" : undefined}
+            className={`${row} ${currentItem} md:hidden`}
+          >
+            <Rune name={p.rune} className="text-muted" />
+            {p.label}
+          </a>
+        ))}
+      </div>
       <div className="mt-2 flex-1 overflow-y-auto px-2 pb-3">
         {data && <ThreadList connection={connection} data={data} current={current} />}
       </div>
@@ -325,46 +287,102 @@ const Sidebar = ({
   );
 };
 
+const pages = [
+  { page: "home", view: "projects", rune: "ingwaz", label: "Projects" },
+  { page: "search", view: "search", rune: "kenaz", label: "Search past sessions" },
+  { page: "spend", view: "spend", rune: "fehu", label: "Spend dashboard" },
+] as const satisfies readonly { page: Page; view: string; rune: RuneName; label: string }[];
+
 const row = "flex min-h-9 items-center gap-2.5 rounded-md px-2 py-1.5";
 const ghostIcon = "size-9 border-0 bg-transparent p-0 text-muted hover:text-fg";
 
-/**
- * Starts a thread in the open thread's project, routed by the router; with no thread open it leads to the
- * projects page, where a folder is picked.
- */
-const NewThread = ({ connection, project }: { connection: Connection; project: ProjectSummary | undefined }) => {
+/** Picks a project, or any folder, in a dialog and starts a thread there. */
+const NewThread = ({
+  connection,
+  data,
+  current,
+}: {
+  connection: Connection;
+  data: SidebarData | undefined;
+  current: ProjectSummary["projectId"] | undefined;
+}) => {
+  const [open, setOpen] = useState(false);
   const [error, setError] = useState<string>();
-  if (!project)
-    return (
-      <a href="#view=projects" className={`${row} hover:bg-hover`}>
-        <Rune name="berkano" className="text-muted" />
-        New thread
-      </a>
-    );
-  const create = async () => {
-    const threadId = uuid<ThreadId>();
-    const result = await connection.dispatch({
-      type: "thread.create",
-      commandId: uuid<CommandId>(),
-      threadId,
-      projectPath: project.path,
-    });
+  // Opening the new thread, from a project or Open folder, closes the dialog.
+  useEffect(() => onHashChange(() => setOpen(false)), []);
+  const start = async (project: ProjectSummary, worktree: boolean) => {
+    const result = await startThread(connection, project.path, worktree);
     setError(result.ok ? undefined : result.message);
-    if (result.ok) openThread(threadId);
   };
+  const projects = byActivity(data);
   return (
-    <>
-      <button type="button" className={`${row} w-full justify-start border-0 bg-transparent font-normal`} onClick={create}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        setError(undefined);
+      }}
+    >
+      <Dialog.Trigger className={`${row} w-full justify-start border-0 bg-transparent font-normal hover:bg-hover`}>
         <Rune name="berkano" className="text-muted" />
         New thread
-        <span className="min-w-0 truncate text-xs text-muted">in {basename(project.path)}</span>
-      </button>
-      {error && (
-        <p role="alert" className="mx-2 text-xs text-error">
-          {error}
-        </p>
-      )}
-    </>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-bg/80" />
+        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 flex max-h-[85dvh] w-[min(36rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-line bg-panel shadow-2xl outline-none">
+          <div className="flex items-center justify-between gap-2 py-3 pr-2 pl-5">
+            <Dialog.Title className="font-serif text-2xl font-semibold">New thread</Dialog.Title>
+            <Dialog.Close aria-label="Close" className={ghostIcon}>
+              <CloseIcon />
+            </Dialog.Close>
+          </div>
+          <div className="overflow-y-auto px-5 pb-5">
+            {projects.length > 0 && (
+              <section aria-labelledby="new-thread-projects">
+                <h3 id="new-thread-projects" className="eyebrow mb-1 text-muted">
+                  In a project
+                </h3>
+                <ul className="-mx-2">
+                  {projects.map((p) => {
+                    const name = basename(p.path);
+                    return (
+                      <li key={p.projectId} className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          title={p.path}
+                          className={`${row} min-w-0 flex-1 justify-start border-0 bg-transparent font-normal hover:bg-hover`}
+                          onClick={() => start(p, false)}
+                        >
+                          <FolderIcon className="shrink-0 text-muted" />
+                          <span className="max-w-[60%] shrink-0 truncate">{name}</span>
+                          {p.projectId === current && <span className="shrink-0 text-xs text-muted">current</span>}
+                          <span className="min-w-0 flex-1 truncate text-right font-mono text-xs text-muted">{p.path}</span>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`New thread in a git worktree of ${name}`}
+                          title="In a git worktree of its own"
+                          className={ghostIcon}
+                          onClick={() => start(p, true)}
+                        >
+                          <BranchIcon className="mx-auto" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {error && (
+                  <p role="alert" className="mt-1 text-xs text-error [overflow-wrap:anywhere]">
+                    {error}
+                  </p>
+                )}
+              </section>
+            )}
+            <OpenFolder connection={connection} className={projects.length > 0 ? "mt-5" : ""} />
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 };
 
@@ -476,104 +494,17 @@ const Quotas = ({ quotas }: { quotas: readonly QuotaView[] }) => (
   </div>
 );
 
-const who: Record<SessionHit["kind"], string> = { user: "You", steer: "You, steering", assistant: "Agent" };
-
-/**
- * Searches past sessions as you type (3 characters or more), across every project, archived threads included.
- * A result jumps to its turn. Hidden until asked for (`requests` counts the asks), and again on Escape once empty.
- */
-const SearchSessions = ({ connection, requests }: { connection: Connection; requests: number }) => {
-  const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<readonly SessionHit[]>();
-  const [shown, setShown] = useState(false);
-  const field = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (requests === 0) return;
-    setShown(true);
-    // Shown on this render, focused once it's in the page.
-    requestAnimationFrame(() => field.current?.focus());
-  }, [requests]);
-  useEffect(() => {
-    const q = query.trim();
-    if ([...q].length < 3) return setHits(undefined);
-    let current = true;
-    // ponytail: a fixed 250 ms pause before each search. Upgrade: cancel in-flight searches if typing outpaces them.
-    const timer = setTimeout(() => void connection.search({ query: q }).then((found) => current && setHits(found ?? [])), 250);
-    return () => {
-      current = false;
-      clearTimeout(timer);
-    };
-  }, [connection, query]);
-  if (!shown) return null;
-  return (
-    <search className="mt-3 px-4">
-      <label htmlFor="session-search" className="eyebrow mb-1 block text-muted">
-        Search past sessions
-      </label>
-      <input
-        ref={field}
-        id="session-search"
-        type="search"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key !== "Escape") return;
-          if (query) setQuery("");
-          else setShown(false);
-        }}
-        placeholder="A phrase, file name or error"
-        autoComplete="off"
-        spellCheck={false}
-        className="w-full text-xs"
-        aria-describedby="session-search-status"
-      />
-      <p id="session-search-status" role="status" className="mt-1 text-xs text-muted empty:hidden">
-        {hits === undefined
-          ? ""
-          : hits.length === 0
-            ? "No past messages match."
-            : `${hits.length} ${hits.length === 1 ? "match" : "matches"}`}
-      </p>
-      {hits && hits.length > 0 && (
-        <ul className="-mx-2 mt-1 max-h-80 overflow-y-auto border-b border-line pb-2">
-          {hits.map((h) => (
-            <li key={`${h.turnId}-${h.kind}-${h.at}`}>
-              <a href={`#thread=${h.threadId}&turn=${h.turnId}`} className="block rounded-md px-2 py-1.5 text-xs hover:bg-hover">
-                <span className="flex gap-1.5">
-                  <span className="min-w-0 flex-1 truncate font-medium">{h.title || "New thread"}</span>
-                  {h.archived && <span className="shrink-0 text-muted">archived</span>}
-                </span>
-                <span className="block text-muted [overflow-wrap:anywhere]">
-                  {who[h.kind]}:{" "}
-                  {h.parts.map((p, i) =>
-                    p.match ? (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: parts never reorder.
-                      <mark key={i} className="rounded-sm bg-user text-fg">
-                        {p.text}
-                      </mark>
-                    ) : (
-                      p.text
-                    ),
-                  )}
-                </span>
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
-    </search>
-  );
+/** Projects with the most recent activity first; `data.threads` is already in that order, and a project without one goes last. */
+const byActivity = (data: SidebarData | undefined) => {
+  const rank = new Map<ProjectSummary["projectId"], number>();
+  for (const [i, t] of (data?.threads ?? []).entries()) if (!rank.has(t.projectId)) rank.set(t.projectId, i);
+  return (data?.projects ?? []).toSorted((a, b) => (rank.get(a.projectId) ?? Infinity) - (rank.get(b.projectId) ?? Infinity));
 };
 
 /** The projects page: open any folder to start a thread, or start one in a project you've worked in. */
 const Home = ({ connection, data }: { connection: Connection; data: SidebarData | undefined }) => {
   const threads = Map.groupBy(data?.threads ?? [], (t) => t.projectId);
-  // Projects with the most recent activity first; `data.threads` is already in that order.
-  const projects = (data?.projects ?? []).toSorted(
-    (a, b) =>
-      (data?.threads.findIndex((t) => t.projectId === a.projectId) ?? 0) -
-      (data?.threads.findIndex((t) => t.projectId === b.projectId) ?? 0),
-  );
+  const projects = byActivity(data);
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto max-w-[1080px] px-5 py-10 sm:px-8 sm:py-14">
@@ -636,23 +567,13 @@ const sameMachine = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostna
  * Starts a thread in any folder, typed or chosen with Browse; verdandid checks the path and resolves it, so a known folder
  * gets a new thread, not a new project.
  */
-const OpenFolder = ({ connection }: { connection: Connection }) => {
+const OpenFolder = ({ connection, className = "mt-8 max-w-2xl" }: { connection: Connection; className?: string }) => {
   const [error, setError] = useState<string>();
   const [picking, setPicking] = useState(false);
   const start = async (form: HTMLFormElement, projectPath: string) => {
-    const threadId = uuid<ThreadId>();
-    const worktree = new FormData(form).get("worktree") === "on";
-    const result = await connection.dispatch({
-      type: "thread.create",
-      commandId: uuid<CommandId>(),
-      threadId,
-      projectPath,
-      ...(worktree && { worktree }),
-    });
+    const result = await startThread(connection, projectPath, new FormData(form).get("worktree") === "on");
     setError(result.ok ? undefined : result.message);
-    if (!result.ok) return;
-    form.reset();
-    openThread(threadId);
+    if (result.ok) form.reset();
   };
   const open = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -668,7 +589,7 @@ const OpenFolder = ({ connection }: { connection: Connection }) => {
     else if (picked.path !== null) await start(form, picked.path);
   };
   return (
-    <form onSubmit={open} className="mt-8 max-w-2xl">
+    <form onSubmit={open} className={className}>
       <label htmlFor="open-folder-path" className="eyebrow mb-2 block text-muted">
         Open folder
       </label>
@@ -730,16 +651,8 @@ const ProjectCard = ({
   const [error, setError] = useState<string>();
   // Without a route, the router picks one for each task of the new thread.
   const newThread = async (worktree: boolean) => {
-    const threadId = uuid<ThreadId>();
-    const result = await connection.dispatch({
-      type: "thread.create",
-      commandId: uuid<CommandId>(),
-      threadId,
-      projectPath: project.path,
-      ...(worktree && { worktree }),
-    });
-    if (result.ok) openThread(threadId);
-    else setError(result.message);
+    const result = await startThread(connection, project.path, worktree);
+    if (!result.ok) setError(result.message);
   };
   const name = basename(project.path);
   const last = threads[0]?.lastActivityAt;
