@@ -17,6 +17,7 @@ import {
   ProjectEscalation,
   Reactor,
   ReactorLive,
+  ReviewSettings,
   ToolSettings,
   WorktreesDir,
 } from "./reactor.ts";
@@ -504,6 +505,7 @@ describe("engine", () => {
       Layer.provideMerge(Layer.succeed(ProjectEscalation, () => Effect.succeed({ verifiers: [], repeatedErrors: 0 }))),
       Layer.provideMerge(Layer.succeed(Decide, rulesDecide)),
       Layer.provideMerge(Layer.succeed(ProfileSkills, { profile: "unused", archive: "unused", extra: [] })),
+      Layer.provideMerge(Layer.succeed(ReviewSettings, { enabled: false, allowMetered: false })),
       Layer.provideMerge(SqlLive(newHome())),
     );
     const runtime = ManagedRuntime.make(layer);

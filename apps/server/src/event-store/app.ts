@@ -4,12 +4,22 @@ import { Decide } from "@verdandi/decisions";
 import { Effect, Layer, Result } from "effect";
 import { attachmentsDir } from "../attachments/attachments.ts";
 import { loadMemorySettings } from "../memory/memory-config.ts";
+import { loadReviewSettings } from "../review/review-config.ts";
 import { catalogFor, routingFor, rulesDecide } from "../routing/routing.ts";
 import { loadSkillFolders } from "../skills/skills-config.ts";
 import { loadSpendCaps } from "../spend/spend-caps.ts";
 import { SqlLive } from "./db.ts";
 import { EngineLive, type Projector } from "./engine.ts";
-import { AttachmentsDir, HarnessRegistry, ProfileSkills, ProjectEscalation, ReactorLive, ToolSettings, WorktreesDir } from "./reactor.ts";
+import {
+  AttachmentsDir,
+  HarnessRegistry,
+  ProfileSkills,
+  ProjectEscalation,
+  ReactorLive,
+  ReviewSettings,
+  ToolSettings,
+  WorktreesDir,
+} from "./reactor.ts";
 
 /** verdandid's core: database, engine and reactor, with the given harness adapters, which new tasks are routed over. */
 export const AppLayer = (
@@ -64,6 +74,7 @@ export const AppLayer = (
     Layer.provideMerge(Layer.succeed(AttachmentsDir, attachmentsDir(home))),
     Layer.provideMerge(Layer.succeed(WorktreesDir, join(home, "worktrees"))),
     Layer.provideMerge(Layer.sync(ProfileSkills, () => loadSkillFolders(home))),
+    Layer.provideMerge(Layer.sync(ReviewSettings, () => loadReviewSettings(home))),
     Layer.provideMerge(
       Layer.sync(ToolSettings, () => {
         const memory = loadMemorySettings(home);

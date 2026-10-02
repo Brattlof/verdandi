@@ -1,7 +1,10 @@
 import { Schema } from "effect";
 import { Effort, HarnessId, Route, SubagentProfile, SubagentRoutes } from "./route.ts";
 
-/** The v1 task taxonomy (DESIGN §8.5). A task's class picks its route from the policy. */
+/**
+ * The v1 task taxonomy (DESIGN §8.5). A task's class picks its route from the policy. `aux.*` classes are Verdandi's
+ * own auxiliary tasks (§9.7), never a user's: `aux.review` is a background review of a finished task (§14.5).
+ */
 export const TaskClass = Schema.Literals([
   "ask.search",
   "ask.explain",
@@ -16,6 +19,7 @@ export const TaskClass = Schema.Literals([
   "review",
   "design.architecture",
   "chat.general",
+  "aux.review",
 ]);
 export type TaskClass = typeof TaskClass.Type;
 

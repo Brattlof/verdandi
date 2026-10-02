@@ -44,6 +44,7 @@ const requestKind = {
   "user-input.requested": "user-input",
   "plan.requested": "plan",
   "skill.proposed": "skill",
+  "memory.proposed": "memory",
 } as const;
 
 const insertRequest = (e: Extract<Event, { type: keyof typeof requestKind }>, at: string) =>
@@ -53,10 +54,11 @@ const insertRequest = (e: Extract<Event, { type: keyof typeof requestKind }>, at
           values (${e.requestId}, ${e.threadId}, ${e.turnId}, ${requestKind[e.type]}, ${JSON.stringify(e)}, ${at})`,
   );
 
-/** Adds a message to session search (DESIGN §14.3). */
+/** Adds a message to session search (DESIGN §14.3). A review thread's aren't: its digest repeats the reviewed thread's. */
 const indexMessage = (threadId: ThreadId, turnId: TurnId, kind: SessionHit["kind"], text: string, at: string) =>
   withSql(
-    (sql) => sql`insert into session_index (text, thread_id, turn_id, kind, at) values (${text}, ${threadId}, ${turnId}, ${kind}, ${at})`,
+    (sql) => sql`insert into session_index (text, thread_id, turn_id, kind, at)
+      select ${text}, ${threadId}, ${turnId}, ${kind}, ${at} where (select review from threads where id = ${threadId}) is null`,
   );
 
 const addItem = (turnId: TurnId, item: Item) =>
@@ -256,6 +258,10 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "approval.requested": insertRequest,
   "user-input.requested": insertRequest,
   "skill.proposed": insertRequest,
+  "memory.proposed": insertRequest,
+  // The digest and the review thread are in the event; the review thread is marked by its own `review.started`.
+  "review.requested": () => Effect.void,
+  "review.started": (e) => withSql((sql) => sql`update threads set review = ${JSON.stringify(e)} where id = ${e.threadId}`),
   // The skill itself is on disk; a skill Verdandi created gets a row, so it can be curated (DESIGN §14.4).
   "skill.applied": (e, at) =>
     e.error !== undefined || (e.action !== "create" && e.action !== "delete")
@@ -353,9 +359,9 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       Effect.forEach(
         e.answers,
         (a, idx) =>
-          sql`insert into decisions (seq, idx, thread_id, turn_id, kind, question, answer, confidence, low_confidence, backend, decided_at)
+          sql`insert into decisions (seq, idx, thread_id, turn_id, kind, question, answer, confidence, low_confidence, backend, decided_at, state)
             values (${seq}, ${idx}, ${e.threadId}, ${e.turnId}, ${a.kind}, ${JSON.stringify(e.questions[idx] ?? null)}, ${JSON.stringify(a)},
-              ${a.confidence}, ${a.lowConfidence ? 1 : 0}, ${a.backend}, ${at})`,
+              ${a.confidence}, ${a.lowConfidence ? 1 : 0}, ${a.backend}, ${at}, ${e.state ?? null})`,
         { discard: true },
       ),
     ),
@@ -411,8 +417,9 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         pending_fork: number;
         session_first_turn: TurnId | null;
         revert: string | null;
+        review: string | null;
       }>`
-        select t.project_id, p.path, t.route, t.running_turn_id, t.session_id,
+        select t.project_id, p.path, t.route, t.running_turn_id, t.session_id, t.review,
           (select verifying from turns where id = t.running_turn_id) as verifying, t.task_id, t.pinned, t.budget_mode, t.worktree,
           t.pending_fork is not null as pending_fork, t.session_first_turn, t.revert,
           t.archived_at is not null as archived,
@@ -439,8 +446,11 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         kind: PendingRequest["kind"];
         plan: string | null;
         execute: string | null;
+        scope: MemoryScope | null;
+        text: string | null;
       }>`
-        select id, turn_id, kind, json_extract(payload, '$.plan') as plan, json_extract(payload, '$.execute') as execute
+        select id, turn_id, kind, json_extract(payload, '$.plan') as plan, json_extract(payload, '$.execute') as execute,
+          json_extract(payload, '$.scope') as scope, json_extract(payload, '$.text') as text
         from requests where thread_id = ${threadId} and resolution is null`;
       const turnList = yield* sql<{ id: TurnId; reverted: 0 | 1 | 2 }>`
         select id, reverted from turns where thread_id = ${threadId} order by started_at, rowid`;
@@ -451,6 +461,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           pendingFork: row.pending_fork === 1,
           sessionFirstTurn: row.session_first_turn,
           revert: row.revert === null ? null : (JSON.parse(row.revert) as StoredRevert),
+          ...(row.review === null ? {} : { review: JSON.parse(row.review) as Extract<Event, { type: "review.started" }> }),
           projectId: row.project_id,
           projectPath: row.path,
           route: JSON.parse(row.route) as Route,
@@ -475,6 +486,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
             kind: r.kind,
             ...(r.plan === null ? {} : { plan: r.plan }),
             ...(r.execute === null ? {} : { execute: JSON.parse(r.execute) as RouteDecision }),
+            ...(r.kind === "memory" && r.scope !== null && r.text !== null ? { memory: { scope: r.scope, text: r.text } } : {}),
           })),
         },
       };
@@ -636,6 +648,7 @@ export const loadThreadSummaries = (
         coalesce((select max(coalesce(completed_at, started_at)) from turns where thread_id = t.id), t.created_at) as last_activity_at
       from threads t
       where (${threadId ?? null} is null or t.id = ${threadId ?? null}) and (${archived ? 1 : 0} = 1 or t.archived_at is null)
+        and t.review is null
       order by last_activity_at desc, t.rowid desc`.pipe(
       Effect.map((rows) =>
         rows.map((r) => ({

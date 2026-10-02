@@ -342,6 +342,45 @@ export const InjectionFlag = Schema.Struct({
   text: Schema.String,
   answer: DecisionAnswer,
 });
+/**
+ * Internal: task `taskId` of the thread finished turn `turnId`; `digest` sums up its turns since its last review
+ * (DESIGN §14.5). The engine asks the decision layer whether it's worth a background review, which would run in
+ * thread `reviewThreadId`.
+ */
+export const TaskReview = Schema.Struct({
+  type: Schema.Literal("task.review"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  taskId: TaskId,
+  turnId: TurnId,
+  reviewThreadId: ThreadId,
+  digest: Schema.String,
+});
+/** Internal: creates review thread `threadId` in `projectPath` for a `review.requested` (DESIGN §14.5). */
+export const ReviewStart = Schema.Struct({
+  type: Schema.Literal("review.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  projectPath: Schema.String,
+  reviews: Schema.Struct({ threadId: ThreadId, taskId: TaskId, turnId: TurnId }),
+  allowMetered: Schema.Boolean,
+});
+/**
+ * Internal: review thread `reviewThreadId` proposes a memory (a routing note is one, in project memory) or a skill
+ * change, after turn `turnId` of the reviewed thread `threadId`. Untrusted: scanned like a save, then recorded as a
+ * pending request for the user.
+ */
+export const ReviewPropose = Schema.Struct({
+  type: Schema.Literal("review.propose"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  reviewThreadId: ThreadId,
+  proposal: Schema.Union([
+    Schema.Struct({ kind: Schema.Literal("memory"), scope: MemoryScope, text: Schema.String }),
+    Schema.Struct({ kind: Schema.Literal("skill"), change: SkillChange }),
+  ]),
+});
 /** Internal: marks a turn left running by a previous verdandid as interrupted. */
 export const TurnRecover = Schema.Struct({
   type: Schema.Literal("turn.recover"),
@@ -411,5 +450,8 @@ export const Command = Schema.Union([
   SkillPropose,
   SkillReport,
   SkillCurate,
+  TaskReview,
+  ReviewStart,
+  ReviewPropose,
 ]);
 export type Command = typeof Command.Type;

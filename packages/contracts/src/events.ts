@@ -217,12 +217,7 @@ export const ApprovalResolved = Schema.Struct({
   /** Set when Verdandi denied the request itself, because its turn ended first; says why. */
   reason: Schema.optionalKey(Schema.String),
 });
-/**
- * The decision layer answered questions about turn `turnId` (DESIGN §9.8), committed right before that turn's
- * `task.started` or `turn.started`. The turn's text is the state, kept only in its `turn.started`. Logged for
- * the lab, to measure other backends against the one that answered.
- */
-export const DecisionRecorded = Schema.Struct({
+const DecisionRecordedV1 = Schema.Struct({
   type: Schema.Literal("decision.recorded"),
   v: v1,
   threadId: ThreadId,
@@ -230,6 +225,43 @@ export const DecisionRecorded = Schema.Struct({
   questions: Schema.Array(DecisionQuestion),
   /** One per question, in the same order. */
   answers: Schema.Array(DecisionAnswer),
+});
+/**
+ * The decision layer answered questions about turn `turnId` (DESIGN §9.8), committed right before that turn's
+ * `task.started` or `turn.started`. The turn's text is the state, kept only in its `turn.started`, unless `state`
+ * holds what was asked about instead: a finished task's digest, asked about after its turn `turnId` (§14.5). Logged
+ * for the lab, to measure other backends against the one that answered. v1 always read the turn's text.
+ */
+export const DecisionRecorded = Schema.Struct({
+  ...DecisionRecordedV1.fields,
+  v: Schema.Literal(2),
+  state: Schema.optionalKey(Schema.String),
+});
+/**
+ * The decision layer found task `taskId`'s turns up to `turnId` worth a background review (DESIGN §14.5): Verdandi
+ * reviews `digest`, untrusted data, in review thread `reviewThreadId` of the same project.
+ */
+export const ReviewRequested = Schema.Struct({
+  type: Schema.Literal("review.requested"),
+  v: v1,
+  threadId: ThreadId,
+  taskId: TaskId,
+  turnId: TurnId,
+  reviewThreadId: ThreadId,
+  projectPath: Schema.String,
+  digest: Schema.String,
+});
+/**
+ * Thread `threadId` is a background review of task `reviews.taskId` (DESIGN §14.5): hidden from thread lists, its one
+ * turn runs as an `aux.review` task with no Verdandi tools and nobody to ask, and only spends metered dollars when
+ * `allowMetered`. What it proposes goes to the reviewed thread.
+ */
+export const ReviewStarted = Schema.Struct({
+  type: Schema.Literal("review.started"),
+  v: v1,
+  threadId: ThreadId,
+  reviews: Schema.Struct({ threadId: ThreadId, taskId: TaskId, turnId: TurnId }),
+  allowMetered: Schema.Boolean,
 });
 /**
  * The decision layer flagged `text` from `source` as a likely injection (DESIGN §17) before Verdandi handed it to
@@ -442,6 +474,21 @@ export const MemorySaved = Schema.Struct({
   turnId: Schema.optionalKey(TurnId),
   replaces: Schema.Array(Schema.String),
 });
+/**
+ * Review thread `reviewThreadId` proposes remembering `text` in the thread's `scope` memory, after its turn `turnId`
+ * (DESIGN §14.5): a pending request until the user allows it, which records `memory.saved`, or denies it. Scanned
+ * before it was recorded.
+ */
+export const MemoryProposed = Schema.Struct({
+  type: Schema.Literal("memory.proposed"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  requestId: Schema.String,
+  scope: MemoryScope,
+  text: Schema.String,
+  reviewThreadId: ThreadId,
+});
 /** The user rewrote remembered fact `entryId`. */
 export const MemoryEdited = Schema.Struct({
   type: Schema.Literal("memory.edited"),
@@ -545,6 +592,8 @@ export const Event = Schema.Union([
   ApprovalResolved,
   TurnCompleted,
   DecisionRecorded,
+  ReviewRequested,
+  ReviewStarted,
   InjectionFlagged,
   SpendCapRaised,
   VerifiersStarted,
@@ -563,6 +612,7 @@ export const Event = Schema.Union([
   ThreadCheckpointsRemoved,
   TaskBlocked,
   MemorySaved,
+  MemoryProposed,
   MemoryEdited,
   MemoryDeleted,
   MemorySnapshotTaken,
@@ -589,6 +639,8 @@ const upgrades: Record<string, (payload: string) => Effect.Effect<Event, Schema.
     Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TaskStartedV1))(payload), (e): Event => ({ ...e, v: 2 })),
   "turn.started@1": (payload) =>
     Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TurnStartedV1))(payload), (e): Event => ({ ...e, v: 2 })),
+  "decision.recorded@1": (payload) =>
+    Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(DecisionRecordedV1))(payload), (e): Event => ({ ...e, v: 2 })),
   "task.escalated@1": (payload) =>
     Effect.map(
       Schema.decodeUnknownEffect(Schema.fromJsonString(TaskEscalatedV1))(payload),
@@ -618,7 +670,9 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "task.rerouted@1": TaskRerouted,
   "approval.resolved@1": ApprovalResolved,
   "turn.completed@1": TurnCompleted,
-  "decision.recorded@1": DecisionRecorded,
+  "decision.recorded@2": DecisionRecorded,
+  "review.requested@1": ReviewRequested,
+  "review.started@1": ReviewStarted,
   "injection.flagged@1": InjectionFlagged,
   "spend.cap.raised@1": SpendCapRaised,
   "verifiers.started@1": VerifiersStarted,
@@ -637,6 +691,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.checkpoints.removed@1": ThreadCheckpointsRemoved,
   "task.blocked@1": TaskBlocked,
   "memory.saved@1": MemorySaved,
+  "memory.proposed@1": MemoryProposed,
   "memory.edited@1": MemoryEdited,
   "memory.deleted@1": MemoryDeleted,
   "memory.snapshot.taken@1": MemorySnapshotTaken,

@@ -40,6 +40,22 @@ export const loadPaying = (now: Date) =>
   });
 
 /**
+ * The harnesses whose latest subscription window as of `now` is nearly used up, or used up with no extra usage paying
+ * for more: background work stays off them (DESIGN §14.5). A window whose reset time has passed no longer counts.
+ */
+export const loadShortQuota = (now: Date) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ harness: HarnessId; payload: string }>`select harness, payload from quota`;
+    return rows.flatMap((r) => {
+      const quota = JSON.parse(r.payload) as Quota;
+      const current = quota.resetsAt === undefined || Date.parse(quota.resetsAt) > now.getTime();
+      const short = quota.status === "allowed_warning" || (quota.status === "rejected" && !quota.usingOverage);
+      return current && short ? [r.harness] : [];
+    });
+  });
+
+/**
  * Each cap over `projectPath`'s threads as of `now`: the profile's first, then the project's. A cap's
  * limit is the configured one or the user's latest raise this period; its spend is metered usage since
  * the period began, which includes subscription turns on extra usage (DESIGN §8.9).

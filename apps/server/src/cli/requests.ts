@@ -26,6 +26,10 @@ export const skillPrompt = (r: Extract<PendingRequest, { type: "skill.proposed" 
   return `\n[skill] The agent proposes to ${skillChangeTitle(r.change)}:\n${diff.join("\n")}\nAllow? [y/n] `;
 };
 
+/** A background review's proposed memory (DESIGN §14.5): what it would remember, and where. */
+export const memoryPrompt = (r: Extract<PendingRequest, { type: "memory.proposed" }>) =>
+  `\n[memory] A background review of this thread's task proposes remembering, in ${r.scope === "user" ? "your user" : "this project's"} memory:\n${r.text}\nRemember it? [y/n] `;
+
 /** A plan and, when approving it moves the build to another route, where and why. */
 export const planPrompt = (r: Extract<PendingRequest, { type: "plan.requested" }>) => {
   const moves = r.execute ? `[approving moves the build to ${r.execute.target.model} ${r.execute.effort}: ${r.execute.reason}]\n` : "";

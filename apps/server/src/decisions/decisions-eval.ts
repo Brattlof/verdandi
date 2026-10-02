@@ -3,7 +3,7 @@ import type { Answered, Backend } from "@verdandi/decisions";
 import { Effect } from "effect";
 import { openReadOnly } from "../routing/replay.ts";
 
-/** One logged answer (DESIGN §9.8), with the text it was about and whether the task it's about went well (null: not known). */
+/** One logged answer (DESIGN §9.8), with the text it was about (its turn's, or the state it was recorded with) and whether the task it's about went well (null: not known). */
 export type LoggedDecision = {
   readonly seq: number;
   readonly kind: string;
@@ -24,8 +24,20 @@ export const loadLoggedDecisions = (home: string): LoggedDecision[] => {
   const db = openReadOnly(home);
   try {
     const rows = db
-      .query<{ seq: number; kind: string; question: string; answer: string; text: string; own: string | null; running: string | null }, []>(
-        `select d.seq, d.kind, d.question, d.answer, t.text,
+      .query<
+        {
+          seq: number;
+          kind: string;
+          question: string;
+          answer: string;
+          text: string;
+          state: string | null;
+          own: string | null;
+          running: string | null;
+        },
+        []
+      >(
+        `select d.seq, d.kind, d.question, d.answer, t.text, d.state,
            (select payload from task_outcomes where task_id = d.turn_id) as own,
            (select o.payload from tasks k join task_outcomes o on o.task_id = k.id
             where k.thread_id = d.thread_id and k.seq < d.seq order by k.seq desc limit 1) as running
@@ -38,8 +50,8 @@ export const loadLoggedDecisions = (home: string): LoggedDecision[] => {
       return {
         seq: r.seq,
         kind: r.kind,
-        // The decision layer read the turn's text without a leading `@name` pin.
-        state: atPin(r.text)?.text ?? r.text,
+        // The decision layer read the recorded state (a finished task's digest), or else the turn's text without a leading `@name` pin.
+        state: r.state ?? atPin(r.text)?.text ?? r.text,
         question: JSON.parse(r.question) as DecisionQuestion,
         answer: JSON.parse(r.answer) as DecisionAnswer,
         good: outcome === null ? null : wentWell(JSON.parse(outcome) as TaskOutcome),

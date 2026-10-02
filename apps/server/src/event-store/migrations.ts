@@ -342,6 +342,16 @@ const skills = Effect.gen(function* () {
     where c.latest = 1 and c.action = 'create'`;
 });
 
+/**
+ * Background review (DESIGN §14.5): the task a review thread reviews (`review.started`), null for every other thread;
+ * and the text a decision was about when it isn't its turn's (a finished task's digest), null for the rest.
+ */
+const review = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table threads add column review text`;
+  yield* sql`alter table decisions add column state text`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -366,4 +376,5 @@ export const migrations = {
   "21_turn_verifying": turnVerifying,
   "22_route_change_reasons": routeChangeReasons,
   "23_skills": skills,
+  "24_review": review,
 };

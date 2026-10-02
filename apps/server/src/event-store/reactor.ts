@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type {
   AttachmentRef,
+  Command,
   CommandId,
   HarnessAdapter,
   HarnessEvent,
@@ -12,6 +13,7 @@ import type {
   Item,
   ProjectId,
   Route,
+  StoredEvent,
   TaskId,
   TaskLimits,
   ThreadId,
@@ -26,9 +28,10 @@ import { SqlClient } from "effect/unstable/sql";
 import { checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
 import { editedPaths } from "../diffs/diff.ts";
 import { memoryNudge } from "../memory/memory.ts";
+import { loadTaskDigest, parseReview, reviewPrompt } from "../review/review.ts";
 import { repeatedError } from "../routing/repeated-error.ts";
 import { searchSessions } from "../search/search.ts";
-import { placeSkill, type SkillFolders } from "../skills/skill-files.ts";
+import { placeSkill, prepareChange, type SkillFolders } from "../skills/skill-files.ts";
 import { makeSkillProposals } from "../skills/skill-proposals.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "../tasks/task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "../tasks/trajectory.ts";
@@ -49,6 +52,11 @@ export class ToolSettings extends Context.Service<
   ToolSettings,
   { readonly approveMemorySaves: boolean; readonly memoryNudgeEvery: number }
 >()("verdandi/ToolSettings") {}
+
+/** Background review in this profile (`review.yaml`, DESIGN §14.5): whether it runs, and whether it may spend metered dollars. */
+export class ReviewSettings extends Context.Service<ReviewSettings, { readonly enabled: boolean; readonly allowMetered: boolean }>()(
+  "verdandi/ReviewSettings",
+) {}
 
 /** The profile's skills folder, which approved skill proposals are written to, and the read-only extra folders (DESIGN §14.4). */
 export class ProfileSkills extends Context.Service<ProfileSkills, SkillFolders>()("verdandi/ProfileSkills") {}
@@ -106,6 +114,7 @@ export const ReactorLive = Layer.effect(
     const projectEscalation = yield* ProjectEscalation;
     const decide = yield* Decide;
     const skillFolders = yield* ProfileSkills;
+    const reviews = yield* ReviewSettings;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
     /** The adapter running each thread's current turn: where answers to its requests go. */
@@ -192,6 +201,90 @@ export const ReactorLive = Layer.effect(
       );
 
     /**
+     * Asks whether the turns of task `taskId` up to `turnId`, since the thread's last review, are worth a background
+     * review (DESIGN §14.5); the decider logs the answer and, on a yes, records `review.requested`.
+     */
+    const askReview = (threadId: ThreadId, turnId: TurnId, taskId: TaskId) =>
+      Effect.gen(function* () {
+        const digest = yield* loadTaskDigest(threadId, taskId, turnId);
+        if (!digest) return;
+        const reviewThreadId = randomUUID() as ThreadId;
+        yield* engine.dispatch({
+          type: "task.review",
+          commandId: randomUUID() as CommandId,
+          threadId,
+          taskId,
+          turnId,
+          reviewThreadId,
+          digest,
+        });
+      }).pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+        Effect.catchCause((cause) => Effect.logWarning(`Could not ask whether turn ${turnId} is worth a review.`, cause)),
+      );
+
+    /**
+     * Starts a requested review: its own thread in the project, hidden from thread lists, and the one turn it sends,
+     * routed as an `aux.review` task. Spend caps, quota and review.yaml can refuse that turn, which ends the review.
+     */
+    // ponytail: a review requested just before verdandid stops never starts, and its turns aren't asked about again.
+    // Upgrade: on startup, start each `review.requested` that has no `review.started`, if lost reviews turn out to matter.
+    const startReview = (e: Extract<StoredEvent["event"], { type: "review.requested" }>) =>
+      Effect.gen(function* () {
+        yield* engine.dispatch({
+          type: "review.start",
+          commandId: randomUUID() as CommandId,
+          threadId: e.reviewThreadId,
+          projectPath: e.projectPath,
+          reviews: { threadId: e.threadId, taskId: e.taskId, turnId: e.turnId },
+          allowMetered: reviews.allowMetered,
+        });
+        yield* engine.dispatch({
+          type: "turn.send",
+          commandId: randomUUID() as CommandId,
+          threadId: e.reviewThreadId,
+          turnId: randomUUID() as TurnId,
+          text: reviewPrompt(e.digest),
+          mode: "ask",
+        });
+      }).pipe(
+        Effect.catchTag("CommandRejected", (rejected) => Effect.logInfo(rejected.message)),
+        Effect.catchCause((cause) => Effect.logWarning(`Could not start the review of turn ${e.turnId}.`, cause)),
+      );
+
+    /**
+     * Turns a finished review's reply into proposals on the reviewed thread, after its turn `of.turnId`: each one scanned
+     * by the decider and left for the user. The reply is untrusted data; one that can't be read proposes nothing.
+     */
+    const settleReview = (turnId: TurnId, reviewThreadId: ThreadId, of: { readonly threadId: ThreadId; readonly turnId: TurnId }) =>
+      Effect.gen(function* () {
+        const [reply] = yield* sql<{ text: string }>`
+          select json_extract(payload, '$.text') as text from items
+          where turn_id = ${turnId} and json_extract(payload, '$.kind') = 'assistant.message'
+            and json_extract(payload, '$.parentToolUseId') is null
+          order by idx desc limit 1`;
+        const parsed = parseReview(reply?.text ?? "");
+        if ("error" in parsed) return yield* Effect.logWarning(`Review ${reviewThreadId}: ${parsed.error}`);
+        const propose = (proposal: Extract<Command, { type: "review.propose" }>["proposal"]) =>
+          engine
+            .dispatch({ type: "review.propose", commandId: randomUUID() as CommandId, ...of, reviewThreadId, proposal })
+            .pipe(Effect.catchTag("CommandRejected", (rejected) => Effect.logInfo(`Review ${reviewThreadId}: ${rejected.message}`)));
+        yield* Effect.forEach(parsed.memories, (m) => propose({ kind: "memory", ...m }), { discard: true });
+        // A skill change carries the file as it is now, read here like `skill_manage`'s.
+        yield* Effect.forEach(
+          parsed.skills,
+          (edit) => {
+            const prepared = Result.try(() => prepareChange(skillFolders, edit));
+            if (Result.isFailure(prepared))
+              return Effect.logInfo(`Review ${reviewThreadId}: couldn't read the skill ${edit.skill}: ${String(prepared.failure)}`);
+            if ("error" in prepared.success) return Effect.logInfo(`Review ${reviewThreadId}: ${prepared.success.error}`);
+            return propose({ kind: "skill", change: prepared.success.change });
+          },
+          { discard: true },
+        );
+      }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record what review ${reviewThreadId} proposed.`, cause)));
+
+    /**
      * Runs the project's verifiers in order until one fails, recording each on the turn before it completes (DESIGN §8.7).
      * Returns the run that failed, if one did.
      */
@@ -234,11 +327,11 @@ export const ReactorLive = Layer.effect(
     /** Saves the thread's tree as turn `turnId`'s start or end checkpoint (DESIGN §13). A failure is logged, never the turn's. */
     const saveCheckpoint = (threadId: ThreadId, turnId: TurnId, at: "start" | "end") =>
       Effect.gen(function* () {
-        const [thread] = yield* sql<{ path: string; worktree: string | null }>`
-          select p.path, t.worktree from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
+        const [thread] = yield* sql<{ path: string; worktree: string | null; review: string | null }>`
+          select p.path, t.worktree, t.review from threads t join projects p on p.id = t.project_id where t.id = ${threadId}`;
         const cwd = thread && threadFolder(thread.path, thread.worktree);
-        // A folder outside git has no checkpoints, and `checkpoint` skips it.
-        if (cwd && existsSync(cwd)) yield* checkpoint(cwd, checkpointRef(threadId, turnId, at));
+        // A folder outside git has no checkpoints, and `checkpoint` skips it. A background review only reads the project.
+        if (cwd && existsSync(cwd) && thread.review === null) yield* checkpoint(cwd, checkpointRef(threadId, turnId, at));
       }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not save the ${at} checkpoint of turn ${turnId}.`, cause)));
 
     const runTurn = (
@@ -265,8 +358,9 @@ export const ReactorLive = Layer.effect(
           limits: string | null;
           spent_usd: number;
           turn_number: number;
+          review: string | null;
         }>`
-          select t.route, t.session_id, p.path, t.worktree, t.pending_fork, t.memory_snapshot, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
+          select t.route, t.session_id, p.path, t.worktree, t.review, t.pending_fork, t.memory_snapshot, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
             (select total(u.cost_usd) from usage_ledger u join turns n on n.id = u.turn_id
               where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId}) as spent_usd,
             (select count(*) from turns n where n.thread_id = t.id and n.rowid <= (select rowid from turns where id = ${turnId})) as turn_number
@@ -288,7 +382,10 @@ export const ReactorLive = Layer.effect(
           thread.limits && thread.task_id
             ? { ...(JSON.parse(thread.limits) as TaskLimits), taskId: thread.task_id, spentUsd: thread.spent_usd }
             : undefined;
-        const nudge = memoryNudge(thread.turn_number, toolSettings.memoryNudgeEvery);
+        // A background review runs unattended with no Verdandi tools, so nothing it does takes effect before the user allows it.
+        const review =
+          thread.review === null ? null : (JSON.parse(thread.review) as Extract<StoredEvent["event"], { type: "review.started" }>);
+        const nudge = review ? undefined : memoryNudge(thread.turn_number, toolSettings.memoryNudgeEvery);
         // The turn's file-tool calls: once its agent is done, a turn that changed files is verified before it completes.
         const calls: Item[] = [];
         // Whether a tool call failed, so the task's tool errors are counted at the turn's end.
@@ -304,7 +401,7 @@ export const ReactorLive = Layer.effect(
             mode,
             ...(attachments.length > 0 && { attachments: attachments.map((a) => ({ ...a, path: join(attachmentsDir, a.id) })) }),
             steers,
-            tools,
+            ...(review ? {} : { tools }),
             // The snapshot a new session starts with goes to its first turn only (DESIGN §14.2).
             ...memoryFor(thread.memory_snapshot, turnId),
             // Every Nth turn of the thread nudges the agent to save memory, in the turn's message, never the system prompt.
@@ -327,10 +424,15 @@ export const ReactorLive = Layer.effect(
               finished = true;
               return Effect.gen(function* () {
                 const failed =
-                  event.status === "success" && editedPaths(cwd, calls).length > 0
+                  event.status === "success" && !review && editedPaths(cwd, calls).length > 0
                     ? yield* verify(threadId, turnId, thread.path, cwd)
                     : undefined;
                 yield* report(threadId, turnId, event);
+                // A review's reply becomes proposals on the thread it reviewed; a review is never escalated or reviewed.
+                if (review) {
+                  if (event.status === "success") yield* settleReview(turnId, threadId, review.reviews);
+                  return;
+                }
                 // Once the turn has completed, a failed verifier, or else the agent having reported it's blocked, or else the
                 // same tool error repeating in the task, may escalate it (DESIGN §8.7): one trigger per turn end, the
                 // strongest signal first. The decider decides whether.
@@ -355,6 +457,9 @@ export const ReactorLive = Layer.effect(
                     nextTurnId: randomUUID() as TurnId,
                     trigger,
                   });
+                } else if (reviews.enabled && event.status === "success" && thread.task_id) {
+                  // A task whose turn finished with nothing to escalate may hold something worth keeping (DESIGN §14.5).
+                  yield* FiberSet.run(turns, askReview(threadId, turnId, thread.task_id));
                 }
               });
             }),
@@ -462,6 +567,8 @@ export const ReactorLive = Layer.effect(
     yield* engine.react((stored) => {
       const e = stored.event;
       if (e.type === "turn.started") return startTurn(e.threadId, e.turnId, e.text, e.mode ?? "build", e.attachments ?? []);
+      // In `turns`, so `drain` waits for the review it starts.
+      if (e.type === "review.requested") return FiberSet.run(turns, startReview(e)).pipe(Effect.asVoid);
       if (e.type === "turn.steered") {
         const queue = steerQueues.get(e.turnId);
         return queue ? Queue.offer(queue, e.text).pipe(Effect.asVoid) : Effect.void;

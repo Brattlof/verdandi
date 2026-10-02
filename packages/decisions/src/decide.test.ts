@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { type DecisionQuestion, decisionKinds } from "@verdandi/contracts";
+import { type DecisionQuestion, decisionKinds, isWorthReviewing } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { type Backend, makeDecide } from "./decide.ts";
-import { correctingQuestion, flagged, injectionQuestion } from "./questions.ts";
-import { followUpRules, injectionRules, rulesBackend } from "./rules.ts";
+import { correctingQuestion, flagged, injectionQuestion, reviewQuestion } from "./questions.ts";
+import { followUpRules, injectionRules, reviewRules, rulesBackend } from "./rules.ts";
 
 const yesNo = (minConfidence: number): DecisionQuestion => ({ type: "noul", kind: "test.yes", question: "Yes?", minConfidence });
 /** Answers every question yes with `confidence`. */
@@ -74,4 +74,20 @@ test("instructions aimed at an agent and ways to send data out are flagged; ordi
     "",
   ])
     expect([text, await flags(text)]).toEqual([text, false]);
+});
+
+test("a task where the user states a lasting preference or the agent found a lesson is worth a review; routine work isn't", async () => {
+  const decide = makeDecide([rulesBackend(reviewRules)]);
+  const worth = async (digest: string) => {
+    const [a] = (await Effect.runPromise(decide.decide({ state: digest, questions: [reviewQuestion] }))).answers;
+    return a !== undefined && isWorthReviewing(a);
+  };
+  for (const digest of [
+    "User: from now on run the tests with TZ=UTC\nAgent: done",
+    "User: fix the flaky test\nAgent: Turns out the clock wasn't mocked; I mocked it.",
+    "User: we use pnpm here, not npm",
+  ])
+    expect([digest, await worth(digest)]).toEqual([digest, true]);
+  for (const digest of ["User: rename foo to bar\nAgent: Renamed it in 3 files.", "User: what does this do?\nAgent: It always returns 0."])
+    expect([digest, await worth(digest)]).toEqual([digest, false]);
 });

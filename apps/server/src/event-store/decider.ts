@@ -15,7 +15,10 @@ import {
   type Event,
   formatUsd,
   type HarnessEvent,
+  type HarnessId,
   isCorrection,
+  isWorthReviewing,
+  type MemoryScope,
   type MemoryView,
   type ProjectId,
   type Resolution,
@@ -42,6 +45,7 @@ import {
   decideRoute,
   type RoutingContext,
   type RoutingThread,
+  reviewClassification,
   routeInputs,
   routeOf,
   targetOf,
@@ -53,12 +57,16 @@ import type { StoredRevert } from "./projector.ts";
 export type PendingRequest = {
   readonly requestId: string;
   readonly turnId: TurnId;
-  readonly kind: "approval" | "user-input" | "plan" | "skill";
+  readonly kind: "approval" | "user-input" | "plan" | "skill" | "memory";
   /** A plan's text as proposed, which an approval's edit is compared with. */
   readonly plan?: string;
   /** A plan's route for the build, when approving it moves the task (`plan.requested`'s `execute`). */
   readonly execute?: RouteDecision;
+  /** A background review's proposed memory, which allowing it saves. */
+  readonly memory?: { readonly scope: MemoryScope; readonly text: string };
 };
+
+type ReviewStarted = Extract<Event, { type: "review.started" }>;
 
 /** What the decider needs to know about the command's thread; `undefined` when it doesn't exist. */
 export type DeciderState = {
@@ -88,6 +96,8 @@ export type DeciderState = {
         readonly sessionFirstTurn: TurnId | null;
         /** The latest revert, until the next turn starts. */
         readonly revert: StoredRevert | null;
+        /** What this thread reviews, when it is a background review's (DESIGN §14.5); absent for every other thread. */
+        readonly review?: ReviewStarted;
         /** How many escalation steps the current task has taken (DESIGN §8.7). */
         readonly taskEscalations: number;
         /** The latest turn succeeded and ran the project's verifiers, which all passed: the next one may de-escalate (DESIGN §8.7). */
@@ -118,6 +128,11 @@ export type DeciderState = {
   readonly injection?: DecisionAnswer;
   /** The skill a `skill.curate` or `skill.restore` names, if Verdandi created it, loaded for those commands. */
   readonly skill?: { readonly state: SkillState; readonly usedAt: string } | null;
+  /**
+   * Harnesses whose subscription window is nearly or fully used up, with no extra usage paying for more, loaded for a
+   * background review's turn: background work leaves what's left to the user (DESIGN §14.5).
+   */
+  readonly shortQuota?: readonly HarnessId[];
 };
 
 type Decision = Result.Result<Event[], CommandRejected>;
@@ -142,6 +157,7 @@ const fits: Record<PendingRequest["kind"], readonly Resolution["decision"][]> = 
   "user-input": ["answer", "deny"],
   plan: ["allow", "deny"],
   skill: ["allow", "deny"],
+  memory: ["allow", "deny"],
 };
 
 const configKey: Record<CapScope, Record<CapPeriod, string>> = {
@@ -206,7 +222,7 @@ export const handedText = (trigger: EscalationTrigger) => {
  * close the fence, under a warning when the injection scan's `answer` flags it (DESIGN §17). Every piece of untrusted
  * text a turn Verdandi sends carries goes through here.
  */
-const asData = (text: string, answer: DecisionAnswer | undefined) => {
+export const asData = (text: string, answer: DecisionAnswer | undefined) => {
   const fence = "`".repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map((m) => m[0].length + 1)));
   return [...(answer && flagged(answer) ? [injectionWarning] : []), fence, text, fence];
 };
@@ -272,6 +288,34 @@ const correctionEscalation = (state: DeciderState, threadId: ThreadId, taskId: T
   };
 };
 
+/**
+ * Why background review `review` can't run on `target` (DESIGN §14.5): it would spend metered dollars and `review.yaml`
+ * doesn't allow that, or the harness's subscription window is short. Undefined when it can.
+ */
+const reviewProblem = (state: DeciderState, review: ReviewStarted, target: RouteTarget): string | undefined => {
+  const paying = state.spend && Result.isSuccess(state.spend) ? state.spend.success.paying : [];
+  if (!review.allowMetered && spendsMetered(target, paying))
+    return `it would spend metered dollars on ${target.model}; set allowMetered: true in the profile's review.yaml to allow that`;
+  if (state.shortQuota?.includes(target.harness))
+    return `the ${target.harness} subscription window is nearly used up, and background work leaves the rest to you`;
+  return undefined;
+};
+
+/**
+ * A request raised in a background review's turn, which runs with nobody to answer (DESIGN §14.5): recorded, then
+ * denied at once, so the review goes on without it.
+ */
+const unattended = (threadId: ThreadId, turnId: TurnId, request: Event & { readonly requestId: string }, plan: boolean): Decision =>
+  accept(request, {
+    type: "approval.resolved",
+    v: 1,
+    threadId,
+    turnId,
+    requestId: request.requestId,
+    resolution: plan ? { decision: "deny", feedback: "This is a background review: reply with the JSON only." } : { decision: "deny" },
+    reason: "A background review runs unattended, so nobody can answer it.",
+  });
+
 /** Why the thread's worktree can't take a turn now, naming the fix; undefined when it can (or there is none). */
 const worktreeProblem = (threadId: ThreadId, worktree: WorktreeView | null): string | undefined => {
   if (!worktree || worktree.state === "ready" || worktree.state === "creating") return undefined;
@@ -309,10 +353,12 @@ const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, ev
         ? accept({ type: "harness.quota.reported", v: 1, threadId, turnId, harness: state.thread.route.harness, quota: event.quota })
         : accept();
     case "approval.requested":
-      return accept({ ...event, v: 1, threadId, turnId });
     case "user-input.requested":
-      return accept({ ...event, v: 1, threadId, turnId });
+      return state.thread?.review
+        ? unattended(threadId, turnId, { ...event, v: 1, threadId, turnId }, false)
+        : accept({ ...event, v: 1, threadId, turnId });
     case "plan.requested": {
+      if (state.thread?.review) return unattended(threadId, turnId, { ...event, v: 1, threadId, turnId }, true);
       // A routed task started in plan mode moves its build to the class's own route when the plan is approved.
       const { thread, routing } = state;
       const cap = reachedCap(state.spend);
@@ -363,6 +409,11 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     const unavailable = worktreeProblem(c.threadId, state.thread.worktree);
     if (unavailable) return reject("WorktreeUnavailable", unavailable);
+    // A background review is one turn Verdandi sends, routed in its own class (DESIGN §14.5).
+    const { review } = state.thread;
+    if (review && state.thread.turns > 0)
+      return reject("ReviewSkipped", "A background review's thread takes the one turn Verdandi sends it.");
+    if (review && !state.routing) return reject("ReviewSkipped", "Verdandi skipped the background review: this verdandid routes no tasks.");
     if (state.spend && Result.isFailure(state.spend)) return reject("InvalidSpendCaps", state.spend.failure);
     // A leading `@name` pins the task this turn starts to that model (DESIGN §8.4 stage 0); the agent never sees it.
     const at = atPin(c.text);
@@ -393,7 +444,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       : [started];
     // First: the reactor starts the turn on turn.started, and a later event of this commit could reach feeds after the turn ends.
     const recorded: Event[] = state.decisions
-      ? [{ type: "decision.recorded", v: 1, threadId: c.threadId, turnId: c.turnId, ...state.decisions }]
+      ? [{ type: "decision.recorded", v: 2, threadId: c.threadId, turnId: c.turnId, ...state.decisions }]
       : [];
     // A reached cap stops only turns that would spend metered dollars; the router routes a new task around it.
     const onRoute = capped(state.spend, targetFor(state, state.thread.route));
@@ -428,7 +479,8 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (!state.routing) return onRoute ?? accept(...recorded, { ...task, route: state.thread.route }, ...turn);
     const routing = cap ? { ...state.routing, capped: cap } : state.routing;
     const images = c.attachments?.filter((a) => a.kind === "image").length ?? 0;
-    const decided = decideRoute(state.thread, routing, text, c.mode, state.decisions?.answers ?? [], images, at?.name);
+    const answers = review ? [reviewClassification] : (state.decisions?.answers ?? []);
+    const decided = decideRoute(state.thread, routing, text, c.mode, answers, images, at?.name);
     if (Result.isFailure(decided)) {
       // Every target left would spend metered dollars: the cap is what stops the turn.
       const stop = decided.failure.reason === "NoRoute" && cap ? capped(state.spend, undefined) : undefined;
@@ -436,6 +488,8 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     const stop = capped(state.spend, decided.success.target);
     if (stop) return stop;
+    const problem = review && reviewProblem(state, review, decided.success.target);
+    if (problem) return reject("ReviewSkipped", `Verdandi skipped the background review: ${problem}.`);
     const inputs = { ...routeInputs(state.thread, routing), ...(at && { at: at.name }) };
     return accept(...recorded, { ...task, route: routeOf(decided.success), decision: decided.success, inputs }, ...turn);
   },
@@ -632,6 +686,65 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       );
     return accept({ type: "skill.state.changed", v: 1, threadId: c.threadId, skill: c.skill, from: "archived", to: "active", by: "user" });
   },
+  // A no is logged and ends there, at no model cost; a yes asks the reactor to review the digest (DESIGN §14.5).
+  "task.review": (state, c) => {
+    if (!state.thread || state.thread.review || !state.decisions) return accept();
+    const recorded: Event = {
+      type: "decision.recorded",
+      v: 2,
+      threadId: c.threadId,
+      turnId: c.turnId,
+      ...state.decisions,
+      state: c.digest,
+    };
+    const [answer] = state.decisions.answers;
+    if (!answer || !isWorthReviewing(answer)) return accept(recorded);
+    const { taskId, turnId, reviewThreadId, digest } = c;
+    return accept(recorded, {
+      type: "review.requested",
+      v: 1,
+      threadId: c.threadId,
+      taskId,
+      turnId,
+      reviewThreadId,
+      projectPath: state.thread.projectPath,
+      digest,
+    });
+  },
+  "review.start": (state, c) =>
+    state.thread
+      ? accept()
+      : accept(
+          {
+            type: "thread.created",
+            v: 1,
+            threadId: c.threadId,
+            projectId: projectIdFor(c.projectPath),
+            projectPath: c.projectPath,
+            route: defaultRoute,
+            pinned: false,
+          },
+          { type: "review.started", v: 1, threadId: c.threadId, reviews: c.reviews, allowMetered: c.allowMetered },
+        ),
+  // Untrusted: scanned like the agent's own saves and proposals, then left for the user.
+  "review.propose": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    const { proposal } = c;
+    const at = { v: 1, threadId: c.threadId, turnId: c.turnId, requestId: c.commandId } as const;
+    if (proposal.kind === "skill") {
+      const problem = changeProblem(proposal.change);
+      if (problem) return reject("InvalidSkill", problem);
+      const refused = proposal.change.after === null ? undefined : scanSkill(proposal.change.after, state.injection);
+      if (refused) return reject("SkillRejected", `Not proposed. ${refused}`);
+      return accept({ type: "skill.proposed", ...at, change: proposal.change });
+    }
+    const text = proposal.text.trim();
+    const refused = scanMemory(text, state.injection);
+    if (refused) return reject("MemoryRejected", `Not proposed. ${refused}`);
+    // A fact the store already has needs no one's approval.
+    if (state.memory && sameAs(memoryEntries(state.memory), proposal.scope, text)) return accept();
+    return accept({ type: "memory.proposed", ...at, scope: proposal.scope, text, reviewThreadId: c.reviewThreadId });
+  },
   "files.report": (state, c) =>
     state.thread
       ? accept({
@@ -716,6 +829,28 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       // An edit identical to the proposal is just an approval.
       resolution: edit !== undefined && edit.trim() === request.plan?.trim() ? { decision: "allow" } : c.resolution,
     };
+    // Allowing a background review's memory saves it, if the store has room (DESIGN §14.5).
+    if (request.memory && c.resolution.decision === "allow") {
+      const { scope, text } = request.memory;
+      const entries = state.memory ? memoryEntries(state.memory) : [];
+      const same = sameAs(entries, scope, text);
+      if (overCap(entries, scope, text, same ? [same.entryId] : []))
+        return reject(
+          "MemoryFull",
+          `${scope === "user" ? "User" : "Project"} memory has no room for it. Edit or delete entries in the Memory panel, then allow it again, or decline it.`,
+        );
+      return accept(resolved, {
+        type: "memory.saved",
+        v: 1,
+        threadId: c.threadId,
+        entryId: same?.entryId ?? c.requestId,
+        scope,
+        ...(scope === "project" && { projectId: state.thread.projectId }),
+        text,
+        turnId: request.turnId,
+        replaces: [],
+      });
+    }
     // The build moves only if the thread is still routed and on the task the plan was made for.
     const { execute } = request;
     const { pinned, taskId, route } = state.thread;
@@ -771,6 +906,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     const thread = state.thread;
     if (
       !thread ||
+      thread.review ||
       thread.pinned ||
       thread.taskDecision?.source === "pin" ||
       thread.archived ||

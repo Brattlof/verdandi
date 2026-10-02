@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { AttachmentRef } from "./attachments.ts";
 import { ClientCommand } from "./commands.ts";
-import { ApprovalRequested, PlanRequested, SkillProposed, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
+import { ApprovalRequested, MemoryProposed, PlanRequested, SkillProposed, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
 import { GcReport, GcUnavailable } from "./gc.ts";
 import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { AccessMode, Item, Quota, Usage } from "./items.ts";
@@ -44,6 +44,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "InvalidSkill",
     "SkillRejected",
     "SkillNotArchived",
+    "ReviewSkipped",
   ]),
   message: Schema.String,
 }) {}
@@ -152,8 +153,11 @@ export const ThreadView = Schema.Struct({
   turns: Schema.Array(TurnView),
   /** Oldest first, so a client can show each between the turns it came between. */
   routeChanges: Schema.Array(RouteChange),
-  /** Requests still waiting for an answer, oldest first, so a client that reconnects can answer them. */
-  pendingRequests: Schema.Array(Schema.Union([ApprovalRequested, UserInputRequested, PlanRequested, SkillProposed])),
+  /**
+   * Requests still waiting for an answer, oldest first, so a client that reconnects can answer them. A background
+   * review's proposals (`memory.proposed`, and `skill.proposed` on a turn that has ended) wait here too (DESIGN §14.5).
+   */
+  pendingRequests: Schema.Array(Schema.Union([ApprovalRequested, UserInputRequested, PlanRequested, SkillProposed, MemoryProposed])),
 });
 export type ThreadView = typeof ThreadView.Type;
 

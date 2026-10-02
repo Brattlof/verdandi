@@ -16,12 +16,12 @@ import {
   type ThreadId,
   type TurnId,
 } from "@verdandi/contracts";
-import { correctingQuestion, type Decide, injectionQuestion } from "@verdandi/decisions";
+import { correctingQuestion, type Decide, injectionQuestion, reviewQuestion } from "@verdandi/decisions";
 import { Context, Effect, Layer, PubSub, Result, Stream } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { type RoutingContext, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
-import { loadSpendState } from "../spend/spend.ts";
+import { loadShortQuota, loadSpendState } from "../spend/spend.ts";
 import type { SpendCaps } from "../spend/spend-caps.ts";
 import { decide, handedText } from "./decider.ts";
 import { loadDeciderState, loadMemory, loadProjects, loadQuotas, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
@@ -156,19 +156,31 @@ export const EngineLive = (options: EngineOptions = {}) =>
                     ...(starts ? { memory: yield* loadRoutingMemory(command.threadId) } : {}),
                   }
                 : undefined;
-            // A new task is classified, and a later turn is asked whether it corrects the agent's last answer.
-            const questions = send ? [...(routing ? taskQuestions(routing) : []), ...(current?.turns ? [correctingQuestion] : [])] : [];
-            // ponytail: asked inside the write transaction, which is free on `rules`; ask before it once a backend takes real time (ADR 0009).
-            const decisions =
+            // A new task is classified, and a later turn is asked whether it corrects the agent's last answer. A background
+            // review's turn isn't: Verdandi wrote it, in its own class (DESIGN §14.5).
+            const questions =
+              send && !current?.review ? [...(routing ? taskQuestions(routing) : []), ...(current?.turns ? [correctingQuestion] : [])] : [];
+            // A finished task's digest is asked whether it's worth a background review.
+            const asked =
               send && questions.length > 0
-                ? { questions, answers: (yield* decider.decide({ state: at ? at.text : send.text, questions })).answers }
-                : undefined;
+                ? { state: at ? at.text : send.text, questions }
+                : command.type === "task.review"
+                  ? { state: command.digest, questions: [reviewQuestion] }
+                  : undefined;
+            // ponytail: asked inside the write transaction, which is free on `rules`; ask before it once a backend takes real time (ADR 0009).
+            const decisions = asked && { questions: asked.questions, answers: (yield* decider.decide(asked)).answers };
             // A follow-up correcting the agent may escalate its routed task (DESIGN §8.7), which reads the project's policy.
             const corrects =
               current && send && !routing && !at && current.taskId !== null && !current.pinned && decisions?.answers.some(isCorrection);
             const policy = routing ?? (current && corrects && options.routing ? yield* options.routing(current.projectPath) : undefined);
-            // Memory: read for memory commands, and for a turn whose new harness session starts with a snapshot of it.
-            const remembers = command.type.startsWith("memory.") || (send !== undefined && current?.sessionId === null);
+            // Memory: read for memory commands, a background review's proposals and the answer to one, and for a turn whose
+            // new harness session starts with a snapshot of it.
+            const remembers =
+              command.type.startsWith("memory.") ||
+              command.type === "review.propose" ||
+              (command.type === "approval.respond" &&
+                current?.pendingRequests.some((r) => r.requestId === command.requestId && r.kind === "memory")) ||
+              (send !== undefined && current?.sessionId === null);
             const memory = remembers ? yield* loadMemory(command.threadId) : null;
             // Untrusted text the command would keep or hand the agent is scanned for injection (DESIGN §17).
             const untrusted =
@@ -176,9 +188,13 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ? command.text.trim()
                 : command.type === "skill.propose"
                   ? (command.change.after ?? undefined)
-                  : escalates && command.type === "task.escalate"
-                    ? handedText(command.trigger)
-                    : undefined;
+                  : command.type === "review.propose"
+                    ? command.proposal.kind === "memory"
+                      ? command.proposal.text.trim()
+                      : (command.proposal.change.after ?? undefined)
+                    : escalates && command.type === "task.escalate"
+                      ? handedText(command.trigger)
+                      : undefined;
             const [injection] =
               untrusted === undefined ? [] : (yield* decider.decide({ state: untrusted, questions: [injectionQuestion] })).answers;
             // A skill Verdandi created has a row in `skills`; any other is never curated or restored.
@@ -187,6 +203,8 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ? ((yield* sql<{ state: SkillState; usedAt: string }>`
                     select state, used_at as usedAt from skills where name = ${command.skill}`)[0] ?? null)
                 : undefined;
+            // A background review stays off a harness whose subscription window is short (DESIGN §14.5).
+            const shortQuota = send && current?.review ? yield* loadShortQuota(new Date()) : undefined;
             const decision = decide(
               {
                 ...state,
@@ -195,6 +213,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ...(memory && { memory }),
                 ...(injection && { injection }),
                 ...(skill !== undefined && { skill }),
+                ...(shortQuota && { shortQuota }),
               },
               command,
             );

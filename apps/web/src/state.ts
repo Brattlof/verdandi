@@ -106,6 +106,10 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "user-input.requested": addRequest,
   "skill.proposed": addRequest,
   "skill.applied": (thread) => thread, // the skill is on disk; the Skills tab reads it from there
+  // A background review's proposal waits for the user like the agent's own requests; the review itself runs out of sight.
+  "memory.proposed": addRequest,
+  "review.requested": (thread) => thread,
+  "review.started": (thread) => thread,
   "plan.requested": (thread, e) =>
     addRequest(
       addItem(thread, e.turnId, {
