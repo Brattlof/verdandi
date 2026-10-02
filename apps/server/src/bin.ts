@@ -9,6 +9,7 @@ import { start } from "./main.ts";
 import { routing } from "./routing/routing-cli.ts";
 import { search } from "./search/search-cli.ts";
 import { costs } from "./spend/costs-cli.ts";
+import { trajectories } from "./tasks/trajectories-cli.ts";
 
 const usage = `Usage:
   verdandi start [--home <dir>] [--port <n>] [--host <ip>]   run verdandid in the foreground; --host 0.0.0.0 (or this machine's LAN address) also opens it to your local network on --port, never to the internet
@@ -22,7 +23,8 @@ const usage = `Usage:
   verdandi costs [--home <dir>] [--days <n>] [--project <path>]   cost per completed task on each route, then spend, cost by task class, usage by model, override rate and estimated savings vs always-Opus
   verdandi search <query> [--project <path>] [--home <dir>]   find past sessions' messages containing the query (3 characters or more), newest first, archived threads included
   verdandi batch <evalset.yaml> [--route auto|<harness>/<model>/<effort>]... [--dry-run] [--approve] [--timeout <minutes>] [--keep] [--home <dir>]   run an eval set's tasks on each route (default: auto, claude-code/opus/medium, claude-code/sonnet/high) in throwaway copies of their repositories, and compare success rate and cost per passed task; --dry-run only estimates, --approve allows what agents ask to do (otherwise denied)
-  verdandi routing replay [--policy <file>] [--project <path>] [--home <dir>]   how saved tasks would route under a proposed policy (or each project's current one), with the estimated cost change; reads the database read-only`;
+  verdandi routing replay [--policy <file>] [--project <path>] [--home <dir>]   how saved tasks would route under a proposed policy (or each project's current one), with the estimated cost change; reads the database read-only
+  verdandi trajectories export --format jsonl|routing [--project <path>] [--since <date>] [--out <file>] [--home <dir>]   saved tasks as chat conversations with tool calls (jsonl) or as what the router knew, the route and how it went (routing), one JSON line per task, secrets masked; projects listed under excludeProjects in the home's trajectories.yaml are left out; reads the database read-only`;
 
 const commands: Record<string, (argv: readonly string[]) => Promise<void>> = {
   start,
@@ -34,6 +36,7 @@ const commands: Record<string, (argv: readonly string[]) => Promise<void>> = {
   routing,
   batch,
   search,
+  trajectories,
 };
 
 const [name, ...argv] = Bun.argv.slice(2);

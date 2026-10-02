@@ -1,7 +1,8 @@
 const MASK = "[REDACTED]";
 
 // ponytail: a fixed list of well-known token shapes plus secret-looking names; a novel token format
-// slips through. Upgrade to a maintained rule set (gitleaks-style) before trajectories can be exported.
+// slips through, saved and exported alike. Upgrade to a maintained rule set (gitleaks-style) before exports
+// leave the machine (a shared dataset, or training on a provider).
 const patterns: readonly [RegExp, string][] = [
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, MASK],
   [/\bsk-[A-Za-z0-9_-]{20,}/g, MASK], // Anthropic, OpenAI
