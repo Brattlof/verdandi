@@ -16,3 +16,7 @@ test("an effort change costs nothing extra on the fake harness; a harness change
   expect(switchCost({ ...warm, route: fake }, { ...fake, effort: "high" })).toBeUndefined();
   expect(switchCost(warm, { ...route, harness: "fake" })).toContain("fresh session");
 });
+
+test("a thread with no session yet, like a fresh one, loses nothing to a harness change", () => {
+  expect(switchCost({ ...warm, sessionId: null }, { ...route, harness: "fake" })).toBeUndefined();
+});

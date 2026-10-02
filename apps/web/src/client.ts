@@ -1,14 +1,13 @@
 import {
   Api,
+  type CatalogModel,
   type ClientCommand,
   CommandRejected,
   DiffUnavailable,
   type DiffView,
-  type HarnessId,
   type InteractionMode,
   type MemoryView,
   type RouteDecision,
-  type RouteTarget,
   RoutingUnavailable,
   type SessionHit,
   type SessionQuery,
@@ -242,17 +241,11 @@ export const connect = (token: string) => {
     };
   };
 
-  /** The harnesses verdandid runs. Asked once: they are fixed while it runs. */
-  let harnessList: Promise<readonly HarnessId[]> | undefined;
-  const harnesses = () =>
-    (harnessList ??= run((rpc) => rpc.HarnessesList()).then((exit) => {
-      if (Exit.isSuccess(exit)) return exit.value;
-      lost.set(true); // it has no errors of its own
-      return [];
-    }));
-
-  /** The models a message can pin its task to with a leading `@name`. Asked once: they are fixed while verdandid runs. */
-  let modelList: Promise<readonly RouteTarget[]> | undefined;
+  /**
+   * The catalog's models on the harnesses verdandid runs: what a leading `@name` pins and the route picker offers.
+   * Asked once: they are fixed while verdandid runs.
+   */
+  let modelList: Promise<readonly CatalogModel[]> | undefined;
   const models = () =>
     (modelList ??= run((rpc) => rpc.ModelsList()).then((exit) => {
       if (Exit.isSuccess(exit)) return exit.value;
@@ -260,6 +253,6 @@ export const connect = (token: string) => {
       return [];
     }));
 
-  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, search, memory, terminals, follow, harnesses, models, lost };
+  return { dispatch, diff, explain, simulate, attachmentUrl, spendCaps, usage, search, memory, terminals, follow, models, lost };
 };
 export type Connection = ReturnType<typeof connect>;

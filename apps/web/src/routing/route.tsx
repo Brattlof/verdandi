@@ -1,8 +1,8 @@
 import {
+  type CatalogModel,
   type CommandId,
   describeRouteChange,
   Effort,
-  type HarnessId,
   type Route,
   type RouteChange,
   type TaskId,
@@ -15,13 +15,14 @@ import type { LiveThread } from "../state.ts";
 /**
  * What switching `thread` to `to` costs beyond the usual turn, or undefined when nothing extra.
  * A warm session loses its cache on a model change, and on Claude Code on an effort change too
- * (ADR 0002); a new harness starts a fresh session.
+ * (ADR 0002); a new harness starts a fresh session. A thread with no session yet has nothing to lose.
  */
 export const switchCost = (thread: Pick<ThreadView, "route" | "sessionId" | "turns">, to: Route) => {
   const from = thread.route;
+  if (thread.sessionId === null) return undefined;
   if (from.harness !== to.harness) return `${to.harness} starts a fresh session: the agent won't see this thread's earlier turns.`;
   const cold = from.model !== to.model || (from.effort !== to.effort && to.harness === "claude-code");
-  if (!cold || thread.sessionId === null) return undefined;
+  if (!cold) return undefined;
   const turns = thread.turns.length;
   return `The next turn is a cold cache write of the whole conversation (${turns} turn${turns === 1 ? "" : "s"} so far), so it costs more than a usual turn.`;
 };
@@ -102,23 +103,38 @@ const Why = ({ connection, taskId, reason }: { connection: Connection; taskId: T
   );
 };
 
+/** A model the picker offers: the catalog's, or the thread's own when the catalog doesn't list it. */
+type Choice = Pick<CatalogModel, "harness" | "model" | "efforts"> & { readonly access?: CatalogModel["access"] };
+const key = (r: Pick<Route, "harness" | "model">) => `${r.harness}/${r.model}`;
+
 const RouteForm = ({ connection, thread, close }: { connection: Connection; thread: LiveThread; close: () => void }) => {
-  const [draft, setDraft] = useState(thread.route);
-  const [harnesses, setHarnesses] = useState<readonly HarnessId[]>([]);
+  // Only the user's edits are state, so the form follows the thread's route as the feed updates it.
+  const [edits, setEdits] = useState<Partial<Route>>({});
+  const draft = { ...thread.route, ...edits };
+  const [models, setModels] = useState<readonly CatalogModel[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string>();
   const id = useId();
   useEffect(() => {
-    void connection.harnesses().then(setHarnesses);
+    void connection.models().then(setModels);
   }, [connection]);
-  // ponytail: models this thread has used, until the model catalog (DESIGN §20 packages/models) lists them per harness.
-  const models = new Set([
-    thread.route.model,
-    ...thread.routeChanges.map((c) => c.from.model),
-    ...thread.turns.flatMap((t) => t.usage.map((u) => u.model)),
-  ]);
-  const to = { ...draft, model: draft.model.trim() };
-  const changed = describeRouteChange(thread.route, to) !== "";
+  // Unpinned with no task, the thread's route is a placeholder: nothing is current yet.
+  const current = !thread.pinned && thread.task === null ? undefined : key(thread.route);
+  // A model picked with `verdandi chat --model` may not be in the catalog; it stays a choice.
+  const choices: readonly Choice[] =
+    current === undefined || models.some((m) => key(m) === current)
+      ? models
+      : [{ harness: thread.route.harness, model: thread.route.model, efforts: Effort.literals }, ...models];
+  const selected = choices.find((m) => key(m) === key(draft)) ?? choices[0];
+  const efforts = selected?.efforts ?? Effort.literals;
+  const to: Route = selected ? { ...draft, harness: selected.harness, model: selected.model } : draft;
+  const pick = (value: string) => {
+    const m = choices.find((c) => key(c) === value);
+    if (!m) return;
+    const effort = m.efforts.length === 0 || m.efforts.includes(draft.effort) ? draft.effort : (m.efforts[0] ?? draft.effort);
+    setEdits({ ...edits, harness: m.harness, model: m.model, effort });
+  };
+  const changed = current !== undefined && describeRouteChange(thread.route, to) !== "";
   const cost = changed ? switchCost(thread, to) : undefined;
   // Picking the route the router chose pins it; picking the pinned route again changes nothing.
   const pins = changed || !thread.pinned;
@@ -131,7 +147,7 @@ const RouteForm = ({ connection, thread, close }: { connection: Connection; thre
   };
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!pins || !to.model) return;
+    if (!pins || !selected) return;
     setSending(true);
     const result = await connection.dispatch({
       type: "thread.route.set",
@@ -146,49 +162,42 @@ const RouteForm = ({ connection, thread, close }: { connection: Connection; thre
   return (
     <form className="flex flex-wrap items-end gap-x-3 gap-y-2" onSubmit={onSubmit}>
       <label className="flex flex-col gap-1 font-medium text-muted">
-        Harness{" "}
-        <select
-          className="text-fg"
-          value={draft.harness}
-          disabled={thread.busy}
-          onChange={(e) => setDraft({ ...draft, harness: e.target.value as HarnessId })}
-        >
-          {[...new Set([thread.route.harness, ...harnesses])].map((h) => (
-            <option key={h} value={h}>
-              {h}
-            </option>
+        Model{" "}
+        <select className="font-mono text-fg" value={key(to)} onChange={(e) => pick(e.target.value)}>
+          {[...Map.groupBy(choices, (m) => m.harness)].map(([harness, group]) => (
+            // A busy thread keeps its harness until the turn ends.
+            <optgroup key={harness} label={harness} disabled={thread.busy && harness !== thread.route.harness}>
+              {group.map((m) => (
+                <option key={key(m)} value={key(m)}>
+                  {m.model} · {m.access ?? "not in the catalog"}
+                  {key(m) === current ? " (current)" : ""}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
-      </label>
-      <label className="flex flex-col gap-1 font-medium text-muted">
-        Model{" "}
-        <input
-          required
-          className="font-mono text-fg"
-          list={`${id}-models`}
-          value={draft.model}
-          onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-        />
-        <datalist id={`${id}-models`}>
-          {[...models].map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
       </label>
       <label className="flex flex-col gap-1 font-medium text-muted">
         Effort{" "}
         <select
           className="text-fg"
-          value={draft.effort}
-          onChange={(e) => setDraft({ ...draft, effort: e.target.value as Route["effort"] })}
+          value={to.effort}
+          disabled={efforts.length === 0}
+          aria-describedby={efforts.length === 0 ? `${id}-no-effort` : undefined}
+          onChange={(e) => setEdits({ ...edits, effort: e.target.value as Route["effort"] })}
         >
-          {Effort.literals.map((level) => (
+          {(efforts.length > 0 ? efforts : [to.effort]).map((level) => (
             <option key={level} value={level}>
               {level}
             </option>
           ))}
         </select>
       </label>
+      {efforts.length === 0 && (
+        <p id={`${id}-no-effort`} className="basis-full text-muted">
+          {to.model} takes no effort level.
+        </p>
+      )}
       <p className="basis-full leading-relaxed text-muted">
         {thread.busy ? "Applies from the next turn. Change the harness when this one finishes." : "Applies from the next turn."}{" "}
         {thread.pinned ? "The router won't pick until you let it again." : "Picking a route pins it: the router stops picking."}
@@ -212,7 +221,7 @@ const RouteForm = ({ connection, thread, close }: { connection: Connection; thre
             Let the router pick
           </button>
         )}
-        <button type="submit" disabled={sending || !pins || !to.model} aria-describedby={cost ? `${id}-cost` : undefined}>
+        <button type="submit" disabled={sending || !pins || !selected} aria-describedby={cost ? `${id}-cost` : undefined}>
           {changed ? "Change route" : "Pin this route"}
         </button>
       </div>

@@ -749,6 +749,17 @@ describe("rpc server", () => {
     expect(unknown.message).toContain("Use one of @fake-small, @fake, @fake-large.");
   });
 
+  test("ModelsList gives each running harness's catalog models with the effort levels each takes", async () => {
+    const { info } = await startServer();
+    const models = await withClient(info.port, info.token, (c) => c.ModelsList());
+    const all = ["low", "medium", "high", "xhigh", "max"] as const;
+    expect(models).toEqual([
+      { harness: "fake", provider: "fake", model: "fake-small", access: "local", efforts: all },
+      { harness: "fake", provider: "fake", model: "fake", access: "local", efforts: all },
+      { harness: "fake", provider: "fake", model: "fake-large", access: "local", efforts: all },
+    ]);
+  });
+
   test("thread.create resolves the folder, so two spellings of one folder are one project", async () => {
     const { info, runtime } = await startServer();
     const other = makeTempHome();
