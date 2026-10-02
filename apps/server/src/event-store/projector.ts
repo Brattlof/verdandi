@@ -216,6 +216,8 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         sql`update threads set revert = json_set(revert, '$.saved', ${e.saved ?? null}, '$.filesError', ${e.error ?? null})
             where id = ${e.threadId} and revert is not null`,
     ),
+  // Git holds checkpoints (ADR 0015); the event only records what the cleanup policy removed.
+  "thread.checkpoints.removed": () => Effect.void,
   // The main agent's replies are searchable; tool output and subagents' steps aren't (ADR 0006).
   "turn.item.added": (e, at) =>
     Effect.andThen(

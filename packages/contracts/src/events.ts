@@ -310,7 +310,7 @@ export const ThreadWorktreeSetupRan = Schema.Struct({
   threadId: ThreadId,
   ...VerifierRun.fields,
 });
-/** The user asked to remove the thread's worktree, or archived the thread. `force` removes it even with uncommitted changes. */
+/** The user asked to remove the thread's worktree, or archived the thread, or the cleanup policy did (ADR 0021). `force` removes it even with uncommitted changes. */
 export const ThreadWorktreeRemovalRequested = Schema.Struct({
   type: Schema.Literal("thread.worktree.removal.requested"),
   v: v1,
@@ -352,6 +352,16 @@ export const ThreadFilesRestored = Schema.Struct({
   from: Schema.String,
   saved: Schema.optionalKey(Schema.String),
   error: Schema.optionalKey(Schema.String),
+});
+/**
+ * The cleanup policy removed these checkpoint and revert refs of the thread (ADR 0021): the diffs of their turns,
+ * reverts to them and undoing a revert they saved no longer work.
+ */
+export const ThreadCheckpointsRemoved = Schema.Struct({
+  type: Schema.Literal("thread.checkpoints.removed"),
+  v: v1,
+  threadId: ThreadId,
+  refs: Schema.Array(Schema.String),
 });
 /**
  * The agent of turn `turnId` said it can't finish task `taskId` as asked (`report_blocked`, DESIGN §8.7), for
@@ -454,6 +464,7 @@ export const Event = Schema.Union([
   ThreadReverted,
   ThreadRevertUndone,
   ThreadFilesRestored,
+  ThreadCheckpointsRemoved,
   TaskBlocked,
   MemorySaved,
   MemoryEdited,
@@ -521,6 +532,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.reverted@1": ThreadReverted,
   "thread.revert.undone@1": ThreadRevertUndone,
   "thread.files.restored@1": ThreadFilesRestored,
+  "thread.checkpoints.removed@1": ThreadCheckpointsRemoved,
   "task.blocked@1": TaskBlocked,
   "memory.saved@1": MemorySaved,
   "memory.edited@1": MemoryEdited,

@@ -3,6 +3,7 @@ import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { AttachmentRef } from "./attachments.ts";
 import { ClientCommand } from "./commands.ts";
 import { ApprovalRequested, PlanRequested, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
+import { GcReport, GcUnavailable } from "./gc.ts";
 import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { AccessMode, Item, Quota, Usage } from "./items.ts";
 import { MemoryView } from "./memory.ts";
@@ -323,6 +324,8 @@ export class Api extends RpcGroup.make(
    * under 3 characters matches nothing.
    */
   Rpc.make("SessionSearch", { payload: SessionQuery, success: Schema.Array(SessionHit) }),
+  /** Runs the cleanup policy now (ADR 0021): with `dryRun`, only says what it would remove. */
+  Rpc.make("Gc", { payload: { dryRun: Schema.Boolean }, success: GcReport, error: GcUnavailable }),
   /** Starts a shell in a PTY, in the folder the thread runs in. It runs until closed, a page reload included. */
   Rpc.make("TerminalOpen", { payload: { threadId: ThreadId, ...TerminalSize }, success: TerminalView, error: TerminalUnavailable }),
   /** The thread's terminals, oldest first, so a reloaded page can reattach to them. */

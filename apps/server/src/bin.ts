@@ -5,6 +5,7 @@ import { doctor } from "./cli/doctor.ts";
 import { open } from "./cli/open.ts";
 import { run } from "./cli/run.ts";
 import { decisions } from "./decisions/decisions-cli.ts";
+import { gc } from "./gc/gc-cli.ts";
 import { requireBun } from "./home/bun-version.ts";
 import { start } from "./main.ts";
 import { routing } from "./routing/routing-cli.ts";
@@ -15,7 +16,8 @@ import { trajectories } from "./tasks/trajectories-cli.ts";
 const usage = `Usage:
   verdandi start [--home <dir>] [--port <n>] [--host <ip>]   run verdandid in the foreground; --host 0.0.0.0 (or this machine's LAN address) also opens it to your local network on --port, never to the internet
   verdandi open  [--home <dir>]                   open the web UI in your browser
-  verdandi doctor [--home <dir>]                  check the setup: Bun, Claude Code, git, the home, the database and verdandid
+  verdandi doctor [--home <dir>]                  check the setup: Bun, Claude Code, git, the home, the database, what the next cleanup sweep removes, and verdandid
+  verdandi gc [--dry-run] [--home <dir>]          run the cleanup policy in gc.yaml now: remove old checkpoints and the worktrees of threads archived long ago (never one with uncommitted changes); --dry-run only lists them
   verdandi chat  [--home <dir>] [--harness <h>] [--model <m>] [--effort <e> | --auto] [--budget thrifty|balanced|max|policy] [--raise-cap] [--thread <id>]   chat with the thread for this folder, or the one named; route flags pin a route, --auto lets the router pick, --budget sets how it trades cost for strength, --raise-cap raises each reached spend cap for the rest of its period
   verdandi chat  --list [--archived] [--home <dir>]  list every thread by project; --archived includes archived ones
   verdandi chat  --archive <thread> | --unarchive <thread> [--home <dir>]   put a thread away, or bring it back
@@ -40,6 +42,7 @@ const commands: Record<string, (argv: readonly string[]) => Promise<void>> = {
   batch,
   search,
   trajectories,
+  gc,
 };
 
 const [name, ...argv] = Bun.argv.slice(2);

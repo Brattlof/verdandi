@@ -189,6 +189,14 @@ export const FilesReport = Schema.Struct({
   error: Schema.optionalKey(Schema.String),
 });
 
+/** Internal: the cleanup sweep reporting the thread's checkpoint and revert refs it removed (ADR 0021). Clients cannot send it. */
+export const CheckpointsReport = Schema.Struct({
+  type: Schema.Literal("checkpoints.report"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  refs: Schema.Array(Schema.String),
+});
+
 /** Internal: the agent of running turn `turnId` called `report_blocked`. Clients cannot send it. */
 export const TaskBlock = Schema.Struct({
   type: Schema.Literal("task.block"),
@@ -318,6 +326,7 @@ export const Command = Schema.Union([
   ApprovalRespond,
   HarnessReport,
   FilesReport,
+  CheckpointsReport,
   TaskBlock,
   WorktreeReported,
   VerifierReport,

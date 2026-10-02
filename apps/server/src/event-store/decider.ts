@@ -509,6 +509,8 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
           ...(c.error === undefined ? {} : { error: c.error }),
         })
       : accept(),
+  "checkpoints.report": (state, c) =>
+    state.thread && c.refs.length > 0 ? accept({ type: "thread.checkpoints.removed", v: 1, threadId: c.threadId, refs: c.refs }) : accept(),
   "worktree.report": (state, c) => {
     if (!state.thread) return accept();
     const { report } = c;
