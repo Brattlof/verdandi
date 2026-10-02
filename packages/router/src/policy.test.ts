@@ -26,7 +26,13 @@ test("a project names its verifiers under escalation", () => {
   ]);
 });
 
+test("the same tool error escalates after 3 repeats unless a project sets escalation.repeatedErrors, 0 for never", () => {
+  expect(loadPolicy().escalation.repeatedErrors).toBe(3);
+  expect(loadPolicy([project("escalation: { repeatedErrors: 0 }\n")]).escalation.repeatedErrors).toBe(0);
+});
+
 test.each([
+  ["escalation: { repeatedErrors: -1 }\n", /\.verdandi\/routing\.yaml: [\s\S]*\["escalation"\]\["repeatedErrors"\]/],
   ["escalation:\n  verifier: [bun test]\n", /\.verdandi\/routing\.yaml: [\s\S]*\["escalation"\]\["verifier"\]/],
   ["routes:\n  review: { effort: extreme }\n", /\.verdandi\/routing\.yaml: [\s\S]*\["routes"\]\["review"\]\["effort"\]/],
   ["routes:\n  code.magic: { effort: low }\n", /\.verdandi\/routing\.yaml: [\s\S]*\["routes"\]\["code\.magic"\]/],

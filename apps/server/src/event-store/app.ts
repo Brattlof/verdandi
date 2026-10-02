@@ -7,7 +7,7 @@ import { catalogFor, routingFor } from "../routing/routing.ts";
 import { loadSpendCaps } from "../spend/spend-caps.ts";
 import { SqlLive } from "./db.ts";
 import { EngineLive, type Projector } from "./engine.ts";
-import { AttachmentsDir, HarnessRegistry, ProjectVerifiers, ReactorLive, ToolSettings, WorktreesDir } from "./reactor.ts";
+import { AttachmentsDir, HarnessRegistry, ProjectEscalation, ReactorLive, ToolSettings, WorktreesDir } from "./reactor.ts";
 
 /** verdandid's core: database, engine and reactor, with the given harness adapters, which new tasks are routed over. */
 export const AppLayer = (
@@ -24,18 +24,24 @@ export const AppLayer = (
   } = {},
 ) => {
   const routing = routingFor(harnesses);
-  // A broken policy runs no verifiers; it already rejects the next routed turn, naming the file and key.
-  const verifiers = (projectPath: string) =>
+  // A broken policy runs no verifiers and counts no repeated errors; it already rejects the next routed turn, naming the file and key.
+  const escalation = (projectPath: string) =>
     Effect.flatMap(routing(projectPath), ({ policy }) =>
       Result.isSuccess(policy)
-        ? Effect.succeed(policy.success.verifiers.length > 0 ? policy.success.verifiers : (options.defaultVerifiers?.(projectPath) ?? []))
-        : Effect.as(Effect.logWarning(`Skipped the project's verifiers: ${policy.failure}`), []),
+        ? Effect.succeed({
+            verifiers: policy.success.verifiers.length > 0 ? policy.success.verifiers : (options.defaultVerifiers?.(projectPath) ?? []),
+            repeatedErrors: policy.success.escalation.repeatedErrors,
+          })
+        : Effect.as(Effect.logWarning(`Skipped the project's verifiers and repeated errors: ${policy.failure}`), {
+            verifiers: [],
+            repeatedErrors: 0,
+          }),
     );
   return ReactorLive.pipe(
     Layer.provideMerge(
       EngineLive({ ...options, routing, catalog: catalogFor(harnesses), spendCaps: loadSpendCaps(options.spendCapsHome ?? home) }),
     ),
-    Layer.provideMerge(Layer.succeed(ProjectVerifiers, verifiers)),
+    Layer.provideMerge(Layer.succeed(ProjectEscalation, escalation)),
     // Stopping closes the sessions harnesses keep warm between turns, so no harness process outlives verdandid.
     Layer.provideMerge(
       Layer.effect(

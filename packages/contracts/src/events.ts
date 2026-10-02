@@ -280,10 +280,10 @@ const TaskEscalatedV1 = Schema.Struct({
   reason: Schema.String,
 });
 /**
- * `trigger` fired after turn `turnId` of routed task `taskId` (a verifier failed, or the agent reported it is blocked),
- * and Verdandi took one step of the escalation ladder (DESIGN §8.7). At `effort` and `model` the task goes on at `to`
- * with the turn `nextTurnId`, committed right after this, which hands the agent the failure or its own report; at
- * `ask` it stops and the user decides. Projected as an `escalation` item of `turnId`.
+ * `trigger` fired after turn `turnId` of routed task `taskId` (a verifier failed, the agent reported it is blocked, or
+ * the same tool error repeated), and Verdandi took one step of the escalation ladder (DESIGN §8.7). At `effort` and
+ * `model` the task goes on at `to` with the turn `nextTurnId`, committed right after this, which hands the agent the
+ * failure, its own report or the repeated error; at `ask` it stops and the user decides. Projected as an `escalation` item of `turnId`.
  */
 export const TaskEscalated = Schema.Struct({
   ...TaskEscalatedV1.fields,

@@ -284,6 +284,9 @@ const runTurn = (server: ServerFile, o: Options) =>
             ? `The verifier ${verifier.command} failed${verifier.exitCode === null ? "" : ` (exit ${verifier.exitCode})`}:\n${tail}`
             : e.error;
       // The reactor asks to escalate after a failed verifier, or else a blocked report, whatever the turn's status.
+      // ponytail: a repeated tool error (`escalation.repeatedErrors`) isn't awaited, since nothing on the turn says one
+      // fired, so run ends here and the escalation's turn goes on in the thread. Upgrade: record the trigger on the turn
+      // before it completes, like `task.blocked`, and wait on it here.
       if ((verifierFailed || blocked) && !pinned && !taskPinned) awaiting = { status, error };
       else return yield* finish(status, error);
     }
