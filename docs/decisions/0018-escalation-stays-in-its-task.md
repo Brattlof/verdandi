@@ -26,4 +26,4 @@ Two things decide what an escalation step is:
 - An escalation is one more turn in the thread, labelled as Verdandi's, and the route chip shows the new route. The user can still move the task's route themselves, which counts as an override as before.
 - The effort step pays the cache re-read on Claude Code that ADR 0002 measured, which a task that is failing anyway is worth paying.
 - Every model takes every effort level in the ladder until the catalog lists effort levels per model.
-- Other triggers (the same error repeating, a rejected diff or revert, `report_blocked`) and de-escalation aren't built. They need checkpoints and Verdandi's tools over MCP (#74, #76).
+- The agent calling `report_blocked` escalates the same way, handing it its own report as data (#124). Other triggers (the same error repeating, a rejected diff or revert) and de-escalation aren't built.

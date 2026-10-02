@@ -32,9 +32,10 @@ const flakyOnce = `const fs = require("fs"); if (fs.existsSync("fixed")) process
 
 /**
  * A project whose policy routes every task to the fake model at medium effort (`minConfidence: 1` sends all to
- * `fallback`), with `verifier`, and a thread on it: routed unless `pin` is given.
+ * `fallback`), with `verifier` if given, and a thread on it, routed unless `pin` is given, whose first turn sends
+ * `text` (by default an edit, so the verifier runs).
  */
-const setup = async (verifier: string, pin?: Route) => {
+const setup = async ({ verifier, pin, text }: { verifier?: string; pin?: Route; text?: string }) => {
   const projectPath = tempDir();
   mkdirSync(join(projectPath, ".verdandi"));
   writeFileSync(join(projectPath, "check.js"), flakyOnce);
@@ -46,7 +47,7 @@ const setup = async (verifier: string, pin?: Route) => {
       "  mid: { harness: fake, provider: fake, model: fake }",
       "  large: { harness: fake, provider: fake, model: fake-large }",
       "fallback: { prefer: [mid], effort: medium }",
-      `escalation: { verifiers: ${JSON.stringify([verifier])} }`,
+      ...(verifier ? [`escalation: { verifiers: ${JSON.stringify([verifier])} }`] : []),
     ].join("\n"),
   );
   const runtime = ManagedRuntime.make(AppLayer(tempDir(), { fake: makeFakeHarness() }));
@@ -58,7 +59,7 @@ const setup = async (verifier: string, pin?: Route) => {
     commandId: id<CommandId>(),
     threadId,
     turnId: id<TurnId>(),
-    text: `edit ${join(projectPath, "a.txt")}`,
+    text: text ?? `edit ${join(projectPath, "a.txt")}`,
     mode: "build",
   });
   // The escalation's follow-up turn starts from the first turn's reactions, so drain until nothing runs.
@@ -81,7 +82,7 @@ const verifiers = (items: readonly Item[] | undefined) =>
   (items ?? []).flatMap((i) => (i.kind === "verifier" ? [i.passed ? "passed" : "failed"] : []));
 
 test("a failing verifier raises the task's effort once, and failing again asks the user", async () => {
-  const { view, outcome } = await setup("exit 1");
+  const { view, outcome } = await setup({ verifier: "exit 1" });
   const [first, second] = view?.turns ?? [];
   expect(view?.turns).toHaveLength(2);
   expect(verifiers(first?.items)).toEqual(["failed"]);
@@ -102,19 +103,57 @@ test("a failing verifier raises the task's effort once, and failing again asks t
   expect(view?.route).toMatchObject({ model: "fake", effort: "high" });
   // The route chip explains the route the task runs on now.
   expect(view?.task?.reason).toBe("`exit 1` failed (exit 1), so the task goes on at high effort, one step up from medium.");
-  expect(outcome).toMatchObject({ status: "failed", escalations: 1, turns: 2, route: { effort: "medium" } });
+  expect(outcome).toMatchObject({
+    status: "failed",
+    escalations: 1,
+    triggers: [
+      { trigger: "verifier", step: "effort" },
+      { trigger: "verifier", step: "ask" },
+    ],
+    turns: 2,
+    route: { effort: "medium" },
+  });
 });
 
 test("an escalation that fixes the task completes it, and routing memory counts it against the route it started on", async () => {
-  const { view, outcome, memory } = await setup(`"${process.execPath}" check.js`);
+  const { view, outcome, memory } = await setup({ verifier: `"${process.execPath}" check.js` });
   expect(view?.turns.map((t) => verifiers(t.items))).toEqual([["failed"], ["passed"]]);
   expect(outcome).toMatchObject({ status: "completed", escalations: 1 });
   expect(memory).toMatchObject([{ route: { model: "fake", effort: "medium" }, tasks: 1, completed: 0, escalated: 1 }]);
 });
 
 test("a pinned thread never escalates: the user picked its route", async () => {
-  const { view, outcome } = await setup("exit 1", { harness: "fake", model: "fake", effort: "medium" });
+  const { view, outcome } = await setup({ verifier: "exit 1", pin: { harness: "fake", model: "fake", effort: "medium" } });
   expect(view?.turns).toHaveLength(1);
   expect(escalations(view?.turns[0]?.items)).toEqual([]);
   expect(outcome).toMatchObject({ status: "failed", escalations: 0 });
+});
+
+const blocked = 'tool report_blocked {"reason":"The spec contradicts itself ``` about rounding"}';
+
+test("an agent that reports it is blocked raises its routed task's effort once, handed its own reason as data", async () => {
+  const { view, outcome } = await setup({ text: blocked });
+  const [first, second] = view?.turns ?? [];
+  expect(view?.turns).toHaveLength(2);
+  expect(first?.items).toContainEqual({ kind: "blocked", reason: "The spec contradicts itself ``` about rounding" });
+  expect(escalations(first?.items)).toMatchObject([
+    {
+      step: "effort",
+      to: { model: "fake", effort: "high" },
+      nextTurnId: second?.turnId,
+      reason: "The agent reported it is blocked, so the task goes on at high effort, one step up from medium.",
+    },
+  ]);
+  // The agent's own reason comes back fenced, in a fence it can't close.
+  expect(second?.text).toContain("````\nThe spec contradicts itself ``` about rounding\n````");
+  expect(escalations(second?.items)).toEqual([]);
+  expect(outcome).toMatchObject({ status: "completed", escalations: 1, triggers: [{ trigger: "blocked", step: "effort" }] });
+});
+
+test("a pinned thread whose agent reports it is blocked only shows that", async () => {
+  const { view, outcome } = await setup({ text: blocked, pin: { harness: "fake", model: "fake", effort: "medium" } });
+  expect(view?.turns).toHaveLength(1);
+  expect(view?.turns[0]?.items).toContainEqual({ kind: "blocked", reason: "The spec contradicts itself ``` about rounding" });
+  expect(escalations(view?.turns[0]?.items)).toEqual([]);
+  expect(outcome).toMatchObject({ escalations: 0, triggers: [] });
 });

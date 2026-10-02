@@ -55,7 +55,7 @@ const events = stored([
 test("an overridden task records its turns, usage by model, running time and the override", () => {
   const [first] = buildTaskOutcomes(events);
   expect(first).toEqual({
-    v: 2,
+    v: 3,
     taskId: u1 as string as TaskId,
     threadId,
     route: sonnet,
@@ -66,6 +66,7 @@ test("an overridden task records its turns, usage by model, running time and the
     userOverride: { from: sonnet, to: opus },
     verifierRuns: [],
     escalations: 0,
+    triggers: [],
     usage: [
       { model: "sonnet", accessMode: "metered", inputTokens: 20, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.5 },
       { model: "haiku", accessMode: "metered", inputTokens: 10, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0.5 },

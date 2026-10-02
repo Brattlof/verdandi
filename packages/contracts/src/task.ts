@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { TaskId, ThreadId } from "./ids.ts";
 import { Usage } from "./items.ts";
 import { Route } from "./route.ts";
+import { EscalationStep, EscalationTrigger } from "./routing.ts";
 
 // Persisted: like events, a published version is never edited. A change is a v2 plus an upgrade on read.
 
@@ -36,15 +37,22 @@ const TaskOutcomeV1 = Schema.Struct({
   /** Time the task's turns ran, summed; the user's time between turns doesn't count. */
   wallMs: Schema.Number,
 });
+/** v2 reads as v3 without `triggers`. */
+const TaskOutcomeV2 = Schema.Struct({
+  ...TaskOutcomeV1.fields,
+  v: Schema.Literal(2),
+  /** The user's latest rating of the task; absent when there's none, or it was cleared. */
+  rating: Schema.optionalKey(TaskRating),
+});
 /**
  * How a task went, for routing memory and the lab (DESIGN §8.8). Rewritten after each of its turns and each
  * rating; its turns are final once the next task starts.
  */
 export const TaskOutcome = Schema.Struct({
-  ...TaskOutcomeV1.fields,
-  v: Schema.Literal(2),
-  /** The user's latest rating of the task; absent when there's none, or it was cleared. */
-  rating: Schema.optionalKey(TaskRating),
+  ...TaskOutcomeV2.fields,
+  v: Schema.Literal(3),
+  /** Each escalation trigger that fired on the task, in order, and the ladder step it took; `escalations` counts those that moved it. */
+  triggers: Schema.Array(Schema.Struct({ trigger: EscalationTrigger, step: EscalationStep })),
 });
 export type TaskOutcome = typeof TaskOutcome.Type;
 

@@ -6,7 +6,7 @@ import { Item, Quota, UsageFields, VerifierRun } from "./items.ts";
 import { MemoryScope } from "./memory.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
-import { BudgetMode, EscalationStep, RouteDecision, RouteInputs } from "./routing.ts";
+import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInputs } from "./routing.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 import { TaskRating } from "./task.ts";
 
@@ -256,12 +256,8 @@ export const VerifierRan = Schema.Struct({
   turnId: TurnId,
   ...VerifierRun.fields,
 });
-/**
- * A verifier failed after turn `turnId` of routed task `taskId`, and Verdandi took one step of the escalation ladder
- * (DESIGN §8.7). At `effort` and `model` the task goes on at `to` with the turn `nextTurnId`, committed right after
- * this, which hands the agent the failure; at `ask` it stops and the user decides. Projected as an `escalation` item of `turnId`.
- */
-export const TaskEscalated = Schema.Struct({
+/** v1 escalations all came from a failed verifier: it reads as v2 with that `trigger`. */
+const TaskEscalatedV1 = Schema.Struct({
   type: Schema.Literal("task.escalated"),
   v: v1,
   threadId: ThreadId,
@@ -272,6 +268,17 @@ export const TaskEscalated = Schema.Struct({
   to: Schema.optionalKey(Route),
   nextTurnId: Schema.optionalKey(TurnId),
   reason: Schema.String,
+});
+/**
+ * `trigger` fired after turn `turnId` of routed task `taskId` (a verifier failed, or the agent reported it is blocked),
+ * and Verdandi took one step of the escalation ladder (DESIGN §8.7). At `effort` and `model` the task goes on at `to`
+ * with the turn `nextTurnId`, committed right after this, which hands the agent the failure or its own report; at
+ * `ask` it stops and the user decides. Projected as an `escalation` item of `turnId`.
+ */
+export const TaskEscalated = Schema.Struct({
+  ...TaskEscalatedV1.fields,
+  v: Schema.Literal(2),
+  trigger: EscalationTrigger,
 });
 /** The thread asked for a worktree on `branch`: the reactor adds it, and the thread's next turn waits until it has. */
 export const ThreadWorktreeRequested = Schema.Struct({
@@ -472,6 +479,11 @@ const upgrades: Record<string, (payload: string) => Effect.Effect<Event, Schema.
     Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TaskStartedV1))(payload), (e): Event => ({ ...e, v: 2 })),
   "turn.started@1": (payload) =>
     Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TurnStartedV1))(payload), (e): Event => ({ ...e, v: 2 })),
+  "task.escalated@1": (payload) =>
+    Effect.map(
+      Schema.decodeUnknownEffect(Schema.fromJsonString(TaskEscalatedV1))(payload),
+      (e): Event => ({ ...e, v: 2, trigger: "verifier" }),
+    ),
 };
 
 const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
@@ -499,7 +511,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "decision.recorded@1": DecisionRecorded,
   "spend.cap.raised@1": SpendCapRaised,
   "verifier.ran@1": VerifierRan,
-  "task.escalated@1": TaskEscalated,
+  "task.escalated@2": TaskEscalated,
   "thread.worktree.requested@1": ThreadWorktreeRequested,
   "thread.worktree.created@1": ThreadWorktreeCreated,
   "thread.worktree.failed@1": ThreadWorktreeFailed,

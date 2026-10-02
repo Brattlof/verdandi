@@ -279,16 +279,24 @@ export const ReactorLive = Layer.effect(
                     ? yield* verify(threadId, turnId, thread.path, cwd)
                     : undefined;
                 yield* report(threadId, turnId, event);
-                // Once the turn has completed, a failed verifier may escalate its task (DESIGN §8.7); the decider decides whether.
-                if (failed) {
-                  const nextTurnId = randomUUID() as TurnId;
+                // Once the turn has completed, a failed verifier, or else the agent having reported it's blocked, may
+                // escalate its task (DESIGN §8.7); the decider decides whether.
+                const [blocked] = failed
+                  ? []
+                  : yield* sql<{ reason: string }>`
+                      select json_extract(payload, '$.reason') as reason from items
+                      where turn_id = ${turnId} and json_extract(payload, '$.kind') = 'blocked' order by idx desc limit 1`;
+                const trigger = failed
+                  ? ({ kind: "verifier", run: failed } as const)
+                  : blocked && ({ kind: "blocked", reason: blocked.reason } as const);
+                if (trigger) {
                   yield* engine.dispatch({
                     type: "task.escalate",
                     commandId: randomUUID() as CommandId,
                     threadId,
                     turnId,
-                    nextTurnId,
-                    run: failed,
+                    nextTurnId: randomUUID() as TurnId,
+                    trigger,
                   });
                 }
               });
@@ -416,8 +424,9 @@ export const ReactorLive = Layer.effect(
       // Queued like turns: a turn sent while its worktree is being added waits for it.
       if (e.type === "thread.worktree.requested") return enqueue(e.threadId, createWorktree(e.threadId));
       if (e.type === "thread.worktree.removal.requested") return enqueue(e.threadId, dropWorktree(e.threadId, e.force));
-      // A route change is an override of the running task, and ends it. A rating changes its task's outcome.
-      if (e.type === "thread.route.changed" || e.type === "task.rated")
+      // A route change is an override of the running task, and ends it. A rating, or an escalation, which commits after
+      // its turn completed, changes its task's outcome.
+      if (e.type === "thread.route.changed" || e.type === "task.rated" || e.type === "task.escalated")
         return FiberSet.run(turns, recordOutcomes(e.threadId)).pipe(Effect.asVoid);
       // Queued like turns, so the next turn starts on the restored files. A revert changes its tasks' outcomes.
       if (e.type === "thread.reverted" || e.type === "thread.revert.undone") {
