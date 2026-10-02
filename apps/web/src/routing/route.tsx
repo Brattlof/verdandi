@@ -267,9 +267,11 @@ export const RouteMarkers = ({ changes }: { changes: readonly RouteChange[] | un
     // biome-ignore lint/suspicious/noArrayIndexKey: route changes only ever append, so the index is stable.
     <p key={i} className={marker}>
       <span className="max-w-[80%] text-center">
-        {describeRouteChange(c.from, c.to)
-          ? `Route changed by you: ${describeRouteChange(c.from, c.to)}`
-          : `Route pinned by you: ${c.to.model} · ${c.to.effort}`}{" "}
+        {c.by === "router"
+          ? `Route changed by the router: ${describeRouteChange(c.from, c.to)}. ${c.reason ?? ""}`
+          : describeRouteChange(c.from, c.to)
+            ? `Route changed by you: ${describeRouteChange(c.from, c.to)}`
+            : `Route pinned by you: ${c.to.model} · ${c.to.effort}`}{" "}
         · <time dateTime={c.at}>{new Date(c.at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</time>
       </span>
     </p>

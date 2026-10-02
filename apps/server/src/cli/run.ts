@@ -212,7 +212,7 @@ const runTurn = (server: ServerFile, o: Options) =>
         route = e.route;
         taskPinned = e.decision?.source === "pin";
       }
-      if (e.type === "task.rerouted") route = e.to;
+      if (e.type === "task.rerouted" || e.type === "task.deescalated") route = e.to;
       if (e.type === "thread.route.changed") pinned = true;
       if (e.type === "thread.route.unpinned") pinned = false;
       if (e.type === "task.escalated" && e.turnId === current) {

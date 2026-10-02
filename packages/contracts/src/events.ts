@@ -290,6 +290,22 @@ export const TaskEscalated = Schema.Struct({
   v: Schema.Literal(2),
   trigger: EscalationTrigger,
 });
+/**
+ * Routed task `taskId`'s last turn passed its verifiers, and the turn `turnId` that goes on with it looks like mechanical
+ * work, so the router moved the rest of the task to the cheaper `to` through the switch-cost gate (DESIGN §8.7). It stays
+ * one task, on the same harness and session. Committed right before that turn's `turn.started`; projected as a route change
+ * by the router, between the turns.
+ */
+export const TaskDeescalated = Schema.Struct({
+  type: Schema.Literal("task.deescalated"),
+  v: v1,
+  threadId: ThreadId,
+  taskId: TaskId,
+  turnId: TurnId,
+  from: Route,
+  to: Route,
+  decision: RouteDecision,
+});
 /** The thread asked for a worktree on `branch`: the reactor adds it, and the thread's next turn waits until it has. */
 export const ThreadWorktreeRequested = Schema.Struct({
   type: Schema.Literal("thread.worktree.requested"),
@@ -466,6 +482,7 @@ export const Event = Schema.Union([
   VerifiersStarted,
   VerifierRan,
   TaskEscalated,
+  TaskDeescalated,
   ThreadWorktreeRequested,
   ThreadWorktreeCreated,
   ThreadWorktreeFailed,
@@ -535,6 +552,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "verifiers.started@1": VerifiersStarted,
   "verifier.ran@1": VerifierRan,
   "task.escalated@2": TaskEscalated,
+  "task.deescalated@1": TaskDeescalated,
   "thread.worktree.requested@1": ThreadWorktreeRequested,
   "thread.worktree.created@1": ThreadWorktreeCreated,
   "thread.worktree.failed@1": ThreadWorktreeFailed,

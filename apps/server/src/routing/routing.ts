@@ -17,6 +17,7 @@ import {
 import { classificationOf, followUpRules, makeDecide, routingQuestions, routingRules, rulesBackend } from "@verdandi/decisions";
 import {
   builtInCatalog,
+  deescalate,
   type Escalation,
   escalate,
   loadPolicy,
@@ -236,6 +237,42 @@ export const decideRoute = (
       reason: "NoRoute",
       message: `${e.message} Pick a route for this thread, or add an available target to .verdandi/routing.yaml.`,
     });
+  }
+};
+
+/**
+ * Pure: where the rest of routed task `task` moves when its last turn passed its verifiers and the next one, `text`
+ * classified by the decision layer's `answers`, is mechanical work (DESIGN §8.7): a cheaper model on the same harness,
+ * through the switch-cost gate. Undefined when the route stays: the thread or task is pinned, the policy is broken, the
+ * turn isn't mechanical, the gate keeps the warm session, or no target is left.
+ */
+export const decideDeescalation = (
+  thread: RoutingThread,
+  routing: RoutingContext,
+  task: RouteDecision | null,
+  text: string,
+  answers: readonly DecisionAnswer[],
+): RouteDecision | undefined => {
+  const classification = classificationOf(answers);
+  if (thread.pinned || task?.source === "pin" || !classification || Result.isFailure(routing.policy)) return undefined;
+  const policy = thread.budgetMode ? { ...routing.policy.success, mode: thread.budgetMode } : routing.policy.success;
+  const target = targetOf(thread.route, policy.catalog);
+  // Without a session there's no cached context to move.
+  const cachedTokens = thread.sessionId === null ? 0 : thread.cachedTokens;
+  try {
+    const decision = deescalate(
+      {
+        text,
+        current: { target, effort: thread.route.effort, cachedTokens, ...warmSubagents(thread) },
+        ...(routing.capped ? { capped: routing.capped } : {}),
+      },
+      policy,
+      () => classification,
+    );
+    return decision && describeRouteChange(thread.route, routeOf(decision)) !== "" ? decision : undefined;
+  } catch (e) {
+    if (e instanceof RouterError) return undefined;
+    throw e;
   }
 };
 

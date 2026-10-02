@@ -147,6 +147,16 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     ...addItem(thread, turnId, { kind: "escalation", step, from, ...(to && { to }), ...(nextTurnId && { nextTurnId }), reason }),
     ...(to && { route: to, task: thread.task && { ...thread.task, reason } }),
   }),
+  // The rest of the task moves to a cheaper model from the turn committed next, shown between the turns like a route change.
+  "task.deescalated": (thread, e, at) => ({
+    ...thread,
+    route: e.to,
+    task: thread.task && { ...thread.task, reason: e.decision.reason },
+    routeChanges: [
+      ...thread.routeChanges,
+      { from: e.from, to: e.to, by: "router", reason: e.decision.reason, at, afterTurns: thread.turns.length },
+    ],
+  }),
   "thread.reverted": (thread, e) => ({
     ...setReverted(thread, e.turnIds, true),
     task: null,

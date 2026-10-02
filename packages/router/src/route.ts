@@ -44,6 +44,12 @@ export type RouteInput = {
    * plan, and the classifier should return the task's own class, so the class's route without its `plan` override applies.
    */
   readonly planApproved?: boolean;
+  /**
+   * The task's last turn passed its verifiers, and this turn goes on with it: route the rest of the task (DESIGN §8.7
+   * de-escalation). It moves only to a less capable model than `current`'s, and only through the switch-cost gate;
+   * otherwise it stays on `current`, effort included. Needs `current`.
+   */
+  readonly verified?: boolean;
   /** How many images are attached: only targets that read images stay candidates. */
   readonly images?: number;
   /** The project's routing memory (DESIGN §8.8): how its tasks went, per class and route. Pins ignore it. */
@@ -276,7 +282,9 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
     ? `Not sure what kind of task this is (best guess ${c.taskClass}, confidence ${c.confidence.toFixed(2)})`
     : input.planApproved
       ? `The plan for this ${c.taskClass} task is approved`
-      : `Looks like ${c.taskClass}${planning ? " in plan mode" : ""}`;
+      : input.verified
+        ? `The verifiers passed and what's left looks like ${c.taskClass}`
+        : `Looks like ${c.taskClass}${planning ? " in plan mode" : ""}`;
   // Named only when it moved the route off the balanced one, so the reason says why a task ran cheaper or stronger.
   const balanced = resolveSpec(rule, "balanced", planning);
   const byMode = balanced.effort !== spec.effort || balanced.prefer?.join() !== spec.prefer?.join() ? `in ${policy.mode} mode ` : "";
@@ -298,7 +306,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   // Stage 4, continued: routing memory. How this project's tasks of the class went on the policy's route
   // can move it: to where the user kept moving them, or else one tier up from where they kept failing.
   const memory =
-    unsure || input.planApproved
+    unsure || input.planApproved || input.verified
       ? undefined
       : input.memory?.find(
           (s) =>
@@ -353,6 +361,13 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   // Stage 5: switch-cost gate. Leave a warm session only for a more capable target, or when the savings beat re-reading the cached context.
   const current = input.current;
   const currentEntry = current && policy.catalog.find((e) => same(e, current.target));
+  // A de-escalation only moves down a tier: up is escalation's job, and an effort change alone rewrites the cache (ADR 0002).
+  if (input.verified && current && currentEntry && rank(pick.tier) >= rank(currentEntry.tier)) {
+    trace.push({ stage: "switch", note: `stay: ${describe(pick, effort)} is no cheaper model than the task's ${currentEntry.model}` });
+    reason = `${lead}, but no cheaper model takes it, so it stays on ${describe(currentEntry, current.effort)}.`;
+    pick = currentEntry;
+    effort = current.effort;
+  }
   let target: CatalogEntry = pick;
   let switchCost = 0;
   if (current && currentEntry && !same(currentEntry, pick)) {
@@ -368,6 +383,8 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
         note: `switch: saves ${dollars(savings)}, more than the ${dollars(moveCost)} to move ${kTokens(cachedTokens)} of context`,
       });
     else {
+      // A de-escalation that doesn't pay leaves the task as it was.
+      if (input.verified) effort = current.effort;
       trace.push({
         stage: "switch",
         note: `stay: saves ${dollars(savings)}, less than the ${dollars(moveCost)} to move ${kTokens(cachedTokens)} of context`,

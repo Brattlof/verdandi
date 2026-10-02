@@ -11,6 +11,7 @@ import type {
   Quota,
   QuotaView,
   Route,
+  RouteChange,
   RouteDecision,
   SessionHit,
   StoredEvent,
@@ -287,6 +288,18 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         reason: e.reason,
       }),
     ),
+  // The task goes on at `to` from the turn committed next, on the same harness and session, and stays routed. Shown between
+  // the turns like the user's route changes; the route chip explains the route it runs on now, and the decision stays as routed.
+  "task.deescalated": (e, at, seq) =>
+    withSql((sql) =>
+      Effect.all([
+        sql`update threads set route = ${JSON.stringify(e.to)} where id = ${e.threadId}`,
+        sql`update route_decisions set reason = ${e.decision.reason} where task_id = ${e.taskId}`,
+        sql`insert into route_changes (seq, thread_id, from_route, to_route, by, after_turns, at, reason)
+            values (${seq}, ${e.threadId}, ${JSON.stringify(e.from)}, ${JSON.stringify(e.to)}, 'router',
+              (select count(*) from turns where thread_id = ${e.threadId}), ${at}, ${e.decision.reason})`,
+      ]),
+    ),
   "thread.worktree.requested": projectWorktree,
   "thread.worktree.created": projectWorktree,
   "thread.worktree.failed": projectWorktree,
@@ -362,6 +375,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         turns: number;
         last_turn_id: TurnId | null;
         task_escalations: number;
+        last_turn_verified: number;
         task_decision: string | null;
         task_mode: string | null;
         cached_tokens: number;
@@ -377,6 +391,12 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           (select count(*) from turns n where n.thread_id = t.id) as turns,
           (select id from turns n where n.thread_id = t.id order by started_at desc, rowid desc limit 1) as last_turn_id,
           coalesce((select escalations from tasks where id = t.task_id), 0) as task_escalations,
+          -- The latest turn succeeded, and ran verifiers that all passed.
+          coalesce((select n.status = 'success'
+              and exists (select 1 from items i where i.turn_id = n.id and json_extract(i.payload, '$.kind') = 'verifier')
+              and not exists (select 1 from items i where i.turn_id = n.id and json_extract(i.payload, '$.kind') = 'verifier'
+                and not json_extract(i.payload, '$.passed'))
+            from turns n where n.thread_id = t.id order by n.started_at desc, n.rowid desc limit 1), 0) as last_turn_verified,
           (select payload from route_decisions where task_id = t.task_id) as task_decision,
           (select mode from turns where id = t.task_id) as task_mode,
           -- ponytail: the context a warm session has cached, read as every token the thread wrote to cache. Harnesses
@@ -413,6 +433,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           turns: row.turns,
           lastTurnId: row.last_turn_id,
           taskEscalations: row.task_escalations,
+          lastTurnVerified: row.last_turn_verified === 1,
           pinned: row.pinned === 1,
           archived: row.archived === 1,
           worktree: row.worktree === null ? null : (JSON.parse(row.worktree) as WorktreeView),
@@ -482,8 +503,15 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
       const usageByTurn = Map.groupBy(usage, (u) => u.turn_id);
       const pending = yield* sql<{ payload: string }>`
         select payload from requests where thread_id = ${threadId} and resolution is null order by requested_at, rowid`;
-      const routeChanges = yield* sql<{ from_route: string; to_route: string; by: "user"; after_turns: number; at: string }>`
-        select from_route, to_route, by, after_turns, at from route_changes where thread_id = ${threadId} order by seq`;
+      const routeChanges = yield* sql<{
+        from_route: string;
+        to_route: string;
+        by: RouteChange["by"];
+        after_turns: number;
+        at: string;
+        reason: string | null;
+      }>`
+        select from_route, to_route, by, after_turns, at, reason from route_changes where thread_id = ${threadId} order by seq`;
       return {
         threadId,
         projectPath: thread.path,
@@ -531,6 +559,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
           by: r.by,
           at: r.at,
           afterTurns: r.after_turns,
+          ...(r.reason === null ? {} : { reason: r.reason }),
         })),
         pendingRequests: pending.map((r) => JSON.parse(r.payload) as ThreadView["pendingRequests"][number]),
       };

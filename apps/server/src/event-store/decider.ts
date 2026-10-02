@@ -33,6 +33,7 @@ import { Result } from "effect";
 import { worktreeBranch } from "../checkpoints/refs.ts";
 import { memorySnapshot, overCap, sameAs, scanMemory } from "../memory/memory.ts";
 import {
+  decideDeescalation,
   decideEscalation,
   decideExecuteRoute,
   decideRoute,
@@ -85,6 +86,8 @@ export type DeciderState = {
         readonly revert: StoredRevert | null;
         /** How many escalation steps the current task has taken (DESIGN §8.7). */
         readonly taskEscalations: number;
+        /** The latest turn succeeded and ran the project's verifiers, which all passed: the next one may de-escalate (DESIGN §8.7). */
+        readonly lastTurnVerified: boolean;
         /** Why that task runs on its route, and whether it started in plan mode. Null without a task, or one from before routing. */
         readonly taskDecision: RouteDecision | null;
         readonly taskPlanned: boolean;
@@ -321,10 +324,29 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     // An `@name` turn starts a task of its own, even while the thread has one open; it neither pins nor unpins the thread.
     // ponytail: its task.started moves a pinned thread's route too, so a task that starts after a limit or revert ended it stays
     // on the `@` model. Upgrade: keep a pinned thread's route apart from its running one, if pinning and `@` in one thread is common.
-    if (state.thread.taskId && !at) return onRoute ?? accept(...recorded, ...turn);
+    const cap = reachedCap(state.spend);
+    const { taskId } = state.thread;
+    if (taskId && !at) {
+      // After a turn whose verifiers all passed, mechanical work moves the rest of the task to a cheaper model (DESIGN §8.7).
+      const down =
+        state.thread.lastTurnVerified && state.routing
+          ? decideDeescalation(
+              state.thread,
+              cap ? { ...state.routing, capped: cap } : state.routing,
+              state.thread.taskDecision,
+              text,
+              state.decisions?.answers ?? [],
+            )
+          : undefined;
+      if (!down) return onRoute ?? accept(...recorded, ...turn);
+      const moved = { type: "task.deescalated", v: 1, threadId: c.threadId, taskId, turnId: c.turnId } as const;
+      return (
+        capped(state.spend, down.target) ??
+        accept(...recorded, { ...moved, from: state.thread.route, to: routeOf(down), decision: down }, ...turn)
+      );
+    }
     const task = { type: "task.started", v: 2, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
     if (!state.routing) return onRoute ?? accept(...recorded, { ...task, route: state.thread.route }, ...turn);
-    const cap = reachedCap(state.spend);
     const routing = cap ? { ...state.routing, capped: cap } : state.routing;
     const images = c.attachments?.filter((a) => a.kind === "image").length ?? 0;
     const decided = decideRoute(state.thread, routing, text, c.mode, state.decisions?.answers ?? [], images, at?.name);

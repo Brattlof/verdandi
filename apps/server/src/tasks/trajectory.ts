@@ -24,7 +24,7 @@ export const recordTrajectory = (threadId: ThreadId, turnId: TurnId) =>
       yield* sql<StoredEventRow>`
         select seq, event_id, command_id, at, type, v, payload from events
         where thread_id = ${threadId}
-          and (type in ('thread.created', 'task.started', 'thread.route.changed', 'harness.session.bound')
+          and (type in ('thread.created', 'task.started', 'thread.route.changed', 'task.deescalated', 'harness.session.bound')
             or json_extract(payload, '$.turnId') = ${turnId})
         order by seq`,
     );
