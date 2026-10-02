@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { builtInCatalog, loadPolicy } from "./policy.ts";
+import { builtInCatalog } from "./catalog.ts";
+import { loadPolicy } from "./policy.ts";
 import { route } from "./route.ts";
 import { rules } from "./rules.ts";
 

@@ -1,5 +1,5 @@
 import {
-  type CatalogEntry,
+  type DatedCatalogEntry,
   listCost,
   type SpendSplit,
   type TaskClass,
@@ -8,13 +8,16 @@ import {
   type UsageFilter,
   type UsageReport,
 } from "@verdandi/contracts";
-import { builtInCatalog } from "@verdandi/router";
+import { datedCatalog, priceOn } from "@verdandi/router";
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { loadQuotas } from "../event-store/projector.ts";
 
-/** What the savings estimate compares against: every task on Opus, at its list price (DESIGN §8.9, §8.10 baseline a). */
-const alwaysOpus = builtInCatalog.find((e) => e.harness === "claude-code" && e.model === "opus");
+/**
+ * What the savings estimate compares against: every task on Opus, at the list price of the day it started, so a later
+ * price change or a move of the alias doesn't rewrite past savings (DESIGN §8.9, §8.10 baseline a).
+ */
+const alwaysOpus = datedCatalog.find((e) => e.harness === "claude-code" && e.model === "opus");
 if (!alwaysOpus) throw new Error("The built-in model catalog has no Claude Code opus entry, which the savings estimate prices against.");
 
 /** When a period of `days` local days, today included, began; null for all time. */
@@ -29,8 +32,8 @@ export const spendSplit = (usage: readonly Usage[]): SpendSplit => ({
 
 /** Pure: cost per class, override and escalation counts, and the savings estimate, from the period's task outcomes. */
 export const summarizeOutcomes = (
-  rows: readonly { readonly taskClass: TaskClass | null; readonly outcome: TaskOutcome }[],
-  baseline: CatalogEntry,
+  rows: readonly { readonly taskClass: TaskClass | null; readonly startedAt: string; readonly outcome: TaskOutcome }[],
+  baseline: DatedCatalogEntry,
 ): Pick<UsageReport, "byClass" | "rates" | "savings"> => {
   const classes = new Map<TaskClass | null, { tasks: number; completed: number; cost: SpendSplit }>();
   let overridden = 0;
@@ -38,7 +41,7 @@ export const summarizeOutcomes = (
   let completed = 0;
   let actualUsd = 0;
   let baselineUsd = 0;
-  for (const { taskClass, outcome } of rows) {
+  for (const { taskClass, startedAt, outcome } of rows) {
     const done = outcome.status === "completed";
     const cost = spendSplit(outcome.usage);
     const c = classes.get(taskClass) ?? { tasks: 0, completed: 0, cost: { meteredUsd: 0, subscriptionUsd: 0 } };
@@ -50,9 +53,10 @@ export const summarizeOutcomes = (
     if (outcome.userOverride) overridden++;
     if (outcome.escalations > 0 || outcome.status === "escalated") escalated++;
     if (done) completed++;
+    const price = priceOn(baseline.prices, startedAt);
     for (const u of outcome.usage) {
       actualUsd += u.costUsd;
-      baselineUsd += listCost(baseline.price, u);
+      baselineUsd += listCost(price, u);
     }
   }
   const spent = (c: SpendSplit) => c.meteredUsd + c.subscriptionUsd;
@@ -63,7 +67,7 @@ export const summarizeOutcomes = (
     rates: { tasks: rows.length, overridden, escalated },
     savings: {
       estimate: true,
-      baseline: `${baseline.model} on ${baseline.harness} at list price`,
+      baseline: `${baseline.model} on ${baseline.harness} at the list price of the day each task started`,
       tasks: rows.length,
       completed,
       actualUsd,
@@ -100,8 +104,8 @@ export const loadUsageReport = (filter: UsageFilter, now: Date) =>
       from usage_ledger u join turns t on t.id = u.turn_id join threads h on h.id = t.thread_id
       where (${since} is null or u.at >= ${since}) and (${project} is null or h.project_id = ${project})
       group by 1, 2 order by cost_usd desc, 1, 2`;
-    const outcomes = yield* sql<{ task_class: TaskClass | null; payload: string }>`
-      select d.task_class, o.payload
+    const outcomes = yield* sql<{ task_class: TaskClass | null; started_at: string; payload: string }>`
+      select d.task_class, k.started_at, o.payload
       from task_outcomes o join tasks k on k.id = o.task_id join threads h on h.id = k.thread_id
         left join route_decisions d on d.task_id = k.id
       where (${since} is null or k.started_at >= ${since}) and (${project} is null or h.project_id = ${project})
@@ -125,7 +129,7 @@ export const loadUsageReport = (filter: UsageFilter, now: Date) =>
         costUsd: t.cost_usd,
       })),
       ...summarizeOutcomes(
-        outcomes.map((o) => ({ taskClass: o.task_class, outcome: JSON.parse(o.payload) as TaskOutcome })),
+        outcomes.map((o) => ({ taskClass: o.task_class, startedAt: o.started_at, outcome: JSON.parse(o.payload) as TaskOutcome })),
         alwaysOpus,
       ),
     } satisfies UsageReport;

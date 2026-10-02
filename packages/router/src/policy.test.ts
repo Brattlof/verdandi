@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { builtInCatalog, loadPolicy, PolicyError } from "./policy.ts";
+import { builtInCatalog } from "./catalog.ts";
+import { loadPolicy, PolicyError } from "./policy.ts";
 
 const project = (yaml: string) => ({ source: ".verdandi/routing.yaml", data: Bun.YAML.parse(yaml) });
 
