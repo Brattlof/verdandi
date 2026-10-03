@@ -1,10 +1,12 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ThreadId, TurnId } from "@verdandi/contracts";
-import { git, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
+import { git, gitHeavyTimeout, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Effect } from "effect";
 import { changedSince, checkpoint, checkpointRef, listCheckpoints } from "./checkpoint.ts";
+
+setDefaultTimeout(gitHeavyTimeout);
 
 const dirs: string[] = [];
 afterEach(() => {

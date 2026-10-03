@@ -20,3 +20,10 @@ export const makeTempRepo = (files: Record<string, string>) => {
   git(repo, "commit", "-q", "-m", "initial");
   return repo;
 };
+
+/**
+ * The default timeout for a test file whose tests drive turns through git checkpoints, set with
+ * `setDefaultTimeout(gitHeavyTimeout)`: such a test spawns git a hundred times or more, and at ~100 ms a spawn on
+ * Windows it passes bun's 5 s default.
+ */
+export const gitHeavyTimeout = 30_000;

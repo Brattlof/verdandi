@@ -1,8 +1,10 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { git, makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
+import { git, gitHeavyTimeout, makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { checkout, estimateBatch, loadEvalSet, parseBatchRoute, runBatch, summarize } from "./batch.ts";
+
+setDefaultTimeout(gitHeavyTimeout);
 
 const dirs: string[] = [];
 afterEach(() => {

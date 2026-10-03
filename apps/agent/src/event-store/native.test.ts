@@ -1,9 +1,9 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Command, CommandId, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeNativeAdapter, nativeCatalog } from "@verdandi/harness-native";
-import { type FakeReply, makeFakeAnthropic, makeTempHome, removeTempHome } from "@verdandi/testkit";
+import { type FakeReply, gitHeavyTimeout, makeFakeAnthropic, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { threadDiff } from "../diffs/diff.ts";
@@ -14,6 +14,8 @@ import { AppLayer } from "./app.ts";
 import { Engine } from "./engine.ts";
 import { loadThreadView } from "./projector.ts";
 import { Reactor } from "./reactor.ts";
+
+setDefaultTimeout(gitHeavyTimeout);
 
 const homes: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];

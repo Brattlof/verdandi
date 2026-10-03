@@ -1,13 +1,16 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Command, CommandId, ThreadId, TurnId } from "@verdandi/contracts";
-import { git, makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
+import { git, gitHeavyTimeout, makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
 import { AppLayer } from "../event-store/app.ts";
 import { Engine } from "../event-store/engine.ts";
 import { loadThreadView } from "../event-store/projector.ts";
 import { Reactor } from "../event-store/reactor.ts";
+import { allowTrustRequests } from "../trust/allow-trust.ts";
+
+setDefaultTimeout(gitHeavyTimeout);
 
 const dirs: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];
@@ -31,6 +34,7 @@ test("two threads in one repo each edit the same file in their own worktree, and
   writeFileSync(join(repo, ".verdandi", "worktree.yaml"), "setup: echo set up\n");
   const runtime = ManagedRuntime.make(AppLayer(temp(makeTempHome()), { fake: makeFakeHarness() }));
   runtimes.push(runtime as never);
+  await runtime.runPromise(allowTrustRequests);
   const dispatch = (c: Command) => runtime.runPromise(Effect.flatMap(Engine, (e) => e.dispatch(c)));
   const rejected = (c: Command) => runtime.runPromise(Effect.flip(Effect.flatMap(Engine, (e) => e.dispatch(c))));
   const settle = () => runtime.runPromise(Effect.flatMap(Reactor, (r) => r.drain));
@@ -92,6 +96,7 @@ test("a thread that ran in the project folder can't move into a worktree", async
   const repo = temp(makeTempRepo({ "a.txt": "one\n" }));
   const runtime = ManagedRuntime.make(AppLayer(temp(makeTempHome()), { fake: makeFakeHarness() }));
   runtimes.push(runtime as never);
+  await runtime.runPromise(allowTrustRequests);
   const run = <A, E>(f: (e: Engine["Service"]) => Effect.Effect<A, E>) => runtime.runPromise(Effect.flatMap(Engine, f));
   const threadId = id<ThreadId>();
   await run((e) => e.dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId, projectPath: repo, route }));
