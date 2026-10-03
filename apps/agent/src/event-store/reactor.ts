@@ -493,27 +493,36 @@ export const ReactorLive = Layer.effect(
                   event.status === "success" && !review && (yield* changedFiles(threadId, turnId, cwd, calls))
                     ? yield* verify(threadId, turnId, thread.path, cwd)
                     : undefined;
-                yield* report(threadId, turnId, event);
-                // A review's reply becomes proposals on the thread it reviewed; a review is never escalated or reviewed.
-                if (review) {
-                  if (event.status === "success") yield* settleReview(turnId, threadId, review.reviews);
-                  return;
-                }
-                // Once the turn has completed, a failed verifier, or else the agent having reported it's blocked, or else the
-                // same tool error repeating in the task, may escalate it (DESIGN §8.7): one trigger per turn end, the
-                // strongest signal first. The decider decides whether.
-                const [blocked] = failed
-                  ? []
-                  : yield* sql<{ reason: string }>`
+                // A failed verifier, or else the agent having reported it's blocked, or else the same tool error repeating
+                // in the task, may escalate it (DESIGN §8.7): one trigger per turn end, the strongest signal first.
+                const [blocked] =
+                  failed || review
+                    ? []
+                    : yield* sql<{ reason: string }>`
                       select json_extract(payload, '$.reason') as reason from items
                       where turn_id = ${turnId} and json_extract(payload, '$.kind') = 'blocked' order by idx desc limit 1`;
                 const trigger = failed
                   ? ({ kind: "verifier", run: failed } as const)
                   : blocked
                     ? ({ kind: "blocked", reason: blocked.reason } as const)
-                    : toolFailed
+                    : toolFailed && !review
                       ? yield* repeatedErrorIn(threadId, thread.path)
                       : undefined;
+                // Recorded on the turn before it completes, as a failed verifier and a blocked report are, so a follower
+                // such as `verdandi run` knows the decision is coming.
+                if (trigger?.kind === "repeated-error") {
+                  const { tool, count } = trigger;
+                  yield* engine
+                    .dispatch({ type: "task.error.repeat", commandId: randomUUID() as CommandId, threadId, turnId, tool, count })
+                    .pipe(Effect.catchTag("CommandRejected", () => Effect.void)); // the turn ended first
+                }
+                yield* report(threadId, turnId, event);
+                // A review's reply becomes proposals on the thread it reviewed; a review is never escalated or reviewed.
+                if (review) {
+                  if (event.status === "success") yield* settleReview(turnId, threadId, review.reviews);
+                  return;
+                }
+                // Once the turn has completed, the decider decides whether the trigger escalates it.
                 if (trigger) {
                   yield* engine.dispatch({
                     type: "task.escalate",

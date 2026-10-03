@@ -217,6 +217,19 @@ export const TaskBlock = Schema.Struct({
 });
 
 /**
+ * Internal: tool `tool` failed with the same error `count` times in the task of running turn `turnId` since it last
+ * escalated (`escalation.repeatedErrors`), recorded before the turn completes. Clients cannot send it.
+ */
+export const TaskErrorRepeat = Schema.Struct({
+  type: Schema.Literal("task.error.repeat"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  tool: Schema.String,
+  count: Schema.Int,
+});
+
+/**
  * Remembers `text` in the thread's user or project memory (DESIGN §14.2), replacing the entries `replaces`
  * names: that is how a full store is consolidated. The agent's `memory_save` sends it with its `turnId`; the
  * Memory panel without. Scanned for secrets, injection and exfiltration first; refused over the store's cap.
@@ -498,6 +511,7 @@ export const Command = Schema.Union([
   FilesReport,
   CheckpointsReport,
   TaskBlock,
+  TaskErrorRepeat,
   WorktreeReported,
   VerifiersStart,
   VerifierReport,

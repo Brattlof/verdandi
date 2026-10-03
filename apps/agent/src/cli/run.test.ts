@@ -253,6 +253,39 @@ test(
 );
 
 test(
+  "follows the task when the same tool error repeats, exiting with the escalated turn's code",
+  async () => {
+    const project = makeTempHome();
+    cleanups.push(async () => removeTempHome(project));
+    mkdirSync(join(project, ".verdandi"));
+    writeFileSync(
+      join(project, ".verdandi", "routing.yaml"),
+      [
+        "minConfidence: 1",
+        "targets:",
+        "  mid: { harness: fake, provider: fake, model: fake }",
+        "fallback: { prefer: [mid], effort: medium }",
+        "escalation: { repeatedErrors: 2 }",
+      ].join("\n"),
+    );
+    const { home } = await startServer();
+    // The first failure is one short of the policy's count, so that run ends with its turn.
+    const first = JSON.parse((await verdandiRun(home, ["--project", project, "--json", "tool missing {}"])).stdout) as RunResult;
+    expect(first).toMatchObject({ status: "completed", escalations: [] });
+    const { stdout, code } = await verdandiRun(home, ["--thread", first.threadId, "--json", "tool missing {}"]);
+    const result = JSON.parse(stdout) as RunResult;
+    expect(code).toBe(exitCodes.completed);
+    expect(result).toMatchObject({
+      status: "completed",
+      route: { effort: "high" },
+      escalations: [{ trigger: "repeated-error", step: "effort", from: { effort: "medium" }, to: { effort: "high" } }],
+    });
+    expect(result.reply).toContain("There's no Verdandi tool missing.");
+  },
+  spawnTimeout,
+);
+
+test(
   "stops waiting for Verdandi's decision once the thread is reverted, saying why",
   async () => {
     const project = routedProject("exit 1");

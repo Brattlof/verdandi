@@ -239,6 +239,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       (sql) => sql`update threads set memory_snapshot = ${JSON.stringify({ turnId: e.turnId, text: e.text })} where id = ${e.threadId}`,
     ),
   "task.blocked": (e) => addItem(e.turnId, { kind: "blocked", reason: e.reason }),
+  "task.error.repeated": () => Effect.void, // the turn's `escalation` item names the trigger
   "injection.flagged": (e) => addItem(e.turnId, injectionItem(e)),
   "thread.files.restored": (e) =>
     withSql(

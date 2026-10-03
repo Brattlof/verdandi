@@ -120,8 +120,8 @@ type Signal = ThreadFeed | { readonly kind: "sigint" } | { readonly kind: "ended
 
 /**
  * Sends the turn on a new thread or `--thread`, follows the thread's feed until its task stops, and says how it went.
- * After a turn of a routed task that set off an escalation trigger (a failed verifier, or the agent reporting it's
- * blocked) it waits for Verdandi's decision (DESIGN §8.7), which the decider records for every such turn, and follows
+ * After a turn of a routed task that set off an escalation trigger (a failed verifier, the agent reporting it's
+ * blocked, or the same tool error repeating) it waits for Verdandi's decision (DESIGN §8.7), which the decider records for every such turn, and follows
  * the turn it sends (`nextTurnId`) the same way.
  */
 const runTurn = (server: ServerFile, o: Options) =>
@@ -185,7 +185,8 @@ const runTurn = (server: ServerFile, o: Options) =>
     const reply: string[] = [];
     const escalations: Escalation[] = [];
     let verifier: VerifierRun | undefined;
-    let blocked = false;
+    // The agent reported it's blocked, or the same tool error repeated: the reactor asks to escalate either way.
+    let triggered = false;
     let asked: PendingRequest | undefined;
     // Set once the followed turn has completed after a trigger, until Verdandi decides whether the task goes on.
     let awaiting: { readonly status: RunStatus; readonly error: string | undefined } | undefined;
@@ -246,7 +247,7 @@ const runTurn = (server: ServerFile, o: Options) =>
         route = to;
         current = e.nextTurnId;
         verifier = undefined;
-        blocked = false;
+        triggered = false;
         awaiting = undefined;
         // A run that is stopping, for a Ctrl+C or a request, stops the turn Verdandi sent too.
         if (interrupting || asked) yield* interrupt();
@@ -277,7 +278,7 @@ const runTurn = (server: ServerFile, o: Options) =>
         streamed = false;
       }
       if (e.type === "turn.usage.recorded") usage.push(e);
-      if (e.type === "task.blocked") blocked = true;
+      if (e.type === "task.blocked" || e.type === "task.error.repeated") triggered = true;
       if (e.type === "verifier.ran") verifier = e;
       // A proposed memory doesn't hold the turn up: it waits for the user (DESIGN §17).
       if (e.type === "memory.proposed")
@@ -310,11 +311,8 @@ const runTurn = (server: ServerFile, o: Options) =>
           : verifierFailed && verifier
             ? `The verifier ${verifier.command} failed${verifier.exitCode === null ? "" : ` (exit ${verifier.exitCode})`}:\n${tail}`
             : e.error;
-      // The reactor asks to escalate after a failed verifier, or else a blocked report, whatever the turn's status.
-      // ponytail: a repeated tool error (`escalation.repeatedErrors`) isn't awaited, since nothing on the turn says one
-      // fired, so run ends here and the escalation's turn goes on in the thread. Upgrade: record the trigger on the turn
-      // before it completes, like `task.blocked`, and wait on it here.
-      if ((verifierFailed || blocked) && !pinned && !taskPinned) awaiting = { status, error };
+      // The reactor asks to escalate after a failed verifier, a blocked report or a repeated tool error, whatever the turn's status.
+      if ((verifierFailed || triggered) && !pinned && !taskPinned) awaiting = { status, error };
       else return yield* finish(status, error);
     }
   });
