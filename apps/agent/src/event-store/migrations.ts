@@ -428,6 +428,21 @@ const devices = Effect.gen(function* () {
   yield* sql`create table device_seen (id text primary key, seen_at text not null)`;
 });
 
+/**
+ * The harness each thread's latest session ran on, kept after a route change drops the session, so the next turn
+ * knows it starts the thread over on another harness and hands it off (DESIGN §8.2 lever 5). Filled from the log: the
+ * thread's route as it stood when its latest session was bound.
+ */
+const sessionHarness = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table threads add column session_harness text`;
+  yield* sql`update threads set session_harness = (
+    select json_extract(r.payload, case r.type when 'thread.route.changed' then '$.to.harness' else '$.route.harness' end)
+    from events r where r.thread_id = threads.id and r.type in ('thread.created', 'task.started', 'thread.route.changed')
+      and r.seq < (select max(b.seq) from events b where b.thread_id = threads.id and b.type = 'harness.session.bound')
+    order by r.seq desc limit 1)`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -457,4 +472,5 @@ export const migrations = {
   "26_turn_untrusted": turnUntrusted,
   "27_skill_history": skillHistory,
   "28_devices": devices,
+  "29_session_harness": sessionHarness,
 };

@@ -130,6 +130,12 @@ export type HarnessRunInput = {
    */
   readonly memory?: string;
   /**
+   * The summary of the thread so far, given on the first turn of a session that takes the thread over from another
+   * harness (DESIGN §8.2 lever 5): fenced and marked as data, put right after `memory` at the head of the turn's message,
+   * so it stays fixed in the session's history (Claude Code and native: a text block of its own; fake: records it).
+   */
+  readonly handoff?: string;
+  /**
    * A one-line reminder to consider saving memory, on every Nth turn of a thread (DESIGN §14.2): put it after the
    * turn's own message, never in the system prompt (Claude Code and native: a text block after the turn's; fake:
    * records it).

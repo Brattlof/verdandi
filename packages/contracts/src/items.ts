@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { TurnId } from "./ids.ts";
-import { Route } from "./route.ts";
+import { HarnessId, Route } from "./route.ts";
 import { EscalationStep } from "./routing.ts";
 
 /** Set on a subagent's steps: the tool call that started the subagent. Absent on the main agent's. */
@@ -21,10 +21,10 @@ export type VerifierRun = typeof VerifierRun.Type;
 
 /**
  * Untrusted text Verdandi itself hands the agent (DESIGN §17): what an escalation's trigger hands its turn (a
- * verifier's output, the agent's own blocked reason, a repeated tool error), or a Verdandi tool's result. A
- * `correction` escalation hands nothing: the user's own message is the turn.
+ * verifier's output, the agent's own blocked reason, a repeated tool error), a Verdandi tool's result, or the summary
+ * a harness handoff seeds a new session with. A `correction` escalation hands nothing: the user's own message is the turn.
  */
-export const HandedSource = Schema.Literals(["verifier", "blocked", "repeated-error", "session_search", "memory_search"]);
+export const HandedSource = Schema.Literals(["verifier", "blocked", "repeated-error", "session_search", "memory_search", "handoff"]);
 export type HandedSource = typeof HandedSource.Type;
 /** What each source is, for the user. */
 export const handedSourceLabel: Record<HandedSource, string> = {
@@ -33,6 +33,7 @@ export const handedSourceLabel: Record<HandedSource, string> = {
   "repeated-error": "the repeated tool error",
   session_search: "a session_search result",
   memory_search: "a memory_search result",
+  handoff: "the handoff summary",
 };
 
 /** A persisted piece of a turn. Text deltas are never items: they are broadcast and dropped. */
@@ -90,6 +91,11 @@ export const Item = Schema.Union([
    * it (an escalation's). The agent got it under a warning; `why` is what the scan saw.
    */
   Schema.Struct({ kind: Schema.Literal("injection"), source: HandedSource, why: Schema.String }),
+  /**
+   * The thread moved from a `from` session to a new `to` one, and this turn's agent starts from `summary`, written by an
+   * `aux.handoff` task over the thread so far (DESIGN §8.2 lever 5): what was carried over, shown to the user.
+   */
+  Schema.Struct({ kind: Schema.Literal("handoff"), from: HarnessId, to: HarnessId, summary: Schema.String }),
   /** Something the harness or Verdandi tells the user about the turn, e.g. why a revert couldn't fork the conversation. */
   Schema.Struct({ kind: Schema.Literal("notice"), text: Schema.String }),
 ]);

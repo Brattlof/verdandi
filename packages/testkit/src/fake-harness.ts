@@ -28,7 +28,8 @@ import { Effect, Stream } from "effect";
  * "fetch <url>" reads that page through a WebFetch tool call first, then runs the turn's next lines as its text.
  * A background review's prompt ("Verdandi is reviewing a finished task …") is answered as a reviewer would, in JSON:
  * it proposes remembering, in project memory, whatever follows the digest's first "remember", and creating the skill
- * named after its first "skill:".
+ * named after its first "skill:". A handoff's prompt ("Verdandi is handing a thread over …") is answered with the
+ * summary's sections, its Goal the digest's first user message.
  * Every reply costs $0.01. Like Claude Code, it checks the task's `maxCost` after the call: when the task's
  * spend then exceeds it, the turn ends with status `limit`. Each turn is one model call against the task's `maxTurns`:
  * a task with none left ends its next turn with status `limit` at once. `calls` records every run.
@@ -42,6 +43,7 @@ export const makeFakeHarness = () => {
     attachments: HarnessRunInput["attachments"];
     fork: HarnessRunInput["fork"];
     memory: HarnessRunInput["memory"];
+    handoff: HarnessRunInput["handoff"];
     nudge: HarnessRunInput["nudge"];
   }[] = [];
   /** Every `reroute`, in order. A rerouted turn answers on its new route's model. */
@@ -110,6 +112,7 @@ export const makeFakeHarness = () => {
       attachments: input.attachments,
       fork: input.fork,
       memory: input.memory,
+      handoff: input.handoff,
       nudge: input.nudge,
     });
     routes.set(input.threadId, input.route);
@@ -182,6 +185,16 @@ export const makeFakeHarness = () => {
         Stream.fromIterable(start),
         reply(input.route.model, `\`\`\`json\n${JSON.stringify({ memories, skills })}\n\`\`\``),
       );
+    }
+    if (input.text.startsWith("Verdandi is handing a thread over")) {
+      const goal = /^User: (.+)$/m.exec(input.text)?.[1] ?? "unknown";
+      const summary = `## Goal
+${goal}
+## Progress
+- Started on it.
+## Next steps
+- Carry on.`;
+      return Stream.concat(Stream.fromIterable(start), reply(input.route.model, summary));
     }
     const fixing = input.text.startsWith("Verdandi ran the project's verifier") ? edited.get(input.threadId) : undefined;
     if (input.text.startsWith("edit ") || fixing) {

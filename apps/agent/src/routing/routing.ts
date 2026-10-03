@@ -14,6 +14,7 @@ import {
   type RouteStats,
   type RouteTarget,
   type SpendCapped,
+  type TaskClass,
   type UntrustedInput,
 } from "@verdandi/contracts";
 import {
@@ -177,20 +178,25 @@ export const routeOf = (d: RouteDecision): Route => ({
 export const taskQuestions = (routing: RoutingContext) =>
   routingQuestions(Result.getOrElse(routing.policy, () => routing.builtIn).minConfidence);
 
-/**
- * A background review's class (DESIGN §14.5), which Verdandi knows without asking: given to the router in place of the
- * decision layer's answers, never recorded as one.
- */
-export const reviewClassification: DecisionAnswer = {
+const known = (taskClass: TaskClass, why: string): DecisionAnswer => ({
   type: "choice",
   kind: decisionKinds.taskClass,
-  answer: "aux.review",
-  probabilities: { "aux.review": 1 },
+  answer: taskClass,
+  probabilities: { [taskClass]: 1 },
   confidence: 1,
   lowConfidence: false,
   backend: "verdandi",
-  why: "a background review of a finished task",
-};
+  why,
+});
+
+/**
+ * An auxiliary thread's class, which Verdandi knows without asking: a background review's (DESIGN §14.5) or a
+ * handoff's (§8.2 lever 5). Given to the router in place of the decision layer's answers, never recorded as one.
+ */
+export const auxClassification = {
+  "review.started": known("aux.review", "a background review of a finished task"),
+  "handoff.started": known("aux.handoff", "a handoff summary of a thread moving to another harness"),
+} satisfies Record<"review.started" | "handoff.started", DecisionAnswer>;
 
 /** When the answers hold no classification, the router takes its safe default. */
 const unclassified = { taskClass: "chat.general", difficulty: 0, confidence: 0, lowConfidence: true, why: "no classification" } as const;

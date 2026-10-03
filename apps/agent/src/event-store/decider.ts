@@ -43,13 +43,13 @@ import { Result } from "effect";
 import { worktreeBranch } from "../checkpoints/refs.ts";
 import { memorySnapshot, overCap, sameAs, scanMemory } from "../memory/memory.ts";
 import {
+  auxClassification,
   decideDeescalation,
   decideEscalation,
   decideExecuteRoute,
   decideRoute,
   type RoutingContext,
   type RoutingThread,
-  reviewClassification,
   routeInputs,
   routeOf,
   targetOf,
@@ -74,7 +74,8 @@ export type PendingRequest = {
   readonly trust?: { readonly purpose: TrustPurpose; readonly commands: readonly string[]; readonly hash: string };
 };
 
-type ReviewStarted = Extract<Event, { type: "review.started" }>;
+/** What marks a thread as Verdandi's own auxiliary one: a background review's or a handoff's, hidden and unattended. */
+export type AuxStarted = Extract<Event, { type: "review.started" | "handoff.started" }>;
 
 /** What the decider needs to know about the command's thread; `undefined` when it doesn't exist. */
 export type DeciderState = {
@@ -112,8 +113,11 @@ export type DeciderState = {
         readonly sessionFirstTurn: TurnId | null;
         /** The latest revert, until the next turn starts. */
         readonly revert: StoredRevert | null;
-        /** What this thread reviews, when it is a background review's (DESIGN §14.5); absent for every other thread. */
-        readonly review?: ReviewStarted;
+        /**
+         * What this thread is for, when it is a background review's (DESIGN §14.5) or a handoff's (§8.2 lever 5); absent
+         * for every other thread.
+         */
+        readonly aux?: AuxStarted;
         /** How many escalation steps the current task has taken (DESIGN §8.7). */
         readonly taskEscalations: number;
         /** The latest turn succeeded and ran the project's verifiers, which all passed: the next one may de-escalate (DESIGN §8.7). */
@@ -159,7 +163,7 @@ export type DeciderState = {
   } | null;
   /**
    * Harnesses whose subscription window is nearly or fully used up, with no extra usage paying for more, loaded for a
-   * background review's turn: background work leaves what's left to the user (DESIGN §14.5).
+   * background review's or a handoff's turn: background work leaves what's left to the user (DESIGN §14.5).
    */
   readonly shortQuota?: readonly HarnessId[];
 };
@@ -318,7 +322,7 @@ const correctionEscalation = (state: DeciderState, threadId: ThreadId, taskId: T
  */
 const planEscalation = (state: DeciderState, threadId: ThreadId, turnId: TurnId, requestId: string): Event | undefined => {
   const { thread, routing } = state;
-  if (!thread?.taskId || !routing || thread.pinned || thread.taskDecision?.source === "pin" || thread.review) return undefined;
+  if (!thread?.taskId || !routing || thread.pinned || thread.taskDecision?.source === "pin" || thread.aux) return undefined;
   const step = decideEscalation(thread, routing, thread.taskEscalations, "You rejected the plan");
   if (step.step === "ask" || capped(state.spend, step.target)) return undefined;
   const { harness, model } = step.target;
@@ -338,32 +342,47 @@ const planEscalation = (state: DeciderState, threadId: ThreadId, turnId: TurnId,
 };
 
 /**
- * Why background review `review` can't run on `target` (DESIGN §14.5): it would spend metered dollars and `review.yaml`
- * doesn't allow that, or the harness's subscription window is short. Undefined when it can.
+ * Why auxiliary task `aux` can't run on `target`: a background review would spend metered dollars and `review.yaml`
+ * doesn't allow that (DESIGN §14.5), or the harness's subscription window is short. A handoff may spend metered
+ * dollars, under the spend caps: the user's own turn waits on it. Undefined when it can.
  */
-const reviewProblem = (state: DeciderState, review: ReviewStarted, target: RouteTarget): string | undefined => {
+const auxProblem = (state: DeciderState, aux: AuxStarted, target: RouteTarget): string | undefined => {
   const paying = state.spend && Result.isSuccess(state.spend) ? state.spend.success.paying : [];
-  if (!review.allowMetered && spendsMetered(target, paying))
+  if (aux.type === "review.started" && !aux.allowMetered && spendsMetered(target, paying))
     return `it would spend metered dollars on ${target.model}; set allowMetered: true in the profile's review.yaml to allow that`;
   if (state.shortQuota?.includes(target.harness))
     return `the ${target.harness} subscription window is nearly used up, and background work leaves the rest to you`;
   return undefined;
 };
 
+/** What each auxiliary task is called, the rejection that skips it, and what a plan it proposes is told instead. */
+const auxKinds = {
+  "review.started": { name: "background review", skipped: "ReviewSkipped", reply: "reply with the JSON only" },
+  "handoff.started": { name: "handoff summary", skipped: "HandoffSkipped", reply: "reply with the summary only" },
+} as const satisfies Record<AuxStarted["type"], { name: string; skipped: CommandRejected["reason"]; reply: string }>;
+
 /**
- * A request raised in a background review's turn, which runs with nobody to answer (DESIGN §14.5): recorded, then
- * denied at once, so the review goes on without it.
+ * A request raised in an auxiliary task's turn, which runs with nobody to answer (DESIGN §14.5): recorded, then
+ * denied at once, so the task goes on without it.
  */
-const unattended = (threadId: ThreadId, turnId: TurnId, request: Event & { readonly requestId: string }, plan: boolean): Decision =>
-  accept(request, {
+const unattended = (
+  aux: AuxStarted,
+  threadId: ThreadId,
+  turnId: TurnId,
+  request: Event & { readonly requestId: string },
+  plan: boolean,
+): Decision => {
+  const { name, reply } = auxKinds[aux.type];
+  return accept(request, {
     type: "approval.resolved",
     v: 1,
     threadId,
     turnId,
     requestId: request.requestId,
-    resolution: plan ? { decision: "deny", feedback: "This is a background review: reply with the JSON only." } : { decision: "deny" },
-    reason: "A background review runs unattended, so nobody can answer it.",
+    resolution: plan ? { decision: "deny", feedback: `This is a ${name}: ${reply}.` } : { decision: "deny" },
+    reason: `A ${name} runs unattended, so nobody can answer it.`,
   });
+};
 
 /** Why the thread's worktree can't take a turn now, naming the fix; undefined when it can (or there is none). */
 const worktreeProblem = (threadId: ThreadId, worktree: WorktreeView | null): string | undefined => {
@@ -405,11 +424,11 @@ const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, ev
         : accept();
     case "approval.requested":
     case "user-input.requested":
-      return state.thread?.review
-        ? unattended(threadId, turnId, { ...event, v: 1, threadId, turnId }, false)
+      return state.thread?.aux
+        ? unattended(state.thread.aux, threadId, turnId, { ...event, v: 1, threadId, turnId }, false)
         : accept({ ...event, v: 1, threadId, turnId });
     case "plan.requested": {
-      if (state.thread?.review) return unattended(threadId, turnId, { ...event, v: 1, threadId, turnId }, true);
+      if (state.thread?.aux) return unattended(state.thread.aux, threadId, turnId, { ...event, v: 1, threadId, turnId }, true);
       // A routed task started in plan mode moves its build to the class's own route when the plan is approved.
       const { thread, routing } = state;
       const cap = reachedCap(state.spend);
@@ -460,11 +479,12 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     const unavailable = worktreeProblem(c.threadId, state.thread.worktree);
     if (unavailable) return reject("WorktreeUnavailable", unavailable);
-    // A background review is one turn Verdandi sends, routed in its own class (DESIGN §14.5).
-    const { review } = state.thread;
-    if (review && state.thread.turns > 0)
-      return reject("ReviewSkipped", "A background review's thread takes the one turn Verdandi sends it.");
-    if (review && !state.routing) return reject("ReviewSkipped", "Verdandi skipped the background review: this verdandid routes no tasks.");
+    // A background review or a handoff is one turn Verdandi sends, routed in its own class (DESIGN §14.5, §8.2).
+    const { aux } = state.thread;
+    const auxKind = aux && auxKinds[aux.type];
+    if (auxKind && state.thread.turns > 0)
+      return reject(auxKind.skipped, `A ${auxKind.name}'s thread takes the one turn Verdandi sends it.`);
+    if (auxKind && !state.routing) return reject(auxKind.skipped, `Verdandi skipped the ${auxKind.name}: this verdandid routes no tasks.`);
     if (state.spend && Result.isFailure(state.spend)) return reject("InvalidSpendCaps", state.spend.failure);
     // A leading `@name` pins the task this turn starts to that model (DESIGN §8.4 stage 0); the agent never sees it.
     const at = atPin(c.text);
@@ -530,7 +550,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (!state.routing) return onRoute ?? accept(...recorded, { ...task, route: state.thread.route }, ...turn);
     const routing = cap ? { ...state.routing, capped: cap } : state.routing;
     const images = c.attachments?.filter((a) => a.kind === "image").length ?? 0;
-    const answers = review ? [reviewClassification] : (state.decisions?.answers ?? []);
+    const answers = aux ? [auxClassification[aux.type]] : (state.decisions?.answers ?? []);
     const decided = decideRoute(state.thread, routing, text, c.mode, answers, images, at?.name);
     if (Result.isFailure(decided)) {
       // Every target left would spend metered dollars: the cap is what stops the turn.
@@ -539,8 +559,8 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     const stop = capped(state.spend, decided.success.target);
     if (stop) return stop;
-    const problem = review && reviewProblem(state, review, decided.success.target);
-    if (problem) return reject("ReviewSkipped", `Verdandi skipped the background review: ${problem}.`);
+    const problem = aux && auxProblem(state, aux, decided.success.target);
+    if (problem && auxKind) return reject(auxKind.skipped, `Verdandi skipped the ${auxKind.name}: ${problem}.`);
     const inputs = { ...routeInputs(state.thread, routing), ...(at && { at: at.name }) };
     return accept(...recorded, { ...task, route: routeOf(decided.success), decision: decided.success, inputs }, ...turn);
   },
@@ -823,7 +843,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
         ),
   // A no is logged and ends there, at no model cost; a yes asks the reactor to review the digest (DESIGN §14.5).
   "task.review": (state, c) => {
-    if (!state.thread || state.thread.review || !state.decisions) return accept();
+    if (!state.thread || state.thread.aux || !state.decisions) return accept();
     const recorded: Event = {
       type: "decision.recorded",
       v: 2,
@@ -860,6 +880,21 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
             pinned: false,
           },
           { type: "review.started", v: 1, threadId: c.threadId, reviews: c.reviews, allowMetered: c.allowMetered },
+        ),
+  "handoff.start": (state, c) =>
+    state.thread
+      ? accept()
+      : accept(
+          {
+            type: "thread.created",
+            v: 1,
+            threadId: c.threadId,
+            projectId: projectIdFor(c.projectPath),
+            projectPath: c.projectPath,
+            route: defaultRoute,
+            pinned: false,
+          },
+          { type: "handoff.started", v: 1, threadId: c.threadId, for: c.for, from: c.from, to: c.to },
         ),
   // Untrusted: scanned like the agent's own saves and proposals, then left for the user.
   "review.propose": (state, c) => {
@@ -1066,7 +1101,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     const thread = state.thread;
     if (
       !thread ||
-      thread.review ||
+      thread.aux ||
       thread.pinned ||
       thread.taskDecision?.source === "pin" ||
       thread.archived ||
