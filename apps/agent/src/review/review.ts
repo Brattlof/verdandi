@@ -1,7 +1,17 @@
-import { clip, decisionKinds, type Item, MemoryScope, type TaskId, type ThreadId, type TurnId } from "@verdandi/contracts";
+import {
+  clip,
+  decisionKinds,
+  type Item,
+  MemoryScope,
+  type TaskId,
+  type TaskOutcome,
+  type ThreadId,
+  type TurnId,
+} from "@verdandi/contracts";
 import type { SkillEdit } from "@verdandi/tools";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { recordTaskOutcomes } from "../tasks/task-outcome.ts";
 import { asData } from "../trust/fence.ts";
 
 type DigestTurn = { readonly text: string; readonly status: string; readonly items: readonly Item[] };
@@ -85,10 +95,37 @@ export const reviewPrompt = (digest: string) =>
     '- memories: lasting facts about the user (scope "user") or this project (scope "project"), one short sentence each;',
     "- skills: a reusable procedure, as a new skill in the Agent Skills SKILL.md format, or a patch that replaces text in one of the user's skills;",
     "- routing: short notes on which model or effort suited this kind of task in this project.",
+    "Never capture these, as memories or skills:",
+    "- failures that depend on this machine or its environment;",
+    "- claims that a tool doesn't work or can't do something: they harden into refusals later sessions cite against themselves;",
+    "- transient errors: network failures, rate limits, flaky tests;",
+    "- one-off accounts of what happened in this task;",
+    "- failures that were never resolved, and fixes that were never shown to work.",
     "Most tasks hold nothing worth keeping: then every list is empty. Never include secrets. Don't change any file.",
     "Reply with one JSON object and nothing else, like:",
     '{"memories": [{"scope": "project", "text": "..."}], "skills": [{"action": "create", "name": "kebab-case-name", "content": "---\\nname: kebab-case-name\\ndescription: ...\\n---\\n..."}, {"action": "patch", "name": "...", "old": "...", "new": "..."}], "routing": ["..."]}',
   ].join("\n");
+
+/**
+ * Pure: why a review may not offer skills learned from a task with outcome `outcome`, or undefined when it may: its
+ * last verifier run passed, or the user rated it up (DESIGN §14.5). A skill every later session trusts needs a lesson
+ * something checked; memories don't wait on this.
+ */
+export const skillsRefused = (outcome: TaskOutcome | undefined) => {
+  if (outcome?.rating === 1) return undefined;
+  const last = outcome?.verifierRuns.at(-1);
+  if (last?.passed) return undefined;
+  return last ? `its last verifier run (\`${last.command}\`) failed` : "no verifier ran on it and the user hasn't rated it up";
+};
+
+/** Task `taskId`'s outcome, rebuilt first so a rating or verifier run since its last rebuild counts. */
+export const loadFreshOutcome = (threadId: ThreadId, taskId: TaskId) =>
+  Effect.gen(function* () {
+    yield* recordTaskOutcomes(threadId);
+    const sql = yield* SqlClient.SqlClient;
+    const [row] = yield* sql<{ payload: string }>`select payload from task_outcomes where task_id = ${taskId}`;
+    return row ? (JSON.parse(row.payload) as TaskOutcome) : undefined;
+  });
 
 const ReviewReply = Schema.Struct({
   memories: Schema.optionalKey(Schema.Array(Schema.Struct({ scope: MemoryScope, text: Schema.String }))),
