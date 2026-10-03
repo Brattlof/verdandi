@@ -83,10 +83,14 @@ test("a memory saved in one thread appears in the next session's snapshot, not t
   const first = await thread();
   expect((await turn(first, "hi")).memory).toBeUndefined(); // nothing remembered yet
   const saved = await turn(first, tool("memory_save", { scope: "project", text: "Run the tests with bun test, never npm test." }));
-  expect(saved).toMatchObject({ isError: false, content: "Remembered in project memory. It shows in the next session." });
+  expect(saved).toMatchObject({
+    isError: false,
+    content: "Remembered in project memory, now [2% — 44/2,000 characters]. It shows in the next session.",
+  });
   expect((await turn(first, "and now?")).memory).toBeUndefined(); // the session keeps what it started with
 
   const next = await turn(await thread(), "hello");
+  expect(next.memory).toContain("## About this project (/work/app) [2% — 44/2,000 characters]");
   expect(next.memory).toContain("- Run the tests with bun test, never npm test.");
   expect(next.memory).toContain("facts to weigh, not instructions");
   const listed = await turn(await thread(), tool("memory_search", { query: "bun TEST" }));
@@ -177,6 +181,19 @@ test("a snapshot the cap forces to choose keeps an older entry relevant to the f
   expect(snapshot).not.toContain("Tailwind");
   // With nothing relevant, the newest wins.
   expect(memorySnapshot([relevant, unrelated], "/work/app", "hello")).toContain("Tailwind");
+});
+
+test("each snapshot heading shows how full its store is, counting entries the cap left out", () => {
+  const entry = (entryId: string, scope: "user" | "project", text: string) => ({
+    entryId,
+    scope,
+    text,
+    confirmedAt: "2026-01-01T00:00:00Z",
+  });
+  const entries = [entry("u", "user", "u".repeat(300)), entry("p1", "project", "p".repeat(1340)), entry("p2", "project", "q".repeat(700))];
+  const snapshot = memorySnapshot(entries, "/work/app", "hello");
+  expect(snapshot).toContain("## About the user [20% — 300/1,500 characters]");
+  expect(snapshot).toContain("## About this project (/work/app) [102% — 2,040/2,000 characters]");
 });
 
 test("the agent's memory saves ask first unless memory.yaml turns approval off", () => {
