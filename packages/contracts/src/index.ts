@@ -17,6 +17,7 @@ export * from "./rpc.ts";
 export * from "./schedule.ts";
 export * from "./search.ts";
 export * from "./skills.ts";
+export * from "./slash.ts";
 export * from "./spend.ts";
 export * from "./task.ts";
 export * from "./terminal.ts";

@@ -1,7 +1,7 @@
 import { createCliRenderer, type InputRenderable } from "@opentui/core";
 import { createRoot, useKeyboard } from "@opentui/react";
-import type { InteractionMode } from "@verdandi/contracts";
-import { type ReactNode, useRef, useSyncExternalStore } from "react";
+import { commonStart, type InteractionMode, slashCompletions, slashEntry } from "@verdandi/contracts";
+import { type ReactNode, useRef, useState, useSyncExternalStore } from "react";
 import { type Io, openSession, type Session, type SessionSetup } from "../cli/chat-session.ts";
 
 // ponytail: the transcript keeps its last `keep` lines, since every line is a renderable; upgrade to rendering only
@@ -56,8 +56,20 @@ const lineColour = (line: string) => (line.startsWith("[") ? muted : /^(ask|plan
 
 const prefix = (mode: InteractionMode) => (mode === "build" ? "> " : `${mode}> `);
 
+/** The commands a draft starting with `/` can complete to, for the line under the transcript; undefined for any other draft. */
+const completionHint = (draft: string) => {
+  const options = slashCompletions(draft, "chat");
+  const [first] = options;
+  if (!first) return undefined;
+  // One command, or the choices of its argument: its usage and help. Several commands: their names.
+  if (options.every((o) => o.name === first.name)) return `${first.usage}: ${slashEntry(first.name).help} · Tab completes`;
+  return `${options.map((o) => `/${o.name}`).join("  ")} · Tab completes`;
+};
+
 /** What a typed line will do now, for the line under the transcript. */
-const hint = (state: ReturnType<Session["state"]>) => {
+const hint = (state: ReturnType<Session["state"]>, draft: string) => {
+  const completing = completionHint(draft);
+  if (completing) return completing;
   const r = state.request;
   if (r?.type === "plan.requested") return "Answer the plan above: y builds it, n rejects it, e edits it in $EDITOR";
   if (r?.type === "user-input.requested") return "Answer the question above: a number or your own words; /skip declines";
@@ -65,19 +77,30 @@ const hint = (state: ReturnType<Session["state"]>) => {
   const files = state.attached.length ? ` · attached: ${state.attached.join(", ")}` : "";
   return state.running
     ? `${state.mode} · working: Enter steers the agent, Ctrl+C stops the turn${files}`
-    : `${state.mode} · Enter sends · /ask /plan /build switch modes · Ctrl+C or /exit quits${files}`;
+    : `${state.mode} · Enter sends · /help lists commands · Ctrl+C or /exit quits${files}`;
 };
 
 /** The chat screen: the transcript, what a typed line will do, and the composer. */
 export const Chat = ({ session, transcript, onQuit }: { session: Session; transcript: Transcript; onQuit: () => void }): ReactNode => {
   const { lines, dropped } = useSyncExternalStore(transcript.subscribe, transcript.get);
   const composer = useRef<InputRenderable>(null);
+  const [draft, setDraft] = useState("");
   const state = session.state();
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c" && session.interrupt()) onQuit();
+    // Tab completes a slash command, or its argument, as far as the registry's options agree.
+    if (key.name === "tab" && composer.current) {
+      const lines = slashCompletions(composer.current.value, "chat").map((o) => o.line);
+      const completed = commonStart(lines);
+      if (completed.length > composer.current.value.length) {
+        composer.current.value = completed;
+        setDraft(completed);
+      }
+    }
   });
   const submit = async (value: string) => {
     if (composer.current) composer.current.value = "";
+    setDraft("");
     // The line chat's terminal echoes what you type; here the transcript does, marked like its prompt.
     transcript.write(`${state.request ? "" : prefix(state.mode)}${value}\n`);
     if (await session.input(value)) onQuit();
@@ -101,7 +124,7 @@ export const Chat = ({ session, transcript, onQuit }: { session: Session; transc
         })}
       </scrollbox>
       <text fg={muted} paddingLeft={1}>
-        {hint(state)}
+        {hint(state, draft)}
       </text>
       <box border height={3}>
         <input
@@ -109,6 +132,7 @@ export const Chat = ({ session, transcript, onQuit }: { session: Session; transc
           focused
           // The input keeps its own text and hands it over on Enter, so fast typing never races a React render.
           onSubmit={(value) => void submit(typeof value === "string" ? value : (composer.current?.value ?? ""))}
+          onInput={setDraft}
           placeholder={state.request ? "Your answer" : "Message the agent"}
         />
       </box>

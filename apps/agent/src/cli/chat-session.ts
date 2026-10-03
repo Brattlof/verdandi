@@ -11,9 +11,13 @@ import {
   handedSourceLabel,
   type InteractionMode,
   injectionItem,
+  parseSlash,
   type Resolution,
+  ratingWords,
+  type SlashNameOn,
+  slashEntry,
+  slashHelp,
   type TaskId,
-  type TaskRating,
   type ThreadFeed,
   type ThreadId,
   type ThreadView,
@@ -49,17 +53,6 @@ const summary = (status: string, error: string | undefined, usage: Usage[]) => {
   return `\n[${status}${error ? `: ${error}` : ""}${parts.length ? ` · ${parts.join(" · ")}` : ""}]\n`;
 };
 
-/** `/rate`'s words; `clear` takes the rating back. */
-const ratingWords = new Map<string, TaskRating | null>([
-  ["up", 1],
-  ["down", -1],
-  ["clear", null],
-]);
-const modeCommands = new Map<string, InteractionMode>([
-  ["/ask", "ask"],
-  ["/plan", "plan"],
-  ["/build", "build"],
-]);
 const modeHelp: Record<InteractionMode, string> = {
   ask: "ask mode: the agent answers without changing anything",
   plan: "plan mode: the agent proposes a plan for you to approve before it changes anything",
@@ -288,7 +281,6 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
       mode = "build";
       return resolve(request, edited ? { decision: "allow", plan: edited.plan } : { decision: "allow" });
     }
-    if (line === "/skip") return resolve(request, { decision: "deny" });
     const question = request.questions[answered.length];
     const picked = question && parseAnswer(question, line);
     if (!question || picked === undefined) return showRequest();
@@ -372,7 +364,7 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
         ? `${harness} ${model} ${effort} (routed; --model or --effort pins a route)`
         : "the route the router picks for the next task";
   io.write(
-    `Thread ${threadId} in ${thread.projectPath === workspaceDir(home) ? `the workspace (${thread.projectPath}; --here works on the current folder instead)` : thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /rate up|down rates the latest task, /rate clear clears it; /trusted lists the project commands you let Verdandi run, /untrust <n> revokes one; /skills lists your skills, and /skills history|revert|pin|unpin|restore manages one; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
+    `Thread ${threadId} in ${thread.projectPath === workspaceDir(home) ? `the workspace (${thread.projectPath}; --here works on the current folder instead)` : thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /help lists the commands; Ctrl+C stops a turn; /exit quits.\n`,
   );
   const tree = thread.worktree;
   if (tree) {
@@ -402,79 +394,104 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
   else prompt();
   showRequest();
 
-  /** Handles one typed line: it answers the waiting request, runs a slash command, steers the running turn or sends a new one. True on `/exit`. */
-  const input = async (line: string) => {
-    const text = line.trim();
-    const request = requests[0];
-    const switchTo = modeCommands.get(text);
-    if (request) await answer(request, text);
-    else if (text === "/exit") return true;
-    else if (text === "/attach" || text.startsWith("/attach ")) {
-      const read = readAttachment(text.slice("/attach".length), process.cwd());
-      if (typeof read === "string") io.write(`${read}\n`);
-      else {
-        attached.push(read);
-        const names = attached.map((a) => a.name).join(", ");
-        io.write(
-          `[attached ${read.name}; ${names} go${attached.length === 1 ? "es" : ""} with your next message${running ? ", after this turn" : ""}. /detach drops them]\n`,
-        );
-      }
-      if (!running) prompt();
-    } else if (text === "/detach") {
+  /** `/revert` drops the latest turn; `/revert <n>` goes back to the end of turn n; `files` restores the files too. */
+  const revert = async (args: readonly string[]) => {
+    const files = args.includes("files");
+    const n = Number(args.find((a) => a !== "files") ?? shown.length - 1);
+    const toTurnId = shown[n - 1];
+    if (!toTurnId || !Number.isInteger(n)) io.write(`[usage: /revert [n] [files], with n from 1 to ${shown.length - 1}]\n`);
+    else await dispatch({ type: "thread.revert", commandId: uuid<CommandId>(), threadId, toTurnId, files });
+  };
+
+  /** The project's trusted command lists, numbered as `/trusted` lists them; `/untrust <n>` revokes one. */
+  const trusted = async (revokeAt: string | undefined) => {
+    const lists = await runtime.runPromise(client.TrustedCommandsList({ threadId }));
+    if (revokeAt === undefined)
+      return io.write(
+        lists.length === 0
+          ? "[this project trusts none of its own commands yet; Verdandi asks before it runs them]\n"
+          : `${lists.map((t, i) => `  ${i + 1}. ${trustedCommandsLine(t)}`).join("\n")}\n[/untrust <n> revokes one]\n`,
+      );
+    const revoke = lists[Number(revokeAt) - 1];
+    if (!revoke) io.write(`[usage: /untrust <n>, with n from /trusted (1 to ${lists.length})]\n`);
+    else if (await dispatch({ type: "commands.trust.revoke", commandId: uuid<CommandId>(), threadId, hash: revoke.hash }))
+      io.write("[revoked: Verdandi asks before it runs those commands again]\n");
+  };
+
+  const switchMode = (to: InteractionMode) => () => {
+    mode = to;
+    io.write(`[${modeHelp[mode]}${running ? "; applies from the next turn" : ""}]\n`);
+  };
+
+  /** What `/exit`'s handler returns; any other result, such as a write's, keeps the chat open. */
+  const quit = Symbol("quit");
+  /** Each slash command of the terminal chat (`slashCommands`), given the words after its name. */
+  const commands: Record<SlashNameOn<"chat">, (args: readonly string[]) => unknown> = {
+    help: () =>
+      io.write(
+        `${slashHelp("chat")}\nStart a message with @opus (or another model) to pin the task it starts to it; Ctrl+C stops a turn.\n`,
+      ),
+    ask: switchMode("ask"),
+    plan: switchMode("plan"),
+    build: switchMode("build"),
+    attach: (args) => {
+      const read = readAttachment(args.join(" "), process.cwd());
+      if (typeof read === "string") return io.write(`${read}\n`);
+      attached.push(read);
+      const names = attached.map((a) => a.name).join(", ");
+      io.write(
+        `[attached ${read.name}; ${names} go${attached.length === 1 ? "es" : ""} with your next message${running ? ", after this turn" : ""}. /detach drops them]\n`,
+      );
+    },
+    detach: () => {
       io.write(attached.length ? `[dropped ${attached.map((a) => a.name).join(", ")}]\n` : "[nothing attached]\n");
       attached = [];
-      if (!running) prompt();
-    } else if (/^\/revert(\s|$)/.test(text)) {
-      // `/revert` drops the latest turn; `/revert <n>` goes back to the end of turn n; `files` restores the files too.
-      const args = text.split(/\s+/).slice(1);
-      const files = args.includes("files");
-      const n = Number(args.find((a) => a !== "files") ?? shown.length - 1);
-      const toTurnId = shown[n - 1];
-      if (!toTurnId || !Number.isInteger(n)) io.write(`[usage: /revert [n] [files], with n from 1 to ${shown.length - 1}]\n`);
-      else await dispatch({ type: "thread.revert", commandId: uuid<CommandId>(), threadId, toTurnId, files });
-      if (!running) prompt();
-    } else if (text === "/undo-revert") {
-      await dispatch({ type: "thread.revert.undo", commandId: uuid<CommandId>(), threadId });
-      if (!running) prompt();
-    } else if (text === "/forget-routing") {
-      if (await dispatch({ type: "routing.memory.clear", commandId: uuid<CommandId>(), threadId }))
-        io.write("[routing memory cleared: this project's next routed tasks go by the policy alone]\n");
-      if (!running) prompt();
-    } else if (/^\/rate(\s|$)/.test(text)) {
-      const word = text.split(/\s+/)[1] ?? "";
+    },
+    diff: (args) => showDiff(args[0] === "all", thread.projectPath),
+    skip: () => {
+      const request = requests[0];
+      if (request?.type !== "user-input.requested") return io.write("[/skip declines the agent's question, and none is waiting]\n");
+      return resolve(request, { decision: "deny" });
+    },
+    rate: async (args) => {
+      const word = args[0] ?? "";
       const rating = ratingWords.get(word);
       if (rating === undefined) io.write("[usage: /rate up|down|clear]\n");
       else if (!lastTask) io.write("[this thread has no task to rate yet]\n");
       else if (await dispatch({ type: "task.rate", commandId: uuid<CommandId>(), threadId, taskId: lastTask, rating }))
         io.write(rating === null ? "[rating cleared]\n" : `[rated the latest task ${word}]\n`);
-      if (!running) prompt();
-    } else if (text === "/trusted" || /^\/untrust(\s|$)/.test(text)) {
-      // The project's trusted command lists, numbered as `/trusted` lists them; `/untrust <n>` revokes one.
-      const trusted = await runtime.runPromise(client.TrustedCommandsList({ threadId }));
-      const n = Number(text.split(/\s+/)[1]);
-      const revoke = text === "/trusted" ? undefined : trusted[n - 1];
-      if (text === "/trusted")
-        io.write(
-          trusted.length === 0
-            ? "[this project trusts none of its own commands yet; Verdandi asks before it runs them]\n"
-            : `${trusted.map((t, i) => `  ${i + 1}. ${trustedCommandsLine(t)}`).join("\n")}\n[/untrust <n> revokes one]\n`,
-        );
-      else if (!revoke) io.write(`[usage: /untrust <n>, with n from /trusted (1 to ${trusted.length})]\n`);
-      else if (await dispatch({ type: "commands.trust.revoke", commandId: uuid<CommandId>(), threadId, hash: revoke.hash }))
-        io.write("[revoked: Verdandi asks before it runs those commands again]\n");
-      if (!running) prompt();
-    } else if (text === "/skills" || text.startsWith("/skills ")) {
-      // The Skills panel's controls: list with pins, a skill's history, revert, pin, unpin and restore.
-      io.write(await runtime.runPromise(skillsAction(client, text.split(/\s+/).slice(1))));
-      if (!running) prompt();
-    } else if (text === "/diff" || text === "/diff all") {
-      await showDiff(text === "/diff all", thread.projectPath);
-      if (!running) prompt();
-    } else if (switchTo) {
-      mode = switchTo;
-      io.write(`[${modeHelp[mode]}${running ? "; applies from the next turn" : ""}]\n`);
-      if (!running) prompt();
-    } else if (!text) {
+    },
+    "forget-routing": async () => {
+      if (await dispatch({ type: "routing.memory.clear", commandId: uuid<CommandId>(), threadId }))
+        io.write("[routing memory cleared: this project's next routed tasks go by the policy alone]\n");
+    },
+    revert,
+    "undo-revert": () => dispatch({ type: "thread.revert.undo", commandId: uuid<CommandId>(), threadId }),
+    trusted: () => trusted(undefined),
+    untrust: (args) => trusted(args[0] ?? ""),
+    // The Skills panel's controls: list with pins, a skill's history, revert, pin, unpin and restore.
+    skills: async (args) => io.write(await runtime.runPromise(skillsAction(client, args))),
+    exit: () => quit,
+  };
+
+  /**
+   * Handles one typed line: a slash command runs (or is refused while a turn runs, as `slashCommands` says) without
+   * answering the waiting request; any other line answers that request, steers the running turn or sends a new one.
+   * True on `/exit`.
+   */
+  const input = async (line: string) => {
+    const text = line.trim();
+    const request = requests[0];
+    const command = parseSlash(text, "chat");
+    if (command) {
+      const busy = slashEntry(command.name).whileBusy;
+      if (running && typeof busy === "object") io.write(`[${busy.refuse}]\n`);
+      else if ((await commands[command.name](command.args)) === quit) return true;
+      // The request still waits, so say again what a typed line answers.
+      if (request && requests[0] === request) showRequest();
+      else if (!running && !requests[0]) prompt();
+    } else if (request) await answer(request, text);
+    else if (!text) {
       if (!running) prompt();
     } else if (!running || !(await steer(running, text))) {
       const turnId = uuid<TurnId>();

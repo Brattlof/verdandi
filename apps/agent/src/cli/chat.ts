@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
-import type { CommandId, ProjectsFeed, ThreadId } from "@verdandi/contracts";
+import { createInterface } from "node:readline";
+import { type CommandId, type ProjectsFeed, slashCompletions, type ThreadId } from "@verdandi/contracts";
 import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { flag, resolveHome } from "../home/home.ts";
 import { cliThreadsFile, defaultFolder, readCliThreads } from "../home/workspace.ts";
@@ -26,18 +27,39 @@ const list = async (runtime: ManagedRuntime.ManagedRuntime<Client, never>, clien
   process.stdout.write(threadList(projects, threads, quotas));
 };
 
-/** The line chat: reads lines from stdin and writes to stdout, for pipes, scripts and `--plain`. */
+/** Tab's options for a line: the slash commands, or the argument choices, it can complete to. */
+const completeLine = (line: string): [string[], string] => [slashCompletions(line, "chat").map((o) => o.line), line];
+
+/**
+ * The line chat: reads lines from stdin and writes to stdout, for pipes, scripts and `--plain`. In a terminal it reads
+ * through readline, so Tab completes slash commands; piped input goes through Bun's line reader, which keeps every line
+ * of input that ends early (Bun's readline drops the lines it buffered when its input closes).
+ */
 const plainChat = async (setup: SessionSetup, notes: readonly string[], done: () => Promise<void>) => {
+  const terminal = process.stdin.isTTY
+    ? createInterface({ input: process.stdin, output: process.stdout, completer: completeLine })
+    : undefined;
+  // Taken now, so a line typed while the session opens isn't lost.
+  const typed = (terminal ?? console)[Symbol.asyncIterator]();
   const io: Io = {
     write: (text) => process.stdout.write(text),
-    prompt: (mode) => process.stdout.write(mode === "build" ? "> " : `${mode}> `),
+    prompt: (mode) => {
+      const prompt = mode === "build" ? "> " : `${mode}> `;
+      if (!terminal) return void process.stdout.write(prompt);
+      terminal.setPrompt(prompt);
+      terminal.prompt(true);
+    },
     suspend: (run) => run(),
   };
   const session = await openSession(setup, io, notes);
-  process.on("SIGINT", () => {
+  const interrupt = () => {
     if (session.interrupt()) void done().finally(() => process.exit(130));
-  });
-  for await (const line of console) if (await session.input(line)) break;
+  };
+  process.on("SIGINT", interrupt);
+  // readline takes Ctrl+C itself.
+  terminal?.on("SIGINT", interrupt);
+  for await (const line of { [Symbol.asyncIterator]: () => typed }) if (await session.input(line)) break;
+  terminal?.close();
   await session.close();
   await done();
 };
