@@ -12,6 +12,7 @@ import {
   RoutingUnavailable,
   type SessionHit,
   type SessionQuery,
+  type SkillHistoryEntry,
   type SkillsView,
   type SpendCap,
   SpendCapsUnavailable,
@@ -225,6 +226,14 @@ export const connect = (endpoint: Endpoint) => {
     return undefined;
   };
 
+  /** The changes written to profile skill `skill`, newest first; undefined when the connection is lost. */
+  const skillHistory = async (skill: string): Promise<readonly SkillHistoryEntry[] | undefined> => {
+    const exit = await run((rpc) => rpc.SkillHistoryGet({ skill }));
+    if (Exit.isSuccess(exit)) return exit.value;
+    lost.set(true); // it has no errors of its own
+    return undefined;
+  };
+
   /** The command lists the user trusted, in every project, newest first; undefined when the connection is lost. */
   const trusted = async (): Promise<readonly TrustedCommands[] | undefined> => {
     const exit = await run((rpc) => rpc.TrustedCommandsList({}));
@@ -309,6 +318,7 @@ export const connect = (endpoint: Endpoint) => {
     search,
     memory,
     skills,
+    skillHistory,
     trusted,
     terminals,
     follow,

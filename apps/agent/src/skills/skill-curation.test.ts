@@ -211,6 +211,52 @@ test("the migration rebuilds the skills Verdandi created from the log, with thei
   const states = (await run(loadSkillsView)).folders.flatMap((f) =>
     f.skills.map((s) => `${f.source} ${s.name} ${s.curation?.state ?? "user"}`),
   );
-  // Used on day 20 and day 10: one still active, one stale. The hand-written one has no curation.
-  expect(states).toEqual(["profile deploy-notes active", "profile mine user", "profile release-steps stale"]);
+  // Used on day 20 and day 10: one still active, one stale. The hand-written one has no curation, and the deleted one
+  // was archived, not removed, with no curation either.
+  expect(states).toEqual(["profile deploy-notes active", "profile mine user", "profile release-steps stale", "archived gone user"]);
+});
+
+test("a pinned skill Verdandi created stays active however long it goes unused, and the sweep can't archive it", async () => {
+  const t0 = Date.parse("2026-01-01T00:00:00.000Z");
+  setSystemTime(new Date(t0));
+  const home = makeTempHome();
+  dirs.push(home);
+  const runtime = ManagedRuntime.make(AppLayer(home, { fake: makeFakeHarness() }));
+  runtimes.push(runtime as never);
+  const run = <A, E>(effect: Effect.Effect<A, E, Engine | Reactor | SqlClient.SqlClient | ProfileSkills>) => runtime.runPromise(effect);
+  const dispatch = (c: Command) => run(Effect.flatMap(Engine, (e) => e.dispatch(c)));
+  await run(
+    Effect.flatMap(Engine, (engine) =>
+      engine.react(({ event: e }) =>
+        e.type === "skill.proposed"
+          ? engine
+              .dispatch({
+                type: "approval.respond",
+                commandId: id<CommandId>(),
+                threadId: e.threadId,
+                requestId: e.requestId,
+                resolution: { decision: "allow" },
+              })
+              .pipe(Effect.ignore)
+          : Effect.void,
+      ),
+    ),
+  );
+  const threadId = id<ThreadId>();
+  const route = { harness: "fake", model: "fake", effort: "low" } as const;
+  await dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId, projectPath: "/work/app", route });
+  const text = `tool skill_manage ${JSON.stringify({ action: "create", name: "deploy-notes", content: skill("deploy-notes") })}`;
+  await dispatch({ type: "turn.send", commandId: id<CommandId>(), threadId, turnId: id<TurnId>(), text, mode: "build" });
+  await run(Effect.flatMap(Reactor, (r) => r.drain));
+  await dispatch({ type: "skill.pin", commandId: id<CommandId>(), skill: "deploy-notes" });
+
+  await run(curateSkills(t0 + 40 * day));
+  await run(Effect.flatMap(Reactor, (r) => r.drain));
+  const [pinned] = (await run(loadSkillsView)).folders[0]?.skills ?? [];
+  expect(pinned).toMatchObject({ name: "deploy-notes", pinned: true, curation: { state: "active" } });
+  expect(existsSync(join(home, "skills", "deploy-notes", "SKILL.md"))).toBe(true);
+  // A sweep that read the skill before the pin committed is refused by the decider too.
+  const usedAt = pinned?.curation?.usedAt ?? "";
+  await dispatch({ type: "skill.curate", commandId: id<CommandId>(), threadId, skill: "deploy-notes", to: "archived", usedAt });
+  expect((await run(loadSkillsView)).folders[0]?.skills[0]?.curation?.state).toBe("active");
 });

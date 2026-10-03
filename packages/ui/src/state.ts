@@ -105,7 +105,15 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "approval.requested": addRequest,
   "user-input.requested": addRequest,
   "skill.proposed": addRequest,
-  "skill.applied": (thread) => thread, // the skill is on disk; the Skills tab reads it from there
+  // The skill is on disk, where the Skills tab reads it; a proposal that couldn't be written says why on its turn.
+  "skill.applied": (thread, e) =>
+    e.error !== undefined && e.turnId
+      ? addItem(thread, e.turnId, { kind: "notice", text: `The skill change wasn't written: ${e.error}` })
+      : thread,
+  // Shown in the Skills tab, fetched when opened.
+  "skill.reverted": (thread) => thread,
+  "skill.pinned": (thread) => thread,
+  "skill.unpinned": (thread) => thread,
   // A background review's proposal waits for the user like the agent's own requests; the review itself runs out of sight.
   "memory.proposed": addRequest,
   // Verdandi's own request to run the project's commands; trusted lists show on the projects page, fetched when opened.

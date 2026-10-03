@@ -279,7 +279,21 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     ),
   "approval.requested": insertRequest,
   "user-input.requested": insertRequest,
-  "skill.proposed": insertRequest,
+  "skill.proposed": (e, at) =>
+    Effect.andThen(
+      insertRequest(e, at),
+      withSql(
+        (sql) => sql`insert into skill_changes (id, skill, thread_id, change)
+          values (${e.requestId}, ${e.change.skill}, ${e.threadId}, ${JSON.stringify(e.change)})`,
+      ),
+    ),
+  "skill.reverted": (e) =>
+    withSql(
+      (sql) => sql`insert into skill_changes (id, skill, thread_id, change, reverts)
+        values (${e.changeId}, ${e.change.skill}, ${e.threadId}, ${JSON.stringify(e.change)}, ${e.reverts})`,
+    ),
+  "skill.pinned": (e, at) => withSql((sql) => sql`insert or replace into skill_pins (name, pinned_at) values (${e.skill}, ${at})`),
+  "skill.unpinned": (e) => withSql((sql) => sql`delete from skill_pins where name = ${e.skill}`),
   "memory.proposed": insertRequest,
   "commands.trust.requested": insertRequest,
   "commands.trusted": (e, at) =>
@@ -293,15 +307,26 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   // The digest and the review thread are in the event; the review thread is marked by its own `review.started`.
   "review.requested": () => Effect.void,
   "review.started": (e) => withSql((sql) => sql`update threads set review = ${JSON.stringify(e)} where id = ${e.threadId}`),
-  // The skill itself is on disk; a skill Verdandi created gets a row, so it can be curated (DESIGN §14.4).
+  // The skill itself is on disk; a skill Verdandi created gets a row, so it can be curated (DESIGN §14.4). Reverting a
+  // delete brings the row back only for a skill Verdandi created: a user's skill is never curated.
   "skill.applied": (e, at) =>
-    e.error !== undefined || (e.action !== "create" && e.action !== "delete")
-      ? Effect.void
-      : withSql((sql) =>
-          e.action === "create"
-            ? sql`insert or replace into skills (name, thread_id, state, used_at) values (${e.skill}, ${e.threadId}, 'active', ${at})`
-            : sql`delete from skills where name = ${e.skill}`,
-        ),
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`update skill_changes set applied_at = ${at}, error = ${e.error ?? null} where id = ${e.requestId}`;
+      if (e.error !== undefined) {
+        if (e.turnId) yield* addItem(e.turnId, { kind: "notice", text: `The skill change wasn't written: ${e.error}` });
+        return;
+      }
+      if (e.action === "create" && e.turnId)
+        yield* sql`insert or replace into skills (name, thread_id, state, used_at) values (${e.skill}, ${e.threadId}, 'active', ${at})`;
+      else if (e.action === "create")
+        yield* sql`insert or replace into skills (name, thread_id, state, used_at)
+          select skill, thread_id, 'active', ${at} from skill_changes
+          where skill = ${e.skill} and reverts is null and error is null and applied_at is not null
+            and json_extract(change, '$.action') = 'create'
+          order by applied_at desc limit 1`;
+      else if (e.action === "delete") yield* sql`delete from skills where name = ${e.skill}`;
+    }),
   // A restore starts the skill's clock again.
   "skill.state.changed": (e, at) =>
     withSql(

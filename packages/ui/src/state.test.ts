@@ -156,6 +156,25 @@ test("a skill proposal waits as a pending request until answered", () => {
   expect(answered?.pendingRequests).toEqual([]);
 });
 
+test("a skill proposal that couldn't be written says why on its turn, as the projector stores it", () => {
+  const failed = fold([
+    snapshot,
+    event(2, { type: "turn.started", v: 2, threadId, turnId, text: "learn this" }),
+    event(3, {
+      type: "skill.applied",
+      v: 2,
+      threadId,
+      turnId,
+      requestId: "r1",
+      action: "patch",
+      skill: "deploy-notes",
+      path: "SKILL.md",
+      error: "deploy-notes/SKILL.md changed since it was proposed",
+    }),
+  ]);
+  expect(failed?.turns.at(-1)?.items).toEqual([{ kind: "notice", text: expect.stringContaining("changed since it was proposed") }]);
+});
+
 test("a plan waits as a pending request and leaves a plan item once answered", () => {
   const feeds = [
     snapshot,

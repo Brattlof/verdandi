@@ -579,12 +579,8 @@ export const SkillProposed = Schema.Struct({
   requestId: Schema.String,
   change: SkillChange,
 });
-/**
- * The reactor wrote the allowed proposal `requestId` to the profile's skills folder, or `error` says why it
- * couldn't (the file changed since it was proposed, a guard refused the path). With `skill.proposed` and its
- * `approval.resolved`, the skill's provenance: who proposed what, in which turn, and who allowed it.
- */
-export const SkillApplied = Schema.Struct({
+/** v1 applied only proposals, each in its turn: it reads as v2. */
+const SkillAppliedV1 = Schema.Struct({
   type: Schema.Literal("skill.applied"),
   v: v1,
   threadId: ThreadId,
@@ -595,6 +591,36 @@ export const SkillApplied = Schema.Struct({
   path: Schema.String,
   error: Schema.optionalKey(Schema.String),
 });
+/**
+ * The reactor wrote the allowed proposal or the revert `requestId` to the profile's skills folder, or `error` says why
+ * it couldn't (the file changed since it was proposed, a guard refused the path). A proposal's has its `turnId`; a
+ * revert has none. With `skill.proposed` and its `approval.resolved`, the skill's provenance: who proposed what, in
+ * which turn, and who allowed it.
+ */
+export const SkillApplied = Schema.Struct({
+  ...SkillAppliedV1.fields,
+  v: Schema.Literal(2),
+  turnId: Schema.optionalKey(TurnId),
+});
+/**
+ * The user reverted the written skill change `reverts` (a proposal's request id, or an earlier revert's `changeId`):
+ * `change` puts its `before` back, checked like a proposal. The reactor writes it and records `skill.applied` with
+ * `changeId` as its request id. Recorded in the reverted change's thread.
+ */
+export const SkillReverted = Schema.Struct({
+  type: Schema.Literal("skill.reverted"),
+  v: v1,
+  threadId: ThreadId,
+  changeId: Schema.String,
+  reverts: Schema.String,
+  change: SkillChange,
+});
+/**
+ * The user pinned profile skill `skill` (`skill.pinned`), so the decider refuses every agent's and background
+ * review's proposal to change it and the curation sweep leaves it alone, or unpinned it. On `profileStream`.
+ */
+export const SkillPinned = Schema.Struct({ type: Schema.Literal("skill.pinned"), v: v1, threadId: ThreadId, skill: Schema.String });
+export const SkillUnpinned = Schema.Struct({ type: Schema.Literal("skill.unpinned"), v: v1, threadId: ThreadId, skill: Schema.String });
 /**
  * Skill `skill`, which Verdandi created in thread `threadId`, moved from `from` to `to` (DESIGN §14.4): the daily
  * sweep staled or archived it for going unused, or the user restored it. Archived skills leave the folder Claude
@@ -703,6 +729,9 @@ export const Event = Schema.Union([
   MemorySnapshotTaken,
   SkillProposed,
   SkillApplied,
+  SkillReverted,
+  SkillPinned,
+  SkillUnpinned,
   SkillStateChanged,
   CommandsTrustRequested,
   CommandsTrusted,
@@ -741,6 +770,8 @@ const upgrades: Record<string, (payload: string) => Effect.Effect<Event, Schema.
       Schema.decodeUnknownEffect(Schema.fromJsonString(ThreadFilesRestoredV1))(payload),
       (e): Event => ({ ...e, v: 2, whole: true, outside: [] }),
     ),
+  "skill.applied@1": (payload) =>
+    Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(SkillAppliedV1))(payload), (e): Event => ({ ...e, v: 2 })),
   "task.escalated@1": (payload) =>
     Effect.map(
       Schema.decodeUnknownEffect(Schema.fromJsonString(TaskEscalatedV1))(payload),
@@ -797,7 +828,10 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "memory.deleted@1": MemoryDeleted,
   "memory.snapshot.taken@1": MemorySnapshotTaken,
   "skill.proposed@1": SkillProposed,
-  "skill.applied@1": SkillApplied,
+  "skill.applied@2": SkillApplied,
+  "skill.reverted@1": SkillReverted,
+  "skill.pinned@1": SkillPinned,
+  "skill.unpinned@1": SkillUnpinned,
   "skill.state.changed@1": SkillStateChanged,
   "commands.trust.requested@1": CommandsTrustRequested,
   "commands.trusted@1": CommandsTrusted,

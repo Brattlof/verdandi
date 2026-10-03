@@ -32,6 +32,7 @@ import { catalogFor, decideRoute, routingFor, rulesDecide, taskQuestions } from 
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
 import { searchSessions } from "../search/search.ts";
 import { loadSkillsView, SkillCurationScheduleLive } from "../skills/skill-curation.ts";
+import { loadSkillHistory } from "../skills/skill-history.ts";
 import { loadSpendState } from "../spend/spend.ts";
 import { loadSpendCaps } from "../spend/spend-caps.ts";
 import { loadUsageReport } from "../spend/usage.ts";
@@ -136,6 +137,12 @@ const Handlers = (home: string) =>
         // Read from disk on each call: the user may add or edit skills by hand.
         SkillsList: () =>
           loadSkillsView.pipe(
+            Effect.provideService(ProfileSkills, skillFolders),
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.catchTag("SqlError", Effect.die),
+          ),
+        SkillHistoryGet: ({ skill }) =>
+          loadSkillHistory(skill).pipe(
             Effect.provideService(ProfileSkills, skillFolders),
             Effect.provideService(SqlClient.SqlClient, sql),
             Effect.catchTag("SqlError", Effect.die),

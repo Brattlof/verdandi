@@ -19,7 +19,7 @@ import { MemoryView } from "./memory.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, CatalogModel, RouteDecision, TaskClass } from "./routing.ts";
 import { SessionHit, SessionQuery } from "./search.ts";
-import { SkillsView } from "./skills.ts";
+import { SkillHistoryEntry, SkillsView } from "./skills.ts";
 import { SpendCap } from "./spend.ts";
 import { RouteCost, TaskRating } from "./task.ts";
 import { TerminalFeed, TerminalId, TerminalSize, TerminalUnavailable, TerminalView } from "./terminal.ts";
@@ -54,6 +54,9 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "InvalidSkill",
     "SkillRejected",
     "SkillNotArchived",
+    "SkillPinned",
+    "SkillNotPinned",
+    "SkillChangeNotFound",
     "ReviewSkipped",
     "CommandsNotTrusted",
   ]),
@@ -364,6 +367,8 @@ export class Api extends RpcGroup.make(
   Rpc.make("MemoryList", { payload: { threadId: ThreadId }, success: MemoryView, error: CommandRejected }),
   /** The profile's skills and those in its read-only extra folders, for the Skills panel (DESIGN §14.4). */
   Rpc.make("SkillsList", { success: SkillsView }),
+  /** The changes written to profile skill `skill`, newest first, each with why reverting it now would be refused, for the Skills panel. */
+  Rpc.make("SkillHistoryGet", { payload: { skill: Schema.String }, success: Schema.Array(SkillHistoryEntry) }),
   /** The command lists the user trusted, in thread `threadId`'s project or in all, newest first; each one's thread revokes it. */
   Rpc.make("TrustedCommandsList", { payload: { threadId: Schema.optionalKey(ThreadId) }, success: Schema.Array(TrustedCommands) }),
   /**

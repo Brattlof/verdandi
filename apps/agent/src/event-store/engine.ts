@@ -5,11 +5,13 @@ import {
   type Command,
   type CommandId,
   CommandRejected,
+  commandStream,
   type Event,
   encodeEvent,
   isCorrection,
   type ProjectsFeed,
   type Receipt,
+  type SkillChange,
   type SkillState,
   type StoredEvent,
   type ThreadFeed,
@@ -97,7 +99,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
           const at = new Date().toISOString();
           const [inserted] = yield* sql<{ seq: number }>`
             insert into events (event_id, command_id, thread_id, type, v, at, payload)
-            values (${eventId}, ${command.commandId}, ${command.threadId}, ${row.type}, ${row.v}, ${at}, ${row.payload})
+            values (${eventId}, ${command.commandId}, ${commandStream(command)}, ${row.type}, ${row.v}, ${at}, ${row.payload})
             returning seq`;
           const stored: StoredEvent = { seq: inserted?.seq ?? 0, eventId, commandId: command.commandId, at, event };
           yield* projectOne(stored);
@@ -114,7 +116,8 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 stored: [] as StoredEvent[],
                 published: [] as ProjectsChange[],
               };
-            const loaded = yield* loadDeciderState(command.threadId);
+            const stream = commandStream(command);
+            const loaded = yield* loadDeciderState(stream);
             // Caps are read on each turn and raise, so an edit to the caps file applies to the next one.
             // A proposed plan's build is routed around a reached cap too.
             const capped =
@@ -153,7 +156,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ? {
                     ...(yield* options.routing(current.projectPath)),
                     // Routing memory moves where a task starts, not an approved plan's build or a running task.
-                    ...(starts ? { memory: yield* loadRoutingMemory(command.threadId) } : {}),
+                    ...(starts ? { memory: yield* loadRoutingMemory(stream) } : {}),
                   }
                 : undefined;
             // A new task is classified, and a later turn is asked whether it corrects the agent's last answer. A background
@@ -181,7 +184,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
               (command.type === "approval.respond" &&
                 current?.pendingRequests.some((r) => r.requestId === command.requestId && r.kind === "memory")) ||
               (send !== undefined && current?.sessionId === null);
-            const memory = remembers ? yield* loadMemory(command.threadId) : null;
+            const memory = remembers ? yield* loadMemory(stream) : null;
             // Untrusted text the command would keep or hand the agent is scanned for injection (DESIGN §17).
             const untrusted =
               command.type === "memory.save" || command.type === "memory.edit"
@@ -203,6 +206,24 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ? ((yield* sql<{ state: SkillState; usedAt: string }>`
                     select state, used_at as usedAt from skills where name = ${command.skill}`)[0] ?? null)
                 : undefined;
+            // A pin stops agents' proposals and the sweep; the user's own pin, unpin and revert read it too.
+            const pinnedName =
+              command.type === "skill.propose"
+                ? command.change.skill
+                : command.type === "review.propose" && command.proposal.kind === "skill"
+                  ? command.proposal.change.skill
+                  : command.type === "skill.curate" || command.type === "skill.pin" || command.type === "skill.unpin"
+                    ? command.skill
+                    : undefined;
+            const pinned =
+              pinnedName === undefined ? undefined : (yield* sql`select 1 from skill_pins where name = ${pinnedName}`).length > 0;
+            const reverting =
+              command.type === "skill.revert"
+                ? ((yield* sql<{ threadId: ThreadId; change: string; appliedAt: string | null; error: string | null }>`
+                    select thread_id as threadId, change, applied_at as appliedAt, error from skill_changes where id = ${command.changeId}`).map(
+                    (r) => ({ ...r, change: JSON.parse(r.change) as SkillChange }),
+                  )[0] ?? null)
+                : undefined;
             // A background review stays off a harness whose subscription window is short (DESIGN §14.5).
             const shortQuota = send && current?.review ? yield* loadShortQuota(new Date()) : undefined;
             const decision = decide(
@@ -213,6 +234,8 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ...(memory && { memory }),
                 ...(injection && { injection }),
                 ...(skill !== undefined && { skill }),
+                ...(pinned !== undefined && { pinned }),
+                ...(reverting !== undefined && { reverting }),
                 ...(shortQuota && { shortQuota }),
               },
               command,
@@ -223,7 +246,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
             const seq = stored.at(-1)?.seq ?? last?.seq ?? 0;
             yield* sql`insert into command_receipts (command_id, seq) values (${command.commandId}, ${seq})`;
             // Read in the same transaction, so the summary is exactly the state as of `seq`.
-            const [thread] = stored.some((s) => summaryEvents.has(s.event.type)) ? yield* loadThreadSummaries(command.threadId) : [];
+            const [thread] = stored.some((s) => summaryEvents.has(s.event.type)) ? yield* loadThreadSummaries(stream) : [];
             const created = stored.find((s) => s.event.type === "thread.created")?.event;
             const change: ThreadChange | undefined = thread && {
               kind: "thread",

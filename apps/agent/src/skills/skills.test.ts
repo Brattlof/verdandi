@@ -2,15 +2,27 @@ import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CommandId, Item, Resolution, ThreadId, TurnId } from "@verdandi/contracts";
+import {
+  type Command,
+  type CommandId,
+  historyLabel,
+  type Item,
+  profileStream,
+  type Resolution,
+  type SkillHistoryEntry,
+  type ThreadId,
+  type TurnId,
+} from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AppLayer } from "../event-store/app.ts";
 import { Engine } from "../event-store/engine.ts";
 import { loadThreadView } from "../event-store/projector.ts";
-import { Reactor } from "../event-store/reactor.ts";
+import { type ProfileSkills, Reactor } from "../event-store/reactor.ts";
+import { loadSkillsView } from "./skill-curation.ts";
 import { listSkills } from "./skill-files.ts";
+import { loadSkillHistory } from "./skill-history.ts";
 import { nameProblem, pathProblem } from "./skills.ts";
 
 const dirs: string[] = [];
@@ -32,20 +44,24 @@ const setup = async (config?: (home: string) => void) => {
   config?.(home);
   const runtime = ManagedRuntime.make(AppLayer(home, { fake: makeFakeHarness() }));
   runtimes.push(runtime as never);
-  const answer: { resolution: Resolution } = { resolution: { decision: "allow" } };
+  // `meanwhile` runs while a proposal waits, before the user answers it.
+  const answer: { resolution: Resolution; meanwhile?: () => void } = { resolution: { decision: "allow" } };
   await runtime.runPromise(
     Effect.flatMap(Engine, (engine) =>
       engine.react(({ event: e }) =>
         e.type === "skill.proposed"
-          ? engine
-              .dispatch({
-                type: "approval.respond",
-                commandId: id<CommandId>(),
-                threadId: e.threadId,
-                requestId: e.requestId,
-                resolution: answer.resolution,
-              })
-              .pipe(Effect.ignore)
+          ? Effect.sync(() => answer.meanwhile?.()).pipe(
+              Effect.andThen(
+                engine.dispatch({
+                  type: "approval.respond",
+                  commandId: id<CommandId>(),
+                  threadId: e.threadId,
+                  requestId: e.requestId,
+                  resolution: answer.resolution,
+                }),
+              ),
+              Effect.ignore,
+            )
           : Effect.void,
       ),
     ),
@@ -77,11 +93,21 @@ const setup = async (config?: (home: string) => void) => {
         ),
       )
     ).map((e): Record<string, unknown> => ({ type: e.type, ...(JSON.parse(e.payload) as object) }));
-  return { home, threadId, turn, events, answer, skills: join(home, "skills") };
+  const run = <A, E>(effect: Effect.Effect<A, E, Engine | Reactor | SqlClient.SqlClient | ProfileSkills>) => runtime.runPromise(effect);
+  /** Dispatches `command` as a client would: its rejection, or undefined once it's committed and its reactions ran. */
+  const dispatch = (command: Command) =>
+    run(
+      Effect.flatMap(Engine, (e) => e.dispatch(command)).pipe(
+        Effect.andThen(Effect.flatMap(Reactor, (r) => r.drain)),
+        Effect.as(undefined),
+        Effect.catchTag("CommandRejected", Effect.succeed),
+      ),
+    );
+  return { home, threadId, turn, events, answer, run, dispatch, skills: join(home, "skills") };
 };
 
 test("the agent proposes a skill, the user approves it, and it's on disk with its provenance recorded as events", async () => {
-  const { threadId, turn, events, skills } = await setup();
+  const { home, threadId, turn, events, skills } = await setup();
   const content = skill("deploy-notes", "Run bun run deploy from the repo root.");
 
   const created = await turn(tool({ action: "create", name: "deploy-notes", content }));
@@ -113,8 +139,10 @@ test("the agent proposes a skill, the user approves it, and it's on disk with it
   expect(listSkills({ profile: skills, archive: `${skills}-archive`, extra: [] }).folders[0]?.skills).toEqual([
     { name: "deploy-notes", description: "How this user deploys.", path: join(skills, "deploy-notes") },
   ]);
+  // A delete archives the whole folder: out of Claude Code's sight, never deleted.
   expect((await turn(tool({ action: "delete", name: "deploy-notes" }))).isError).toBe(false);
   expect(existsSync(join(skills, "deploy-notes"))).toBe(false);
+  expect(readFileSync(join(home, "skills-archive", "deploy-notes", "scripts", "deploy.sh"), "utf8")).toBe("bun run deploy\n");
 });
 
 test("a declined proposal leaves nothing behind, and the agent hears why", async () => {
@@ -196,4 +224,136 @@ test("the skills list shows each skill with its source", async () => {
       { path: join(extra, "missing"), source: "extra", skills: [] },
     ],
   });
+});
+
+test("reverting an applied patch puts the file back, a revert can be reverted, and the history lists them newest first", async () => {
+  const { threadId, turn, run, dispatch, skills } = await setup();
+  const content = skill("deploy-notes", "Run bun run deploy.");
+  await turn(tool({ action: "create", name: "deploy-notes", content }));
+  await turn(
+    tool({ action: "patch", name: "deploy-notes", path: "SKILL.md", old: "bun run deploy", new: "rm -rf dist && bun run deploy" }),
+  );
+  const file = join(skills, "deploy-notes", "SKILL.md");
+  const patched = readFileSync(file, "utf8");
+
+  const [patch, create] = await run(loadSkillHistory("deploy-notes"));
+  expect(patch).toMatchObject({ threadId, change: { action: "patch" } });
+  expect(patch).not.toHaveProperty("blocked");
+  expect(create).toMatchObject({ change: { action: "create" } });
+  // Only the latest change can go back: the create's SKILL.md isn't what's on disk any more.
+  expect(create?.blocked).toContain("changed since");
+
+  expect(await dispatch({ type: "skill.revert", commandId: id<CommandId>(), threadId, changeId: patch?.changeId ?? "" })).toBeUndefined();
+  expect(readFileSync(file, "utf8")).toBe(content);
+  const [revert] = await run(loadSkillHistory("deploy-notes"));
+  expect(revert).toMatchObject({ reverts: patch?.changeId, change: { action: "patch", before: patched, after: content } });
+  expect(historyLabel(revert as SkillHistoryEntry)).toBe("reverted: patched SKILL.md");
+
+  // Undoing the revert is a revert too.
+  expect(await dispatch({ type: "skill.revert", commandId: id<CommandId>(), threadId, changeId: revert?.changeId ?? "" })).toBeUndefined();
+  expect(readFileSync(file, "utf8")).toBe(patched);
+  expect(await run(loadSkillHistory("deploy-notes"))).toHaveLength(4);
+});
+
+test("a revert after a hand edit is refused and writes nothing, and the history says so before asking", async () => {
+  const { threadId, turn, run, dispatch, skills } = await setup();
+  await turn(tool({ action: "create", name: "deploy-notes", content: skill("deploy-notes", "Run bun run deploy.") }));
+  await turn(tool({ action: "write_file", name: "deploy-notes", path: "notes.md", content: "Deploy on Fridays.\n" }));
+  const notes = join(skills, "deploy-notes", "notes.md");
+  writeFileSync(notes, "Never deploy on Fridays.\n");
+
+  const [written] = await run(loadSkillHistory("deploy-notes"));
+  expect(written?.blocked).toContain("changed since");
+  await dispatch({ type: "skill.revert", commandId: id<CommandId>(), threadId, changeId: written?.changeId ?? "" });
+  expect(readFileSync(notes, "utf8")).toBe("Never deploy on Fridays.\n");
+  const [refused] = await run(loadSkillHistory("deploy-notes"));
+  expect(refused).toMatchObject({ reverts: written?.changeId, error: expect.stringContaining("Nothing was written") });
+
+  // Undone by hand, the revert goes through: the file the change added is removed, and only that file.
+  writeFileSync(notes, "Deploy on Fridays.\n");
+  await dispatch({ type: "skill.revert", commandId: id<CommandId>(), threadId, changeId: written?.changeId ?? "" });
+  expect(existsSync(notes)).toBe(false);
+  expect(existsSync(join(skills, "deploy-notes", "SKILL.md"))).toBe(true);
+  // A revert that was never written has nothing to revert.
+  const failed = await dispatch({ type: "skill.revert", commandId: id<CommandId>(), threadId, changeId: refused?.changeId ?? "" });
+  expect(failed).toMatchObject({ reason: "SkillChangeNotFound" });
+});
+
+test("reverting a create removes the skill, and reverting that brings the whole folder back", async () => {
+  const { home, threadId, turn, run, dispatch, skills } = await setup();
+  await turn(tool({ action: "create", name: "deploy-notes", content: skill("deploy-notes", "Run bun run deploy.") }));
+  await turn(tool({ action: "write_file", name: "deploy-notes", path: "scripts/deploy.sh", content: "bun run deploy\n" }));
+  const create = (await run(loadSkillHistory("deploy-notes"))).find((e) => e.change.action === "create");
+
+  await dispatch({ type: "skill.revert", commandId: id<CommandId>(), threadId, changeId: create?.changeId ?? "" });
+  expect(existsSync(join(skills, "deploy-notes"))).toBe(false);
+  expect(existsSync(join(home, "skills-archive", "deploy-notes", "scripts", "deploy.sh"))).toBe(true);
+  expect((await run(loadSkillsView)).folders.find((f) => f.source === "profile")?.skills).toEqual([]);
+
+  const [removal] = await run(loadSkillHistory("deploy-notes"));
+  expect(removal).toMatchObject({ change: { action: "delete" }, reverts: create?.changeId });
+  await dispatch({ type: "skill.revert", commandId: id<CommandId>(), threadId, changeId: removal?.changeId ?? "" });
+  expect(readFileSync(join(skills, "deploy-notes", "scripts", "deploy.sh"), "utf8")).toBe("bun run deploy\n");
+  // Back with its curation, since Verdandi created it.
+  const back = (await run(loadSkillsView)).folders.find((f) => f.source === "profile")?.skills[0];
+  expect(back?.curation).toMatchObject({ state: "active", threadId });
+});
+
+test("a proposal whose file changed while it waited isn't written, and its turn says why", async () => {
+  const { threadId, turn, run, answer, skills } = await setup();
+  await turn(tool({ action: "create", name: "deploy-notes", content: skill("deploy-notes", "Run bun run deploy.") }));
+  const file = join(skills, "deploy-notes", "SKILL.md");
+  answer.meanwhile = () => writeFileSync(file, skill("deploy-notes", "Edited by hand."));
+
+  const patched = await turn(tool({ action: "patch", name: "deploy-notes", path: "SKILL.md", old: "Run", new: "Always run" }));
+  expect(patched.isError).toBe(true);
+  expect(readFileSync(file, "utf8")).toBe(skill("deploy-notes", "Edited by hand."));
+  const items = (await run(loadThreadView(threadId)))?.turns.at(-1)?.items;
+  expect(items).toContainEqual({ kind: "notice", text: expect.stringContaining("wasn't written") });
+});
+
+test("a pinned skill refuses every agent's and review's change until it's unpinned, and the user's own edits are untouched", async () => {
+  const { threadId, turn, run, dispatch, skills } = await setup();
+  mkdirSync(join(skills, "mine"), { recursive: true });
+  const mine = skill("mine", "My own steps.");
+  writeFileSync(join(skills, "mine", "SKILL.md"), mine);
+
+  expect(await dispatch({ type: "skill.pin", commandId: id<CommandId>(), skill: "mine" })).toBeUndefined();
+  expect((await run(loadSkillsView)).folders[0]?.skills[0]).toMatchObject({ name: "mine", pinned: true });
+  const edits = [
+    { action: "patch", name: "mine", path: "SKILL.md", old: "My own", new: "Better" },
+    { action: "write_file", name: "mine", path: "extra.md", content: "More.\n" },
+    { action: "delete", name: "mine" },
+  ];
+  for (const edit of edits) {
+    const refused = await turn(tool(edit));
+    expect(refused).toMatchObject({ isError: true, content: expect.stringContaining("pinned") });
+  }
+  // A background review's proposal is refused the same way.
+  const reviewed = (await run(loadThreadView(threadId)))?.turns.at(-1)?.turnId ?? id<TurnId>();
+  const change = { action: "patch", skill: "mine", path: "SKILL.md", before: mine, after: mine.replace("My own", "Better") } as const;
+  const review = await dispatch({
+    type: "review.propose",
+    commandId: id<CommandId>(),
+    threadId,
+    turnId: reviewed,
+    reviewThreadId: id<ThreadId>(),
+    proposal: { kind: "skill", change },
+  });
+  expect(review).toMatchObject({ reason: "SkillPinned" });
+  // The user's own edit on disk is theirs to make.
+  writeFileSync(join(skills, "mine", "SKILL.md"), mine.replace("My own", "Still my own"));
+
+  // The pin is the profile's, on its own stream; unpinning lets agents propose again.
+  const pins = await run(
+    Effect.flatMap(
+      SqlClient.SqlClient,
+      (sql) => sql<{ threadId: string }>`select thread_id as threadId from events where type like 'skill.%pinned'`,
+    ),
+  );
+  expect(pins).toEqual([{ threadId: profileStream }]);
+  expect(await dispatch({ type: "skill.unpin", commandId: id<CommandId>(), skill: "mine" })).toBeUndefined();
+  expect(await dispatch({ type: "skill.unpin", commandId: id<CommandId>(), skill: "mine" })).toMatchObject({ reason: "SkillNotPinned" });
+  const unpinned = [{ ...edits[0], old: "Still my own" }, ...edits.slice(1)];
+  for (const edit of unpinned) expect((await turn(tool(edit))).isError).toBe(false);
 });
