@@ -11,7 +11,7 @@ M1 includes diffs (DESIGN §21), but checkpoints, the hidden per-turn refs that 
 ## Decision
 
 1. `DiffGet` (`diff.*` in DESIGN §11) returns the thread's project working tree against `HEAD`, one unified diff per file, with new untracked files included and ignored ones left out. Paths are relative to the project folder, and only that folder is diffed.
-2. With a `turnId`, it narrows to the files that turn's file tools touched, taken from its `tool.call` items (Claude Code: `Edit`, `MultiEdit`, `Write`, `NotebookEdit`). A harness with other tool names adds them to `apps/server/src/diffs/diff.ts`.
+2. With a `turnId`, it narrows to the files that turn's file tools touched, taken from its `tool.call` items (Claude Code: `Edit`, `MultiEdit`, `Write`, `NotebookEdit`). A harness with other tool names adds them to `apps/agent/src/diffs/diff.ts`.
 3. git runs read-only: `--no-optional-locks`, so the user's index is never refreshed; literal pathspecs; fixed `a/` `b/` prefixes; no external diff drivers. Nothing is stored, so there's no event or migration to undo when checkpoints replace this.
 4. Payloads stay small: each file's diff is cut at 64 KiB on a line break and marked `truncated`, and once the response reaches 512 KiB the remaining files are counted in `omittedFiles`.
 5. A project that isn't a git repo, doesn't exist or has no commits fails with `DiffUnavailable` and a message that names the fix.

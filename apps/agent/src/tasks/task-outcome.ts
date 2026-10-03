@@ -12,7 +12,7 @@ import { decodeRows, type StoredEventRow } from "./trajectory.ts";
  * Each outcome keeps the last event it was built from, and only a newer one replaces it, so running this twice, or
  * two at once, is harmless.
  * ponytail: still reads all of the current task's events: 18 ms median, 25 ms p95 for a 1,000-turn task on an M4 Pro
- * (`apps/server/scripts/bench-rebuilds.ts`, #140). Upgrade to folding only the events since its last outcome, from a saved
+ * (`apps/agent/scripts/bench-rebuilds.ts`, #140). Upgrade to folding only the events since its last outcome, from a saved
  * builder state, if tasks that long show up.
  */
 export const recordTaskOutcomes = (threadId: ThreadId) =>
