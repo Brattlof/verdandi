@@ -421,7 +421,7 @@ export const ThreadWorktreeRemoved = Schema.Struct({
 /**
  * The user reverted the thread to the end of turn `toTurnId`: `turnIds`, the later turns still shown, are now
  * reverted, and the next turn forks the conversation from there (ADR 0004). It ends the running task, whose
- * outcome becomes `reverted`. With `files` the reactor restores the files from `toTurnId`'s end checkpoint.
+ * outcome becomes `reverted`. With `files` the reactor restores the files `turnIds` changed from `toTurnId`'s end checkpoint.
  */
 export const ThreadReverted = Schema.Struct({
   type: Schema.Literal("thread.reverted"),
@@ -431,16 +431,24 @@ export const ThreadReverted = Schema.Struct({
   turnIds: Schema.Array(TurnId),
   files: Schema.Boolean,
 });
-/** The user undid the thread's latest revert: `turnIds` show again; with `restore`, the reactor puts back the files saved before it. */
-export const ThreadRevertUndone = Schema.Struct({
+const ThreadRevertUndoneV1 = Schema.Struct({
   type: Schema.Literal("thread.revert.undone"),
   v: v1,
   threadId: ThreadId,
   turnIds: Schema.Array(TurnId),
   restore: Schema.optionalKey(Schema.String),
 });
-/** The reactor restored the thread's files from checkpoint `from`, after saving them as `saved`, or failed to (`error`). */
-export const ThreadFilesRestored = Schema.Struct({
+/**
+ * The user undid the thread's latest revert: `turnIds` show again; with `restore`, the reactor puts back the files
+ * saved before it: only `paths` (relative to the repo's top), the ones the revert restored, or the whole thread
+ * folder without them (a v1 revert).
+ */
+export const ThreadRevertUndone = Schema.Struct({
+  ...ThreadRevertUndoneV1.fields,
+  v: Schema.Literal(2),
+  paths: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+const ThreadFilesRestoredV1 = Schema.Struct({
   type: Schema.Literal("thread.files.restored"),
   v: v1,
   threadId: ThreadId,
@@ -448,6 +456,27 @@ export const ThreadFilesRestored = Schema.Struct({
   saved: Schema.optionalKey(Schema.String),
   error: Schema.optionalKey(Schema.String),
 });
+/**
+ * The reactor restored the thread's files from checkpoint `from`, after saving them as `saved`, or failed to (`error`).
+ * `paths` are the ones it restored, relative to the repo's top, which undoing the revert puts back. A revert restores
+ * only the paths its turns changed in the thread's folder, unless one of them has no checkpoints: then it restores the
+ * whole folder (`whole`), the user's own edits too. `outside` are files, absolute, its turns' file tools changed outside
+ * the folder, which have no checkpoints and stay as they are.
+ */
+export const ThreadFilesRestored = Schema.Struct({
+  ...ThreadFilesRestoredV1.fields,
+  v: Schema.Literal(2),
+  paths: Schema.optionalKey(Schema.Array(Schema.String)),
+  whole: Schema.Boolean,
+  outside: Schema.Array(Schema.String),
+});
+/** What a revert's restore did beyond the files its turns changed in the thread's folder, as sentences for every client. */
+export const describeRevertFiles = (r: { readonly whole?: boolean; readonly outside?: readonly string[] }) => [
+  ...(r.whole
+    ? ["A reverted turn had no checkpoints, so the whole folder was restored, your own edits too. Undoing the revert puts them back."]
+    : []),
+  ...(r.outside?.length ? [`Not restored, since they're outside the thread's folder: ${r.outside.join(", ")}.`] : []),
+];
 /**
  * The cleanup policy removed these checkpoint and revert refs of the thread (ADR 0021): the diffs of their turns,
  * reverts to them and undoing a revert they saved no longer work.
@@ -704,6 +733,14 @@ const upgrades: Record<string, (payload: string) => Effect.Effect<Event, Schema.
     Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TurnStartedV1))(payload), (e): Event => ({ ...e, v: 2 })),
   "decision.recorded@1": (payload) =>
     Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(DecisionRecordedV1))(payload), (e): Event => ({ ...e, v: 2 })),
+  // v1 restored and put back the whole folder, and didn't look outside it.
+  "thread.revert.undone@1": (payload) =>
+    Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(ThreadRevertUndoneV1))(payload), (e): Event => ({ ...e, v: 2 })),
+  "thread.files.restored@1": (payload) =>
+    Effect.map(
+      Schema.decodeUnknownEffect(Schema.fromJsonString(ThreadFilesRestoredV1))(payload),
+      (e): Event => ({ ...e, v: 2, whole: true, outside: [] }),
+    ),
   "task.escalated@1": (payload) =>
     Effect.map(
       Schema.decodeUnknownEffect(Schema.fromJsonString(TaskEscalatedV1))(payload),
@@ -750,8 +787,8 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.worktree.removal.requested@1": ThreadWorktreeRemovalRequested,
   "thread.worktree.removed@1": ThreadWorktreeRemoved,
   "thread.reverted@1": ThreadReverted,
-  "thread.revert.undone@1": ThreadRevertUndone,
-  "thread.files.restored@1": ThreadFilesRestored,
+  "thread.revert.undone@2": ThreadRevertUndone,
+  "thread.files.restored@2": ThreadFilesRestored,
   "thread.checkpoints.removed@1": ThreadCheckpointsRemoved,
   "task.blocked@1": TaskBlocked,
   "memory.saved@1": MemorySaved,

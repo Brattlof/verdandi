@@ -135,6 +135,23 @@ describe("stored events", () => {
     expect(await roundTrip(v2)).toEqual(v2);
   });
 
+  test("reads a v1 revert's files as restored and put back whole, with nothing outside the folder, as v1 did", async () => {
+    const restored = { type: "thread.files.restored", v: 1, threadId, from: "refs/a", saved: "refs/b" } as const;
+    expect(await Effect.runPromise(decodeStoredEvent({ type: restored.type, v: 1, payload: JSON.stringify(restored) }))).toEqual({
+      ...restored,
+      v: 2,
+      whole: true,
+      outside: [],
+    });
+    const undone = { type: "thread.revert.undone", v: 1, threadId, turnIds: [turnId], restore: "refs/b" } as const;
+    expect(await Effect.runPromise(decodeStoredEvent({ type: undone.type, v: 1, payload: JSON.stringify(undone) }))).toEqual({
+      ...undone,
+      v: 2,
+    });
+    const v2: Event = { ...restored, v: 2, paths: ["src/a b.ts"], whole: false, outside: ["C:/Users/a b/notes.md"] };
+    expect(await roundTrip(v2)).toEqual(v2);
+  });
+
   test("round-trips CRLF and unicode text", async () => {
     const e: Event = { type: "turn.started", v: 2, threadId, turnId, text: "räksmörgås\r\n日本語 \u{1F600}" };
     expect(await roundTrip(e)).toEqual(e);

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Effect } from "effect";
 import { snapshot } from "../checkpoints/checkpoint.ts";
-import { diffTrees, editedPaths, limits } from "./diff.ts";
+import { diffTrees, editedFiles, limits } from "./diff.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -65,25 +65,25 @@ describe("diffTrees", () => {
     expect(view.files.reduce((n, f) => n + f.diff.length, 0)).toBeLessThanOrEqual(limits.totalBytes);
   });
 });
-test("editedPaths keeps the project's files that file tools touched", () => {
+test("editedFiles splits the files that file tools touched into the project's and the others", () => {
   const project = join("/", "work", "my repo");
   const call = (name: string, input: unknown) => ({ kind: "tool.call" as const, toolUseId: name, name, input });
-  const paths = editedPaths(project, [
+  const files = editedFiles(project, [
     call("Edit", { file_path: join(project, "src", "a b.ts") }),
     call("Write", { file_path: join(project, "src", "a b.ts") }),
     call("NotebookEdit", { notebook_path: join(project, "..n.ipynb") }),
     call("Read", { file_path: join(project, "read.ts") }),
     call("Write", { file_path: join("/", "elsewhere", "x.ts") }),
   ]);
-  expect(paths).toEqual(["src/a b.ts", "..n.ipynb"]);
+  expect(files).toEqual({ inside: ["src/a b.ts", "..n.ipynb"], outside: [resolve("/", "elsewhere", "x.ts")] });
 });
 
-test("editedPaths matches a file named through a symlink to the project", () => {
+test("editedFiles matches a file named through a symlink to the project", () => {
   const dir = makeTempHome();
   dirs.push(dir);
   const project = join(dir, "real project");
   mkdirSync(project);
   symlinkSync(project, join(dir, "link"), "junction"); // like macOS /tmp → /private/tmp
   const input = { file_path: join(dir, "link", "new.ts") };
-  expect(editedPaths(project, [{ kind: "tool.call", toolUseId: "1", name: "Write", input }])).toEqual(["new.ts"]);
+  expect(editedFiles(project, [{ kind: "tool.call", toolUseId: "1", name: "Write", input }])).toEqual({ inside: ["new.ts"], outside: [] });
 });

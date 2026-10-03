@@ -622,9 +622,10 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
         "There's no revert to undo: a turn has run since the thread's latest revert, or it was undone already.",
       );
     }
-    // Files are put back only from the checkpoint saved before the revert; without one they were never changed.
-    const restore = revert.files && revert.saved ? { restore: revert.saved } : {};
-    return accept({ type: "thread.revert.undone", v: 1, threadId: c.threadId, turnIds: revert.turnIds, ...restore });
+    // Files are put back only from the checkpoint saved before the revert, and only those it restored; without one they
+    // were never changed.
+    const restore = revert.files && revert.saved ? { restore: revert.saved, ...(revert.paths && { paths: revert.paths }) } : {};
+    return accept({ type: "thread.revert.undone", v: 2, threadId: c.threadId, turnIds: revert.turnIds, ...restore });
   },
   "task.block": (state, c) => {
     if (state.thread?.runningTurnId !== c.turnId || !state.thread.taskId) {
@@ -803,11 +804,14 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     state.thread
       ? accept({
           type: "thread.files.restored",
-          v: 1,
+          v: 2,
           threadId: c.threadId,
           from: c.from,
           ...(c.saved === undefined ? {} : { saved: c.saved }),
           ...(c.error === undefined ? {} : { error: c.error }),
+          ...(c.paths === undefined ? {} : { paths: c.paths }),
+          whole: c.whole,
+          outside: c.outside,
         })
       : accept(),
   "checkpoints.report": (state, c) =>
