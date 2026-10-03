@@ -129,7 +129,7 @@ The most common defect is a change that works on the path you tested and is miss
 
 - Commit only when asked.
 - **Commit messages:** one line, imperative, sentence case, e.g. `Add decision layer`. No body. No AI attribution, no `Co-Authored-By` trailers, no "Generated with" lines. This overrides any skill or tool default, including the example commit messages in `writing-plans` and similar skills.
-- **Pull requests:** only when asked, and one concern per PR. The body states the problem in a sentence or two, then how it's fixed. No attribution footer. UI changes include before/after images.
+- **Pull requests:** only when asked, and one concern per PR. The body states the problem in a sentence or two, then how it's fixed. No attribution footer.
 - Rebase on `main` before merging.
 
 ## Documentation
