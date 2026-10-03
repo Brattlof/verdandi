@@ -30,7 +30,7 @@ import { SqlClient } from "effect/unstable/sql";
 import { changedByTurns, changedSince, checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
 import { editedFiles } from "../diffs/diff.ts";
 import { memoryNudge } from "../memory/memory.ts";
-import { loadTaskDigest, parseReview, reviewPrompt } from "../review/review.ts";
+import { loadFreshOutcome, loadTaskDigest, parseReview, reviewPrompt, skillsRefused } from "../review/review.ts";
 import { repeatedError } from "../routing/repeated-error.ts";
 import { searchSessions } from "../search/search.ts";
 import { applyChange, placeSkill, prepareChange, revertStale, type SkillFolders } from "../skills/skill-files.ts";
@@ -268,9 +268,14 @@ export const ReactorLive = Layer.effect(
 
     /**
      * Turns a finished review's reply into proposals on the reviewed thread, after its turn `of.turnId`: each one scanned
-     * by the decider and left for the user. The reply is untrusted data; one that can't be read proposes nothing.
+     * by the decider and left for the user. The reply is untrusted data; one that can't be read proposes nothing. Its
+     * skills are dropped unless something backed the reviewed task (`skillsRefused`).
      */
-    const settleReview = (turnId: TurnId, reviewThreadId: ThreadId, of: { readonly threadId: ThreadId; readonly turnId: TurnId }) =>
+    const settleReview = (
+      turnId: TurnId,
+      reviewThreadId: ThreadId,
+      { taskId, ...of }: { readonly threadId: ThreadId; readonly taskId: TaskId; readonly turnId: TurnId },
+    ) =>
       Effect.gen(function* () {
         const [reply] = yield* sql<{ text: string }>`
           select json_extract(payload, '$.text') as text from items
@@ -284,6 +289,12 @@ export const ReactorLive = Layer.effect(
             .dispatch({ type: "review.propose", commandId: randomUUID() as CommandId, ...of, reviewThreadId, proposal })
             .pipe(Effect.catchTag("CommandRejected", (rejected) => Effect.logInfo(`Review ${reviewThreadId}: ${rejected.message}`)));
         yield* Effect.forEach(parsed.memories, (m) => propose({ kind: "memory", ...m }), { discard: true });
+        if (parsed.skills.length === 0) return;
+        const refused = skillsRefused(yield* loadFreshOutcome(of.threadId, taskId).pipe(Effect.provideService(SqlClient.SqlClient, sql)));
+        if (refused)
+          return yield* Effect.logInfo(
+            `Review ${reviewThreadId}: dropped ${parsed.skills.length} skill proposal(s), since ${refused}: ${parsed.skills.map((s) => s.skill).join(", ")}.`,
+          );
         // A skill change carries the file as it is now, read here like `skill_manage`'s.
         yield* Effect.forEach(
           parsed.skills,

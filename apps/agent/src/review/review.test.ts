@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Command, CommandId, ThreadId, TurnId } from "@verdandi/contracts";
+import type { Command, CommandId, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -10,6 +10,7 @@ import { Engine } from "../event-store/engine.ts";
 import { loadMemory, loadThreadSummaries, loadThreadView } from "../event-store/projector.ts";
 import { Reactor } from "../event-store/reactor.ts";
 import { loadUsageReport } from "../spend/usage.ts";
+import { allowTrustRequests } from "../trust/allow-trust.ts";
 import { loadReviewSettings } from "./review-config.ts";
 
 const dirs: string[] = [];
@@ -29,9 +30,9 @@ const threadId = "thread-1" as ThreadId;
 
 /**
  * A verdandid whose home has `review` as its `review.yaml` (none when undefined), and a routed thread in a project
- * whose policy runs tasks on the fake model and background reviews on the small one.
+ * whose policy runs tasks on the fake model and background reviews on the small one, and runs `verifiers`, trusted.
  */
-const setup = async (review?: string) => {
+const setup = async (review?: string, verifiers?: string[]) => {
   const home = tempDir();
   if (review !== undefined) writeFileSync(join(home, "review.yaml"), review);
   const projectPath = tempDir();
@@ -46,20 +47,28 @@ const setup = async (review?: string) => {
       "routes:",
       "  aux.review: { prefer: [small], effort: low }",
       "fallback: { prefer: [mid], effort: medium }",
+      ...(verifiers ? [`escalation: { verifiers: ${JSON.stringify(verifiers)} }`] : []),
     ].join("\n"),
   );
   const runtime = ManagedRuntime.make(AppLayer(home, { fake: makeFakeHarness() }));
   runtimes.push(runtime as never);
+  await runtime.runPromise(allowTrustRequests);
   const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient | Engine | Reactor>) => runtime.runPromise(effect);
   const dispatch = (c: Command) => run(Effect.flatMap(Engine, (e) => e.dispatch(c)));
   await dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId, projectPath });
   const drain = () => run(Effect.flatMap(Reactor, (r) => r.drain));
   return {
+    projectPath,
     /** Sends `text` as the thread's next turn and waits until nothing runs: the turn, and any review it sets off. */
     send: async (text: string) => {
-      await dispatch({ type: "turn.send", commandId: id<CommandId>(), threadId, turnId: id<TurnId>(), text, mode: "build" });
+      const turnId = id<TurnId>();
+      await dispatch({ type: "turn.send", commandId: id<CommandId>(), threadId, turnId, text, mode: "build" });
       await drain();
+      return turnId;
     },
+    /** Rates up the task turn `firstTurn` started, whose id is that turn's. */
+    rateUp: (firstTurn: TurnId) =>
+      dispatch({ type: "task.rate", commandId: id<CommandId>(), threadId, taskId: firstTurn as string as TaskId, rating: 1 }),
     respond: async (requestId: string) => {
       await dispatch({ type: "approval.respond", commandId: id<CommandId>(), threadId, requestId, resolution: { decision: "allow" } });
       await drain();
@@ -121,6 +130,26 @@ test("a task with nothing worth keeping skips the review; one worth it is review
   await respond(proposal?.requestId ?? "");
   expect((await view())?.pendingRequests).toEqual([]);
   expect((await memory())?.project).toMatchObject([{ text: "the tests need TZ=UTC", source: { threadId } }]);
+});
+
+test("a review offers skills only from a task whose last verifier run passed or that the user rated up, and memories from any", async () => {
+  const lesson = "skill: tz-tests remember: the tests need TZ=UTC";
+  const offered = async (s: Awaited<ReturnType<typeof setup>>) =>
+    ((await s.view())?.pendingRequests ?? []).map((r) => (r.type === "skill.proposed" ? r.change.skill : r.type));
+
+  const unchecked = await setup("enabled: true\n");
+  await unchecked.send(lesson);
+  expect(await offered(unchecked)).toEqual(["memory.proposed"]);
+
+  const verified = await setup("enabled: true\n", ["exit 0"]);
+  await verified.send(`edit ${join(verified.projectPath, "a.txt")}`);
+  await verified.send(lesson);
+  expect(await offered(verified)).toEqual(["memory.proposed", "tz-tests"]);
+
+  const rated = await setup("enabled: true\n");
+  await rated.rateUp(await rated.send("hello"));
+  await rated.send(lesson);
+  expect(await offered(rated)).toEqual(["memory.proposed", "tz-tests"]);
 });
 
 test("background review is off without review.yaml: nothing is asked", async () => {

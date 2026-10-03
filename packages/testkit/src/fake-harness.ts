@@ -27,7 +27,8 @@ import { Effect, Stream } from "effect";
  * "tool <name> <json args>" calls one of the Verdandi tools the run was given, reporting the call and its result as items.
  * "fetch <url>" reads that page through a WebFetch tool call first, then runs the turn's next lines as its text.
  * A background review's prompt ("Verdandi is reviewing a finished task …") is answered as a reviewer would, in JSON:
- * it proposes remembering, in project memory, whatever follows the digest's first "remember".
+ * it proposes remembering, in project memory, whatever follows the digest's first "remember", and creating the skill
+ * named after its first "skill:".
  * Every reply costs $0.01. Like Claude Code, it checks the task's `maxCost` after the call: when the task's
  * spend then exceeds it, the turn ends with status `limit`. `calls` records every run.
  */
@@ -172,7 +173,14 @@ export const makeFakeHarness = () => {
     if (input.text.startsWith("Verdandi is reviewing a finished task")) {
       const fact = /remember:?\s+([^\n`]+)/i.exec(input.text)?.[1]?.trim();
       const memories = fact ? [{ scope: "project", text: fact }] : [];
-      return Stream.concat(Stream.fromIterable(start), reply(input.route.model, `\`\`\`json\n${JSON.stringify({ memories })}\n\`\`\``));
+      const name = /\bskill: ([a-z][a-z0-9-]*)/.exec(input.text)?.[1];
+      const skills = name
+        ? [{ action: "create", name, content: `---\nname: ${name}\ndescription: A procedure a review proposed.\n---\nSteps.\n` }]
+        : [];
+      return Stream.concat(
+        Stream.fromIterable(start),
+        reply(input.route.model, `\`\`\`json\n${JSON.stringify({ memories, skills })}\n\`\`\``),
+      );
     }
     const fixing = input.text.startsWith("Verdandi ran the project's verifier") ? edited.get(input.threadId) : undefined;
     if (input.text.startsWith("edit ") || fixing) {
