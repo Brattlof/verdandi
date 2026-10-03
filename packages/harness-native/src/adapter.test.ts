@@ -349,9 +349,28 @@ test("a task's cost limit stops the turn with status limit once a request passes
   const { adapter } = setup([
     { blocks: [{ type: "tool_use", id: "toolu_1", name: "memory_save", input: { text: "x" } }], usage: { input: 1_000_000 } },
   ]);
-  const events = await run(adapter, input("t1", "go", { limits: { maxCost: 1, taskId: "t1" as never, spentUsd: 0 } }));
+  const events = await run(adapter, input("t1", "go", { limits: { maxCost: 1, taskId: "t1" as never, spentUsd: 0, spentTurns: 0 } }));
   expect(events.at(-1)).toEqual({ type: "turn.finished", status: "limit", error: "Stopped at the task's $1 cost limit." });
   expect(events.some((e) => e.type === "approval.requested")).toBe(false);
+});
+
+test("a task's turn limit counts the model calls its earlier turns made, reporting each call as it's made", async () => {
+  const note: HarnessTool = {
+    name: "note",
+    description: "Notes a thing.",
+    params: { text: { type: "string", description: "The thing." } },
+    call: async () => ({ text: "Noted." }),
+  };
+  const { fake, adapter } = setup([
+    { blocks: [{ type: "tool_use", id: "toolu_1", name: "note", input: { text: "a" } }] },
+    { blocks: [{ type: "text", text: "Done." }] },
+  ]);
+  // Two of the task's three were spent before this turn, in an earlier run or process.
+  const limits = { maxTurns: 3, taskId: "t1" as never, spentUsd: 0, spentTurns: 2 };
+  const events = await run(adapter, input("t3", "note a", { tools: [note], limits }));
+  expect(fake.requests).toHaveLength(1);
+  expect(events.filter((e) => e.type === "model.called")).toHaveLength(1);
+  expect(events.at(-1)).toEqual({ type: "turn.finished", status: "limit", error: "Stopped at the task's 3-turn limit." });
 });
 
 test("a model the native harness doesn't run, or a key the API rejects, fails the turn naming the fix", async () => {

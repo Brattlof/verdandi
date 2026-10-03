@@ -409,7 +409,7 @@ export const ReactorLive = Layer.effect(
       let finished = false;
       const fail = (error: string) => report(threadId, turnId, { type: "turn.finished", status: "error", error });
       return Effect.gen(function* () {
-        // The task's budget guards, and what its turns before this one cost.
+        // The task's budget guards, and what its turns before this one cost and how many model calls they made.
         const [thread] = yield* sql<{
           route: string;
           session_id: string | null;
@@ -421,12 +421,16 @@ export const ReactorLive = Layer.effect(
           task_id: TaskId | null;
           limits: string | null;
           spent_usd: number;
+          spent_turns: number;
           turn_number: number;
           review: string | null;
         }>`
           select t.route, t.session_id, p.path, t.worktree, t.review, t.pending_fork, t.memory_snapshot, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
             (select total(u.cost_usd) from usage_ledger u join turns n on n.id = u.turn_id
               where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId}) as spent_usd,
+            (select count(*) from events e where e.thread_id = t.id and e.type = 'turn.model.called'
+              and json_extract(e.payload, '$.turnId') in (select n.id from turns n
+                where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId})) as spent_turns,
             (select count(*) from turns n where n.thread_id = t.id and n.rowid <= (select rowid from turns where id = ${turnId})) as turn_number
           from threads t join projects p on p.id = t.project_id
             left join tasks k on k.id = t.task_id left join route_decisions d on d.task_id = t.task_id
@@ -446,7 +450,12 @@ export const ReactorLive = Layer.effect(
         live.set(threadId, adapter);
         const limits =
           thread.limits && thread.task_id
-            ? { ...(JSON.parse(thread.limits) as TaskLimits), taskId: thread.task_id, spentUsd: thread.spent_usd }
+            ? {
+                ...(JSON.parse(thread.limits) as TaskLimits),
+                taskId: thread.task_id,
+                spentUsd: thread.spent_usd,
+                spentTurns: thread.spent_turns,
+              }
             : undefined;
         // A background review runs unattended with no Verdandi tools, so nothing it does takes effect before the user allows it.
         const review =

@@ -151,6 +151,13 @@ export const TurnUsageRecorded = Schema.Struct({
   turnId: TurnId,
   ...UsageFields,
 });
+/** The agent of turn `turnId` made a model round trip, which its task's `maxTurns` counts (DESIGN §8.9). Only recorded for a task with one. */
+export const TurnModelCalled = Schema.Struct({
+  type: Schema.Literal("turn.model.called"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+});
 /** The harness's subscription window changed. The projection keeps only each harness's latest. */
 export const HarnessQuotaReported = Schema.Struct({
   type: Schema.Literal("harness.quota.reported"),
@@ -707,6 +714,7 @@ export const Event = Schema.Union([
   HarnessSessionBound,
   TurnItemAdded,
   TurnSteered,
+  TurnModelCalled,
   TurnUsageRecorded,
   HarnessQuotaReported,
   ApprovalRequested,
@@ -808,6 +816,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "harness.session.bound@1": HarnessSessionBound,
   "turn.item.added@1": TurnItemAdded,
   "turn.steered@1": TurnSteered,
+  "turn.model.called@1": TurnModelCalled,
   "turn.usage.recorded@1": TurnUsageRecorded,
   "harness.quota.reported@1": HarnessQuotaReported,
   "approval.requested@1": ApprovalRequested,

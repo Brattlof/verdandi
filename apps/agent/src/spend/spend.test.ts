@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Command, CommandId, CommandRejected, Route, TaskOutcome, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
-import { Effect, ManagedRuntime } from "effect";
+import { Deferred, Effect, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AppLayer } from "../event-store/app.ts";
 import { Engine } from "../event-store/engine.ts";
@@ -114,5 +114,37 @@ describe("spend caps", () => {
     ]);
     expect(tasks).toBe(2);
     expect(outcomes).toEqual(["limit", "completed"]);
+  });
+
+  test("a task's maxTurns counts the model calls of a turn that was interrupted, so the next turn starts no fresh count", async () => {
+    const { projectPath, run } = setup({
+      routing: "targets:\n  small: { harness: fake, provider: fake, model: fake-small }\nfallback: { prefer: [small], maxTurns: 2 }\n",
+    });
+    const { statuses, outcomes } = await run(
+      Effect.gen(function* () {
+        const engine = yield* Engine;
+        yield* dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId, projectPath });
+        const called = yield* Deferred.make<void>();
+        yield* engine.react((s) => (s.event.type === "turn.model.called" ? Deferred.succeed(called, undefined) : Effect.void));
+        const hanging = id<TurnId>();
+        yield* dispatch({ type: "turn.send", commandId: id<CommandId>(), threadId, turnId: hanging, text: "hang", mode: "build" });
+        yield* Deferred.await(called);
+        yield* dispatch({ type: "turn.interrupt", commandId: id<CommandId>(), threadId, turnId: hanging });
+        yield* (yield* Reactor).drain;
+        // A model call each: the second reaches the task's two, and the third finds none left.
+        for (const text of ["again", "and again"]) yield* turn(text);
+        const outcomes = yield* (yield* SqlClient.SqlClient)<{ payload: string }>`select payload from task_outcomes order by seq`;
+        return {
+          statuses: (yield* loadThreadView(threadId))?.turns.map((t) => [t.status, t.error]),
+          outcomes: outcomes.map((o) => (JSON.parse(o.payload) as TaskOutcome).status),
+        };
+      }),
+    );
+    expect(statuses).toEqual([
+      ["interrupted", undefined],
+      ["success", undefined],
+      ["limit", "Stopped at the task's 2-turn limit."],
+    ]);
+    expect(outcomes).toEqual(["limit"]);
   });
 });

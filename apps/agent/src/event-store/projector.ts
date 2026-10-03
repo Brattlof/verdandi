@@ -266,6 +266,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   },
   "turn.steered": (e, at) =>
     Effect.andThen(addItem(e.turnId, { kind: "user.steer", text: e.text }), indexMessage(e.threadId, e.turnId, "steer", e.text, at)),
+  "turn.model.called": () => Effect.void, // counted from the log when the task's next turn starts
   "turn.usage.recorded": (e, at) =>
     withSql(
       (sql) =>

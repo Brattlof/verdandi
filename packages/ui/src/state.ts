@@ -95,6 +95,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "harness.session.bound": (thread, e) => ({ ...thread, sessionId: e.sessionId }),
   "turn.item.added": (thread, e) => addItem(thread, e.turnId, e.item),
   "turn.steered": (thread, e) => addItem(thread, e.turnId, { kind: "user.steer", text: e.text }),
+  "turn.model.called": (thread) => thread, // counts toward the task's maxTurns
   "turn.usage.recorded": (thread, { turnId, model, accessMode, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUsd }) =>
     updateTurn(thread, turnId, (t) => ({
       ...t,

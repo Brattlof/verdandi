@@ -36,10 +36,12 @@ const usageEvents = (context: NormalizeContext, modelUsage: Record<string, Model
     return [{ type: "usage", model, accessMode: context.overage ? "metered" : "subscription", ...usage }];
   });
 
+export const turnLimitError = "Stopped at the task's turn limit (maxTurns in the routing policy).";
+
 /** Results for a budget guard the task reached (ADR 0005), and what the turn's error says. */
 const guards: Partial<Record<string, string>> = {
   error_max_budget_usd: "Stopped at the task's cost limit (maxCost in the routing policy).",
-  error_max_turns: "Stopped at the task's turn limit (maxTurns in the routing policy).",
+  error_max_turns: turnLimitError,
 };
 
 /**

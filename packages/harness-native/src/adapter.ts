@@ -297,10 +297,13 @@ export const makeNativeAdapter = (options: {
     let spent = 0;
     for (let requests = 1; ; requests++) {
       const limits = input.limits;
-      // ponytail: counts this run's model calls, not the task's; upgrade once turns are counted per task (as for Claude Code, ADR 0005).
-      if (limits?.maxTurns !== undefined && requests > limits.maxTurns) {
-        yield finished("limit", `Stopped at the task's ${limits.maxTurns}-turn limit.`);
-        return;
+      // The task's earlier turns' model calls count too, reported as they're made so an interrupt doesn't lose them.
+      if (limits?.maxTurns !== undefined) {
+        if (limits.spentTurns + requests > limits.maxTurns) {
+          yield finished("limit", `Stopped at the task's ${limits.maxTurns}-turn limit.`);
+          return;
+        }
+        yield { type: "model.called" };
       }
       const { model, effort } = session.route;
       const entry = nativeCatalog.find((e) => e.model === model);

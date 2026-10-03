@@ -32,7 +32,7 @@ import {
 } from "@verdandi/contracts";
 import { Effect, Exit, Option, Schema, Stream } from "effect";
 import { z } from "zod";
-import { initialContext, type NormalizeContext, normalize } from "./normalize.ts";
+import { initialContext, type NormalizeContext, normalize, turnLimitError } from "./normalize.ts";
 
 export type QueryFn = typeof query;
 
@@ -75,6 +75,10 @@ type Session = {
   reportsState: boolean;
   /** The task whose budget guards the process was started with; undefined when it has none. */
   readonly limitedTask: TaskId | undefined;
+  /** Whether that task has a `maxTurns`, so each main-agent model call is reported as `model.called`. */
+  readonly countsTurns: boolean;
+  /** The main agent's latest message: Claude Code splits one reply's blocks into messages that share its id. */
+  lastMessageId: string | undefined;
   /** The turn running now: Verdandi's tools act for it. */
   turnId: TurnId;
 };
@@ -295,10 +299,9 @@ const openSession = (
       }),
       ...(input.mode === "build" ? {} : { permissionMode: "plan" as const }),
       // Spawn-time only, and counted over the process's life: `run` opens a process per task with limits.
-      // A process opened mid-task (after an interrupt or restart) gets what the task has left.
-      // ponytail: `maxTurns` starts over in such a process; upgrade by passing what's left once turns are counted per task.
+      // A process opened mid-task (after an interrupt or restart) gets what the task has left; `run` stops a task with no turns left.
       ...(input.limits?.maxCost === undefined ? {} : { maxBudgetUsd: Math.max(input.limits.maxCost - input.limits.spentUsd, 0.01) }),
-      ...(input.limits?.maxTurns === undefined ? {} : { maxTurns: input.limits.maxTurns }),
+      ...(input.limits?.maxTurns === undefined ? {} : { maxTurns: input.limits.maxTurns - input.limits.spentTurns }),
       includePartialMessages: true,
       // Subagents' text too, not only their tool calls, so their steps reach the trajectory whole.
       forwardSubagentText: true,
@@ -354,6 +357,8 @@ const openSession = (
     transcriptPath: undefined,
     reportsState: false,
     limitedTask: input.limits?.taskId,
+    countsTurns: input.limits?.maxTurns !== undefined,
+    lastMessageId: undefined,
     turnId: input.turnId,
   };
   return session;
@@ -503,6 +508,11 @@ export const makeClaudeCodeAdapter = (options: {
         continue;
       }
       if (msg.type === "system" && msg.subtype === "init" && msg.permissionMode !== "plan") session.buildMode = msg.permissionMode;
+      // A new reply of the main agent is a model call, what `maxTurns` counts; reported for the task to count across processes.
+      if (session.countsTurns && msg.type === "assistant" && msg.parent_tool_use_id === null && msg.message.id !== session.lastMessageId) {
+        session.lastMessageId = msg.message.id;
+        yield { type: "model.called" };
+      }
       const normalized = normalize(msg, session.context);
       session.context = normalized.context;
       const events = normalized.events.map((e): HarnessEvent => {
@@ -540,6 +550,10 @@ export const makeClaudeCodeAdapter = (options: {
               message: `Project folder not found: ${input.cwd}. Check that the path exists and is reachable.`,
             });
           }
+          // Claude Code takes no `maxTurns` of 0, so a task whose earlier turns used them all stops here.
+          const { limits } = input;
+          if (limits?.maxTurns !== undefined && limits.spentTurns >= limits.maxTurns)
+            return Stream.make<HarnessEvent[]>({ type: "turn.finished", status: "limit", error: turnLimitError });
           // A live session is only reused while it is the thread's session; a harness switch unbinds it. A task
           // with budget guards gets a process of its own, resuming the session, since they're set at spawn.
           const live = sessions.get(input.threadId);
