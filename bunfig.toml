@@ -1,6 +1,10 @@
 [install]
 # Dependency versions must be at least 14 days old (AGENTS.md), including transitive ones.
 minimumReleaseAge = 1209600
+# Packages excused from the age rule: security fixes only, each with a dated comment naming the version, the advisory
+# and when to remove it, e.g. `# 2026-10-03: foo 1.2.4 fixes GHSA-xxxx; remove once 14 days old (2026-10-17).`
+# scripts/lockfile-diff.ts holds CI to the same rule and list.
+minimumReleaseAgeExcludes = []
 exact = true
 linker = "isolated"
 
