@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import type { CommandId, ThreadId } from "@verdandi/contracts";
+import type { CommandId, PairMessage, ThreadId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { startLanGate } from "@verdandi/web/lan-gate";
 import { serveWeb } from "@verdandi/web/serve";
@@ -28,11 +28,11 @@ const startWeb = async () => {
   return { agent, ui, home };
 };
 
-const harnessesThrough = (port: number, token: string, home: string) =>
+const harnessesThrough = (port: number, token: string, home: string, device?: true) =>
   Effect.runPromise(
     Effect.exit(
       Effect.scoped(
-        Effect.flatMap(connect({ port, token }), (c) =>
+        Effect.flatMap(connect({ port, token, ...(device && { device }) }), (c) =>
           Effect.andThen(
             c.CommandDispatch({
               type: "thread.create",
@@ -94,17 +94,46 @@ test("the web server refuses an upgrade from a page on another site even with th
     expect([foreign, await opens(foreign)]).toEqual([foreign, false]);
 });
 
-test("the gate relays the page and the RPC to the web server, and refuses a page it didn't serve", async () => {
-  const { ui, home } = await startWeb();
-  const gate = startLanGate("127.0.0.1", 0, ui.port);
+test("a LAN client is refused until it pairs through the gate, then its device token works there, and the page token never does", async () => {
+  const { agent, ui, home } = await startWeb();
+  const gate = startLanGate("127.0.0.1", 0, ui.port, ui.gateSecret);
   cleanups.push(() => gate.stop(true));
-  expect(await (await fetch(`http://127.0.0.1:${gate.port}/`)).text()).toContain('<div id="root">');
-  const through = await harnessesThrough(gate.port ?? 0, ui.token, home);
+  const port = gate.port ?? 0;
+  expect(await (await fetch(`http://127.0.0.1:${port}/`)).text()).toContain('<div id="root">');
+  // The page token works only on the machine running verdandi web.
+  expect((await harnessesThrough(port, ui.token, home))._tag).toBe("Failure");
+  expect((await fetch(`http://127.0.0.1:${port}/auth`, { headers: { authorization: `Bearer ${ui.token}` } })).status).toBe(403);
+  expect((await fetch(`http://127.0.0.1:${port}/auth`)).status).toBe(401);
+
+  const pairing = new WebSocket(`ws://127.0.0.1:${port}/pair`, { headers: { Origin: `http://127.0.0.1:${port}` } });
+  const next = () =>
+    new Promise<PairMessage>((resolve) => {
+      pairing.onmessage = (e) => resolve(JSON.parse(String(e.data)) as PairMessage);
+    });
+  const pending = await next();
+  if (pending.kind !== "pending") throw new Error(`expected a pending request, got ${pending.kind}`);
+  const approved = next();
+  await Effect.runPromise(
+    Effect.scoped(Effect.flatMap(connect(agent), (c) => c.DevicesList())).pipe(
+      Effect.tap((v) => Effect.sync(() => expect(v.pending).toEqual([expect.objectContaining({ address: "127.0.0.1" })]))),
+      Effect.andThen(Effect.scoped(Effect.flatMap(connect(agent), (c) => c.DeviceApprove({ requestId: pending.requestId })))),
+    ),
+  );
+  const issued = await approved;
+  if (issued.kind !== "approved") throw new Error(`expected approval, got ${issued.kind}`);
+  const auth = await fetch(`http://127.0.0.1:${port}/auth`, { headers: { authorization: `Device ${issued.token}` } });
+  expect(await auth.json()).toEqual({ kind: "device", deviceId: issued.deviceId });
+  const through = await harnessesThrough(port, issued.token, home, true);
   expect(through._tag === "Success" && through.value).toEqual(["fake"]);
-  const url = `ws://127.0.0.1:${gate.port}/rpc?token=${ui.token}`;
+});
+
+test("the gate refuses a WebSocket from a page it didn't serve", async () => {
+  const { ui } = await startWeb();
+  const gate = startLanGate("127.0.0.1", 0, ui.port, ui.gateSecret);
+  cleanups.push(() => gate.stop(true));
   const opens = (origin: string) =>
     new Promise<boolean>((resolve) => {
-      const ws = new WebSocket(url, { headers: { Origin: origin } });
+      const ws = new WebSocket(`ws://127.0.0.1:${gate.port}/pair`, { headers: { Origin: origin } });
       ws.onopen = () => {
         ws.close();
         resolve(true);
@@ -119,7 +148,7 @@ test("the gate relays the page and the RPC to the web server, and refuses a page
 
 test("the gate refuses every request from outside the local network, the page's files included", async () => {
   const { ui } = await startWeb();
-  const gate = startLanGate("127.0.0.1", 0, ui.port, () => false);
+  const gate = startLanGate("127.0.0.1", 0, ui.port, ui.gateSecret, () => false);
   cleanups.push(() => gate.stop(true));
   for (const path of ["/", "/rpc", "/attachments/x"]) {
     const answer = await fetch(`http://127.0.0.1:${gate.port}${path}`);

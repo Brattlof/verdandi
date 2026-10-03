@@ -3,6 +3,7 @@ import {
   type CatalogModel,
   type ClientCommand,
   CommandRejected,
+  DevicesUnavailable,
   DiffUnavailable,
   type DiffView,
   FolderPickUnavailable,
@@ -85,8 +86,12 @@ const disconnected = { ok: false, reason: "Disconnected", message: "Lost the con
 export type Endpoint = {
   /** The host's address, e.g. `http://127.0.0.1:4780`: the RPC WebSocket is at `/rpc`, attachments at `/attachments/<id>`. */
   readonly base: string;
-  /** The host's token for this page; the host swaps it for the agent's, which the page never holds. */
+  /**
+   * The page's token: one the host made for this page, which it swaps for the agent's (the page never holds that), or,
+   * with `device`, the device token this device got when it paired (ADR 0028), which the agent checks itself.
+   */
   readonly token: string;
+  readonly device?: true;
   /** Whether the agent runs on the machine showing the page, so its OS folder dialog reaches the user. */
   readonly sameMachine: boolean;
   /** What to do once the connection is lost, e.g. "If verdandid restarted, run `verdandi web` again." */
@@ -100,7 +105,7 @@ export type Endpoint = {
  */
 export const connect = (endpoint: Endpoint) => {
   const { base, token } = endpoint;
-  const url = `${base.replace(/^http/, "ws")}/rpc?token=${encodeURIComponent(token)}`;
+  const url = `${base.replace(/^http/, "ws")}/rpc?${endpoint.device ? "device" : "token"}=${encodeURIComponent(token)}`;
   const runtime = ManagedRuntime.make(
     Layer.effect(Client)(makeClient).pipe(
       Layer.provide(RpcClient.layerProtocolSocket()),
@@ -171,7 +176,9 @@ export const connect = (endpoint: Endpoint) => {
   const attachmentUrl = (id: string) => {
     let url = attachments.get(id);
     if (!url) {
-      url = fetch(`${base}/attachments/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${token}` } })
+      url = fetch(`${base}/attachments/${encodeURIComponent(id)}`, {
+        headers: { authorization: `${endpoint.device ? "Device" : "Bearer"} ${token}` },
+      })
         .then((r) => (r.ok ? r.blob() : undefined))
         .then(
           (blob) => blob && URL.createObjectURL(blob),
@@ -294,6 +301,14 @@ export const connect = (endpoint: Endpoint) => {
     };
   };
 
+  /** Pairs the device that raised `requestId`, or denies it; a `DevicesUnavailable` message says why not. */
+  const answerPairing = async (requestId: string, approve: boolean): Promise<Dispatched> => {
+    const exit = await run((rpc) => (approve ? Effect.asVoid(rpc.DeviceApprove({ requestId })) : rpc.DeviceDeny({ requestId })));
+    if (Exit.isSuccess(exit)) return { ok: true };
+    const unavailable = failure(exit.cause, DevicesUnavailable);
+    return unavailable ? { ok: false, reason: "DeviceNotFound", message: unavailable.message } : disconnected;
+  };
+
   /**
    * The catalog's models on the harnesses verdandid runs: what a leading `@name` pins and the route picker offers.
    * Asked once: they are fixed while verdandid runs.
@@ -322,6 +337,7 @@ export const connect = (endpoint: Endpoint) => {
     trusted,
     terminals,
     follow,
+    answerPairing,
     models,
     lost,
     endpoint,

@@ -115,6 +115,8 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "skill.reverted": (thread) => thread,
   "skill.pinned": (thread) => thread,
   "skill.unpinned": (thread) => thread,
+  "device.paired": (thread) => thread, // on the profile's stream, never a thread's
+  "device.revoked": (thread) => thread,
   // A background review's proposal waits for the user like the agent's own requests; the review itself runs out of sight.
   "memory.proposed": addRequest,
   // Verdandi's own request to run the project's commands; trusted lists show on the projects page, fetched when opened.

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks) and #242 (trusted project commands). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local.
+Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks) and #242 (trusted project commands). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local. Amended by ADR 0028: each device other than a page `verdandi web` opens pairs and gets its own revocable token.
 
 ## Context
 
@@ -15,19 +15,20 @@ Verdandi's security layers differ widely in strength, and DESIGN §17 listed the
 A bypass of one of these is a vulnerability.
 
 1. **The OS user account.** verdandid, every harness, and every tool, verifier, setup command and terminal run as the user who started verdandid, with that user's rights. The Verdandi home and the project folders are trusted local state: whatever can write to them already acts as the user. The one exception is a project's own commands, which a cloned repo's author or an agent allowed only to edit files can write; they pass a consent gate (boundary 5). Nothing inside the agent process contains a hostile model; only the OS can, and Verdandi has no sandbox before M6.
-2. **The loopback socket and the profile token.**
+2. **The loopback socket, the profile token and device tokens.**
    - verdandid listens only on `127.0.0.1` (`ServerLayer` in `apps/agent/src/rpc/server.ts`).
    - An `/rpc` upgrade needs the token: 32 random bytes made at each start, compared in constant time (`sameToken`).
    - Before the token is read, an upgrade from any browser page is refused (ADR 0026; it allowed verdandid's own page until then). The CLI and `verdandi web`'s relay send no `Origin`. The web server checks its own page's `Origin` (`ownOrigin` in `apps/web/src/serve.ts`) and its own page token.
    - `/attachments/<id>` takes the token only in an `Authorization` header, which forces a CORS preflight that verdandid never grants.
    - The token is written to `server.json` in the home with mode `0600` (`apps/agent/src/main.ts`). On Windows the mode doesn't apply, and the file inherits the ACL of a home under the user's profile.
-   - Per-device tokens are #215.
+   - A paired device's token (ADR 0028) is checked only as a device's (`?device=`, `Authorization: Device`), against the SHA-256 kept in `device.paired`, never as the profile's, and opens nothing once `device.revoked` is recorded, which also closes its open connections. A token is made only when the owner approves a pairing request, and sent once, over the requester's own `/pair` socket. Pairing requests wait in memory, never the log, at most 3; the code is the check, and the address and name shown with it are hints.
    - Bun's HMR socket (`/_bun/hmr`) exists only when `verdandi web` runs from source (verdandid's until ADR 0026), and it takes no token. Bun refuses a foreign hostname in its `Origin` but accepts `localhost` at any port. It sends a version string, the web UI's bundled source and reload notices, never the token or user data. A release build (`NODE_ENV=production`) has no such socket.
 3. **The LAN gate.** With `verdandi web --host`, `startLanGate` (`apps/web/src/lan-gate.ts`) refuses:
    - every request that isn't from a private, tailnet or loopback address (`isLocalAddress`);
-   - every WebSocket from a page it didn't serve (`gateOrigin`).
+   - every WebSocket from a page it didn't serve (`gateOrigin`);
+   - the page token `verdandi web` makes, so other devices get in only by pairing (ADR 0028).
 
-   A public `--host` address is refused (`hostProblem`). The token still guards everything past the page.
+   A public `--host` address is refused (`hostProblem`). A device token still guards everything past the page; the address check is a second line of defence.
 4. **Validation at the RPC boundary.**
    - Project paths must be existing folders, stored as their real paths (`resolveProjectPath` in `apps/agent/src/projects/project.ts`).
    - Attachments are counted and sized, and an image's bytes must match its type, before anything is stored (`storeAttachments` in `apps/agent/src/attachments/attachments.ts`).
@@ -59,13 +60,13 @@ These lower risk, and they can be bypassed by design. A bypass is a bug worth fi
 - A bypass of a scanner, a fence or redaction.
 - What an agent does after the user approved it, or under permissions the user's own harness settings grant.
 - Claude Code's own behaviour, which is Anthropic's to fix.
-- `--host` sending the token over plain HTTP on the local network. Beyond a network you trust, don't use `--host`; use Tailscale (DESIGN §15).
+- `--host` sending a device token over plain HTTP on the local network. Beyond a network you trust, don't use `--host`; use Tailscale (DESIGN §15).
 
 ### Principals
 
-Today the only principal is the owner: the OS user, who holds the token. Once the gateway exists (DESIGN §15) there will be:
+Today the only principal is the owner: the OS user, who holds the profile's token, and the devices they paired. Once the gateway exists (DESIGN §15) there will be:
 
-- **The owner:** the OS user, holding the token (per device after #215).
+- **The owner:** the OS user, holding the profile's token, and each device they paired (ADR 0028).
 - **Allowlisted channel senders:** they can start turns in their bound thread and never run owner commands (#212).
 - **Scheduled jobs:** they run as the owner, under a restricted profile and a budget.
 - **The agent:** never a principal. It acts for one, inside that principal's approvals.
@@ -97,4 +98,4 @@ The rivals' incidents argue for these defaults. Each one names what holds it tod
 - A report is triaged against the boundaries above. A heuristic's weakness is fixed as a bug, and no doc may present a heuristic as a boundary.
 - Containment comes from the OS (a separate account, a VM or a container) until M6's sandbox, and the docs say so rather than imply otherwise.
 - With `approveSaves` on by default, `memory_save` raises an approval on Claude Code and the native harness in every home without a `memory.yaml`. A headless `verdandi run` whose agent saves a memory therefore stops at it (exit code 5), unless `--deny-requests` is set or the home sets `approveSaves: false`.
-- Known gaps, tracked: one token for every device (#215); context files and skills that Claude Code loads by itself aren't scanned (#177).
+- Known gaps, tracked: context files and skills that Claude Code loads by itself aren't scanned (#177).

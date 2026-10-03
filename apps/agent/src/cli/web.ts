@@ -37,7 +37,7 @@ export const web = async (argv: readonly string[]) => {
   const served = await serverFor(home, argv);
   // With a LAN gate, --port is the gate's, the one other devices use, and the web server takes any free loopback port.
   const ui = serveWeb(served.server, port === undefined || lan ? 0 : Number(port));
-  const gate = lan && host ? startLanGate(host, port === undefined ? 0 : Number(port), ui.port) : undefined;
+  const gate = lan && host ? startLanGate(host, port === undefined ? 0 : Number(port), ui.port, ui.gateSecret) : undefined;
   const url = `http://127.0.0.1:${ui.port}/#token=${ui.token}`;
   console.log(
     `Verdandi's web UI at http://127.0.0.1:${ui.port}/ (home: ${home}); Ctrl+C stops it${served.stop ? ", and the verdandid it runs" : ""}.`,
@@ -53,8 +53,9 @@ export const web = async (argv: readonly string[]) => {
     console.log(
       `Also open on your local network at ${addresses.map((a) => `http://${a}:${gate.port}/`).join(", ") || `port ${gate.port}`}; requests from outside it are refused.`,
     );
-    console.log("From another device, open this URL. It holds the page's access token, so don't share it:");
-    for (const a of addresses) console.log(`  http://${a}:${gate.port}/#token=${ui.token}`);
+    console.log(
+      "Another device pairs when it opens that address: approve it, if its code matches, in the web UI's Devices page, the terminal chat, or with verdandi devices approve <id>.",
+    );
   }
   if (!argv.includes("--no-open") && !(await launch(opener(url))))
     console.log(`Couldn't open a browser. Open this URL yourself; it holds the page's access token, so don't share it:\n${url}`);

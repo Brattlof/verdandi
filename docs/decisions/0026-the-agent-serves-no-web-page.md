@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-03). Amends ADR 0025's network boundaries (its sections 2 and 3).
+Accepted (2026-10-03). Amends ADR 0025's network boundaries (its sections 2 and 3). Amended by ADR 0028: other devices pair instead of sharing the page token, and `--host` prints no token URL.
 
 ## Context
 

@@ -411,6 +411,23 @@ const skillHistory = Effect.gen(function* () {
   yield* sql`create table skill_pins (name text primary key, pinned_at text not null)`;
 });
 
+/**
+ * Paired devices (ADR 0028): each device with its token's hash, from `device.paired` and `device.revoked`; none
+ * were paired yet. `device_seen` is when each last connected: process state verdandid writes on connect, not a read
+ * model, since an event per connection would flood the log.
+ */
+const devices = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table devices (
+    id text primary key,
+    name text not null,
+    token_hash text not null unique,
+    paired_at text not null,
+    revoked_at text
+  )`;
+  yield* sql`create table device_seen (id text primary key, seen_at text not null)`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -439,4 +456,5 @@ export const migrations = {
   "25_trusted_commands": trustedCommands,
   "26_turn_untrusted": turnUntrusted,
   "27_skill_history": skillHistory,
+  "28_devices": devices,
 };

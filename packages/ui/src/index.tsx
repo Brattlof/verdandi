@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./app.tsx";
 import { connect, type Endpoint } from "./client.ts";
+import { Pairing } from "./devices/devices.tsx";
 import { RuneMark } from "./ui/runes.tsx";
 
 export type { Endpoint } from "./client.ts";
@@ -26,3 +27,21 @@ export const mount = (root: HTMLElement, endpoint: Endpoint | undefined, missing
       </div>
     ),
   );
+
+/**
+ * Asks to pair this device with the agent behind `base` (ADR 0028), showing the code to read to the owner, and resolves
+ * with the device token once approved. The host keeps the token, then mounts the UI with it as a device endpoint.
+ */
+export const pair = (root: HTMLElement, base: string) =>
+  new Promise<string>((resolve) => {
+    const screen = createRoot(root);
+    screen.render(
+      <Pairing
+        base={base}
+        onPaired={(token) => {
+          screen.unmount();
+          resolve(token);
+        }}
+      />,
+    );
+  });
