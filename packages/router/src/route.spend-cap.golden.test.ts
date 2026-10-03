@@ -57,7 +57,7 @@ test("a reached spend cap moves a task off a metered target, and the reason name
   const decision = route({ text: TEXT, mode: "build", harnesses: ["fake"], capped }, policy, rules);
   expect([decision.target.model, decision.target.access, decision.effort]).toEqual(["fake", "local", "low"]);
   expect(decision.reason).toBe(
-    "Looks like ask.explain, but the profile's daily cap of metered spend is reached, so it runs on fake at low effort instead of the metered fake-api.",
+    `Looks like ask.explain ("what does"), but the profile's daily cap of metered spend is reached, so it runs on fake at low effort instead of the metered fake-api.`,
   );
   expect(decision.trace.find((t) => t.stage === "candidates")?.note).toContain("api: the profile's daily cap of metered spend is reached");
 });

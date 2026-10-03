@@ -279,12 +279,12 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   let pick =
     preferred.length > 0 ? cheapest(preferred) : cheapest(above.length > 0 ? above : others.filter((t) => rank(t.tier) === strongest));
   const lead = unsure
-    ? `Not sure what kind of task this is (best guess ${c.taskClass}, confidence ${c.confidence.toFixed(2)})`
+    ? `Not sure what kind of task this is (best guess ${c.taskClass}, confidence ${c.confidence.toFixed(2)}: ${c.why})`
     : input.planApproved
       ? `The plan for this ${c.taskClass} task is approved`
       : input.verified
         ? `The verifiers passed and what's left looks like ${c.taskClass}`
-        : `Looks like ${c.taskClass}${planning ? " in plan mode" : ""}`;
+        : `Looks like ${c.taskClass} (${c.why})${planning ? " in plan mode" : ""}`;
   // Named only when it moved the route off the balanced one, so the reason says why a task ran cheaper or stronger.
   const balanced = resolveSpec(rule, "balanced", planning);
   const byMode = balanced.effort !== spec.effort || balanced.prefer?.join() !== spec.prefer?.join() ? `in ${policy.mode} mode ` : "";

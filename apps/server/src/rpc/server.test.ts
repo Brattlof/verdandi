@@ -711,7 +711,7 @@ describe("rpc server", () => {
         return { preview, before, decision, missing };
       }),
     );
-    expect(preview.reason).toBe("Looks like ask.search, so it runs on fake-small at low effort.");
+    expect(preview.reason).toBe('Looks like ask.search (rules: "where is"), so it runs on fake-small at low effort.');
     expect(before).toEqual([]);
     expect(decision).toEqual(preview);
     expect(decision.trace.map((t) => t.stage)).toContain("classify");
