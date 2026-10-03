@@ -734,7 +734,7 @@ They share `packages/contracts`, which is why they stay in one repo, as Hermes k
 
 ## 12. User experience
 
-- **Terminal chat** (the default surface): the thread for the current folder, or the workspace's; the agent's text streams, with a line for each route decision, verifier run, escalation and request. Requests are answered inline (y/n, a plan edited in `$EDITOR`), and slash commands switch modes and show diffs, revert, rate and attach. It grows into a full terminal UI (§23, question 8).
+- **Terminal chat** (the default surface): a terminal UI on OpenTUI (ADR 0027) on the thread for the current folder, or the workspace's. The agent's text streams into a transcript, with a line for each route decision, verifier run, escalation and request; a line under it says what a typed line will do (answer the request, steer the running turn, or send); the composer stays usable while the agent works. Requests are answered there (y/n, a plan edited in `$EDITOR`), and slash commands switch modes and show diffs, revert, rate and attach. `--plain`, or a pipe, gets the same chat as plain lines. Multiline editing, completion, and tool calls and diffs in panes come next.
 - **Web UI layout:**
   - rail: opens the projects, search and spend pages, one click from anywhere (profiles join it in M5);
   - sidebar: always lists threads by recency, each with its project, live status and cost;
@@ -1038,6 +1038,7 @@ The ADR also lists what isn't a vulnerability, who the principals are once the g
 | Agent SDK | `@anthropic-ai/claude-agent-sdk`, exact version pinned | Claude Code harness |
 | Database | SQLite in WAL mode via `bun:sqlite` + Effect SQL | Built in and fast, with no native addon; FTS5 for search |
 | Terminal | A PTY host process using Bun's built-in PTY (ConPTY on Windows; ADR 0007), plus xterm.js in the UI | A separate process keeps native terminal crashes away from the server. VS Code uses the same design. |
+| Terminal UI | **OpenTUI** through `@opentui/react` (ADR 0027) | Built for Bun, React like the web UI, and redraws only what changed. Its renderer is native (Zig, through `bun:ffi`): the one exception to "no native addon", loaded only when the terminal UI opens |
 | Git | The `git` command line, through a typed wrapper | Worktrees and low-level checkpoint commands |
 | Credentials | OS keychain through `Bun.secrets`, plus `keyCommand` | No plain-text keys, and no native addon |
 | Decision models | `rules` by default; Laya (ONNX through `onnxruntime-node`) in a worker process where it beats rules (ADR 0009); ollaya for larger local models; the Jev API if turned on | §9.8 |
@@ -1071,7 +1072,8 @@ verdandi/
 │  │     ├─ gateway/              # gateway core; platforms come from plugins
 │  │     ├─ surfaces/             # openai-compatible API, ACP server, MCP server
 │  │     ├─ rpc/                  # WebSocket API (loopback only, no web page)
-│  │     └─ cli/                  # `verdandi chat`, `run`, `web`, `doctor`
+│  │     ├─ cli/                  # `verdandi chat` (its session, and the --plain line chat), `run`, `web`, `doctor`
+│  │     └─ tui/                  # the terminal UI on OpenTUI: draws the chat session
 │  ├─ web/                       # `verdandi web`: serves packages/ui's page, relays to the
 │  │                             #   agent with its own page token, LAN gate for --host
 │  └─ desktop/                   # Electron host for packages/ui: main, preload bridge,
@@ -1164,7 +1166,7 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 5. **First gateway platform:** Telegram (recommended: simplest bot API, good inline buttons) or Discord?
 6. **Local models:** which local coding and chat models to target first, and on what hardware?
 7. **Moving to credits when quota runs low:** decided. Verdandi asks the first time, then remembers. Claude Code's own silent move to extra usage is never hidden: those turns are priced as metered and shown (ADR 0005).
-8. **Terminal UI:** decided. The terminal chat (bare `verdandi`) is the default surface and grows into a full terminal UI: multiline editing, completion, live tool output. Its library is picked, and asked for, when that work starts.
+8. **Terminal UI:** decided. The terminal chat (bare `verdandi`) is the default surface, a terminal UI on OpenTUI (ADR 0027).
 9. **Jev:** keep it off until TypeSafe publishes data-retention terms (recommended), or turn it on now for selected projects?
 10. **Gateway turns and `workspace.yaml`'s folders:** should a turn started by a gateway sender other than the owner get the folders the agent may work in (§13), or ask for any path outside the workspace (recommended)?
 
@@ -1222,7 +1224,7 @@ Everything that makes Hermes Agent good, and where it lives in Verdandi. Hermes'
 | Mixture-of-agents | MoA route type | 9.4 | M6 |
 | Batch runner, trajectory compression | Batch runner, trajectory exporters, `lab/` | 14.6, 14.7 | M1 (recording), M2 (batch runner) → M6 |
 | Exact pins, supply-chain CI | Supply chain | 17 | M0 |
-| Terminal UI | `verdandi`, the terminal chat and default surface; a full terminal UI grows from it | 11, 12 | M1 |
+| Terminal UI | `verdandi`, the terminal UI on OpenTUI and default surface | 11, 12 | M1 |
 | Opt-in checkpoints with `/rollback`, `hermes -w` worktrees | Checkpoints every turn, revert, worktrees per thread | 13 | M3 |
 | Desktop app (chat, preview rail, terminal, file browser) and web dashboard | Web UI, desktop app | 12, 19 | M1 / M5 |
 | **Not in Hermes** | Task routing across harnesses and access modes, decision layer, race mode, learned routing | 8, 9.8 | M1 → M6 |
