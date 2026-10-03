@@ -35,7 +35,7 @@ export const serve = async (home: string, argv: readonly string[], options: { re
   const folders = loadTrustedFolders(home);
   const claudePath = findClaude();
   // Only with an Anthropic API key configured; a malformed one stops here, naming the fix.
-  const native = await nativeHarness(home);
+  const native = await nativeHarness(home, folders);
   const harnesses: Partial<Record<HarnessId, HarnessAdapter>> = {
     "claude-code": claudePath
       ? makeClaudeCodeAdapter({

@@ -19,21 +19,16 @@ export const untrustedSource = (item: Item): string | undefined =>
       : undefined;
 
 /**
- * Whether a harness's sessions have tools that write files or run commands, so untrusted input in one can do harm and
- * holds its route at the policy's floor. The native harness has neither yet (#178, #179).
- */
-const canHarm: Record<HarnessId, boolean> = { "claude-code": true, native: false, fake: true };
-
-/**
  * Pure: the first untrusted input the thread's warm session on `harness` took in, from `turns` (the thread's, oldest
  * first, each with its own first source): those from `sessionFirstTurn` on (all, when unknown) that weren't forked
- * away. Undefined without a session, or on a harness whose sessions can't do harm with it.
+ * away. Undefined without a session. Every harness's sessions can write files (native: its file tools, ADR 0022), so
+ * untrusted input in any of them holds its route at the policy's floor.
  */
 export const sessionUntrusted = (
   turns: readonly { readonly turnId: TurnId; readonly reverted: 0 | 1 | 2; readonly untrusted: string | null }[],
   session: { readonly harness: HarnessId; readonly sessionId: string | null; readonly sessionFirstTurn: TurnId | null },
 ): UntrustedInput | undefined => {
-  if (session.sessionId === null || !canHarm[session.harness]) return undefined;
+  if (session.sessionId === null) return undefined;
   const from = Math.max(
     0,
     turns.findIndex((t) => t.turnId === session.sessionFirstTurn),

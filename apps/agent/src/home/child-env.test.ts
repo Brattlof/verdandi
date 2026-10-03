@@ -18,7 +18,7 @@ test("a key verdandid loads from .env reaches the native harness and no process 
       const { runVerifier } = await import(${JSON.stringify(join(import.meta.dir, "..", "verifiers", "verify.ts"))});
       const { childEnv } = await import(${JSON.stringify(join(import.meta.dir, "child-env.ts"))});
       const none = { get: async () => null, set: async () => {}, delete: async () => false };
-      const native = await nativeHarness(process.cwd(), process.env, none);
+      const native = await nativeHarness(process.cwd(), [], process.env, none);
       const verifier = await Effect.runPromise(runVerifier(${JSON.stringify(echo)}, process.cwd()));
       console.log(JSON.stringify({
         native: native.adapter !== undefined, status: native.status, verifier: verifier.output,

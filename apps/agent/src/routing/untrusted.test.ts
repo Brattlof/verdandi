@@ -41,7 +41,7 @@ test("network tools and flagged injections taint a turn; the shell and the user'
   );
 });
 
-test("a session holds the first untrusted input since it started, not a forked-away turn's, and only where it can do harm", () => {
+test("a session holds the first untrusted input since it started, not a forked-away turn's", () => {
   const turns = [
     { turnId: "t1" as TurnId, reverted: 0, untrusted: "WebSearch" },
     { turnId: "t2" as TurnId, reverted: 2, untrusted: "WebFetch" },
@@ -53,9 +53,9 @@ test("a session holds the first untrusted input since it started, not a forked-a
   expect(sessionUntrusted(turns, { ...session, sessionFirstTurn: "t2" as TurnId })).toEqual({ source: "WebFetch", turn: 4 });
   expect(sessionUntrusted(turns, { ...session, sessionFirstTurn: "t3" as TurnId })).toEqual({ source: "WebFetch", turn: 4 });
   expect(sessionUntrusted(turns.slice(0, 3), { ...session, sessionFirstTurn: "t2" as TurnId })).toBeUndefined();
-  // No warm session has nothing in context; the native harness has no tools to write files or run commands yet.
+  // No warm session has nothing in context; a native one, which can write files, holds it too.
   expect(sessionUntrusted(turns, { ...session, sessionId: null })).toBeUndefined();
-  expect(sessionUntrusted(turns, { ...session, harness: "native" })).toBeUndefined();
+  expect(sessionUntrusted(turns, { ...session, harness: "native" })).toEqual({ source: "WebSearch", turn: 1 });
 });
 
 /** A routed thread on the fake harness running as Claude Code, in a project whose policy routes everything to Sonnet. */

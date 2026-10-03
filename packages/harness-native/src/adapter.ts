@@ -15,7 +15,8 @@ import {
 import { Effect, Stream } from "effect";
 import { type CacheBreaks, cacheBreak, fingerprint, type Sent } from "./cache-check.ts";
 import { nativeCatalog } from "./catalog.ts";
-import { modeNotes, planTool, sessionPrefix, turnContent } from "./prompt.ts";
+import { access, fileTools, type Reach, runFileTool } from "./file-tools.ts";
+import { modeNotes, opensFiles, planTool, sessionPrefix, turnContent } from "./prompt.ts";
 import {
   appendEntry,
   createTranscript,
@@ -89,11 +90,16 @@ async function* request(turn: Turn, event: (requestId: string) => HarnessEvent):
 
 const feedback = (r: Resolution) => (r.decision === "deny" && r.feedback ? ` Their feedback: ${r.feedback}` : "");
 
-/** Runs one tool call: the plan tool raises `plan.requested`, a Verdandi tool that `ask`s raises `approval.requested` first. */
+/**
+ * Runs one tool call: the plan tool raises `plan.requested`, a file tool checks its path (asking outside the thread's
+ * reach, ADR 0025), and a Verdandi tool that `ask`s raises `approval.requested` first.
+ */
 async function* runTool(
   use: Anthropic.ToolUseBlock,
   input: HarnessRunInput,
+  session: Session,
   turn: Turn,
+  reach: Reach,
 ): AsyncGenerator<HarnessEvent, { readonly text: string; readonly isError?: boolean }> {
   const args = (typeof use.input === "object" && use.input !== null ? use.input : {}) as Record<string, unknown>;
   if (use.name === planTool) {
@@ -119,6 +125,32 @@ async function* runTool(
         : "The user approved the plan. Build it now.",
     };
   }
+  const file = fileTools[use.name];
+  // A session from before the file tools keeps the tool list it started with.
+  if (file && session.transcript.prefix.tools.some((t) => t.name === use.name)) {
+    if (file.writes && (turn.planning || input.mode === "ask"))
+      return {
+        text: turn.planning
+          ? `You're planning: change no file until the user approves your plan with ${planTool}.`
+          : "This turn runs in ask mode: answer without changing any file.",
+        isError: true,
+      };
+    const path = file.path(args);
+    if (path === "") return { text: "`path` is required.", isError: true };
+    const allowed = access(path, input.cwd, reach, file.writes);
+    if (allowed.kind === "refuse") return { text: allowed.why, isError: true };
+    if (allowed.kind === "ask") {
+      const note = allowed.note;
+      const r = yield* request(turn, (requestId) => ({
+        type: "approval.requested",
+        requestId,
+        toolName: use.name,
+        input: { ...args, note },
+      }));
+      if (r.decision !== "allow") return { text: `The user denied this.${feedback(r)}`, isError: true };
+    }
+    return await runFileTool(file, args, input.cwd, reach);
+  }
   const tool = input.tools?.find((t) => t.name === use.name);
   if (!tool) return { text: `There's no tool named ${use.name}.`, isError: true };
   if (tool.ask) {
@@ -131,13 +163,14 @@ async function* runTool(
 /**
  * Verdandi's own agent loop on the Anthropic Messages API (DESIGN §9.4, ADR 0022), metered at list price. Each
  * thread keeps one session, whose system prompt and tool list are fixed when it opens and whose transcript is kept
- * in `sessionsDir`, so a thread resumes after a restart. Each request is checked against the session's last one, and a
+ * in `sessionsDir`, so a thread resumes after a restart. Its file tools work in the thread's folder and `reach`. Each request is checked against the session's last one, and a
  * break of the prompt cache is logged as a warning, or thrown with `cacheBreaks: "throw"`, as every test sets. Tests
  * pass the fake provider's `fetch`.
  */
 export const makeNativeAdapter = (options: {
   readonly apiKey: string;
   readonly sessionsDir: string;
+  readonly reach: Reach;
   readonly fetch?: typeof globalThis.fetch;
   readonly cacheBreaks?: CacheBreaks;
 }): HarnessAdapter => {
@@ -178,7 +211,7 @@ export const makeNativeAdapter = (options: {
     const started = (transcript: Transcript): HarnessEvent => ({ type: "session.started", sessionId: transcript.id, harnessVersion });
     const notice = (text: string): HarnessEvent => ({ type: "item", item: { kind: "notice", text } });
     const fresh = (events: HarnessEvent[]) => {
-      const transcript = createTranscript(dir, randomUUID(), sessionPrefix(input.cwd, input.tools ?? []));
+      const transcript = createTranscript(dir, randomUUID(), sessionPrefix(input.cwd, input.tools ?? [], options.reach.folders));
       return bind(transcript, "build", [started(transcript), ...events]);
     };
     const resumed = input.resumeSessionId
@@ -301,7 +334,7 @@ export const makeNativeAdapter = (options: {
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const use of uses) {
         yield { type: "item", item: { kind: "tool.call", toolUseId: use.id, name: use.name, input: use.input } };
-        const result = yield* runTool(use, input, turn);
+        const result = yield* runTool(use, input, session, turn, options.reach);
         const isError = result.isError === true;
         results.push({ type: "tool_result", tool_use_id: use.id, content: result.text, ...(isError && { is_error: true }) });
         yield { type: "item", item: { kind: "tool.result", toolUseId: use.id, isError, content: result.text } };
@@ -326,8 +359,9 @@ export const makeNativeAdapter = (options: {
               }),
           });
           // Read before the turn starts: a missing attachment fails the turn with its name.
+          const canOpenFiles = opensFiles(session.transcript.prefix);
           const content = yield* Effect.try({
-            try: () => turnContent(input, session.mode === input.mode ? undefined : modeNotes[input.mode]),
+            try: () => turnContent(input, session.mode === input.mode ? undefined : modeNotes[input.mode], canOpenFiles),
             catch: (e) =>
               new HarnessError({
                 message: `An attachment of this turn can't be read (${String(e)}). It may have been deleted from the profile's attachments folder; attach it again.`,
@@ -335,10 +369,13 @@ export const makeNativeAdapter = (options: {
           });
           session.mode = input.mode;
           session.route = input.route;
-          if (input.attachments?.some((a) => a.kind === "file"))
+          if (!canOpenFiles && input.attachments?.some((a) => a.kind === "file"))
             events.push({
               type: "item",
-              item: { kind: "notice", text: "The native harness can't open attached files yet: the agent sees only their names." },
+              item: {
+                kind: "notice",
+                text: "This native session started before the agent could open files, so it sees only the attached files' names. A new thread can open them.",
+              },
             });
           const turn: Turn = { waiting: new Map(), steers: [], planning: input.mode === "plan" };
           session.turn = turn;

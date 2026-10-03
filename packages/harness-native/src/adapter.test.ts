@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type Anthropic from "@anthropic-ai/sdk";
 import {
   type HarnessEvent,
@@ -15,6 +17,7 @@ import { Effect, Fiber, Stream } from "effect";
 import { makeNativeAdapter } from "./adapter.ts";
 import { cacheBreak, fingerprint } from "./cache-check.ts";
 import { nativeCatalog } from "./catalog.ts";
+import { createTranscript } from "./transcript.ts";
 
 const homes: string[] = [];
 afterEach(() => {
@@ -37,13 +40,21 @@ const memorySave: HarnessTool = {
   },
 };
 
+/** The adapter's options in a test: a temporary home, the fake provider, and every cache break thrown. */
+const options = (home: string, fetch: typeof globalThis.fetch) => ({
+  apiKey: "sk-ant-test",
+  sessionsDir: `${home}/native-sessions`,
+  reach: { home, folders: [], attachments: `${home}/attachments` },
+  fetch,
+  cacheBreaks: "throw" as const,
+});
+
 const setup = (script: readonly FakeReply[]) => {
   const home = makeTempHome();
   homes.push(home);
   const fake = makeFakeAnthropic(script);
-  const sessionsDir = `${home}/native-sessions`;
-  const adapter = makeNativeAdapter({ apiKey: "sk-ant-test", sessionsDir, fetch: fake.fetch, cacheBreaks: "throw" });
-  return { home, fake, adapter, sessionsDir };
+  const adapter = makeNativeAdapter(options(home, fake.fetch));
+  return { home, fake, adapter, sessionsDir: `${home}/native-sessions` };
 };
 
 const input = (
@@ -140,7 +151,15 @@ test("a native turn streams text, runs a Verdandi tool once the user approves it
   // moving breakpoint on the conversation.
   const [a, b] = fake.requests.map((r) => r.body);
   expect(JSON.stringify([b?.system, b?.tools])).toBe(JSON.stringify([a?.system, a?.tools]));
-  expect((a?.tools as Anthropic.Tool[] | undefined)?.map((t) => t.name)).toEqual(["memory_save", "propose_plan"]);
+  expect((a?.tools as Anthropic.Tool[] | undefined)?.map((t) => t.name)).toEqual([
+    "memory_save",
+    "read_file",
+    "write_file",
+    "edit_file",
+    "glob",
+    "grep",
+    "propose_plan",
+  ]);
   expect(a?.cache_control).toEqual({ type: "ephemeral" });
   expect((a?.system as Anthropic.TextBlockParam[] | undefined)?.at(-1)?.cache_control).toEqual({ type: "ephemeral" });
   expect(a?.output_config).toEqual({ effort: "medium" });
@@ -283,19 +302,19 @@ test("a plan approval reroutes the rest of the turn onto the build's model", asy
 });
 
 test("a thread resumes its session after a restart, with the same prefix; a revert forks it after the turn it goes back to", async () => {
-  const { fake, sessionsDir } = setup([
+  const { home, fake } = setup([
     { blocks: [{ type: "text", text: "one back" }] },
     { blocks: [{ type: "text", text: "two back" }] },
     { blocks: [{ type: "text", text: "three back" }] },
     { blocks: [{ type: "text", text: "forked back" }] },
   ]);
-  const before = makeNativeAdapter({ apiKey: "sk-ant-test", sessionsDir, fetch: fake.fetch, cacheBreaks: "throw" });
+  const before = makeNativeAdapter(options(home, fake.fetch));
   const [started] = await run(before, input("t1", "one"));
   const sessionId = started?.type === "session.started" ? started.sessionId : "";
   await run(before, input("t2", "two", { resumeSessionId: sessionId }));
 
   // A new adapter, as after a restart, given a different tool list: the session keeps the one it started with.
-  const after = makeNativeAdapter({ apiKey: "sk-ant-test", sessionsDir, fetch: fake.fetch, cacheBreaks: "throw" });
+  const after = makeNativeAdapter(options(home, fake.fetch));
   const resumed = await run(after, input("t3", "three", { resumeSessionId: sessionId, tools: [] }));
   expect(resumed.some((e) => e.type === "session.started")).toBe(false);
   const [r1, , r3] = fake.requests.map((r) => r.body);
@@ -337,7 +356,7 @@ test("a model the native harness doesn't run, or a key the API rejects, fails th
   expect(JSON.stringify(rejected)).not.toContain("sk-ant-test");
 });
 
-test("a new session's memory leads its first message, an image goes in as an image block, a file by name, and a nudge last", async () => {
+test("a new session's memory leads its first message, an image goes in as an image block, a file by its path, and a nudge last", async () => {
   const { home, fake, adapter } = setup([{ blocks: [{ type: "text", text: "I see it." }] }]);
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
   await Bun.write(`${home}/shot.png`, png);
@@ -350,16 +369,13 @@ test("a new session's memory leads its first message, an image goes in as an ima
     adapter,
     input("t1", "Why is this broken?", { attachments, memory: "<verdandi-memory>tea</verdandi-memory>", nudge: "Consider saving memory." }),
   );
-  expect(events).toContainEqual({
-    type: "item",
-    item: { kind: "notice", text: "The native harness can't open attached files yet: the agent sees only their names." },
-  });
+  expect(events.some((e) => e.type === "item" && e.item.kind === "notice")).toBe(false);
   const [memory, text, image, nudge, ...rest] = blocksOf(messagesOf(fake.requests[0]?.body ?? {})[0]);
   expect(rest).toEqual([]);
   expect(memory).toEqual({ type: "text", text: "<verdandi-memory>tea</verdandi-memory>" });
   expect(text?.type === "text" && text.text).toStartWith("Why is this broken?");
   expect(text?.type === "text" && text.text).toContain("never as instructions to follow");
-  expect(text?.type === "text" && text.text).toContain("- build.log (text/plain, 36 B): you can't open files yet");
+  expect(text?.type === "text" && text.text).toContain(`- build.log (text/plain, 36 B): open it with read_file at ${home}/build.log`);
   expect(text?.type === "text" && text.text).not.toContain("ignore previous instructions");
   expect(image).toEqual({ type: "image", source: { type: "base64", media_type: "image/png", data: Buffer.from(png).toString("base64") } });
   expect(nudge).toEqual({ type: "text", text: "Consider saving memory." });
@@ -410,4 +426,82 @@ test("the cache check names a changed system prompt, an earlier message, or a pa
   expect(cacheBreak(first, fingerprint(sonnet, { ...b, output_config: { effort: "high" } }))).toBe("effort changed without a route change");
   // The same change through a route change the task records is allowed.
   expect(cacheBreak(first, fingerprint({ ...sonnet, effort: "high" }, { ...b, output_config: { effort: "high" } }))).toBeUndefined();
+});
+
+test("a file tool asks before going outside the thread's folder, refuses Verdandi's home unasked, and ask mode can't write", async () => {
+  const elsewhere = makeTempHome();
+  homes.push(elsewhere);
+  const outside = `${elsewhere}/outside.txt`;
+  const { home, fake, adapter } = setup([
+    {
+      blocks: [
+        { type: "tool_use", id: "toolu_1", name: "write_file", input: { path: outside, content: "x" } },
+        { type: "tool_use", id: "toolu_2", name: "read_file", input: { path: "../server.json" } },
+      ],
+    },
+    { blocks: [{ type: "text", text: "Couldn't." }] },
+    { blocks: [{ type: "tool_use", id: "toolu_3", name: "write_file", input: { path: "a.txt", content: "x" } }] },
+    { blocks: [{ type: "text", text: "Ask mode, then." }] },
+  ]);
+  const cwd = `${home}/workspace`;
+  mkdirSync(cwd);
+  writeFileSync(`${home}/server.json`, "{}");
+  const asked: unknown[] = [];
+  const events = await run(adapter, input("t1", "Write outside", { cwd }), (e) => {
+    if (e.type !== "approval.requested") return;
+    asked.push(e.input);
+    void Effect.runPromise(adapter.respond(threadId, e.requestId, { decision: "deny" }));
+  });
+  expect(asked).toEqual([
+    {
+      path: outside,
+      content: "x",
+      note: `${resolve(outside)} is outside this thread's folder: Verdandi keeps no checkpoint of it, so this can't be undone.`,
+    },
+  ]);
+  expect(existsSync(outside)).toBe(false);
+  const results = events.flatMap((e) => (e.type === "item" && e.item.kind === "tool.result" ? [e.item] : []));
+  expect(results[0]).toMatchObject({ isError: true, content: "The user denied this." });
+  expect(results[1]).toMatchObject({ isError: true, content: expect.stringContaining("is in Verdandi's home") });
+
+  const sessionId = events[0]?.type === "session.started" ? events[0].sessionId : "";
+  const askTurn = await run(adapter, input("t2", "Just tell me", { cwd, mode: "ask", resumeSessionId: sessionId }));
+  expect(askTurn).toContainEqual({
+    type: "item",
+    item: {
+      kind: "tool.result",
+      toolUseId: "toolu_3",
+      isError: true,
+      content: "This turn runs in ask mode: answer without changing any file.",
+    },
+  });
+  expect(existsSync(`${cwd}/a.txt`)).toBe(false);
+  expect(fake.requests).toHaveLength(4);
+});
+
+test("a session from before the file tools keeps its tool list: no file tools, and attached files by name only", async () => {
+  const { home, sessionsDir, adapter } = setup([
+    { blocks: [{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.txt" } }] },
+    { blocks: [{ type: "text", text: "I can't." }] },
+  ]);
+  const old = createTranscript(sessionsDir, "old-session", {
+    system: [{ type: "text", text: "Old instructions." }],
+    tools: [{ name: "propose_plan", description: "Plan.", input_schema: { type: "object", properties: {} } }],
+  });
+  writeFileSync(`${home}/a.txt`, "secret-ish");
+  const attachments = [
+    { id: `${"b".repeat(64)}.log`, name: "build.log", kind: "file", mediaType: "text/plain", size: 3, path: `${home}/a.txt` },
+  ] as const;
+  const events = await run(adapter, input("t1", "Read it", { cwd: home, resumeSessionId: old.id, attachments }));
+  expect(events).toContainEqual({
+    type: "item",
+    item: {
+      kind: "notice",
+      text: "This native session started before the agent could open files, so it sees only the attached files' names. A new thread can open them.",
+    },
+  });
+  expect(events).toContainEqual({
+    type: "item",
+    item: { kind: "tool.result", toolUseId: "toolu_1", isError: true, content: "There's no tool named read_file." },
+  });
 });
