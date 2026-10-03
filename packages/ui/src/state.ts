@@ -161,9 +161,18 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     ...(e.status === "limit" ? { task: null } : {}),
   }),
   "spend.cap.raised": (thread) => thread, // the caps are fetched with SpendCapsGet
-  // The task goes on at `to` from its next turn: Verdandi's after a verifier, the user's after a correction.
-  "task.escalated": (thread, { turnId, step, from, to, nextTurnId, reason }) => ({
-    ...addItem(thread, turnId, { kind: "escalation", step, from, ...(to && { to }), ...(nextTurnId && { nextTurnId }), reason }),
+  // The task goes on at `to` from its next turn: Verdandi's after a verifier, the user's after a correction, or within
+  // this turn after a rejected plan.
+  "task.escalated": (thread, { turnId, step, from, to, nextTurnId, requestId, reason }) => ({
+    ...addItem(thread, turnId, {
+      kind: "escalation",
+      step,
+      from,
+      ...(to && { to }),
+      ...(nextTurnId && { nextTurnId }),
+      ...(requestId && { requestId }),
+      reason,
+    }),
     ...(to && { route: to, task: thread.task && { ...thread.task, reason } }),
   }),
   // The rest of the task moves to a cheaper model from the turn committed next, shown between the turns like a route change.

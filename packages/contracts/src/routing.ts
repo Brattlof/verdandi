@@ -113,10 +113,10 @@ export type EscalationStep = typeof EscalationStep.Type;
 
 /**
  * What set off an escalation (DESIGN §8.7): a project verifier failed, the agent called `report_blocked`, the same
- * tool error came back `escalation.repeatedErrors` times in the task, or the decision layer read the user's follow-up
- * as correcting the agent.
+ * tool error came back `escalation.repeatedErrors` times in the task, the decision layer read the user's follow-up
+ * as correcting the agent, or the user rejected the agent's plan.
  */
-export const EscalationTrigger = Schema.Literals(["verifier", "blocked", "repeated-error", "correction"]);
+export const EscalationTrigger = Schema.Literals(["verifier", "blocked", "repeated-error", "correction", "plan-rejected"]);
 export type EscalationTrigger = typeof EscalationTrigger.Type;
 
 /** A partial route: layers merge key by key, so a later layer can change only the effort. */

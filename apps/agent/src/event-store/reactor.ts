@@ -705,8 +705,9 @@ export const ReactorLive = Layer.effect(
         const queue = steerQueues.get(e.turnId);
         return queue ? Queue.offer(queue, e.text).pipe(Effect.asVoid) : Effect.void;
       }
-      // Committed right before the approval it goes with, so the harness switches before the agent's next step.
-      if (e.type === "task.rerouted") return live.get(e.threadId)?.reroute(e.threadId, e.to) ?? Effect.void;
+      // Committed right before the approval or denial it goes with, so the harness switches before the agent's next step.
+      const moved = e.type === "task.rerouted" || (e.type === "task.escalated" && e.trigger === "plan-rejected") ? e.to : undefined;
+      if (moved) return live.get(e.threadId)?.reroute(e.threadId, moved) ?? Effect.void;
       // An archived skill leaves the folder Claude Code loads, and a restored one goes back (DESIGN §14.4).
       if (e.type === "skill.state.changed") {
         const error = placeSkill(skillFolders, e.skill, e.to === "archived");

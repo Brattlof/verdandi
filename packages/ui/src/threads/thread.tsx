@@ -469,20 +469,35 @@ const Rating = ({ task, onRate }: { task: Task; onRate: TurnProps["onRate"] }) =
 );
 
 type ToolResult = Extract<Item, { kind: "tool.result" }>;
-/** Results sit under their call, and a subagent's steps under the call that started it. */
-type Tree = { readonly results: ReadonlyMap<string, ToolResult>; readonly children: ReadonlyMap<string, Item[]> };
+type Escalation = Extract<Item, { kind: "escalation" }>;
+/**
+ * Results sit under their call, a subagent's steps under the call that started it, and the escalation a rejected plan
+ * set off on its plan's card.
+ */
+type Tree = {
+  readonly results: ReadonlyMap<string, ToolResult>;
+  readonly children: ReadonlyMap<string, Item[]>;
+  readonly rejections: ReadonlyMap<string, Escalation>;
+};
 
 const parentOf = (item: Item) => ("parentToolUseId" in item ? item.parentToolUseId : undefined);
 
 const Items = memo(({ items }: { items: TurnView["items"] }) => {
   const results = new Map(items.flatMap((i) => (i.kind === "tool.result" ? [[i.toolUseId, i] as const] : [])));
   const calls = new Set(items.flatMap((i) => (i.kind === "tool.call" ? [i.toolUseId] : [])));
-  const shown = items.filter((i) => i.kind !== "tool.result" || !calls.has(i.toolUseId));
+  const plans = new Set(items.flatMap((i) => (i.kind === "plan" && i.requestId ? [i.requestId] : [])));
+  const rejections = new Map(
+    items.flatMap((i) => (i.kind === "escalation" && i.requestId && plans.has(i.requestId) ? [[i.requestId, i] as const] : [])),
+  );
+  const shown = items.filter(
+    (i) =>
+      (i.kind !== "tool.result" || !calls.has(i.toolUseId)) && (i.kind !== "escalation" || !i.requestId || !rejections.has(i.requestId)),
+  );
   const children = Map.groupBy(
     shown.filter((i) => parentOf(i) !== undefined),
     (i) => parentOf(i) ?? "",
   );
-  return <ItemList items={shown.filter((i) => parentOf(i) === undefined)} tree={{ results, children }} />;
+  return <ItemList items={shown.filter((i) => parentOf(i) === undefined)} tree={{ results, children, rejections }} />;
 });
 
 const ItemList = ({ items, tree }: { items: readonly Item[]; tree: Tree }) => (
@@ -523,19 +538,28 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
       <p className="mt-0.5 mb-0">{item.text}</p>
     </UserBubble>
   ),
-  // A plan approved with the user's edit shows the edit against the proposal.
-  plan: ({ item }) => (
-    <div className="my-3 border border-line border-l-2 border-l-accent bg-card px-4 py-3">
-      <span className="eyebrow text-accent">
-        Plan
-        <span className="font-normal tracking-normal text-muted normal-case">
-          {item.edited === undefined ? "" : " · approved with your edits"}
-          {item.filePath ? ` · ${item.filePath}` : ""}
+  // A plan approved with the user's edit shows the edit against the proposal; a rejected one, the escalation it set off.
+  plan: ({ item, tree }) => {
+    const escalation = item.requestId === undefined ? undefined : tree.rejections.get(item.requestId);
+    return (
+      <div className="my-3 border border-line border-l-2 border-l-accent bg-card px-4 py-3">
+        <span className="eyebrow text-accent">
+          Plan
+          <span className="font-normal tracking-normal text-muted normal-case">
+            {item.edited === undefined ? "" : " · approved with your edits"}
+            {escalation ? " · rejected" : ""}
+            {item.filePath ? ` · ${item.filePath}` : ""}
+          </span>
         </span>
-      </span>
-      {item.edited === undefined ? <Markdown text={item.text} /> : <TextDiff before={item.text} after={item.edited} />}
-    </div>
-  ),
+        {item.edited === undefined ? <Markdown text={item.text} /> : <TextDiff before={item.text} after={item.edited} />}
+        {escalation?.to && (
+          <p className="mt-2 mb-0 border-t border-line pt-2 text-xs text-muted">
+            Escalated: {describeRouteChange(escalation.from, escalation.to)}. {escalation.reason}
+          </p>
+        )}
+      </div>
+    );
+  },
   "route.switch": ({ item }) => (
     <p className="my-3 flex items-center gap-3 text-xs text-muted before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">
       <span className="max-w-[80%] text-center">

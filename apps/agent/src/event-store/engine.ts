@@ -118,12 +118,19 @@ export const EngineLive = (options: EngineOptions = {}) =>
               };
             const stream = commandStream(command);
             const loaded = yield* loadDeciderState(stream);
+            // Rejecting a routed task's plan escalates it (DESIGN §8.7), which reads the project's policy and caps.
+            const rejectsPlan =
+              command.type === "approval.respond" &&
+              command.resolution.decision === "deny" &&
+              loaded.thread?.pinned === false &&
+              loaded.thread.pendingRequests.some((r) => r.requestId === command.requestId && r.kind === "plan");
             // Caps are read on each turn and raise, so an edit to the caps file applies to the next one.
             // A proposed plan's build is routed around a reached cap too.
             const capped =
               (command.type === "turn.send" ||
                 command.type === "spend.cap.raise" ||
                 command.type === "task.escalate" ||
+                rejectsPlan ||
                 (command.type === "harness.report" && command.event.type === "plan.requested")) &&
               loaded.thread &&
               options.spendCaps;
@@ -152,7 +159,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
             // Routing reads the project's policy file, so only when this command starts a task, routes a planned task's build,
             // escalates or may de-escalate.
             const routing =
-              current && (starts || plans || escalates || deescalates) && options.routing
+              current && (starts || plans || escalates || rejectsPlan || deescalates) && options.routing
                 ? {
                     ...(yield* options.routing(current.projectPath)),
                     // Routing memory moves where a task starts, not an approved plan's build or a running task.
