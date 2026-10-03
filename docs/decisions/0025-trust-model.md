@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (issue #197, 2026-10-02). Describes the code once #235 (secrets kept from child processes, #203) and #236 (`Origin` checks, #196) are merged.
+Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks) and #242 (trusted project commands).
 
 ## Context
 
@@ -14,7 +14,7 @@ Verdandi's security layers differ widely in strength, and DESIGN §17 listed the
 
 A bypass of one of these is a vulnerability.
 
-1. **The OS user account.** verdandid, every harness, and every tool, verifier, setup command and terminal run as the user who started verdandid, with that user's rights. The Verdandi home and the project folders are trusted local state: whatever can write to them already acts as the user. Nothing inside the agent process contains a hostile model; only the OS can, and Verdandi has no sandbox before M6. Until #230 lands, a project's `.verdandi/` folder is trusted like the rest of its code: its verifiers (`routing.yaml`) and worktree setup (`worktree.yaml`) run without asking.
+1. **The OS user account.** verdandid, every harness, and every tool, verifier, setup command and terminal run as the user who started verdandid, with that user's rights. The Verdandi home and the project folders are trusted local state: whatever can write to them already acts as the user. The one exception is a project's own commands, which a cloned repo's author or an agent allowed only to edit files can write; they pass a consent gate (boundary 5). Nothing inside the agent process contains a hostile model; only the OS can, and Verdandi has no sandbox before M6.
 2. **The loopback socket and the profile token.**
    - verdandid listens only on `127.0.0.1` (`ServerLayer` in `apps/server/src/rpc/server.ts`).
    - An `/rpc` upgrade needs the token: 32 random bytes made at each start, compared in constant time (`sameToken`).
@@ -32,6 +32,12 @@ A bypass of one of these is a vulnerability.
    - Project paths must be existing folders, stored as their real paths (`resolveProjectPath` in `apps/server/src/projects/project.ts`).
    - Attachments are counted and sized, and an image's bytes must match its type, before anything is stored (`storeAttachments` in `apps/server/src/attachments/attachments.ts`).
    - A skill change must stay inside one kebab-case skill in the profile's folder, with no link on the way and no overlap with an extra folder (`prepareChange` in `apps/server/src/skills/skill-files.ts`).
+5. **The asks Verdandi itself enforces.** Nothing runs or is written past one of these without the user's answer:
+   - a project's own commands (its verifiers in `.verdandi/routing.yaml`, its worktree setup in `.verdandi/worktree.yaml`) run only once the user trusts that exact list in the project, by its hash (`apps/server/src/trust/trust.ts`), and a changed list asks again. Unattended runs only run trusted lists;
+   - a Verdandi tool marked `ask` (`packages/tools`) runs only once allowed;
+   - a skill change, or a memory save or proposal that asks, writes nothing until allowed.
+
+   Getting one of these past its ask is a vulnerability. What the approved step then does is not: an approval is consent, not containment.
 
 ### Heuristics
 
@@ -39,13 +45,13 @@ These lower risk, and they can be bypassed by design. A bypass is a bug worth fi
 
 - The injection question (`untrusted.injection`, `injectionRules` in `packages/decisions/src/rules.ts`), the secret scans on memory (`scanMemory`) and skills (`scanSkill`), and trajectory redaction (`packages/trajectories/src/redact.ts`).
 - "Marked as data" fences around untrusted text handed to the agent (escalation hand-offs, attachments, the memory snapshot), and the warning over a flagged search result. A model can still follow what's inside one (#198).
-- Approvals and plan mode, which are consent, not containment. They ask before the steps a harness routes through them. They don't limit what an approved step does, or what the user's own harness settings already allow. Plan mode is Claude Code's read-only mode, enforced by Claude Code.
+- What an approval or plan mode limits. They're consent, not containment: they ask before a step, and don't limit what an approved step does or what the user's own harness settings already allow. The harness's own permission prompts and plan mode (Claude Code's read-only mode) are enforced by the harness.
 - Spend caps (`spend-caps.yaml`) and task limits, which are a budget, not a security control.
 
 ### Out of scope as vulnerabilities
 
 - Prompt injection that bypasses no boundary and no approval.
-- Anything that needs the user's account, or write access to the home or a project folder.
+- Anything that needs the user's account or write access to the home. The same goes for write access to a project folder, unless it gets the project's commands run past their ask.
 - A bypass of a scanner, a fence or redaction.
 - What an agent does after the user approved it, or under permissions the user's own harness settings grant.
 - Claude Code's own behaviour, which is Anthropic's to fix.
@@ -87,4 +93,4 @@ The rivals' incidents argue for these defaults. Each one names what holds it tod
 - A report is triaged against the boundaries above. A heuristic's weakness is fixed as a bug, and no doc may present a heuristic as a boundary.
 - Containment comes from the OS (a separate account, a VM or a container) until M6's sandbox, and the docs say so rather than imply otherwise.
 - With `approveSaves` on by default, `memory_save` raises an approval on Claude Code and the native harness in every home without a `memory.yaml`. A headless `verdandi run` whose agent saves a memory therefore stops at it (exit code 5), unless `--deny-requests` is set or the home sets `approveSaves: false`.
-- Known gaps, tracked: a project's own commands run without asking (#230); one token for every device (#215); context files and skills that Claude Code loads by itself aren't scanned (#177); the memory snapshot's fence can be closed by an entry (#198).
+- Known gaps, tracked: one token for every device (#215); context files and skills that Claude Code loads by itself aren't scanned (#177); the memory snapshot's fence can be closed by an entry (#198).

@@ -17,12 +17,13 @@ A bypass of a boundary in ADR 0025:
 - running code or reading data as you without going through your OS account, for example from a web page, another device or another user on the machine;
 - reaching verdandid's API without the profile's token, or from a page on another site;
 - the LAN gate (`--host`) relaying a request from outside private and loopback ranges, or a WebSocket from a page it didn't serve;
-- input that passes validation at the RPC boundary and then escapes it: project paths, attachments, or skill paths outside the profile's skills folder.
+- input that passes validation at the RPC boundary and then escapes it: project paths, attachments, or skill paths outside the profile's skills folder;
+- getting something past an ask Verdandi enforces: a project's verifiers or worktree setup running without the user trusting that exact list, a Verdandi tool that asks running unasked, or a skill change or memory save written without the approval it asked for.
 
 ## Out of scope
 
 - Prompt injection that bypasses no boundary and no approval.
-- Anything that needs your account, or write access to the Verdandi home or a project folder.
+- Anything that needs your account or write access to the Verdandi home, or write access to a project folder, unless it gets the project's commands run past their ask.
 - A bypass of the injection and secret scans, redaction, or "marked as data" fences. These are heuristics; we fix such bypasses as bugs.
 - What an agent does after you approved it, or under permissions your own harness settings grant.
 - Claude Code's own behaviour. Report it to Anthropic.
@@ -37,4 +38,4 @@ A bypass of a boundary in ADR 0025:
 | Process spawning and its environment | `apps/server/src/home/child-env.ts`, `apps/server/src/verifiers/verify.ts`, `apps/server/src/terminals/` |
 | Project paths and attachments | `apps/server/src/projects/project.ts`, `apps/server/src/attachments/attachments.ts` |
 | Memory and skill writes | `apps/server/src/memory/`, `apps/server/src/skills/skill-files.ts` |
-| A project's own commands (verifiers, worktree setup) | `.verdandi/` in each project; asking before they run is #230 |
+| Trusting a project's own commands (verifiers, worktree setup) | `apps/server/src/trust/`, `apps/server/src/event-store/reactor.ts` |
