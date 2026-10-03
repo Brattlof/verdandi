@@ -125,6 +125,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "commands.trust.revoked": (thread) => thread,
   "review.requested": (thread) => thread,
   "review.started": (thread) => thread,
+  "handoff.started": (thread) => thread,
   "plan.requested": (thread, e) =>
     addRequest(
       addItem(thread, e.turnId, {

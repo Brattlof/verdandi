@@ -275,6 +275,19 @@ export const ReviewStarted = Schema.Struct({
   allowMetered: Schema.Boolean,
 });
 /**
+ * Thread `threadId` writes the handoff summary for turn `for.turnId` (DESIGN §8.2 lever 5), whose thread moves from a
+ * `from` session to a new `to` one: hidden from thread lists and search like a review, its one turn runs as an
+ * `aux.handoff` task with no Verdandi tools and nobody to ask. Its reply seeds the new session.
+ */
+export const HandoffStarted = Schema.Struct({
+  type: Schema.Literal("handoff.started"),
+  v: v1,
+  threadId: ThreadId,
+  for: Schema.Struct({ threadId: ThreadId, turnId: TurnId }),
+  from: HarnessId,
+  to: HarnessId,
+});
+/**
  * The decision layer flagged `text` from `source` as a likely injection (DESIGN §17) before Verdandi handed it to
  * the agent: it went over anyway, under a warning. On turn `turnId`, the one that handed it over or, for an
  * escalation's, the turn it escalated from. `text` is untrusted data, kept as the decision's state for the lab.
@@ -729,6 +742,7 @@ export const Event = Schema.Union([
   DecisionRecorded,
   ReviewRequested,
   ReviewStarted,
+  HandoffStarted,
   InjectionFlagged,
   SpendCapRaised,
   VerifiersStarted,
@@ -833,6 +847,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "decision.recorded@2": DecisionRecorded,
   "review.requested@1": ReviewRequested,
   "review.started@1": ReviewStarted,
+  "handoff.started@1": HandoffStarted,
   "injection.flagged@1": InjectionFlagged,
   "spend.cap.raised@1": SpendCapRaised,
   "verifiers.started@1": VerifiersStarted,

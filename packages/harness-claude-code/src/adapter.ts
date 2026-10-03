@@ -369,10 +369,11 @@ const openSession = (
  * (DESIGN §17). Files go in as paths the agent reads with its own tools; images as image blocks.
  */
 export const promptContent = (
-  input: Pick<HarnessRunInput, "text" | "attachments" | "memory" | "nudge">,
+  input: Pick<HarnessRunInput, "text" | "attachments" | "memory" | "handoff" | "nudge">,
 ): SDKUserMessage["message"]["content"] => {
-  // A new session's memory snapshot leads its first message, and a memory nudge follows it, each in a block of its own (DESIGN §14.2).
-  const memory = input.memory ? [{ type: "text" as const, text: input.memory }] : [];
+  // A new session's memory snapshot leads its first message, then a handoff's summary (DESIGN §14.2, §8.2 lever 5), and
+  // a memory nudge follows it, each in a block of its own.
+  const memory = [input.memory, input.handoff].flatMap((text) => (text ? [{ type: "text" as const, text }] : []));
   const nudge = input.nudge ? [{ type: "text" as const, text: input.nudge }] : [];
   const attachments = input.attachments ?? [];
   if (attachments.length === 0) {

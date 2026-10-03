@@ -575,6 +575,21 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
       </span>
     </p>
   ),
+  // What the new session was handed, folded: the user opens it to see what carried over.
+  handoff: ({ item }) => (
+    <details className="my-1.5 rounded border border-line bg-card">
+      <summary className="flex list-none items-center gap-2 rounded px-2 py-1 text-xs hover:bg-hover [&::-webkit-details-marker]:hidden">
+        <ChevronIcon className="size-3.5 text-muted [details[open]>summary>&]:rotate-90" />
+        <span className="font-semibold">Handed over</span>
+        <span className="min-w-0 flex-1 truncate text-muted">
+          from {item.from} to a new {item.to} session, with this summary of the thread so far
+        </span>
+      </summary>
+      <div className="border-t border-line px-3 py-1">
+        <Markdown text={item.summary} />
+      </div>
+    </details>
+  ),
   blocked: ({ item }) => (
     <p role="note" className="my-2 border border-line border-l-2 border-l-warn bg-card px-3 py-1.5 text-xs">
       <span className="font-medium text-warn">The agent is blocked: </span>

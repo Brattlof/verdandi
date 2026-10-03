@@ -31,7 +31,7 @@ import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { sessionUntrusted, untrustedSource } from "../routing/untrusted.ts";
 import { skillUsed } from "../skills/skills.ts";
-import type { DeciderState, PendingRequest } from "./decider.ts";
+import type { AuxStarted, DeciderState, PendingRequest } from "./decider.ts";
 
 type Projection<T extends Event["type"]> = (
   event: Extract<Event, { type: T }>,
@@ -185,7 +185,9 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       Effect.andThen(
         sql`update turns set reverted = 2 where thread_id = ${e.threadId} and reverted = 1
               and (select pending_fork from threads where id = ${e.threadId}) is not null`,
+        // A running turn's route can't change harness, so the thread's route says which harness the session is on.
         sql`update threads set session_id = ${e.sessionId}, transcript_path = ${e.transcriptPath ?? null}, pending_fork = null,
+              session_harness = json_extract(route, '$.harness'),
               session_first_turn = case when pending_fork is null and session_id is not ${e.sessionId} then running_turn_id
                 else session_first_turn end
             where id = ${e.threadId}`,
@@ -311,7 +313,9 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     withSql((sql) => sql`delete from trusted_commands where project_id = ${e.projectId} and hash = ${e.hash}`),
   // The digest and the review thread are in the event; the review thread is marked by its own `review.started`.
   "review.requested": () => Effect.void,
+  // The `review` column marks a thread as Verdandi's own auxiliary one, hidden from thread lists and search: a review's or a handoff's.
   "review.started": (e) => withSql((sql) => sql`update threads set review = ${JSON.stringify(e)} where id = ${e.threadId}`),
+  "handoff.started": (e) => withSql((sql) => sql`update threads set review = ${JSON.stringify(e)} where id = ${e.threadId}`),
   // The skill itself is on disk; a skill Verdandi created gets a row, so it can be curated (DESIGN §14.4). Reverting a
   // delete brings the row back only for a skill Verdandi created: a user's skill is never curated.
   "skill.applied": (e, at) =>
@@ -538,7 +542,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           pendingFork: row.pending_fork === 1,
           sessionFirstTurn: row.session_first_turn,
           revert: row.revert === null ? null : (JSON.parse(row.revert) as StoredRevert),
-          ...(row.review === null ? {} : { review: JSON.parse(row.review) as Extract<Event, { type: "review.started" }> }),
+          ...(row.review === null ? {} : { aux: JSON.parse(row.review) as AuxStarted }),
           projectId: row.project_id,
           projectPath: row.path,
           route,

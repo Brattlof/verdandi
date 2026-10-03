@@ -169,7 +169,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
             // A new task is classified, and a later turn is asked whether it corrects the agent's last answer. A background
             // review's turn isn't: Verdandi wrote it, in its own class (DESIGN §14.5).
             const questions =
-              send && !current?.review ? [...(routing ? taskQuestions(routing) : []), ...(current?.turns ? [correctingQuestion] : [])] : [];
+              send && !current?.aux ? [...(routing ? taskQuestions(routing) : []), ...(current?.turns ? [correctingQuestion] : [])] : [];
             // A finished task's digest is asked whether it's worth a background review.
             const asked =
               send && questions.length > 0
@@ -240,7 +240,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
                   }))[0] ?? null)
                 : undefined;
             // A background review stays off a harness whose subscription window is short (DESIGN §14.5).
-            const shortQuota = send && current?.review ? yield* loadShortQuota(new Date()) : undefined;
+            const shortQuota = send && current?.aux ? yield* loadShortQuota(new Date()) : undefined;
             const decision = decide(
               {
                 ...state,

@@ -93,6 +93,13 @@ const GOLDENS: Golden[] = [
     given: true,
     routes: { thrifty: "haiku low", balanced: "haiku low", max: "haiku low" },
   },
+  // So does a handoff's summary, written before a thread's new session on another harness (DESIGN §8.2 lever 5).
+  {
+    text: "Verdandi is handing a thread over from Claude Code to Verdandi's native agent.",
+    taskClass: "aux.handoff",
+    given: true,
+    routes: { thrifty: "haiku low", balanced: "haiku low", max: "haiku low" },
+  },
 ];
 
 /** How a reason names a "model effort" route: Haiku takes no effort level, so its reason names none. */

@@ -257,7 +257,7 @@ interface RouteDecision {
 - Hermes Agent shipped per-turn routing of short, simple messages to a cheap model, then removed it in April 2026. It had been opt-in and off by default, and it conflicts with that project's rule that the prompt stays cached for the whole conversation.
 - Cursor's router and GitHub Copilot's Auto mode both include the cost of breaking the cache when they decide. They switch only at cache boundaries, or when the task has changed a lot.
 
-**Handoff format for lever 5.** The summary always has the same sections: *Goal, Constraints, Progress, Decisions, Files touched, Open issues, Next steps.* A cheap auxiliary model writes it (§9.7). The old transcript stays searchable through `session_search`.
+**Handoff format for lever 5.** The summary always has the same sections: *Goal, Constraints, Progress, Decisions, Files touched, Open issues, Next steps.* A cheap auxiliary model writes it (§9.7), as an `aux.handoff` task over a digest of the thread, before the first turn of a session on another harness than the thread's last; *Files touched* comes from the thread's checkpoints, not the model. The summary leads the new session's first message after the memory snapshot, fenced as data, and shows on that turn. The old transcript stays searchable through `session_search` (ADR 0030).
 
 **Baseline to beat:** often the best option is the strongest model at lower effort, because a single model keeps a single cache. The router must beat this baseline (§8.10).
 
@@ -334,7 +334,7 @@ Stages 1–5 are pure and fast, so the composer shows a **live routing preview w
 | `review` | Code or security review | Opus · medium |
 | `design.architecture` | Designs, trade-offs | Opus · high (Fable in Max mode) |
 | `chat.general` | Gateway chit-chat, quick questions | Cheapest acceptable (local or Haiku) |
-| `aux.*` | Titles, commit messages, handoffs, compression, vision, background review, judging whether a command is safe, classification | Set per aux task (§9.7); `aux.review`: Haiku · low |
+| `aux.*` | Titles, commit messages, handoffs, compression, vision, background review, judging whether a command is safe, classification | Set per aux task (§9.7); `aux.review` and `aux.handoff`: Haiku · low |
 
 **Budget modes:**
 - **Thrifty** moves routes one step down and makes local models acceptable more often.

@@ -235,6 +235,10 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
           )
             addRequest(e);
           if (e.type === "turn.item.added" && e.item.kind === "notice") io.write(`\n[${e.item.text}]\n`);
+          if (e.type === "turn.item.added" && e.item.kind === "handoff")
+            io.write(
+              `\n[handed over from ${e.item.from} to a new ${e.item.to} session, with this summary of the thread so far:]\n${e.item.summary}\n`,
+            );
           if (e.type === "thread.worktree.setup.held")
             io.write(`[worktree setup ${e.command} waits for you to trust it; the next turn asks]\n`);
           if (e.type === "skill.applied") io.write(e.error ? `[skill not written: ${e.error}]\n` : `[skill ${e.skill} saved]\n`);

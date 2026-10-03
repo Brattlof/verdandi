@@ -7,7 +7,7 @@ import { CommandId, profileStream, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { HandedSource, VerifierRun } from "./items.ts";
 import { MemoryScope } from "./memory.ts";
 import { Resolution } from "./requests.ts";
-import { InteractionMode, Route } from "./route.ts";
+import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode } from "./routing.ts";
 import { SkillAction, SkillChange } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
@@ -407,6 +407,19 @@ export const ReviewStart = Schema.Struct({
   allowMetered: Schema.Boolean,
 });
 /**
+ * Internal: creates handoff thread `threadId` in `projectPath` (DESIGN §8.2 lever 5): its one turn writes the summary
+ * that seeds the new `to` session of turn `for.turnId`, whose thread last ran on `from`.
+ */
+export const HandoffStart = Schema.Struct({
+  type: Schema.Literal("handoff.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  projectPath: Schema.String,
+  for: Schema.Struct({ threadId: ThreadId, turnId: TurnId }),
+  from: HarnessId,
+  to: HarnessId,
+});
+/**
  * Internal: review thread `reviewThreadId` proposes a memory (a routing note is one, in project memory) or a skill
  * change, after turn `turnId` of the reviewed thread `threadId`. Untrusted: scanned like a save, then recorded as a
  * pending request for the user.
@@ -526,6 +539,7 @@ export const Command = Schema.Union([
   TaskReview,
   ReviewStart,
   ReviewPropose,
+  HandoffStart,
   CommandsTrustRequest,
   DeviceRevoke,
   DevicePair,
