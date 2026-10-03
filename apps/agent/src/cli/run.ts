@@ -111,7 +111,9 @@ const parse = (argv: readonly string[]): Options => {
 /** What the turn stopped for, in a line, or with a plan the plan itself. */
 const describeRequest = (r: PendingRequest) =>
   r.type === "commands.trust.requested"
-    ? `approval to run ${trustedCommandsLine(r)}, which this project hasn't trusted`
+    ? r.purpose === "context"
+      ? `approval to start the agent with ${trustedCommandsLine(r)}, which this project hasn't trusted`
+      : `approval to run ${trustedCommandsLine(r)}, which this project hasn't trusted`
     : r.type === "approval.requested"
       ? `approval to use ${r.toolName} ${clip(JSON.stringify(r.input), 400)}`
       : r.type === "user-input.requested"

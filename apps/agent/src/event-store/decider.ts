@@ -1243,6 +1243,8 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
           text: c.text,
           question: injectionQuestion,
           answer: c.answer,
+          ...(c.file !== undefined && { file: c.file }),
+          ...(c.withheld && { withheld: true }),
         })
       : reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`),
   "turn.recover": (state, c) =>

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks) and #242 (trusted project commands). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local. Amended by ADR 0028: each device other than a page `verdandi web` opens pairs and gets its own revocable token.
+Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks), #242 (trusted project commands) and #177 (scanned context files). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local. Amended by ADR 0028: each device other than a page `verdandi web` opens pairs and gets its own revocable token.
 
 ## Context
 
@@ -51,6 +51,7 @@ These lower risk, and they can be bypassed by design. A bypass is a bug worth fi
 - What an approval or plan mode limits. They're consent, not containment: they ask before a step, and don't limit what an approved step does or what the user's own harness settings already allow. The harness's own permission prompts and plan mode (Claude Code's read-only mode) are enforced by the harness.
 - The native harness's file tools' path rules (`access` in `packages/harness-native/src/file-tools.ts`): free in the thread's folder and the `workspace.yaml` folders, asking elsewhere, refusing the rest of the Verdandi home. They steer the agent's own tools, but anything run as the user, Claude Code's tools included, reaches the same files.
 - Spend caps (`spend-caps.yaml`) and task limits, which are a budget, not a security control.
+- The context-file scan (#177, #180). Before each turn, the files a harness loads by itself (`loads`: Claude Code's instruction files and imports, rules, skills, commands and agents, `packages/harness-claude-code/src/context-files.ts`) go through the injection question. A flagged one the user hasn't trusted holds the turn on a `context` trust request, keyed by each file's path and content hash (`apps/agent/src/trust/context.ts`). The native harness leaves a flagged context file or skill description out of its prompt instead. The hold is an ask, but only the scan decides when it fires, so the whole is a heuristic: a reworded injection loads unasked, as do the user's own `~/.claude` files and files Claude Code loads later in a session.
 - Skill pins (`skill_pins`). The decider refuses a pinned skill's change on Verdandi's own path (`skill_manage`, a background review's proposal) and curation leaves it alone, but a harness's own file tools that the user allows can still write the skills folder.
 
 ### Out of scope as vulnerabilities
@@ -98,4 +99,4 @@ The rivals' incidents argue for these defaults. Each one names what holds it tod
 - A report is triaged against the boundaries above. A heuristic's weakness is fixed as a bug, and no doc may present a heuristic as a boundary.
 - Containment comes from the OS (a separate account, a VM or a container) until M6's sandbox, and the docs say so rather than imply otherwise.
 - With `approveSaves` on by default, `memory_save` raises an approval on Claude Code and the native harness in every home without a `memory.yaml`. A headless `verdandi run` whose agent saves a memory therefore stops at it (exit code 5), unless `--deny-requests` is set or the home sets `approveSaves: false`.
-- Known gaps, tracked: context files and skills that Claude Code loads by itself aren't scanned (#177).
+- A false positive in a context file holds every turn in that project until the user allows it once; allowing it trusts those contents until the file changes. Unattended runs stop at it like any request: `verdandi run` exits 5, and a batch denies it, failing the task.

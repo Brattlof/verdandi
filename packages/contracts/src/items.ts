@@ -20,11 +20,22 @@ export const VerifierRun = Schema.Struct({
 export type VerifierRun = typeof VerifierRun.Type;
 
 /**
- * Untrusted text Verdandi itself hands the agent (DESIGN §17): what an escalation's trigger hands its turn (a
- * verifier's output, the agent's own blocked reason, a repeated tool error), a Verdandi tool's result, or the summary
- * a harness handoff seeds a new session with. A `correction` escalation hands nothing: the user's own message is the turn.
+ * Untrusted text Verdandi puts in front of the agent (DESIGN §17): what an escalation's trigger hands its turn (a
+ * verifier's output, the agent's own blocked reason, a repeated tool error), a Verdandi tool's result, the summary a
+ * harness handoff seeds a new session with, or a `context` file (a context or skill file a harness loads by itself, or
+ * one the native harness puts in its prompt). A `correction` escalation hands nothing: the user's own message is the turn.
  */
-export const HandedSource = Schema.Literals(["verifier", "blocked", "repeated-error", "session_search", "memory_search", "handoff"]);
+export const HandedSource = Schema.Literals([
+  "verifier",
+  "blocked",
+  "repeated-error",
+  "session_search",
+  "memory_search",
+  "handoff",
+  "skills_list",
+  "skill_view",
+  "context",
+]);
 export type HandedSource = typeof HandedSource.Type;
 /** What each source is, for the user. */
 export const handedSourceLabel: Record<HandedSource, string> = {
@@ -34,7 +45,18 @@ export const handedSourceLabel: Record<HandedSource, string> = {
   session_search: "a session_search result",
   memory_search: "a memory_search result",
   handoff: "the handoff summary",
+  skills_list: "a skills_list result",
+  skill_view: "a skill_view result",
+  context: "a context file",
 };
+
+/** How a flagged injection is introduced to the user, before its `why`: the same in the web UI and the terminal. */
+export const injectionLead = (item: { readonly source: HandedSource; readonly file?: string; readonly withheld?: boolean }) =>
+  item.withheld
+    ? `Possible prompt injection in ${item.file ?? handedSourceLabel[item.source]}, left out of the agent's context:`
+    : item.source === "context"
+      ? `Possible prompt injection in ${item.file ?? "a context file"}, which the harness loads into the agent's context:`
+      : `Possible prompt injection in ${handedSourceLabel[item.source]}, handed to the agent under a warning:`;
 
 /** A persisted piece of a turn. Text deltas are never items: they are broadcast and dropped. */
 export const Item = Schema.Union([
@@ -90,9 +112,16 @@ export const Item = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("blocked"), reason: Schema.String }),
   /**
    * Verdandi's injection scan flagged text from `source` it handed the agent in this turn, or in the turn it sent after
-   * it (an escalation's). The agent got it under a warning; `why` is what the scan saw.
+   * it (an escalation's). The agent got it under a warning; `why` is what the scan saw. A `context` flag names its
+   * `file`; `withheld` when the text never reached the agent (the native harness leaves a flagged file out).
    */
-  Schema.Struct({ kind: Schema.Literal("injection"), source: HandedSource, why: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("injection"),
+    source: HandedSource,
+    why: Schema.String,
+    file: Schema.optionalKey(Schema.String),
+    withheld: Schema.optionalKey(Schema.Boolean),
+  }),
   /**
    * The thread moved from a `from` session to a new `to` one, and this turn's agent starts from `summary`, written by an
    * `aux.handoff` task over the thread so far (DESIGN §8.2 lever 5): what was carried over, shown to the user.

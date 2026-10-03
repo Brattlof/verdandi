@@ -1,5 +1,5 @@
-import { appendFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import type {
   AccessMode,
   HarnessAdapter,
@@ -24,6 +24,7 @@ import { Effect, Stream } from "effect";
  * project's verifier …") edits the thread's last edited file again, the way an agent fixing it would; "subagent" delegates a read to a subagent whose
  * steps carry `parentToolUseId`, "background" does the same in a background subagent that reports after the main
  * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back, with its attachments' names, kinds and sizes, and fixed usage on the route's model.
+ * It "loads" its folder's `CLAUDE.md` (`loads`), so Verdandi scans it as it does Claude Code's.
  * A turn with a `fork` starts a new session holding the old one's turns up to the fork; `history` keeps each session's turns.
  * "tool <name> <json args>" calls one of the Verdandi tools the run was given, reporting the call and its result as items.
  * "fetch <url>" reads that page through a WebFetch tool call first, then runs the turn's next lines as its text.
@@ -345,6 +346,8 @@ ${goal}
     release: () => void;
   } = {
     id: "fake",
+    // Loads its folder's CLAUDE.md the way Claude Code would, so tests see the scan hold a turn; it never reads it.
+    loads: (cwd) => [join(cwd, "CLAUDE.md")].filter((file) => existsSync(file)),
     calls,
     history,
     reroutes,

@@ -16,6 +16,7 @@ import {
 import { Effect, Stream } from "effect";
 import { type CacheBreaks, cacheBreak, fingerprint, type Sent } from "./cache-check.ts";
 import { nativeCatalog } from "./catalog.ts";
+import { indexSkills, readContext, type SkillEntry } from "./context.ts";
 import { access, fileTools, type Reach, runFileTool } from "./file-tools.ts";
 import { modeNotes, opensFiles, planTool, sessionPrefix, turnContent } from "./prompt.ts";
 import { classify } from "./provider-failure.ts";
@@ -191,7 +192,8 @@ async function* runTool(
 /**
  * Verdandi's own agent loop on the Anthropic Messages API (DESIGN §9.4, ADR 0022), metered at list price. Each
  * thread keeps one session, whose system prompt and tool list are fixed when it opens and whose transcript is kept
- * in `sessionsDir`, so a thread resumes after a restart. Its file tools work in the thread's folder and `reach`, and its
+ * in `sessionsDir`, so a thread resumes after a restart. A new session's prompt holds the folder's context file and an
+ * index of `skills`, each scanned through the turn's `scan`, which leaves a flagged one out. Its file tools work in the thread's folder and `reach`, and its
  * terminal runs commands through `terminal`, whose outputs folder `read_file` may read. Each request is checked against the session's last one, and a
  * break of the prompt cache is logged as a warning, or thrown with `cacheBreaks: "throw"`, as every test sets. Tests
  * pass the fake provider's `fetch`.
@@ -203,6 +205,8 @@ export const makeNativeAdapter = (options: {
   readonly terminal: Terminal;
   readonly fetch?: typeof globalThis.fetch;
   readonly cacheBreaks?: CacheBreaks;
+  /** The skills a new session's index lists (DESIGN §14.4), read when it opens. */
+  readonly skills?: () => readonly SkillEntry[];
 }): HarnessAdapter => {
   // Everything explicit, so nothing in the environment meant for Claude Code (a base URL, a token, debug logging) applies here.
   const client = new Anthropic({
@@ -237,7 +241,7 @@ export const makeNativeAdapter = (options: {
   };
 
   /** The thread's session for this turn, and what to report before it starts. */
-  const open = (input: HarnessRunInput): { readonly session: Session; readonly events: HarnessEvent[] } => {
+  const open = async (input: HarnessRunInput): Promise<{ readonly session: Session; readonly events: HarnessEvent[] }> => {
     const dir = options.sessionsDir;
     const live = sessions.get(input.threadId);
     const bind = (transcript: Transcript, mode: InteractionMode | undefined, events: HarnessEvent[]) => {
@@ -247,9 +251,33 @@ export const makeNativeAdapter = (options: {
     };
     const started = (transcript: Transcript): HarnessEvent => ({ type: "session.started", sessionId: transcript.id, harnessVersion });
     const notice = (text: string): HarnessEvent => ({ type: "item", item: { kind: "notice", text } });
-    const fresh = (events: HarnessEvent[]) => {
-      const transcript = createTranscript(dir, randomUUID(), sessionPrefix(input.cwd, input.tools ?? [], options.reach.folders));
-      return bind(transcript, "build", [started(transcript), ...events]);
+    // Read once, when the session opens: the transcript keeps them, so a resume builds the same prompt (DESIGN §9.4).
+    // Without `scan` nothing unscanned goes in.
+    const fresh = async (events: HarnessEvent[]) => {
+      const { scan } = input;
+      const context = scan && (await readContext(input.cwd, scan));
+      const skills = scan ? await indexSkills(options.skills?.() ?? [], scan) : [];
+      const prefix = sessionPrefix(input.cwd, input.tools ?? [], options.reach.folders, { context, skills });
+      const transcript = createTranscript(dir, randomUUID(), prefix);
+      const flagged = skills.filter((s) => s.flagged).map((s) => s.name);
+      return bind(transcript, "build", [
+        started(transcript),
+        ...events,
+        ...(context && "blocked" in context
+          ? [
+              notice(
+                `${context.file} was left out of this session's prompt: Verdandi's injection scan flagged it, so the agent works without the project's conventions. Fix it, then start a new thread to give them back.`,
+              ),
+            ]
+          : []),
+        ...(flagged.length > 0
+          ? [
+              notice(
+                `The skills index leaves out the description of ${flagged.join(", ")}: Verdandi's injection scan flagged ${flagged.length === 1 ? "it" : "them"}. skill_view still shows the skill, under a warning.`,
+              ),
+            ]
+          : []),
+      ]);
     };
     const resumed = input.resumeSessionId
       ? live?.transcript.id === input.resumeSessionId
@@ -416,7 +444,7 @@ export const makeNativeAdapter = (options: {
         Effect.gen(function* () {
           if (!nativeCatalog.some((e) => e.model === input.route.model))
             return yield* new HarnessError({ message: unknownModel(input.route.model) });
-          const { session, events } = yield* Effect.try({
+          const { session, events } = yield* Effect.tryPromise({
             try: () => open(input),
             catch: (e) =>
               new HarnessError({

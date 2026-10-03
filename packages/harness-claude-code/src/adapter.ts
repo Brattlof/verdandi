@@ -32,6 +32,7 @@ import {
 } from "@verdandi/contracts";
 import { Effect, Exit, Option, Schema, Stream } from "effect";
 import { z } from "zod";
+import { claudeCodeLoads } from "./context-files.ts";
 import { initialContext, type NormalizeContext, normalize, turnLimitError } from "./normalize.ts";
 
 export type QueryFn = typeof query;
@@ -543,6 +544,12 @@ export const makeClaudeCodeAdapter = (options: {
 
   return {
     id: "claude-code",
+    loads: (cwd) =>
+      claudeCodeLoads(cwd, {
+        additionalDirectories: options.additionalDirectories ?? [],
+        plugins: options.plugins ?? [],
+        env: options.env ?? process.env,
+      }),
     run: (input) =>
       Stream.unwrap(
         Effect.gen(function* () {

@@ -347,6 +347,8 @@ export const HandoffStarted = Schema.Struct({
  * The decision layer flagged `text` from `source` as a likely injection (DESIGN §17) before Verdandi handed it to
  * the agent: it went over anyway, under a warning. On turn `turnId`, the one that handed it over or, for an
  * escalation's, the turn it escalated from. `text` is untrusted data, kept as the decision's state for the lab.
+ * A `context` file names its `file` (relative to the thread's folder when inside it): Claude Code loads it only once the
+ * user allows it; the native harness leaves it out (`withheld`).
  */
 export const InjectionFlagged = Schema.Struct({
   type: Schema.Literal("injection.flagged"),
@@ -357,12 +359,16 @@ export const InjectionFlagged = Schema.Struct({
   text: Schema.String,
   question: DecisionQuestion,
   answer: DecisionAnswer,
+  file: Schema.optionalKey(Schema.String),
+  withheld: Schema.optionalKey(Schema.Boolean),
 });
 /** How an `injection.flagged` shows on its turn, the same in the projection, the web UI and trajectories. */
 export const injectionItem = (e: typeof InjectionFlagged.Type): Extract<Item, { kind: "injection" }> => ({
   kind: "injection",
   source: e.source,
   why: e.answer.why ?? `the ${e.answer.backend} backend gave no reason`,
+  ...(e.file !== undefined && { file: e.file }),
+  ...(e.withheld && { withheld: true }),
 });
 /**
  * The user raised a spend cap from `fromUsd` to `toUsd` for the rest of the period `periodKey` (DESIGN §8.9),

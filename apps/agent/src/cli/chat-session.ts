@@ -8,9 +8,9 @@ import {
   describeRevertFiles,
   describeRouteChange,
   describeSpendCap,
-  handedSourceLabel,
   type InteractionMode,
   injectionItem,
+  injectionLead,
   parseSlash,
   type Resolution,
   ratingWords,
@@ -192,8 +192,8 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
           }
           if (e.type === "task.blocked") io.write(`\n[the agent is blocked: ${e.reason}]\n`);
           if (e.type === "injection.flagged") {
-            const why = injectionItem(e).why;
-            io.write(`\n[possible prompt injection in ${handedSourceLabel[e.source]}, handed to the agent under a warning: ${why}]\n`);
+            const item = injectionItem(e);
+            io.write(`\n[${injectionLead(item)} ${item.why}]\n`);
           }
           if (e.type === "task.escalated") {
             const moved = e.to ? `escalated to ${e.to.model} ${e.to.effort}` : "not escalated";
@@ -439,7 +439,7 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
     const revoke = lists[Number(revokeAt) - 1];
     if (!revoke) io.write(`[usage: /untrust <n>, with n from /trusted (1 to ${lists.length})]\n`);
     else if (await dispatch({ type: "commands.trust.revoke", commandId: uuid<CommandId>(), threadId, hash: revoke.hash }))
-      io.write("[revoked: Verdandi asks before it runs those commands again]\n");
+      io.write("[revoked: Verdandi asks again before it runs those commands or starts an agent with those files]\n");
   };
 
   const switchMode = (to: InteractionMode) => () => {
