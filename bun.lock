@@ -34,22 +34,7 @@
     "apps/web": {
       "name": "@verdandi/web",
       "dependencies": {
-        "@base-ui/react": "1.8.0",
-        "@fontsource-variable/crimson-pro": "5.3.0",
-        "@fontsource-variable/ibm-plex-sans": "5.3.0",
-        "@fontsource-variable/jetbrains-mono": "5.3.0",
-        "@tanstack/react-virtual": "3.14.13",
-        "@verdandi/contracts": "workspace:*",
-        "@xterm/addon-fit": "0.11.0",
-        "@xterm/xterm": "6.0.0",
-        "effect": "4.0.0-rc.115",
-        "react": "19.3.0",
-        "react-dom": "19.3.0",
-      },
-      "devDependencies": {
-        "@types/react": "19.3.0",
-        "@types/react-dom": "19.3.0",
-        "tailwindcss": "4.3.3",
+        "@verdandi/ui": "workspace:*",
       },
     },
     "packages/contracts": {
@@ -112,6 +97,27 @@
       "name": "@verdandi/trajectories",
       "dependencies": {
         "@verdandi/contracts": "workspace:*",
+      },
+    },
+    "packages/ui": {
+      "name": "@verdandi/ui",
+      "dependencies": {
+        "@base-ui/react": "1.8.0",
+        "@fontsource-variable/crimson-pro": "5.3.0",
+        "@fontsource-variable/ibm-plex-sans": "5.3.0",
+        "@fontsource-variable/jetbrains-mono": "5.3.0",
+        "@tanstack/react-virtual": "3.14.13",
+        "@verdandi/contracts": "workspace:*",
+        "@xterm/addon-fit": "0.11.0",
+        "@xterm/xterm": "6.0.0",
+        "effect": "4.0.0-rc.115",
+        "react": "19.3.0",
+        "react-dom": "19.3.0",
+      },
+      "devDependencies": {
+        "@types/react": "19.3.0",
+        "@types/react-dom": "19.3.0",
+        "tailwindcss": "4.3.3",
       },
     },
   },
@@ -285,6 +291,8 @@
     "@verdandi/tools": ["@verdandi/tools@workspace:packages/tools"],
 
     "@verdandi/trajectories": ["@verdandi/trajectories@workspace:packages/trajectories"],
+
+    "@verdandi/ui": ["@verdandi/ui@workspace:packages/ui"],
 
     "@verdandi/web": ["@verdandi/web@workspace:apps/web"],
 

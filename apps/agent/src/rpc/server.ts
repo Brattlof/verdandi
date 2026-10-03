@@ -13,7 +13,6 @@ import {
   SpendCapsUnavailable,
   TerminalUnavailable,
 } from "@verdandi/contracts";
-import web from "@verdandi/web/index.html";
 import { Context, Deferred, Effect, Layer, Result, Stream } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -208,20 +207,6 @@ const Handlers = (home: string) =>
 const sameToken = (given: string | null, token: string) =>
   given !== null && given.length === token.length && timingSafeEqual(Buffer.from(given), Buffer.from(token));
 
-/**
- * Whether a page at `origin` is verdandid's own web UI: on loopback, at the port the request came in on (`host`).
- * DNS rebinding can point another site's hostname at 127.0.0.1, but its origin keeps that hostname.
- */
-export const ownOrigin = (origin: string, host: string | undefined) => {
-  if (!URL.canParse(origin) || !URL.canParse(`http://${host}`)) return false;
-  const page = new URL(origin);
-  return (
-    page.protocol === "http:" &&
-    (page.hostname === "127.0.0.1" || page.hostname === "localhost") &&
-    page.port === new URL(`http://${host}`).port
-  );
-};
-
 const imageTypes: Record<string, string> = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 
 /**
@@ -251,8 +236,9 @@ const serveAttachment = (home: string, token: string) =>
   });
 
 /**
- * The WebSocket RPC protocol at /rpc and attachments at /attachments/<id>. /rpc refuses a page on another site
- * (a browser sends its `Origin`; the CLI and the LAN gate's relay send none), then an upgrade without the profile's token.
+ * The WebSocket RPC protocol at /rpc and attachments at /attachments/<id>. /rpc refuses every browser page (a browser
+ * sends its `Origin`; the CLI and `verdandi web`'s relay send none), since pages reach verdandid only through the web
+ * server (ADR 0026), then an upgrade without the profile's token.
  */
 const ProtocolWithToken = (home: string, token: string) =>
   Layer.effect(RpcServer.Protocol)(
@@ -266,9 +252,9 @@ const ProtocolWithToken = (home: string, token: string) =>
         Effect.gen(function* () {
           const request = yield* HttpServerRequest.HttpServerRequest;
           const origin = request.headers.origin;
-          if (origin !== undefined && !ownOrigin(origin, request.headers.host)) {
+          if (origin !== undefined) {
             return HttpServerResponse.text(
-              `Refused a connection from a page at ${origin}: only verdandid's own web UI may connect. Open it with: verdandi open`,
+              `Refused a connection from a page at ${origin}: verdandid serves no web page, and browsers reach it only through the web UI. Open it with: verdandi web`,
               { status: 403 },
             );
           }
@@ -285,7 +271,7 @@ const ProtocolWithToken = (home: string, token: string) =>
     }),
   );
 
-/** verdandid: the core, a token-protected WebSocket API and the web UI on 127.0.0.1. Port 0 picks a free port. */
+/** verdandid: the core and its token-protected WebSocket API on 127.0.0.1, serving no web page (ADR 0026). Port 0 picks a free port. */
 export const ServerLayer = (
   home: string,
   harnesses: Partial<Record<HarnessId, HarnessAdapter>>,
@@ -308,11 +294,6 @@ export const ServerLayer = (
         disablePreemptiveShutdown: true,
         // A turn's attachments arrive base64-encoded in one message: at most 10 MB of bytes (contracts' attachmentLimits).
         websocket: { maxPayloadLength: 20 * 1024 * 1024 },
-        // The web UI, bundled by Bun from source. Run from source it rebuilds on every change to apps/web and
-        // reloads open pages; a release build sets NODE_ENV=production and gets one minified bundle, built on
-        // the first request and served from memory.
-        routes: { "/": web },
-        development: Bun.env.NODE_ENV === "production" ? false : { hmr: true },
       }),
     ),
   );

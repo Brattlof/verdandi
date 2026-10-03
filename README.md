@@ -65,11 +65,11 @@ bun run verdandi --home ./.verdandi-dev --model opus --effort high
 bun run verdandi --home ./.verdandi-dev --workspace  # the profile's workspace, for anything that isn't one project
 ```
 
-For the web UI, keep the server running and open it from a second terminal:
+The agent serves no web page. For the web UI, run its own small server, which opens your browser:
 
 ```bash
-bun run dev                                          # verdandid, state in ./.verdandi-dev
-bun run verdandi open --home ./.verdandi-dev         # the web UI in your browser
+bun run web:dev                                      # the web UI, state in ./.verdandi-dev; Ctrl+C stops it
+bun run dev                                          # or keep verdandid running on its own, for chats and the web UI to share
 bun run verdandi doctor --home ./.verdandi-dev       # check Bun, Claude Code, git, the database and the server
 ```
 

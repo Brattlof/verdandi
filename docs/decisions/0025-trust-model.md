@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks) and #242 (trusted project commands).
+Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks) and #242 (trusted project commands). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local.
 
 ## Context
 
@@ -18,13 +18,13 @@ A bypass of one of these is a vulnerability.
 2. **The loopback socket and the profile token.**
    - verdandid listens only on `127.0.0.1` (`ServerLayer` in `apps/agent/src/rpc/server.ts`).
    - An `/rpc` upgrade needs the token: 32 random bytes made at each start, compared in constant time (`sameToken`).
-   - Before the token is read, an upgrade from a browser page other than verdandid's own is refused (`ownOrigin`). The CLI sends no `Origin`.
+   - Before the token is read, an upgrade from any browser page is refused (ADR 0026; it allowed verdandid's own page until then). The CLI and `verdandi web`'s relay send no `Origin`. The web server checks its own page's `Origin` (`ownOrigin` in `apps/web/src/serve.ts`) and its own page token.
    - `/attachments/<id>` takes the token only in an `Authorization` header, which forces a CORS preflight that verdandid never grants.
    - The token is written to `server.json` in the home with mode `0600` (`apps/agent/src/main.ts`). On Windows the mode doesn't apply, and the file inherits the ACL of a home under the user's profile.
    - Per-device tokens are #215.
-   - Bun's HMR socket (`/_bun/hmr`) exists only when verdandid runs from source, and it takes no token. Bun refuses a foreign hostname in its `Origin` but accepts `localhost` at any port. It sends a version string, the web UI's bundled source and reload notices, never the token or user data. A release build (`NODE_ENV=production`) has no such socket.
-3. **The LAN gate.** With `--host`, `startLanGate` (`apps/agent/src/rpc/lan-gate.ts`) refuses:
-   - every request that isn't from a private or loopback address (`isLocalAddress`);
+   - Bun's HMR socket (`/_bun/hmr`) exists only when `verdandi web` runs from source (verdandid's until ADR 0026), and it takes no token. Bun refuses a foreign hostname in its `Origin` but accepts `localhost` at any port. It sends a version string, the web UI's bundled source and reload notices, never the token or user data. A release build (`NODE_ENV=production`) has no such socket.
+3. **The LAN gate.** With `verdandi web --host`, `startLanGate` (`apps/web/src/lan-gate.ts`) refuses:
+   - every request that isn't from a private, tailnet or loopback address (`isLocalAddress`);
    - every WebSocket from a page it didn't serve (`gateOrigin`).
 
    A public `--host` address is refused (`hostProblem`). The token still guards everything past the page.

@@ -703,19 +703,25 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 | Surface | Purpose | Milestone |
 |---|---|---|
 | **Terminal chat** (`verdandi`, also `verdandi chat`) | The default surface: chat, steer, approve, plans, diffs, revert, on the current folder when it's a project and in the workspace otherwise (§13) | M1 |
-| **CLI commands** (`verdandi <command>`) | `start` (always-on verdandid), `open`, `doctor`, `run "<task>"` (headless), `batch` (eval and trajectory runs), and the rest | M1 → M6 |
-| **Web UI** | An optional workspace GUI: threads side by side, diffs, terminal, dashboards. `verdandi open` opens it while verdandid runs | M1 |
-| **Desktop app** (Electron, `apps/desktop` in this repo) | A thin shell around the `verdandi` binary, which it runs as the always-on verdandid: tray, notifications, auto-update, and the web UI in a window | M5 |
+| **CLI commands** (`verdandi <command>`) | `start` (always-on verdandid), `web`, `doctor`, `run "<task>"` (headless), `batch` (eval and trajectory runs), and the rest | M1 → M6 |
+| **Web UI** (`verdandi web`) | An optional workspace GUI: threads side by side, diffs, terminal, dashboards. Its own small server, run only when wanted; `--host` opens it to the local network or tailnet | M1 |
+| **Desktop app** (Electron, `apps/desktop` in this repo) | A thin host for the same UI: it runs the `verdandi` binary as the always-on verdandid, or connects to one on another machine, with tray, notifications and auto-update | M5 |
 | **Messaging gateway** | Start, steer and approve tasks from chat apps (§15) | M5 |
 | **OpenAI-compatible API** | `model: "verdandi/auto"`, so any tool can use Verdandi as a routed model | M6 |
 | **ACP server** | Use the native agent from editors that support ACP | M6 |
 | **MCP server** | Expose memory, skills and sessions to other MCP clients | M3 (for Claude Code), then public in M6 |
 
-**Who runs verdandid.** One per profile. Bare `verdandi` and `verdandi run` connect to the one running, or else start one in their own process that stops when they end; meanwhile other clients can connect to it (`verdandi open`) and lose it when the chat quits. Whatever has to outlive a chat needs an always-on verdandid, `verdandi start` or the desktop app: other devices, and in M5 the scheduler and gateway, which only an always-on verdandid starts, so a bot doesn't go offline when a terminal closes.
+**Who runs verdandid.** One per profile. Bare `verdandi` and `verdandi run` connect to the one running, or else start one in their own process that stops when they end; meanwhile other clients can connect to it (`verdandi web`) and lose it when the chat quits. Whatever has to outlive a chat needs an always-on verdandid, `verdandi start` or the desktop app: other devices, and in M5 the scheduler and gateway, which only an always-on verdandid starts, so a bot doesn't go offline when a terminal closes.
 
-**One repo, separate apps.** The agent is the `verdandi` binary (verdandid and the CLI, `apps/agent`); the web UI is served by it (`apps/web`); the desktop app is a separate Electron app (`apps/desktop`) that ships its own installer and runs that binary. They share `packages/contracts`, which is why they stay in one repo, as Hermes keeps its agent and desktop app.
+**The agent serves no web page (ADR 0026).** The agent is the `verdandi` binary, verdandid and the CLI (`apps/agent`): the brain, the terminal chat and the gateway. It listens only on `127.0.0.1`, an API for local clients behind the profile's token, and refuses every browser page. Chatting in the terminal or from a messaging app needs nothing else.
 
-**One UI for web and desktop.** The desktop app has no UI of its own: its window loads `apps/web` from the verdandid it runs, the same bundle a browser gets, so a UI change is made once. What only a desktop app can do (tray, OS notifications, open at login, auto-update) lives in Electron's main process, and the page reaches it through one small preload bridge (`window.verdandiDesktop`) that it feature-detects; each such feature has a browser fallback or is simply absent in the browser. Nothing in `apps/web` is forked per app, and the bridge check is the only place the page asks where it runs.
+**One UI, thin hosts.** The whole UI is one package, `packages/ui`, which imports only `contracts` and is given an endpoint to talk to. Each host only mounts it and connects it, so a UI change is made once:
+- **`apps/web`** is `verdandi web`: a small server that serves the page and relays its RPC and attachments to the agent. The page gets a token of the web server's own, swapped for the agent's on the way through. `--host` opens it to the local network or tailnet through the LAN gate.
+- **`apps/desktop`** (M5) bundles `packages/ui` in its window and never depends on `apps/web`. Electron's main process runs the agent binary it ships and holds the token. What only a desktop app can do (tray, OS notifications, open at login, auto-update) reaches the UI through one small preload bridge that it feature-detects, and is absent in the browser.
+
+They share `packages/contracts`, which is why they stay in one repo, as Hermes keeps its agent and desktop app.
+
+**A remote agent (M5).** The desktop app, and later the terminal chat, can talk to an agent on another machine, e.g. one on a VM reached over Tailscale. The agent then opens an API-only listener on a private or tailnet address, never a page, which needs first: per-device pairing and revocable tokens (#215), a protocol version check when a client connects, since the desktop app and a remote agent update separately, and a connection picker in the desktop app (this computer, or a remote agent). The UI marks what lives on the agent's machine: paths, terminals and worktrees are the VM's, and the OS folder dialog is offered only when the agent is on the machine showing the UI. Until then, a browser on another device uses `verdandi web --host`.
 
 **Protocol:** a WebSocket on `127.0.0.1`, with a per-profile token. Typed RPC contracts shared by server and clients:
 - `command.dispatch`
@@ -912,7 +918,7 @@ Trajectories from open or local models don't have this restriction. The exporter
   - Connections are outbound only, so no ports need opening.
   - Webhooks for inbound triggers, e.g. CI failed → start a fix task.
 - **Profiles:** completely separate homes (`work`, `personal`), each with its own database, credentials, memory, skills and channels. Switch in the UI, or with `--profile` on the CLI.
-- **Remote access:** the web UI over Tailscale. Never exposed publicly by default.
+- **Remote access:** `verdandi web --host` on a tailnet address, and in M5 the desktop app to a remote agent (§11). Never exposed publicly.
 
 ---
 
@@ -935,16 +941,16 @@ Claude Code manages its own context. The native harness has a pluggable `Context
 
 ADR 0025 is the trust model. Everything runs as you, the OS user, and nothing inside the agent process contains a hostile model; only the OS can, and Verdandi has no sandbox before M6. So Verdandi's layers come in two strengths:
 
-- **Boundaries**, where a bypass is a vulnerability: your OS account (the Verdandi home and project folders are trusted local state), the loopback socket and its token, the LAN gate, validation at the RPC boundary (project paths, attachments, skill paths), and the asks Verdandi itself enforces (trusted project commands, Verdandi tools that ask, skill and memory proposals), which nothing may skip.
+- **Boundaries**, where a bypass is a vulnerability: your OS account (the Verdandi home and project folders are trusted local state), the loopback socket and its token, the web server's page token and `Origin` check, the LAN gate, validation at the RPC boundary (project paths, attachments, skill paths), and the asks Verdandi itself enforces (trusted project commands, Verdandi tools that ask, skill and memory proposals), which nothing may skip.
 - **Heuristics**, which lower risk and can be bypassed by design: the injection and secret scans, redaction, "marked as data" fences, what an approval or plan mode limits (they're consent, not containment), and spend caps (a budget, not a security control).
 
 The ADR also lists what isn't a vulnerability, who the principals are once the gateway exists (the agent never is one), and the defaults below, with the code that holds each. `SECURITY.md` says how to report one.
 
 - **Network:**
-  - verdandid listens on `127.0.0.1` only, and requires the profile's token for each connection.
-  - A WebSocket from a browser page other than verdandid's own is refused before the token is read.
-  - `verdandi start --host` opts in to the local network through a gate that relays to verdandid. The gate refuses every request from outside private and loopback ranges, and every WebSocket from a page it didn't serve. A public `--host` address is refused.
-  - On the local network the token travels over plain HTTP. Remote access beyond a network you trust is opt-in, through Tailscale.
+  - verdandid listens on `127.0.0.1` only, serves no web page, and requires the profile's token for each connection. It refuses every WebSocket from a browser page (ADR 0026).
+  - `verdandi web` serves the UI and relays to verdandid. The page holds only the web server's token, made per run, never the agent's; a WebSocket from a page other than the web server's own is refused before its token is read.
+  - `verdandi web --host` opts in to the local network or tailnet through a gate in front of the web server. The gate refuses every request from outside private, tailnet and loopback ranges, and every WebSocket from a page it didn't serve. A public `--host` address is refused.
+  - On the local network the page's token travels over plain HTTP. Remote access beyond a network you trust is opt-in, through Tailscale.
 - **No default outbound calls.** verdandid calls only your harness and the providers you configured, with no telemetry. Fonts are bundled and remote images aren't loaded. Anything more is named in config and off until turned on.
 - **Claude Code credentials are never touched.** The harness drives your own logged-in CLI.
   - Anthropic's Agent SDK docs say third-party developers may not offer claude.ai login or rate limits in their products without approval.
@@ -1023,7 +1029,7 @@ The ADR also lists what isn't a vulnerability, who the principals are once the g
 | Area | Choice | Why |
 |---|---|---|
 | Language | TypeScript, strict mode, modern ES modules only | The Agent SDK is TypeScript, types are shared between server and UI, and the leading coding agents are TypeScript. Learning at run time (memory, skills, routing memory) needs no Python; training does, and lives in `lab/`, talking to the app through files (§14.7) |
-| Runtime | **Bun** | Ships as one installable binary (`bun build --compile`) with the web UI embedded, the way Claude Code installs. SQLite, test runner, bundler, package manager, shell and OS-keychain access are built in, which means fewer dependencies and a smaller supply-chain surface. Fast CLI startup. Anthropic maintains Bun, and Claude Code itself ships on it. |
+| Runtime | **Bun** | Ships as one installable binary (`bun build --compile`) with the web UI inside for `verdandi web`, the way Claude Code installs. SQLite, test runner, bundler, package manager, shell and OS-keychain access are built in, which means fewer dependencies and a smaller supply-chain surface. Fast CLI startup. Anthropic maintains Bun, and Claude Code itself ships on it. |
 | Type checking | TypeScript 7 (native compiler) | Stable since 7.0; much faster type checks |
 | Monorepo | Bun workspaces (isolated installs, version catalogs) + Turborepo | Isolated installs enforce package boundaries; Turborepo caches builds |
 | Server core | **Effect 4** on `@effect/platform-bun` (Schema, RPC over WebSocket, SQL, Stream). Confirm in M0 whether 4 is stable enough, else use 3.x. | Cancellation, cleanup and streaming are Verdandi's hardest problems, and Effect is designed for them. Effect Schema converts old stored events to the current shape. |
@@ -1037,12 +1043,12 @@ The ADR also lists what isn't a vulnerability, who the principals are once the g
 | Decision models | `rules` by default; Laya (ONNX through `onnxruntime-node`) in a worker process where it beats rules (ADR 0009); ollaya for larger local models; the Jev API if turned on | §9.8 |
 | Web UI | React 19 + TanStack Virtual, bundled by Bun from an HTML import and served by verdandid. A router, a state library or the React Compiler are added when a view needs them. | Virtualized long threads, no separate bundler or dev server |
 | UI kit | Tailwind 4 (through `bun-plugin-tailwind`), Base UI used directly for accessible widgets, Streamdown, Shiki, `@pierre/diffs`, Tiptap | Each is built for its job. Base UI is unstyled, so Tailwind styles everything and there is no component layer to copy in (ADR 0012) |
-| Desktop | **Electron** + electron-builder, with auto-update. It runs the compiled verdandid binary as a separate process, and its window loads the web UI from it (§11). | Same Chromium on every OS. VS Code, Cursor, T3 Code and Hermes all ship on it. The server runs independently of the window, which the scheduler and gateway need anyway. |
+| Desktop | **Electron** + electron-builder, with auto-update. It runs the compiled verdandid binary as a separate process, or connects to a remote one, and renders `packages/ui` in its window (§11). | Same Chromium on every OS. VS Code, Cursor, T3 Code and Hermes all ship on it. The server runs independently of the window, which the scheduler and gateway need anyway. |
 | Gateway | Official or leading SDK for each platform, as plugins | — |
 | Local models | Ollama (and any OpenAI-compatible local server) | Free auxiliary and classifier work, and a local agent option |
 | Tests | `bun test` (with Effect's test services, e.g. TestClock), Playwright, golden tests for the router, install and update end-to-end tests on all three OSes | Covers everything from the router's rules to the installer |
 | Lint and format | Biome | One fast tool for both |
-| Release | `bun build --compile` (one `verdandi` binary per platform, via an install script and npm), the web UI embedded in it through its HTML import, electron-builder (desktop), Changesets | — |
+| Release | `bun build --compile` (one `verdandi` binary per platform, via an install script and npm), with `verdandi web`'s page bundled in through its HTML import, electron-builder (desktop), Changesets | — |
 | CI | GitHub Actions on Windows, macOS and Ubuntu, plus supply-chain jobs | — |
 | **lab/** | Python 3.13+, uv, ruff, ty, pytest; PyTorch, TRL and scikit-learn as needed; ONNX export | ML tooling lives here, outside the app |
 
@@ -1064,14 +1070,16 @@ verdandi/
 │  │     ├─ scheduler/
 │  │     ├─ gateway/              # gateway core; platforms come from plugins
 │  │     ├─ surfaces/             # openai-compatible API, ACP server, MCP server
-│  │     ├─ rpc/                  # WebSocket API, LAN gate
-│  │     └─ cli/                  # `verdandi chat`, `run`, `open`, `doctor`
-│  ├─ web/                       # React UI; src/ has one folder per feature: threads,
-│  │                             #   composer, routing, spend, diffs, terminals, memory,
-│  │                             #   worktrees, skills, automations, settings; ui/ is shared
-│  └─ desktop/                   # Electron shell with no UI of its own (it loads apps/web):
-│                                #   main, preload bridge, verdandid process, tray, updater
+│  │     ├─ rpc/                  # WebSocket API (loopback only, no web page)
+│  │     └─ cli/                  # `verdandi chat`, `run`, `web`, `doctor`
+│  ├─ web/                       # `verdandi web`: serves packages/ui's page, relays to the
+│  │                             #   agent with its own page token, LAN gate for --host
+│  └─ desktop/                   # Electron host for packages/ui: main, preload bridge,
+│                                #   agent process or remote connection, tray, updater
 ├─ packages/
+│  ├─ ui/                        # the whole UI (React), shared by web and desktop; src/ has
+│  │                             #   one folder per feature: threads, composer, routing, spend,
+│  │                             #   diffs, terminals, memory, worktrees, skills, …; ui/ is shared
 │  ├─ contracts/                 # schemas: ids, commands, events, harness events,
 │  │                             #   routing, catalog, rpc, trajectories
 │  ├─ router/                    # PURE routing engine; src/catalog.json + src/policy.json
@@ -1106,7 +1114,7 @@ verdandi/
 - `router` depends only on `contracts`, and never imports I/O code.
 - Harness, model, decisions, memory, skills, tools and trajectories packages depend on `contracts` and `shared` helpers.
 - `apps/agent` depends on everything.
-- `web` never imports from `agent`, and `desktop` imports neither: it runs the agent binary and loads the web UI from it.
+- `ui` depends only on `contracts`. `web` and `desktop` depend on `ui` and never on `agent` or each other; `agent` imports `web` only in its `verdandi web` command, on demand (ADR 0026).
 - `lab/` never imports TypeScript code. It reads exported files only.
 
 Bun's isolated installs enforce these rules at the package level: an import fails if the package isn't declared as a dependency.
