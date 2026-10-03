@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import type { Effort, HarnessId } from "@verdandi/contracts";
+import { builtInCatalog } from "./catalog.ts";
 import { escalate } from "./escalate.ts";
-import { builtInCatalog, loadPolicy } from "./policy.ts";
+import { loadPolicy } from "./policy.ts";
 
 const target = (model: string) => {
   const entry = builtInCatalog.find((e) => e.model === model);

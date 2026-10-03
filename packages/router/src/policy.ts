@@ -2,7 +2,6 @@ import {
   type BudgetMode,
   type Catalog,
   type CatalogEntry,
-  decodeCatalog,
   decodePolicy,
   Effort,
   type EscalationStep,
@@ -10,16 +9,13 @@ import {
   type RouteRule,
   type RouteSpec,
 } from "@verdandi/contracts";
-import catalogData from "./catalog.json";
+import { builtInCatalog } from "./catalog.ts";
 import builtInPolicy from "./policy.json";
 
 /** Bad routing policy. The message names the file, the key, and what was expected there. */
 export class PolicyError extends Error {
   override name = "PolicyError";
 }
-
-/** The bundled model catalog (DESIGN §8.6). */
-export const builtInCatalog = decodeCatalog(catalogData);
 
 export type PolicyLayer = { readonly source: string; readonly data: unknown };
 

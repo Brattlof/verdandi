@@ -37,8 +37,15 @@ export type Tier = typeof Tier.Type;
 export const RouteTarget = Schema.Struct({ harness: HarnessId, provider: Schema.String, model: Schema.String, access: Access });
 export type RouteTarget = typeof RouteTarget.Type;
 
-/** A model as one harness and provider serve it (DESIGN §8.6). Prices are $/MTok list prices. */
-export const CatalogEntry = Schema.Struct({
+/** A model's $/MTok list prices. */
+export const Price = Schema.Struct({ input: Schema.Number, output: Schema.Number, cacheRead: Schema.Number, cacheWrite: Schema.Number });
+export type Price = typeof Price.Type;
+
+/** A list price and the UTC day it took effect, `YYYY-MM-DD`. */
+export const DatedPrice = Schema.Struct({ since: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/)), ...Price.fields });
+export type DatedPrice = typeof DatedPrice.Type;
+
+const catalogModel = {
   ...RouteTarget.fields,
   tier: Tier,
   context: Schema.Int,
@@ -49,9 +56,18 @@ export const CatalogEntry = Schema.Struct({
    * (Claude Code reports them as `supportedEffortLevels` from `supportedModels()`).
    */
   efforts: Schema.Array(Effort),
-  price: Schema.Struct({ input: Schema.Number, output: Schema.Number, cacheRead: Schema.Number, cacheWrite: Schema.Number }),
-});
+};
+
+/** A model as one harness and provider serve it (DESIGN §8.6), at its latest list price. */
+export const CatalogEntry = Schema.Struct({ ...catalogModel, price: Price });
 export type CatalogEntry = typeof CatalogEntry.Type;
+
+/**
+ * A catalog entry with every list price it has had, oldest first. A price change, or its alias moving to another model,
+ * adds one and keeps the old; a wrong price is fixed in place, since it never applied. The router routes on the latest.
+ */
+export const DatedCatalogEntry = Schema.Struct({ ...catalogModel, prices: Schema.NonEmptyArray(DatedPrice) });
+export type DatedCatalogEntry = typeof DatedCatalogEntry.Type;
 
 /** A catalog model as clients offer it: its target and the effort levels it takes. */
 export const CatalogModel = Schema.Struct({ ...RouteTarget.fields, efforts: Schema.Array(Effort) });
@@ -59,7 +75,7 @@ export type CatalogModel = typeof CatalogModel.Type;
 
 /** What these tokens cost at `price`, a catalog entry's $/MTok list prices. */
 export const listCost = (
-  price: CatalogEntry["price"],
+  price: Price,
   tokens: {
     readonly inputTokens: number;
     readonly outputTokens: number;
@@ -75,7 +91,8 @@ export const listCost = (
 
 export const Catalog = Schema.Array(CatalogEntry);
 export type Catalog = typeof Catalog.Type;
-export const decodeCatalog = Schema.decodeUnknownSync(Catalog);
+/** Decodes the router's `catalog.json`. */
+export const decodeDatedCatalog = Schema.decodeUnknownSync(Schema.Array(DatedCatalogEntry));
 
 /**
  * A task's budget guards (DESIGN §8.9): at most `maxCost` USD, and `maxTurns` agent turns (model round trips).

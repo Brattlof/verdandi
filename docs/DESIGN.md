@@ -347,7 +347,7 @@ Stages 1–5 are pure and fast, so the composer shows a **live routing preview w
 - which harness can run it,
 - which provider serves it,
 - its context window,
-- prices (input, output, cache read, cache write),
+- prices (input, output, cache read, cache write), each with the day it took effect: a price change, or an alias moving to another model, adds one and keeps the old, so the savings estimate prices each task at the price of the day it started; routing uses the latest,
 - capabilities (tools, vision, thinking, effort levels),
 - its access mode.
 

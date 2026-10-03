@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import type { BudgetMode, Effort } from "@verdandi/contracts";
+import { builtInCatalog } from "./catalog.ts";
 import { deescalate } from "./deescalate.ts";
-import { builtInCatalog, loadPolicy } from "./policy.ts";
+import { loadPolicy } from "./policy.ts";
 import { rules } from "./rules.ts";
 
 const target = (model: string) => {
