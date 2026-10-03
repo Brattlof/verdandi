@@ -3,16 +3,21 @@ const MASK = "[REDACTED]";
 // ponytail: a fixed list of well-known token shapes plus secret-looking names; a novel token format
 // slips through, saved and exported alike. Upgrade to a maintained rule set (gitleaks-style) before exports
 // leave the machine (a shared dataset, or training on a provider).
+/** Secrets recognisable by their shape alone, each with what it is. `scripts/check-committed.ts` scans the repo with these. */
+export const tokenPatterns: readonly [RegExp, string][] = [
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "private key"],
+  [/\bsk-[A-Za-z0-9_-]{20,}/g, "sk- API key"], // Anthropic, OpenAI
+  [/\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})/g, "GitHub token"],
+  [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "AWS access key"],
+  [/\bxox[abposr]-[A-Za-z0-9-]{10,}/g, "Slack token"],
+  [/\bAIza[0-9A-Za-z_-]{35}/g, "Google API key"],
+  [/\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}/g, "Stripe key"],
+  [/\b(?:npm_[A-Za-z0-9]{36}|hf_[A-Za-z]{34})\b/g, "npm or Hugging Face token"],
+  [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, "JWT"],
+];
+
 const patterns: readonly [RegExp, string][] = [
-  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, MASK],
-  [/\bsk-[A-Za-z0-9_-]{20,}/g, MASK], // Anthropic, OpenAI
-  [/\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})/g, MASK],
-  [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, MASK],
-  [/\bxox[abposr]-[A-Za-z0-9-]{10,}/g, MASK],
-  [/\bAIza[0-9A-Za-z_-]{35}/g, MASK],
-  [/\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}/g, MASK],
-  [/\b(?:npm_[A-Za-z0-9]{36}|hf_[A-Za-z]{34})\b/g, MASK],
-  [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, MASK], // JWT
+  ...tokenPatterns.map(([pattern]): [RegExp, string] => [pattern, MASK]),
   [/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{16,}/g, `$1${MASK}`],
   [/(:\/\/[^/\s:@]+:)[^/\s@]+@/g, `$1${MASK}@`], // credentials in a URL
   // The name may be quoted, as in JSON or a Python dict: `"apiKey": "…"`.

@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { keyVariable } from "@verdandi/harness-native";
 import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 
-const fakeKey = "sk-ant-test-not-a-real-key";
+// Built from parts so the source holds no key-shaped string (scripts/check-committed.ts).
+const fakeKey = "sk-ant-" + "test-not-a-real-key";
 
 test("a key verdandid loads from .env reaches the native harness and no process it starts", async () => {
   const folder = makeTempHome();
