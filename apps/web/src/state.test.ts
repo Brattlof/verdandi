@@ -193,6 +193,7 @@ test("the projects feed adds new threads on top and moves a changed thread up", 
     projects: [{ projectId, path: "/repo" }],
     threads: [summary("b", "2026-09-30T10:00:00.000Z"), summary("a", "2026-09-30T09:00:00.000Z")],
     quotas: [],
+    workspace: "/w",
     seq: 5,
   });
   sidebar = applyProjectsFeed(sidebar, { kind: "thread", thread: summary("a", "2026-09-30T11:00:00.000Z", true), seq: 6 });
@@ -225,7 +226,7 @@ test("a harness's new quota replaces its old one and keeps the threads", () => {
     quota: { harness: "claude-code", quota: { status, usingOverage }, at: "2026-09-30T12:00:00.000Z" },
     seq,
   });
-  let sidebar = applyProjectsFeed(undefined, { kind: "snapshot", projects: [], threads: [], quotas: [], seq: 1 });
+  let sidebar = applyProjectsFeed(undefined, { kind: "snapshot", projects: [], threads: [], quotas: [], workspace: "/w", seq: 1 });
   sidebar = applyProjectsFeed(sidebar, quota("allowed_warning", false, 2));
   sidebar = applyProjectsFeed(sidebar, quota("rejected", true, 3));
   expect(sidebar?.quotas.map((q) => [q.harness, q.quota.status, q.quota.usingOverage])).toEqual([["claude-code", "rejected", true]]);

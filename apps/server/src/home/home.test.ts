@@ -1,7 +1,18 @@
 import { expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { flag, flags, resolveHome } from "./home.ts";
+import { makeTempHome } from "@verdandi/testkit";
+import { flag, flags, readServerFile, resolveHome, runningServer, serverFile } from "./home.ts";
+
+test("a server.json whose process is gone counts as no server, and the error names both ways to run one", () => {
+  const home = makeTempHome();
+  writeFileSync(serverFile(home), JSON.stringify({ port: 1, token: "t", pid: 2147483646 }));
+  expect(runningServer(home)).toBeUndefined();
+  expect(() => readServerFile(home)).toThrow("Run `verdandi`, which runs it while you chat, or `verdandi start`");
+  writeFileSync(serverFile(home), JSON.stringify({ port: 1, token: "t", pid: process.pid }));
+  expect(runningServer(home)?.port).toBe(1);
+});
 
 test("defaults to the default profile in ~/.verdandi", () => {
   expect(resolveHome([])).toBe(join(homedir(), ".verdandi", "profiles", "default"));

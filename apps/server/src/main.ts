@@ -1,12 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { type HarnessAdapter, HarnessError, type HarnessId } from "@verdandi/contracts";
 import { findClaude, makeClaudeCodeAdapter } from "@verdandi/harness-claude-code";
 import { makeFakeHarness } from "@verdandi/testkit";
-import { Effect, ManagedRuntime, Stream } from "effect";
+import { Effect, Layer, Logger, ManagedRuntime, References, Stream } from "effect";
 import { attachmentsDir } from "./attachments/attachments.ts";
 import { childEnv } from "./home/child-env.ts";
-import { alive, flag, resolveHome, type ServerFile, serverFile } from "./home/home.ts";
+import { flag, resolveHome, runningServer, type ServerFile, serverFile } from "./home/home.ts";
+import { ensureWorkspace, loadTrustedFolders } from "./home/workspace.ts";
 import { nativeHarness } from "./native/native-harness.ts";
 import { hostProblem, isLocalAddress, startLanGate } from "./rpc/lan-gate.ts";
 import { ServerInfo, ServerLayer } from "./rpc/server.ts";
@@ -27,7 +28,76 @@ const lanAddresses = () =>
     .flatMap((a) => (a && a.family === "IPv4" && !a.internal && isLocalAddress(a.address) ? [a.address] : []));
 
 /**
- * `verdandi start`: runs verdandid in the foreground until Ctrl+C. verdandid itself only listens on
+ * Starts verdandid in this process, listening on 127.0.0.1 (`port`, or any free one), and writes `server.json` so clients
+ * find it. Returns it with lines saying what runs, and `stop`, which shuts it down. Its logs go to stderr, so a chat or
+ * `verdandi run --json` sharing the process keeps stdout; `quiet`, for those, keeps only warnings and leaves out the
+ * lines about what runs as usual.
+ */
+export const serve = async (home: string, argv: readonly string[], options: { readonly port?: number; readonly quiet?: boolean } = {}) => {
+  mkdirSync(attachmentsDir(home), { recursive: true });
+  const file = serverFile(home);
+  const running = runningServer(home);
+  if (running) throw new Error(`verdandid is already running for ${home} (pid ${running.pid}). Stop it before starting another.`);
+  ensureWorkspace(home);
+  // A broken workspace.yaml stops here, naming the file and key.
+  const folders = loadTrustedFolders(home);
+  const claudePath = findClaude();
+  // Only with an Anthropic API key configured; a malformed one stops here, naming the fix.
+  const native = await nativeHarness(home);
+  const harnesses: Partial<Record<HarnessId, HarnessAdapter>> = {
+    "claude-code": claudePath
+      ? makeClaudeCodeAdapter({
+          claudePath,
+          additionalDirectories: [attachmentsDir(home), ...folders],
+          plugins: [skillsPlugin(home)],
+          env: childEnv(),
+        })
+      : claudeMissing,
+    ...(native.adapter && { native: native.adapter }),
+    // The fake harness answers without any model call: for trying the loop end to end.
+    ...(argv.includes("--dev-fake-harness") ? { fake: makeFakeHarness() } : {}),
+  };
+  const logs = Layer.mergeAll(
+    Logger.layer([Logger.withConsoleError(Logger.formatSimple)]),
+    Layer.succeed(References.MinimumLogLevel, options.quiet ? "Warn" : "Info"),
+  );
+  const { port } = options;
+  const runtime = ManagedRuntime.make(ServerLayer(home, harnesses, port === undefined ? {} : { port }).pipe(Layer.provide(logs)));
+  const info = await runtime.runPromise(
+    Effect.gen(function* () {
+      return yield* ServerInfo;
+    }),
+  );
+  const server = { port: info.port, token: info.token, pid: process.pid } satisfies ServerFile;
+  writeFileSync(file, JSON.stringify(server), { mode: 0o600 });
+  // A process that exits without `stop` (a second Ctrl+C) leaves no server.json behind for clients to try.
+  const forget = () => rmSync(file, { force: true });
+  process.once("exit", forget);
+  const status = [
+    ...(claudePath ? [] : ["Claude Code CLI not found on PATH; claude-code turns will fail until it is installed."]),
+    ...(options.quiet ? [] : [native.status]),
+    ...(folders.length ? [`The agent also works in ${folders.join(", ")} as in a thread's own folder (workspace.yaml).`] : []),
+  ];
+  const stop = async () => {
+    forget();
+    process.off("exit", forget);
+    await runtime.dispose();
+  };
+  return { server, status, stop };
+};
+
+/**
+ * The verdandid running for `home`, or one started in this process when none is (`serve`), with `stop` to shut that
+ * one down when the command ends. Bare `verdandi` and `verdandi run` use this, so neither needs `verdandi start` first.
+ */
+export const serverFor = async (home: string, argv: readonly string[]) => {
+  const running = runningServer(home);
+  return running ? { server: running, status: [], stop: undefined } : await serve(home, argv, { quiet: true });
+};
+
+/**
+ * `verdandi start`: runs verdandid in the foreground until Ctrl+C, for the clients that need it to outlive a chat (the
+ * web UI, other devices, and later the scheduler, gateway and desktop app). verdandid itself only listens on
  * 127.0.0.1; `--host` also opens it to the local network through a gate that refuses anything else.
  */
 export const start = async (argv: readonly string[]) => {
@@ -36,50 +106,24 @@ export const start = async (argv: readonly string[]) => {
   const problem = host === undefined ? undefined : hostProblem(host);
   if (problem) throw new Error(problem);
   const lan = host !== undefined && host !== "127.0.0.1" && host !== "::1";
-  mkdirSync(attachmentsDir(home), { recursive: true });
-  const file = serverFile(home);
-  if (existsSync(file)) {
-    const running = JSON.parse(readFileSync(file, "utf8")) as ServerFile;
-    if (alive(running.pid))
-      throw new Error(`verdandid is already running for ${home} (pid ${running.pid}). Stop it before starting another.`);
-  }
-  const claudePath = findClaude();
-  // Only with an Anthropic API key configured; a malformed one stops here, naming the fix.
-  const native = await nativeHarness(home);
-  const harnesses: Partial<Record<HarnessId, HarnessAdapter>> = {
-    "claude-code": claudePath
-      ? makeClaudeCodeAdapter({ claudePath, additionalDirectories: [attachmentsDir(home)], plugins: [skillsPlugin(home)], env: childEnv() })
-      : claudeMissing,
-    ...(native.adapter && { native: native.adapter }),
-    // The fake harness answers without any model call: for trying the loop end to end.
-    ...(argv.includes("--dev-fake-harness") ? { fake: makeFakeHarness() } : {}),
-  };
   const port = flag(argv, "--port");
   // With a LAN gate, --port is the gate's, the one other devices use, and verdandid takes any free loopback port.
-  const runtime = ManagedRuntime.make(ServerLayer(home, harnesses, port === undefined || lan ? {} : { port: Number(port) }));
-  const info = await runtime.runPromise(
-    Effect.gen(function* () {
-      return yield* ServerInfo;
-    }),
-  );
-  writeFileSync(file, JSON.stringify({ port: info.port, token: info.token, pid: process.pid } satisfies ServerFile), { mode: 0o600 });
-  console.log(`verdandid listening on 127.0.0.1:${info.port} (home: ${home}). Open the web UI with: verdandi open`);
-  if (!claudePath) console.log("Claude Code CLI not found on PATH; claude-code turns will fail until it is installed.");
-  console.log(native.status);
-  const gate = lan && host ? startLanGate(host, port === undefined ? 0 : Number(port), info.port) : undefined;
+  const { server, status, stop: shutdown } = await serve(home, argv, port === undefined || lan ? {} : { port: Number(port) });
+  console.log(`verdandid listening on 127.0.0.1:${server.port} (home: ${home}). Open the web UI with: verdandi open`);
+  for (const line of status) console.log(line);
+  const gate = lan && host ? startLanGate(host, port === undefined ? 0 : Number(port), server.port) : undefined;
   if (gate) {
     const addresses = host === "0.0.0.0" || host === "::" ? lanAddresses() : [host ?? ""];
     console.log(
       `Also open on your local network at ${addresses.map((a) => `http://${a}:${gate.port}/`).join(", ") || `port ${gate.port}`}; requests from outside it are refused.`,
     );
     console.log(`From another device, open this URL. It holds your access token, so don't share it:`);
-    for (const a of addresses) console.log(`  http://${a}:${gate.port}/#token=${info.token}`);
+    for (const a of addresses) console.log(`  http://${a}:${gate.port}/#token=${server.token}`);
   }
 
   const stop = async () => {
     gate?.stop(true);
-    rmSync(file, { force: true });
-    await runtime.dispose();
+    await shutdown();
     process.exit(0);
   };
   process.once("SIGINT", stop);

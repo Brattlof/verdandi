@@ -311,11 +311,13 @@ const NewThread = ({
   const [error, setError] = useState<string>();
   // Opening the new thread, from a project or Open folder, closes the dialog.
   useEffect(() => onHashChange(() => setOpen(false)), []);
-  const start = async (project: ProjectSummary, worktree: boolean) => {
+  const start = async (project: Pick<ProjectSummary, "path">, worktree: boolean) => {
     const result = await startThread(connection, project.path, worktree);
     setError(result.ok ? undefined : result.message);
   };
-  const projects = byActivity(data);
+  // The workspace has its own entry above the projects.
+  const projects = byActivity(data).filter((p) => p.path !== data?.workspace);
+  const workspace = data?.workspace;
   return (
     <Dialog.Root
       open={open}
@@ -338,6 +340,18 @@ const NewThread = ({
             </Dialog.Close>
           </div>
           <div className="overflow-y-auto px-5 pb-5">
+            {workspace && (
+              <button
+                type="button"
+                title={workspace}
+                className={`${row} -mx-2 mb-4 w-[calc(100%+1rem)] justify-start border-0 bg-transparent font-normal hover:bg-hover`}
+                onClick={() => start({ path: workspace }, false)}
+              >
+                <Rune name="berkano" className="shrink-0 text-muted" />
+                <span className="shrink-0">Workspace</span>
+                <span className="min-w-0 flex-1 truncate text-right text-xs text-muted">no project: chat, chores and your files</span>
+              </button>
+            )}
             {projects.length > 0 && (
               <section aria-labelledby="new-thread-projects">
                 <h3 id="new-thread-projects" className="eyebrow mb-1 text-muted">
@@ -372,12 +386,12 @@ const NewThread = ({
                     );
                   })}
                 </ul>
-                {error && (
-                  <p role="alert" className="mt-1 text-xs text-error [overflow-wrap:anywhere]">
-                    {error}
-                  </p>
-                )}
               </section>
+            )}
+            {error && (
+              <p role="alert" className="mt-1 text-xs text-error [overflow-wrap:anywhere]">
+                {error}
+              </p>
             )}
             <OpenFolder connection={connection} className={projects.length > 0 ? "mt-5" : ""} />
           </div>
@@ -394,7 +408,8 @@ const ThreadList = ({ connection, data, current }: { connection: Connection; dat
   if (data.threads.length === 0)
     return (
       <p className="mx-2 mt-2 text-xs text-muted">
-        No threads spun yet. Open a project folder from <a href="#view=projects">Projects</a>, or run <code>verdandi chat</code> in one.
+        No threads spun yet. Start one with New thread, open a project folder from <a href="#view=projects">Projects</a>, or run{" "}
+        <code>verdandi</code> in a terminal.
       </p>
     );
   return (

@@ -22,7 +22,7 @@ It also remembers across sessions, writes and improves its own skills, runs on a
 <table>
 <tr><td><b>A task router, not a model picker</b></td><td>For every task, Verdandi picks a <i>route</i>: harness, provider, model, effort, interaction mode and subagent profiles. It weighs subscription quota, API credits and local compute as costs, switches only at task boundaries so prompt caches survive, and escalates mid-task when a verifier says the cheap route isn't enough. Every decision gets a readable reason, and overriding it takes one click.</td></tr>
 <tr><td><b>Built on the harnesses you already use</b></td><td>Claude Code runs through your installed and logged-in CLI, on your subscription, with its subagents, skills, hooks, MCP and plan mode intact. The native harness calls model APIs directly: Anthropic, OpenAI, OpenRouter, Google, and Ollama for local models. Codex, OpenCode and ACP agents come later.</td></tr>
-<tr><td><b>A fast workspace</b></td><td>Threads, streaming, diffs, approvals, plan mode, worktrees, checkpoints you can revert to, and a real terminal, in a web UI built to replace the terminal for daily agent work. No constantly repainting animations, and no spinners that lie about progress.</td></tr>
+<tr><td><b>Terminal first, with a fast workspace</b></td><td>Type <code>verdandi</code> anywhere: in a project it works on that project, anywhere else in its own workspace, and it runs its server while you chat. When you want more, a web UI adds threads side by side, streaming, diffs, approvals, plan mode, worktrees, checkpoints you can revert to, and a real terminal. No constantly repainting animations, and no spinners that lie about progress.</td></tr>
 <tr><td><b>An agent that learns</b></td><td>Memory across sessions, session search on SQLite FTS5, and skills that are proposed from repeated work, curated and improved over time. Skills learned on a strong model run on a cheaper one. Every task records its route, outcome and trajectory in a format you can train on.</td></tr>
 <tr><td><b>Small judgments without LLM calls</b></td><td>A decision layer answers typed questions (what kind of task is this, is this command safe, what's worth remembering, which context to keep) with calibrated probabilities from fast decision models instead of full LLM calls.</td></tr>
 <tr><td><b>Always on, reachable anywhere</b></td><td>Scheduled jobs run unattended in worktrees within a budget. Start, steer and approve tasks from Telegram, Discord or Slack. Keep separate <code>work</code> and <code>personal</code> profiles.</td></tr>
@@ -57,13 +57,19 @@ cd verdandi
 bun install
 ```
 
-Start the server against a throwaway dev home, then open the web UI or chat from a second terminal:
+Chat in the terminal against a throwaway dev home. It runs the server while you chat:
+
+```bash
+bun run verdandi --home ./.verdandi-dev              # chat with the thread for this folder (a project), or the workspace
+bun run verdandi --home ./.verdandi-dev --model opus --effort high
+bun run verdandi --home ./.verdandi-dev --workspace  # the profile's workspace, for anything that isn't one project
+```
+
+For the web UI, keep the server running and open it from a second terminal:
 
 ```bash
 bun run dev                                          # verdandid, state in ./.verdandi-dev
 bun run verdandi open --home ./.verdandi-dev         # the web UI in your browser
-bun run verdandi chat --home ./.verdandi-dev         # chat with the thread for this folder
-bun run verdandi chat --home ./.verdandi-dev --model opus --effort high
 bun run verdandi doctor --home ./.verdandi-dev       # check Bun, Claude Code, git, the database and the server
 ```
 

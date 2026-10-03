@@ -217,11 +217,13 @@ export type Sidebar = {
   readonly projects: readonly ProjectSummary[];
   readonly threads: readonly ThreadSummary[];
   readonly quotas: readonly QuotaView[];
+  /** Where a thread without a project runs. */
+  readonly workspace: string;
 };
 
 /** `archived`: whether the sidebar shows archived threads; when it doesn't, a thread that gets archived leaves it. */
 export const applyProjectsFeed = (sidebar: Sidebar | undefined, feed: ProjectsFeed, archived = false): Sidebar | undefined => {
-  if (feed.kind === "snapshot") return { projects: feed.projects, threads: feed.threads, quotas: feed.quotas };
+  if (feed.kind === "snapshot") return { projects: feed.projects, threads: feed.threads, quotas: feed.quotas, workspace: feed.workspace };
   if (!sidebar) return sidebar;
   if (feed.kind === "quota") return { ...sidebar, quotas: [...sidebar.quotas.filter((q) => q.harness !== feed.quota.harness), feed.quota] };
   const { project, thread } = feed;

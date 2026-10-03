@@ -1,5 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { writeFileSync } from "node:fs";
 import {
   type AttachmentUpload,
   type ClientCommand,
@@ -21,7 +20,9 @@ import {
   type TurnId,
 } from "@verdandi/contracts";
 import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
-import { flag, readServerFile, resolveHome } from "../home/home.ts";
+import { flag, resolveHome } from "../home/home.ts";
+import { cliThreadsFile, defaultFolder, readCliThreads, workspaceDir } from "../home/workspace.ts";
+import { serverFor } from "../main.ts";
 import { connect } from "../rpc/client.ts";
 import { readAttachment } from "./attach.ts";
 import {
@@ -42,11 +43,6 @@ import { threadList } from "./thread-list.ts";
 class Client extends Context.Service<Client, Effect.Success<ReturnType<typeof connect>>>()("verdandi/cli/Client") {}
 
 const uuid = <T>() => crypto.randomUUID() as T;
-
-/** The CLI remembers one thread per folder, in the Verdandi home. */
-const threadsFile = (home: string) => join(home, "cli-threads.json");
-const readThreads = (home: string): Record<string, string> =>
-  existsSync(threadsFile(home)) ? JSON.parse(readFileSync(threadsFile(home), "utf8")) : {};
 
 type Usage = { model: string; accessMode: string; inputTokens: number; outputTokens: number; costUsd: number };
 
@@ -97,18 +93,33 @@ const diffText = (view: DiffView, projectPath: string) => {
   return files.length || omitted ? files.join("") + omitted : "[no changes]\n";
 };
 
-/** `verdandi chat`: a simple terminal chat with the thread for the current folder, or the one `--thread` names. */
+/**
+ * `verdandi` (or `verdandi chat`): a simple terminal chat with the thread for the current folder when it's a project,
+ * else the workspace's (`defaultFolder`), or the one `--thread` names. Without a running verdandid it runs one in this
+ * process until you quit.
+ */
 export const chat = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
-  const server = readServerFile(home);
   const route = routeFromFlags(argv); // also rejects bad flags before connecting
   const budget = budgetFromFlags(argv);
   if (argv.includes("--auto") && picksRoute(argv)) {
     throw new Error("--auto lets the router pick each task's route, so leave out --harness, --model and --effort.");
   }
   const picked = flag(argv, "--thread") as ThreadId | undefined;
+  const folder = picked ? undefined : defaultFolder(home, process.cwd(), argv);
 
-  const runtime = ManagedRuntime.make(Layer.effect(Client)(connect(server)));
+  const served = await serverFor(home, argv);
+  if (served.stop) {
+    process.stdout.write(
+      `[verdandid runs in this chat and stops when you quit; \`verdandi open\` opens the web UI meanwhile, \`verdandi start\` keeps one running]\n`,
+    );
+    for (const line of served.status) process.stdout.write(`[${line}]\n`);
+  }
+  const runtime = ManagedRuntime.make(Layer.effect(Client)(connect(served.server)));
+  const done = async () => {
+    await runtime.dispose();
+    await served.stop?.();
+  };
   const client = await runtime.runPromise(
     Effect.gen(function* () {
       return yield* Client;
@@ -116,7 +127,7 @@ export const chat = async (argv: readonly string[]) => {
   );
   if (argv.includes("--list")) {
     await list(runtime, client, argv.includes("--archived"));
-    return runtime.dispose();
+    return done();
   }
   // Archiving hides a thread from the lists without deleting anything; unarchiving brings it back.
   const archive = flag(argv, "--archive") as ThreadId | undefined;
@@ -124,24 +135,23 @@ export const chat = async (argv: readonly string[]) => {
   const put = archive ?? unarchive;
   if (put) {
     const type = archive ? "thread.archive" : "thread.unarchive";
-    const done = archive
+    const said = archive
       ? `Archived thread ${put}. \`verdandi chat --unarchive ${put}\` brings it back; \`verdandi chat --list --archived\` lists it.\n`
       : `Unarchived thread ${put}: it takes turns again.\n`;
     process.stdout.write(
       await runtime.runPromise(
         client.CommandDispatch({ type, commandId: uuid<CommandId>(), threadId: put }).pipe(
-          Effect.as(done),
+          Effect.as(said),
           Effect.catchTag("CommandRejected", (e) => Effect.succeed(`${e.message}\n`)),
         ),
       ),
     );
-    return runtime.dispose();
+    return done();
   }
-  const cwd = process.cwd();
-  const threads = readThreads(home);
+  const threads = readCliThreads(home);
   // --worktree starts a new thread in a worktree of its own; with --thread, it recreates that thread's worktree.
   const worktree = argv.includes("--worktree");
-  let threadId = picked ?? (worktree ? undefined : (threads[cwd] as ThreadId | undefined));
+  let threadId = picked ?? (worktree || !folder ? undefined : (threads[folder] as ThreadId | undefined));
   if (!threadId) {
     threadId = uuid<ThreadId>();
     await runtime.runPromise(
@@ -149,12 +159,12 @@ export const chat = async (argv: readonly string[]) => {
         type: "thread.create",
         commandId: uuid<CommandId>(),
         threadId,
-        projectPath: cwd,
+        projectPath: folder ?? process.cwd(),
         ...(picksRoute(argv) ? { route } : {}),
         ...(worktree && { worktree }),
       }),
     );
-    writeFileSync(threadsFile(home), JSON.stringify({ ...threads, [cwd]: threadId }, null, 2));
+    if (folder) writeFileSync(cliThreadsFile(home), JSON.stringify({ ...threads, [folder]: threadId }, null, 2));
   }
 
   const dispatch = (command: ClientCommand) =>
@@ -382,7 +392,7 @@ export const chat = async (argv: readonly string[]) => {
   // Ctrl+C interrupts the running turn. A second Ctrl+C before it ends, or one at the prompt, quits.
   let interrupting: TurnId | undefined;
   process.on("SIGINT", () => {
-    if (!running || interrupting === running) process.exit(130);
+    if (!running || interrupting === running) return void done().finally(() => process.exit(130));
     interrupting = running;
     process.stdout.write("\n[interrupting: Ctrl+C again to quit]\n");
     void dispatch({ type: "turn.interrupt", commandId: uuid<CommandId>(), threadId, turnId: running });
@@ -425,7 +435,7 @@ export const chat = async (argv: readonly string[]) => {
         ? `${harness} ${model} ${effort} (routed; --model or --effort pins a route)`
         : "the route the router picks for the next task";
   process.stdout.write(
-    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /rate up|down rates the latest task, /rate clear clears it; /trusted lists the project commands you let Verdandi run, /untrust <n> revokes one; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
+    `Thread ${threadId} in ${thread.projectPath === workspaceDir(home) ? `the workspace (${thread.projectPath}; --here works on the current folder instead)` : thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /rate up|down rates the latest task, /rate clear clears it; /trusted lists the project commands you let Verdandi run, /untrust <n> revokes one; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
   );
   const tree = thread.worktree;
   if (tree) {
@@ -462,7 +472,7 @@ export const chat = async (argv: readonly string[]) => {
     if (request) await answer(request, text);
     else if (text === "/exit") break;
     else if (text === "/attach" || text.startsWith("/attach ")) {
-      const read = readAttachment(text.slice("/attach".length), cwd);
+      const read = readAttachment(text.slice("/attach".length), process.cwd());
       if (typeof read === "string") process.stdout.write(`${read}\n`);
       else {
         attached.push(read);
@@ -536,5 +546,5 @@ export const chat = async (argv: readonly string[]) => {
   }
   await runtime.runPromise(client.Unsubscribe({ subscriptionId }));
   await feed;
-  await runtime.dispose();
+  await done();
 };
