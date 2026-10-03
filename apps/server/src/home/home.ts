@@ -41,12 +41,23 @@ export const alive = (pid: number) => {
   }
 };
 
-/** Written by `verdandi start`, read by clients: where the server listens and its token. */
+/** Written by verdandid when it starts, read by clients: where the server listens and its token. */
 export const serverFile = (home: string) => join(home, "server.json");
 export type ServerFile = { readonly port: number; readonly token: string; readonly pid: number };
 
+/** The `server.json` of the verdandid running for `home`, or undefined when none is (no file, or one a stopped process left). */
+export const runningServer = (home: string): ServerFile | undefined => {
+  if (!existsSync(serverFile(home))) return undefined;
+  const server = JSON.parse(readFileSync(serverFile(home), "utf8")) as ServerFile;
+  return alive(server.pid) ? server : undefined;
+};
+
 /** The running server's `server.json`, for clients. Fails with the fix when verdandid isn't running. */
 export const readServerFile = (home: string): ServerFile => {
-  if (!existsSync(serverFile(home))) throw new Error(`verdandid is not running for ${home}. Start it with: verdandi start`);
-  return JSON.parse(readFileSync(serverFile(home), "utf8")) as ServerFile;
+  const server = runningServer(home);
+  if (!server)
+    throw new Error(
+      `verdandid is not running for ${home}. Run \`verdandi\`, which runs it while you chat, or \`verdandi start\` to keep it running.`,
+    );
+  return server;
 };

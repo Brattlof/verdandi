@@ -284,6 +284,8 @@ export const ProjectsFeed = Schema.Union([
     kind: Schema.Literal("snapshot"),
     projects: Schema.Array(ProjectSummary),
     threads: Schema.Array(ThreadSummary),
+    /** The profile's workspace folder: where a thread without a project runs, and its project's path once it has one. */
+    workspace: Schema.String,
     /** One per harness that has reported a subscription window. */
     quotas: Schema.Array(QuotaView),
     seq: Schema.Number,

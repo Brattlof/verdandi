@@ -16,15 +16,16 @@ import { costs } from "./spend/costs-cli.ts";
 import { trajectories } from "./tasks/trajectories-cli.ts";
 
 const usage = `Usage:
-  verdandi start [--home <dir>] [--port <n>] [--host <ip>]   run verdandid in the foreground; --host 0.0.0.0 (or this machine's LAN address) also opens it to your local network on --port, never to the internet
-  verdandi open  [--home <dir>]                   open the web UI in your browser
+  verdandi [chat flags]                           chat in the terminal: on the current folder when it's a project (inside a git repo, or one you've chatted in), else in the profile's workspace; --here or --workspace picks one. Runs verdandid in this process while you chat unless one is running already
+  verdandi start [--home <dir>] [--port <n>] [--host <ip>]   keep verdandid running in the foreground, for the web UI and other devices; --host 0.0.0.0 (or this machine's LAN address) also opens it to your local network on --port, never to the internet
+  verdandi open  [--home <dir>]                   open the web UI in your browser, while verdandid runs (verdandi start, or a chat)
   verdandi doctor [--home <dir>]                  check the setup: Bun, Claude Code, git, the home, the database, what the next cleanup sweep removes, and verdandid
   verdandi gc [--dry-run] [--home <dir>]          run the cleanup policy in gc.yaml now: remove old checkpoints and the worktrees of threads archived long ago (never one with uncommitted changes); --dry-run only lists them
-  verdandi chat  [--home <dir>] [--harness <h>] [--model <m>] [--effort <e> | --auto] [--budget thrifty|balanced|max|policy] [--raise-cap] [--thread <id>]   chat with the thread for this folder, or the one named; route flags pin a route, --auto lets the router pick, --budget sets how it trades cost for strength, --raise-cap raises each reached spend cap for the rest of its period
+  verdandi chat  [--home <dir>] [--here | --workspace] [--harness <h>] [--model <m>] [--effort <e> | --auto] [--budget thrifty|balanced|max|policy] [--raise-cap] [--thread <id>]   the same as bare verdandi: chat with the thread for this folder (or the workspace), or the one named; route flags pin a route, --auto lets the router pick, --budget sets how it trades cost for strength, --raise-cap raises each reached spend cap for the rest of its period
   verdandi chat  --list [--archived] [--home <dir>]  list every thread by project; --archived includes archived ones
   verdandi chat  --archive <thread> | --unarchive <thread> [--home <dir>]   put a thread away, or bring it back
   verdandi chat  --worktree [--thread <id>] | --remove-worktree [--force]   start a new thread in a git worktree of its own (with --thread, recreate that thread's removed worktree), or remove the thread's worktree and keep its branch
-  verdandi run <task> [--project <path> | --thread <id>] [--mode ask|plan|build] [--route auto|<harness>/<model>/<effort>] [--deny-requests] [--json] [--home <dir>]   send one turn headless, on a new thread in --project (default: this folder) or on the thread named, and print the agent's text, following the turns Verdandi sends when it escalates the task; --route pins the thread to a route or with auto lets the router pick; the agent's requests stop the run unless --deny-requests denies them, and nothing is ever approved; --json prints one object at the end instead (threadId, turnId, taskId, status, route, cost, reply, escalations, error); Ctrl+C interrupts the turn. Exits 0 completed, 1 couldn't run it, 2 bad flags, 3 failed (an agent error, or a failed verifier the task didn't escalate past), 4 stopped at a task limit, 5 the agent asked for approval or an answer, 130 interrupted
+  verdandi run <task> [--project <path> | --here | --workspace | --thread <id>] [--mode ask|plan|build] [--route auto|<harness>/<model>/<effort>] [--deny-requests] [--json] [--home <dir>]   send one turn headless, on a new thread in --project (default: this folder when it's a project, else the workspace) or on the thread named, running verdandid for the run unless one is running, and print the agent's text, following the turns Verdandi sends when it escalates the task; --route pins the thread to a route or with auto lets the router pick; the agent's requests stop the run unless --deny-requests denies them, and nothing is ever approved; --json prints one object at the end instead (threadId, turnId, taskId, status, route, cost, reply, escalations, error); Ctrl+C interrupts the turn. Exits 0 completed, 1 couldn't run it, 2 bad flags, 3 failed (an agent error, or a failed verifier the task didn't escalate past), 4 stopped at a task limit, 5 the agent asked for approval or an answer, 130 interrupted
   verdandi costs [--home <dir>] [--days <n>] [--project <path>]   cost per completed task on each route, then spend, cost by task class, usage by model, override rate and estimated savings vs always-Opus
   verdandi search <query> [--project <path>] [--home <dir>]   find past sessions' messages containing the query (3 characters or more), newest first, archived threads included
   verdandi skills list | restore <name> [--home <dir>]   list the profile's skills (which the agent proposes with skill_manage and you approve; those Verdandi created show stale after 14 days unused), the ones archived after 30 (kept, not loaded), and those in the read-only extra folders of skills.yaml; restore brings an archived skill back, through the running verdandid
@@ -51,8 +52,14 @@ const commands: Record<string, (argv: readonly string[]) => Promise<void>> = {
   key,
 };
 
-const [name, ...argv] = Bun.argv.slice(2);
-const command = name === undefined ? undefined : commands[name];
+const args = Bun.argv.slice(2);
+if (args[0] === "help" || args.includes("--help") || args.includes("-h")) {
+  console.log(usage);
+  process.exit(0);
+}
+// Bare `verdandi`, or flags alone, is the terminal chat.
+const [name, ...argv] = args[0] === undefined || args[0].startsWith("--") ? ["chat", ...args] : args;
+const command = commands[name ?? ""];
 if (!command) {
   console.error(usage);
   process.exit(1);

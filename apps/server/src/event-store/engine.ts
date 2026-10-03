@@ -57,7 +57,7 @@ export class Engine extends Context.Service<
      * A snapshot of every project and thread summary, then each summary again whenever it changes. The
      * snapshot leaves archived threads out unless `archived`; changes always come, so a client sees a thread leave.
      */
-    readonly projectsFeed: (archived: boolean) => Stream.Stream<ProjectsFeed, SqlError.SqlError>;
+    readonly projectsFeed: (archived: boolean, workspace: string) => Stream.Stream<ProjectsFeed, SqlError.SqlError>;
     /** Deltas are broadcast to subscribers while their turn runs, and never stored. */
     readonly publishDelta: (threadId: ThreadId, turnId: TurnId, text: string) => Effect.Effect<void>;
     readonly react: (reaction: Reaction) => Effect.Effect<void>;
@@ -289,7 +289,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
           }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
         );
 
-      const projectsFeed = (archived: boolean) =>
+      const projectsFeed = (archived: boolean, workspace: string) =>
         Stream.unwrap(
           Effect.gen(function* () {
             // Same order as `feed`: subscribe, then read the snapshot.
@@ -312,7 +312,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 return newer;
               }),
             );
-            return Stream.concat(Stream.succeed<ProjectsFeed>({ kind: "snapshot", ...snapshot }), live);
+            return Stream.concat(Stream.succeed<ProjectsFeed>({ kind: "snapshot", ...snapshot, workspace }), live);
           }).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
         );
 

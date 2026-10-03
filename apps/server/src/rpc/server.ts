@@ -26,6 +26,7 @@ import { Engine } from "../event-store/engine.ts";
 import { loadDeciderState, loadMemory } from "../event-store/projector.ts";
 import { HarnessRegistry, ProfileSkills } from "../event-store/reactor.ts";
 import { Gc, GcLive, GcScheduleLive } from "../gc/gc.ts";
+import { workspaceDir } from "../home/workspace.ts";
 import { pickFolder } from "../projects/folder-picker.ts";
 import { resolveProjectPath } from "../projects/project.ts";
 import { catalogFor, decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
@@ -87,7 +88,8 @@ const Handlers = (home: string) =>
               : Effect.succeed(command)
           ).pipe(Effect.flatMap(engine.dispatch), Effect.catchTag("SqlError", Effect.die)),
         ThreadSubscribe: ({ threadId, subscriptionId }) => untilUnsubscribed(subscriptionId, engine.feed(threadId)),
-        ProjectsSubscribe: ({ subscriptionId, archived }) => untilUnsubscribed(subscriptionId, engine.projectsFeed(archived ?? false)),
+        ProjectsSubscribe: ({ subscriptionId, archived }) =>
+          untilUnsubscribed(subscriptionId, engine.projectsFeed(archived ?? false, workspaceDir(home))),
         Unsubscribe: ({ subscriptionId }) => {
           const stop = subscriptions.get(subscriptionId);
           return stop ? Deferred.succeed(stop, undefined).pipe(Effect.asVoid) : Effect.void;

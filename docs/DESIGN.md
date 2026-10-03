@@ -18,7 +18,7 @@
 
 Verdandi is a local-first workspace and personal agent platform for AI coding and automation. It combines four things:
 
-1. **A fast workspace GUI.** It covers threads, diffs, approvals, worktrees, checkpoints and a terminal.
+1. **A terminal-first agent, with a GUI when you want one.** Type `verdandi` anywhere to talk to the agent: in a project it works on that project, anywhere else in its own workspace. A web UI and a desktop app add threads side by side, diffs, approvals, worktrees, checkpoints and a terminal.
 2. **An agent that runs all the time and learns.** It keeps memory across sessions and writes and improves its own skills. It records its trajectories, meaning full session histories with their outcomes, as data it can learn from. It also runs scheduled jobs and can be reached from chat apps.
 3. **Many harnesses and providers.** A *harness* is whatever runs the agent loop:
    - **Claude Code**, driven through your installed and logged-in CLI, which uses your subscription;
@@ -37,7 +37,7 @@ Verdandi starts with Claude Code, because that's what the owner uses every day. 
 - **One model for everything wastes tokens and quota.** A commit message doesn't need Opus at `xhigh`, and a subtle concurrency bug shouldn't be tried on a small local model.
 - **Every way of reaching a model has a different kind of cost.** A subscription has usage limits. API credits cost money. Local models are free but weaker. No tool today weighs all three when choosing.
 - **Switching naively is expensive.** Prompt caches and thinking blocks belong to one model. A switch mid-conversation bills the entire context again.
-- **Agent CLIs are built for the terminal.** Running sessions in parallel, reviewing diffs and approving actions there is clumsy.
+- **Agent CLIs are one terminal per session.** Running sessions in parallel, reviewing diffs and approving actions across them is clumsy, so the terminal needs a GUI beside it, not instead of it.
 - **Agents forget, and they don't improve.** Every session starts from zero. A procedure you've taught once has to be taught again. Nothing learns from what worked.
 - **Agents are stuck at the desk.** You can't start, steer or approve work from your phone, or have it run on a schedule.
 
@@ -50,7 +50,7 @@ Verdandi starts with Claude Code, because that's what the owner uses every day. 
 | # | Goal | How we'll know |
 |---|---|---|
 | G1 | **Task-based routing** that lowers effective cost without hurting results | On our own eval set, cost per completed task is at least 30% lower than "always Opus at default effort", with no drop in success rate. |
-| G2 | **A great GUI for agent sessions** | It can replace the terminal for daily Claude Code work. |
+| G2 | **Great surfaces for agent sessions** | The terminal chat is enough for daily Claude Code work, and the GUI covers parallel threads, diffs and review. |
 | G3 | **Transparent, overridable routing** | Every decision has a one-line reason, and overriding takes one click. Fewer than 15% of tasks are overridden once the router is tuned. |
 | G4 | **An agent that learns** | Memory and skills build up over time. Skills learned on a strong model run on a cheaper one. Recorded trajectories are good enough to train on. |
 | G5 | **Many harnesses and providers** | Adding a harness or provider needs no change to the router or the orchestration core. |
@@ -165,7 +165,7 @@ flowchart LR
 
 | Component | Responsibility |
 |---|---|
-| **verdandid** | One long-running local process that owns all state and every session. All the surfaces are thin clients. |
+| **verdandid** | One local process per profile that owns all state and every session. All the surfaces are thin clients. It runs inside `verdandi` while you chat, or always on under `verdandi start` or the desktop app (§11). |
 | **Orchestrator** | Turns commands into events and events into projections. Side effects happen only in *reactors*. |
 | **Router** | A pure function from `(signals, policy, thread state, catalog, budget)` to a `RouteDecision`. The classifier is passed in from outside, so the router itself stays pure. |
 | **Decision layer** | Answers small typed questions (pick one, score, yes/no) with calibrated probabilities. It uses local or cloud decision models instead of LLM calls (§9.8). |
@@ -176,7 +176,7 @@ flowchart LR
 | **Learning** | Memory, session search, the skill lifecycle, background review, and recording trajectories. |
 | **Execution backends** | Where the native harness runs commands: locally, in Docker, over SSH, or in a cloud sandbox. |
 | **Scheduler** | Runs tasks on a schedule, without you present. |
-| **Surfaces** | Web and desktop GUI, CLI, messaging gateway, OpenAI-compatible API, and ACP and MCP servers. |
+| **Surfaces** | The terminal chat (the default), web and desktop GUI, CLI commands, messaging gateway, OpenAI-compatible API, and ACP and MCP servers. |
 | **lab/** | Python, offline. Builds datasets, trains the router, and optionally fine-tunes models. It exchanges data with the app **only through files**. |
 
 ---
@@ -195,7 +195,7 @@ UsageRecord ── per turn → rolled up per task / thread / project / day
 ```
 
 - **Profile:** a completely separate Verdandi home, e.g. `work` vs `personal`. Each has its own database, memory, skills, credentials and gateway bindings.
-- **Project:** a local repo, or a non-code workspace such as the default "Chat" project that gateway conversations go into.
+- **Project:** a folder you work on, usually a repo. A thread that isn't about one project runs in the profile's **workspace** (`<home>/workspace`, §13): chat, chores, gateway conversations and scheduled jobs. The workspace is stored as a project like any other, so every feature works there.
 - **Thread:** a lasting conversation. It can have a worktree, and a channel binding (e.g. a Telegram chat).
 - **Task:** the unit of routing. A task is a continuous run of turns under **one** `RouteDecision`. A new task starts when:
   - a thread starts,
@@ -702,13 +702,18 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 
 | Surface | Purpose | Milestone |
 |---|---|---|
-| **Web UI** | The primary workspace | M1 |
-| **CLI** (`verdandi`) | `start`, `open`, `doctor`, `run "<task>"` (headless), `chat` (simple terminal chat), `batch` (eval and trajectory runs) | M1 → M6 |
-| **Desktop app** (Electron) | Tray, notifications, auto-update, manages the server process | M5 |
+| **Terminal chat** (`verdandi`, also `verdandi chat`) | The default surface: chat, steer, approve, plans, diffs, revert, on the current folder when it's a project and in the workspace otherwise (§13) | M1 |
+| **CLI commands** (`verdandi <command>`) | `start` (always-on verdandid), `open`, `doctor`, `run "<task>"` (headless), `batch` (eval and trajectory runs), and the rest | M1 → M6 |
+| **Web UI** | An optional workspace GUI: threads side by side, diffs, terminal, dashboards. `verdandi open` opens it while verdandid runs | M1 |
+| **Desktop app** (Electron, `apps/desktop` in this repo) | A thin shell around the `verdandi` binary, which it runs as the always-on verdandid: tray, notifications, auto-update, and the web UI in a window | M5 |
 | **Messaging gateway** | Start, steer and approve tasks from chat apps (§15) | M5 |
 | **OpenAI-compatible API** | `model: "verdandi/auto"`, so any tool can use Verdandi as a routed model | M6 |
 | **ACP server** | Use the native agent from editors that support ACP | M6 |
 | **MCP server** | Expose memory, skills and sessions to other MCP clients | M3 (for Claude Code), then public in M6 |
+
+**Who runs verdandid.** One per profile. Bare `verdandi` and `verdandi run` connect to the one running, or else start one in their own process that stops when they end; meanwhile other clients can connect to it (`verdandi open`) and lose it when the chat quits. Whatever has to outlive a chat needs an always-on verdandid, `verdandi start` or the desktop app: other devices, and in M5 the scheduler and gateway, which only an always-on verdandid starts, so a bot doesn't go offline when a terminal closes.
+
+**One repo, separate apps.** The agent is the `verdandi` binary (verdandid and the CLI, `apps/server`); the web UI is served by it (`apps/web`); the desktop app is a separate Electron app (`apps/desktop`) that ships its own installer and runs that binary. They share `packages/contracts`, which is why they stay in one repo, as Hermes keeps its agent and desktop app.
 
 **Protocol:** a WebSocket on `127.0.0.1`, with a per-profile token. Typed RPC contracts shared by server and clients:
 - `command.dispatch`
@@ -721,11 +726,12 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 
 ## 12. User experience
 
-- **Layout:**
+- **Terminal chat** (the default surface): the thread for the current folder, or the workspace's; the agent's text streams, with a line for each route decision, verifier run, escalation and request. Requests are answered inline (y/n, a plan edited in `$EDITOR`), and slash commands switch modes and show diffs, revert, rate and attach. It grows into a full terminal UI (§23, question 8).
+- **Web UI layout:**
   - rail: opens the projects, search and spend pages, one click from anywhere (profiles join it in M5);
   - sidebar: always lists threads by recency, each with its project, live status and cost;
   - search page: session search (§14.3);
-  - projects page: open any folder, or start a thread in a project you've worked in;
+  - projects page: open any folder, or start a thread in a project you've worked in; New thread also offers the workspace;
   - center: the conversation;
   - right panel, switchable: diff, terminal, routing trace, or memory and skills.
 - **Composer:**
@@ -751,6 +757,8 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 
 ## 13. Workspaces and execution
 
+- **The workspace:** the profile's own folder, `<home>/workspace`, which verdandid creates as a git repo when it starts, so checkpoints, diffs and revert work there. A thread that isn't about one project runs there. `verdandi` and `verdandi run` work on the current folder when it's a project (inside a git repo, or a folder the CLI already has a thread for) and in the workspace otherwise; `--here` and `--workspace` pick one. Gateway conversations and scheduled jobs that name no project run there too (§15).
+- **Folders the agent may work in:** the workspace doesn't fence the agent in. `folders` in the home's `workspace.yaml` (e.g. `- ~/Downloads`), read when verdandid starts (a broken file stops it, naming the file and key), are given to every harness session besides its own folder, fixed for the session's life (§5, the cache rule). Claude Code gets them as `additionalDirectories`, so it works there as it does in the thread's folder: it reads freely and edits under the same permission mode. Anywhere else it asks first. The native harness's file tools, once built, follow the same rule. Files outside the thread's folder have no checkpoint, so a revert doesn't restore them. To take a folder back, remove it from the file and restart verdandid; `verdandi start` lists them.
 - **Worktrees (per thread, optional):** `git worktree add` on a new branch `verdandi/<thread>` from `HEAD`, under the profile's `worktrees/<repo>/<branch>`. The project's setup command (`setup` in `<repo>/.verdandi/worktree.yaml`, e.g. `bun install`) runs once in each new worktree, once you trust it (§17; until then the thread's next turn asks first), and the thread shows its result. Removing a worktree, or archiving its thread, keeps the branch and refuses while it has uncommitted changes unless you confirm; it can be recreated on its branch. A thread's folder never changes after its first turn, because the harness keeps its session there. Once its thread has been archived longer than the cleanup policy keeps it (`gc.yaml`, 30 days by default), a worktree git kept is removed, never one with uncommitted changes (ADR 0021).
 - **Checkpoints:** at the start and end of each turn, the tree is saved to hidden refs `refs/verdandi/checkpoints/<thread>/<turn>/start` and `…/end`, using a temporary index so your branch, staging area and stash are never touched (ADR 0015). A turn's diff is its end against its start, so your own edits between turns never show in it. Checkpoints older than the cleanup policy's `keepDays` are removed daily, except the last `keepTurns` turns' of threads that aren't archived; `verdandi gc --dry-run` and `verdandi doctor` show what goes next.
 - **Revert:** to the end of any earlier turn, the conversation only, or the conversation and the files (restored from that turn's end checkpoint, after the current files are checkpointed, so the revert can be undone until the next turn). Reverted turns stay in the log, folded away, and their task's outcome becomes `reverted`. The next turn forks the harness session at that point (Claude Code: ADR 0004).
@@ -884,8 +892,10 @@ Trajectories from open or local models don't have this restriction. The exporter
     - a script to run first,
     - `contextFrom` to chain in earlier job outputs,
     - where its output goes: a channel, a thread or a notification, set in the job's config. A job the agent creates with `cronjob` delivers to its own thread's binding; pointing it anywhere else is your edit.
+  - **Where:** in the job's project, or in the workspace when it names none (§13).
+  - **Who runs them:** only an always-on verdandid (§11).
   - **Unattended runs:**
-    - run in worktrees,
+    - run in worktrees when their project is a git repo other than the workspace,
     - use a restricted permission profile,
     - have a hard budget,
     - are stopped by a watchdog after a period with no activity,
@@ -893,7 +903,7 @@ Trajectories from open or local models don't have this restriction. The exporter
 - **Messaging gateway:**
   - One gateway process inside verdandid, with a `PlatformAdapter` for each platform.
   - **Platforms:** Telegram, Discord and Slack first. Then WhatsApp, Signal, Matrix and email as plugins.
-  - Each chat is **bound to a thread**, and the thread's replies go to that chat. Approvals appear as buttons.
+  - Each chat is **bound to a thread**, and the thread's replies go to that chat. Approvals appear as buttons. A new conversation starts as a thread in the workspace (§13); triage can move it to a project.
   - **The model never names a destination.** No tool lets the agent send a message to a channel of its choosing: gateway messages are untrusted data, and an injected instruction plus such a tool would be a way to send your code or memory out.
   - **Triage:** the decision layer sorts incoming messages by project, by whether the agent needs to act, and by urgency (§9.8).
   - Only users on each channel's allowlist can use it.
@@ -1010,7 +1020,7 @@ The ADR also lists what isn't a vulnerability, who the principals are once the g
 
 | Area | Choice | Why |
 |---|---|---|
-| Language | TypeScript, strict mode, modern ES modules only | The Agent SDK is TypeScript, types are shared between server and UI, and the leading coding agents are TypeScript |
+| Language | TypeScript, strict mode, modern ES modules only | The Agent SDK is TypeScript, types are shared between server and UI, and the leading coding agents are TypeScript. Learning at run time (memory, skills, routing memory) needs no Python; training does, and lives in `lab/`, talking to the app through files (§14.7) |
 | Runtime | **Bun** | Ships as one installable binary (`bun build --compile`) with the web UI embedded, the way Claude Code installs. SQLite, test runner, bundler, package manager, shell and OS-keychain access are built in, which means fewer dependencies and a smaller supply-chain surface. Fast CLI startup. Anthropic maintains Bun, and Claude Code itself ships on it. |
 | Type checking | TypeScript 7 (native compiler) | Stable since 7.0; much faster type checks |
 | Monorepo | Bun workspaces (isolated installs, version catalogs) + Turborepo | Isolated installs enforce package boundaries; Turborepo caches builds |
@@ -1144,8 +1154,9 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 5. **First gateway platform:** Telegram (recommended: simplest bot API, good inline buttons) or Discord?
 6. **Local models:** which local coding and chat models to target first, and on what hardware?
 7. **Moving to credits when quota runs low:** decided. Verdandi asks the first time, then remembers. Claude Code's own silent move to extra usage is never hidden: those turns are priced as metered and shown (ADR 0005).
-8. **Terminal UI:** is `verdandi chat` enough, or do you want a full terminal UI later?
+8. **Terminal UI:** decided. The terminal chat (bare `verdandi`) is the default surface and grows into a full terminal UI: multiline editing, completion, live tool output. Its library is picked, and asked for, when that work starts.
 9. **Jev:** keep it off until TypeSafe publishes data-retention terms (recommended), or turn it on now for selected projects?
+10. **Gateway turns and `workspace.yaml`'s folders:** should a turn started by a gateway sender other than the owner get the folders the agent may work in (§13), or ask for any path outside the workspace (recommended)?
 
 ---
 
@@ -1201,7 +1212,7 @@ Everything that makes Hermes Agent good, and where it lives in Verdandi. Hermes'
 | Mixture-of-agents | MoA route type | 9.4 | M6 |
 | Batch runner, trajectory compression | Batch runner, trajectory exporters, `lab/` | 14.6, 14.7 | M1 (recording), M2 (batch runner) → M6 |
 | Exact pins, supply-chain CI | Supply chain | 17 | M0 |
-| Terminal UI | `verdandi chat` (a full terminal UI is an open question) | 11 | M1 |
+| Terminal UI | `verdandi`, the terminal chat and default surface; a full terminal UI grows from it | 11, 12 | M1 |
 | Opt-in checkpoints with `/rollback`, `hermes -w` worktrees | Checkpoints every turn, revert, worktrees per thread | 13 | M3 |
 | Desktop app (chat, preview rail, terminal, file browser) and web dashboard | Web UI, desktop app | 12, 19 | M1 / M5 |
 | **Not in Hermes** | Task routing across harnesses and access modes, decision layer, race mode, learned routing | 8, 9.8 | M1 → M6 |

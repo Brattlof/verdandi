@@ -18,13 +18,15 @@ import {
 } from "@verdandi/contracts";
 import { Effect, Fiber, Queue, Schema, Stream } from "effect";
 import { parseBatchRoute } from "../batch/batch.ts";
-import { flag, readServerFile, resolveHome, type ServerFile } from "../home/home.ts";
+import { flag, resolveHome, type ServerFile } from "../home/home.ts";
+import { defaultFolder } from "../home/workspace.ts";
+import { serverFor } from "../main.ts";
 import { expandHome } from "../projects/project.ts";
 import { connect } from "../rpc/client.ts";
 import { spendSplit } from "../spend/usage.ts";
 import { type PendingRequest, skillChangeTitle, trustedCommandsLine } from "./requests.ts";
 
-/** How `verdandi run` ends, as its usage line in `bin.ts` documents. Any other error (verdandid not running, the turn rejected) exits 1. */
+/** How `verdandi run` ends, as its usage line in `bin.ts` documents. Any other error (verdandid couldn't start, the turn rejected) exits 1. */
 export const exitCodes = { completed: 0, usage: 2, failed: 3, limit: 4, request: 5, interrupted: 130 } as const;
 type RunStatus = Exclude<keyof typeof exitCodes, "usage">;
 type TurnStatus = Extract<Event, { type: "turn.completed" }>["status"];
@@ -60,7 +62,8 @@ type Options = {
 };
 
 const valueFlags = ["--home", "--project", "--thread", "--mode", "--route"];
-const switches = ["--json", "--deny-requests"];
+// `--dev-fake-harness` goes to the verdandid a run starts when none is running.
+const switches = ["--json", "--deny-requests", "--here", "--workspace", "--dev-fake-harness"];
 
 /** The task is every word that isn't a flag or a flag's value. Fails naming the flag or value at fault. */
 const parse = (argv: readonly string[]): Options => {
@@ -76,14 +79,23 @@ const parse = (argv: readonly string[]): Options => {
   const route = flag(argv, "--route");
   const project = flag(argv, "--project");
   const threadId = flag(argv, "--thread") as ThreadId | undefined;
-  if (threadId && project !== undefined) throw new Error("--thread continues a thread in its own folder, so leave out --project.");
+  const folderFlags = [
+    project !== undefined && "--project",
+    argv.includes("--here") && "--here",
+    argv.includes("--workspace") && "--workspace",
+  ];
+  const named = folderFlags.filter((f) => f !== false);
+  if (threadId && named.length) throw new Error(`--thread continues a thread in its own folder, so leave out ${named.join(" and ")}.`);
+  if (named.length > 1) throw new Error(`Pick one of ${named.join(" and ")}.`);
+  const home = resolveHome(argv);
   return {
-    home: resolveHome(argv),
+    home,
     text,
     mode,
     route: route === undefined ? undefined : parseBatchRoute(route),
     threadId,
-    projectPath: resolve(expandHome(project ?? ".")),
+    // Unless named, the current folder when it's a project, else the workspace (DESIGN §13).
+    projectPath: threadId ? "" : project === undefined ? defaultFolder(home, process.cwd(), argv) : resolve(expandHome(project)),
     json: argv.includes("--json"),
     deny: argv.includes("--deny-requests"),
   };
@@ -321,7 +333,12 @@ export const run = async (argv: readonly string[]) => {
     process.exitCode = exitCodes.usage;
     return;
   }
-  const result = await Effect.runPromise(Effect.scoped(runTurn(readServerFile(options.home), options)));
+  // Without a running verdandid, one runs in this process for the run; its notes go to stderr, keeping stdout for the reply.
+  const served = await serverFor(options.home, argv);
+  for (const line of served.status)
+    process.stderr.write(`[${line}]
+`);
+  const result = await Effect.runPromise(Effect.scoped(runTurn(served.server, options))).finally(() => served.stop?.());
   if (options.json) process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.error) process.stderr.write(`${result.error}\n`);
   if (!options.json) {
