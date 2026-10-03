@@ -6,6 +6,9 @@ import {
   type HarnessId,
   type ProjectId,
   type Resolution,
+  type SlashName,
+  slashCommands,
+  slashEntry,
   type TaskId,
   type ThreadId,
   type TurnId,
@@ -639,4 +642,33 @@ describe("@name pins", () => {
     expect(reason(decide({ thread, routing }, at("@fake")))).toBe("InvalidPin");
     expect(reason(decide({ thread }, at("@fake fix it")))).toBe("InvalidPin");
   });
+});
+
+test("the decider rejects each command a slash command refuses while a turn runs, and accepts it once the thread is idle", () => {
+  const t1 = "turn-a" as TurnId;
+  const t2 = "turn-b" as TurnId;
+  const base = idle.thread as NonNullable<DeciderState["thread"]>;
+  const quiet: DeciderState = {
+    thread: {
+      ...base,
+      turnList: [t1, t2].map((id) => ({ turnId: id, reverted: 0, untrusted: null })),
+      revert: { toTurnId: t1, turnIds: ["turn-c" as TurnId], files: false, undone: false, prevFork: null },
+    },
+  };
+  const busy: DeciderState = { thread: { ...(quiet.thread as NonNullable<DeciderState["thread"]>), runningTurnId: t2 } };
+  const samples: Partial<Record<Command["type"], Command>> = {
+    "thread.revert": { type: "thread.revert", commandId, threadId, toTurnId: t1, files: false },
+    "thread.revert.undo": { type: "thread.revert.undo", commandId, threadId },
+  };
+  const refused = Object.keys(slashCommands).flatMap((name) => {
+    const { whileBusy, dispatches } = slashEntry(name as SlashName);
+    return typeof whileBusy === "object" ? dispatches : [];
+  });
+  expect(refused.length).toBeGreaterThan(0);
+  for (const type of refused) {
+    const command = samples[type];
+    if (!command) throw new Error(`Add a sample ${type} command to this test.`);
+    expect([type, reason(decide(busy, command))]).not.toEqual([type, "accepted"]);
+    expect([type, reason(decide(quiet, command))]).toEqual([type, "accepted"]);
+  }
 });

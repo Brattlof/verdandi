@@ -1,12 +1,18 @@
 import {
   atPin,
   type BudgetMode,
+  type ClientCommand,
   type CommandId,
   type InteractionMode,
+  parseSlash,
   type Question,
   type Resolution,
   type RouteTarget,
+  ratingWords,
   type SkillChange,
+  type SlashNameOn,
+  slashCompletions,
+  slashEntry,
   type ThreadId,
   type ThreadView,
   type TurnId,
@@ -52,7 +58,9 @@ export const Composer = ({
   const [capRejections, setCapRejections] = useState(0);
   const running = thread.turns.findLast((t) => t.status === "running");
   const { threadId } = thread;
-  const pins = usePinMenu(connection, running ? "" : text, setText);
+  const menu = useComposerMenu(connection, text, running !== undefined, setText);
+  /** What a command run from the message box did, when its effect doesn't show elsewhere. */
+  const [notice, setNotice] = useState<string>();
 
   const attach = async (files: readonly File[]) => {
     if (files.length === 0) return;
@@ -82,11 +90,47 @@ export const Composer = ({
     setError(message);
     setText((current) => current || body);
   };
+  /** Runs a web command of `slashCommands` and says how it went; each one gets a handler, or this fails typecheck. */
+  const run = async (command: ClientCommand, done: string) => {
+    const result = await connection.dispatch(command);
+    if (result.ok) setNotice(done);
+    else setError(result.message);
+  };
+  const commands: Record<SlashNameOn<"web">, (args: readonly string[]) => unknown> = {
+    ask: () => onMode("ask"),
+    plan: () => onMode("plan"),
+    build: () => onMode("build"),
+    rate: (args) => {
+      const rating = ratingWords.get(args[0] ?? "");
+      const task = thread.tasks.at(-1);
+      if (rating === undefined) return setError("Rate the latest task with /rate up, /rate down or /rate clear.");
+      if (!task) return setError("This thread has no task to rate yet.");
+      return run(
+        { type: "task.rate", commandId: uuid<CommandId>(), threadId, taskId: task.taskId, rating },
+        rating === null ? "Rating cleared." : `Rated the latest task ${args[0]}.`,
+      );
+    },
+    "forget-routing": () =>
+      run(
+        { type: "routing.memory.clear", commandId: uuid<CommandId>(), threadId },
+        "Routing memory cleared: this project's next routed tasks go by the policy alone.",
+      ),
+    "undo-revert": () => run({ type: "thread.revert.undo", commandId: uuid<CommandId>(), threadId }, "Revert undone."),
+  };
   const send = async () => {
     const body = text.trim();
     if (!body && (running || pending.length === 0)) return;
-    setText("");
     setError(undefined);
+    setNotice(undefined);
+    // A web command runs here and never reaches the agent; one the registry refuses while a turn runs says when it works.
+    const command = parseSlash(body, "web");
+    if (command) {
+      const busy = slashEntry(command.name).whileBusy;
+      if (running && typeof busy === "object") return setError(busy.refuse);
+      setText("");
+      return void (await commands[command.name](command.args));
+    }
+    setText("");
     if (running) {
       const steered = await connection.dispatch({
         type: "turn.steer",
@@ -127,13 +171,14 @@ export const Composer = ({
     void send();
   };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (pins.onKeyDown(e)) return;
+    if (menu.onKeyDown(e)) return;
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void send();
     }
   };
   const hint = modes.find((m) => m.value === mode)?.hint;
+  const command = parseSlash(text, "web");
   // Only a message that starts a routed task gets a preview: one that continues a task keeps its route. A leading `@name` starts one.
   const preview = !running && ((!thread.pinned && thread.task === null) || atPin(text) !== undefined);
   return (
@@ -148,7 +193,7 @@ export const Composer = ({
         onDrop={onDrop}
         className="relative rounded-lg border border-line-strong bg-card shadow-[0_1px_2px_rgb(0_0_0/0.04)] focus-within:border-accent focus-within:shadow-[0_0_0_1px_var(--color-accent)]"
       >
-        {pins.menu}
+        {menu.menu}
         <PendingList items={pending} onRemove={detach} />
         <label className="sr-only" htmlFor="message">
           {running ? "Steer the running turn" : "Message"}
@@ -164,14 +209,20 @@ export const Composer = ({
           className="block max-h-[40vh] w-full resize-y rounded-lg border-0 bg-transparent px-3.5 pt-3 outline-none focus-visible:outline-none"
           placeholder={running ? "Steer the agent: it reads this at its next step" : "Message the agent, or @model to pin its task"}
           aria-describedby={preview ? "route-preview" : undefined}
-          {...pins.inputProps}
+          {...menu.inputProps}
         />
         {preview && (
           <RoutePreview
             connection={connection}
             thread={thread}
-            text={pins.open ? "" : text}
-            idle={pins.open ? "Pins the task this message starts to the model you pick." : undefined}
+            text={menu.open || command ? "" : text}
+            idle={
+              menu.pins
+                ? "Pins the task this message starts to the model you pick."
+                : menu.open || command
+                  ? "Runs the command here: nothing goes to the agent."
+                  : undefined
+            }
             mode={mode}
             images={pending.filter((p) => p.preview !== undefined).length}
           />
@@ -239,6 +290,9 @@ export const Composer = ({
           {error}
         </p>
       )}
+      <p role="status" className="mt-1.5 px-1 text-xs text-muted empty:hidden">
+        {notice}
+      </p>
     </div>
   );
 };
@@ -346,13 +400,18 @@ const RoutePreview = ({
   );
 };
 
+/** One line the composer's menu offers: picking it puts `line` in the message box. */
+type MenuOption = { readonly key: string; readonly label: string; readonly detail: string; readonly line: string };
+
 /**
- * The models a message can pin its task to (DESIGN §12), offered while its first token is a `@name` being typed: an
- * ARIA listbox the message box drives with `aria-activedescendant`, so focus stays in the box. Arrow keys move,
- * Enter or Tab picks, Escape closes. Not Base UI's Autocomplete: that treats the whole field as its query, and its
- * Escape clears the field and its Home and End jump to the field's ends, wrong for a multi-line message.
+ * The composer's menu, offered while the message is a `@name` being typed (the models a message can pin its task to,
+ * DESIGN §12; not while steering) or a `/command` (the registry's web commands, or the choices of the argument being
+ * typed). An ARIA listbox the message box drives with `aria-activedescendant`, so focus stays in the box. Arrow keys
+ * move, Enter or Tab picks, Escape closes; Enter on an option the message already says falls through, so it runs.
+ * Not Base UI's Autocomplete: that treats the whole field as its query, and its Escape clears the field and its Home
+ * and End jump to the field's ends, wrong for a multi-line message.
  */
-const usePinMenu = (connection: Connection, text: string, setText: (text: string) => void) => {
+const useComposerMenu = (connection: Connection, text: string, steering: boolean, setText: (text: string) => void) => {
   const [models, setModels] = useState<readonly RouteTarget[]>([]);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState<string>();
@@ -360,61 +419,69 @@ const usePinMenu = (connection: Connection, text: string, setText: (text: string
   useEffect(() => {
     void connection.models().then(setModels);
   }, [connection]);
-  const typed = /^@(\S*)$/.exec(text)?.[1]?.toLowerCase();
-  const matches =
-    typed === undefined || text === dismissed
+  const typed = steering ? undefined : /^@(\S*)$/.exec(text)?.[1]?.toLowerCase();
+  const pins = text.startsWith("@");
+  const options: MenuOption[] =
+    text === dismissed
       ? []
-      : models
-          .filter((m) => m.model.toLowerCase().startsWith(typed))
-          // The exact name first, so Enter on a typed name picks it.
-          .toSorted((a, b) => Number(b.model.toLowerCase() === typed) - Number(a.model.toLowerCase() === typed));
-  const open = matches.length > 0;
-  const current = Math.min(active, matches.length - 1);
-  const pick = (m: RouteTarget) => {
-    setText(`@${m.model} `);
+      : pins
+        ? typed === undefined
+          ? []
+          : models
+              .filter((m) => m.model.toLowerCase().startsWith(typed))
+              // The exact name first, so Enter on a typed name picks it.
+              .toSorted((a, b) => Number(b.model.toLowerCase() === typed) - Number(a.model.toLowerCase() === typed))
+              .map((m) => ({ key: `${m.harness} ${m.model}`, label: `@${m.model}`, detail: m.harness, line: `@${m.model} ` }))
+        : slashCompletions(text, "web").map((o) => ({ key: o.line, label: o.line.trim(), detail: slashEntry(o.name).help, line: o.line }));
+  const open = options.length > 0;
+  const current = Math.min(active, options.length - 1);
+  const pick = (o: MenuOption) => {
+    setText(o.line);
     setActive(0);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (!open || e.nativeEvent.isComposing) return false;
+    const chosen = options[current];
     if (e.key === "ArrowDown" || e.key === "ArrowUp")
-      setActive((current + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length);
+      setActive((current + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length);
     else if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
-      const m = matches[current];
-      if (m) pick(m);
+      if (!chosen || (e.key === "Enter" && chosen.line === text)) return false;
+      pick(chosen);
     } else if (e.key === "Escape") setDismissed(text);
     else return false;
     e.preventDefault();
     e.stopPropagation();
     return true;
   };
-  const option = (i: number) => `${id}-model-${i}`;
+  const option = (i: number) => `${id}-option-${i}`;
+  const what = pins ? `model${options.length === 1 ? "" : "s"} to pin this task to` : `command${options.length === 1 ? "" : "s"}`;
   const menu = (
     <>
       <p role="status" className="sr-only">
-        {open ? `${matches.length} model${matches.length === 1 ? "" : "s"} to pin this task to: arrow keys choose, Enter picks.` : ""}
+        {open ? `${options.length} ${what}: arrow keys choose, Enter picks.` : ""}
       </p>
       {open && (
         <div
-          id={`${id}-models`}
+          id={`${id}-options`}
           role="listbox"
-          aria-label="Pin this task to a model"
+          aria-label={pins ? "Pin this task to a model" : "Commands"}
           className="absolute bottom-full left-0 z-10 mb-1 min-w-56 rounded-lg border border-line-strong bg-card p-1 text-sm shadow-lg"
         >
-          {matches.map((m, i) => (
+          {options.map((o, i) => (
             // Picked by pointer here; by keyboard from the message box, which keeps focus.
             // biome-ignore lint/a11y/useKeyWithClickEvents: the message box handles the keys for its listbox (aria-activedescendant).
             <div
-              key={`${m.harness} ${m.model}`}
+              key={o.key}
               id={option(i)}
               role="option"
               tabIndex={-1}
               aria-selected={i === current}
               className="flex cursor-pointer items-center justify-between gap-6 rounded-md px-2 py-1 hover:bg-hover aria-selected:bg-hover"
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => pick(m)}
+              onClick={() => pick(o)}
             >
-              <span className="font-mono">@{m.model}</span>
-              <span className="text-xs text-muted">{m.harness}</span>
+              <span className="font-mono">{o.label}</span>
+              <span className="text-xs text-muted">{o.detail}</span>
             </div>
           ))}
         </div>
@@ -423,11 +490,11 @@ const usePinMenu = (connection: Connection, text: string, setText: (text: string
   );
   const inputProps = {
     "aria-autocomplete": "list",
-    "aria-controls": open ? `${id}-models` : undefined,
+    "aria-controls": open ? `${id}-options` : undefined,
     "aria-activedescendant": open ? option(current) : undefined,
     onInput: () => setActive(0),
   } as const;
-  return { open, menu, onKeyDown, inputProps };
+  return { open, pins: open && pins, menu, onKeyDown, inputProps };
 };
 
 type Request = ThreadView["pendingRequests"][number];

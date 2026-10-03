@@ -734,7 +734,7 @@ They share `packages/contracts`, which is why they stay in one repo, as Hermes k
 
 ## 12. User experience
 
-- **Terminal chat** (the default surface): a terminal UI on OpenTUI (ADR 0027) on the thread for the current folder, or the workspace's. The agent's text streams into a transcript, with a line for each route decision, verifier run, escalation and request; a line under it says what a typed line will do (answer the request, steer the running turn, or send); the composer stays usable while the agent works. Requests are answered there (y/n, a plan edited in `$EDITOR`), and slash commands switch modes and show diffs, revert, rate and attach. `--plain`, or a pipe, gets the same chat as plain lines. Multiline editing, completion, and tool calls and diffs in panes come next.
+- **Terminal chat** (the default surface): a terminal UI on OpenTUI (ADR 0027) on the thread for the current folder, or the workspace's. The agent's text streams into a transcript, with a line for each route decision, verifier run, escalation and request; a line under it says what a typed line will do (answer the request, steer the running turn, or send); the composer stays usable while the agent works. Requests are answered there (y/n, a plan edited in `$EDITOR`), and slash commands switch modes and show diffs, revert, rate and attach; Tab completes them and `/help` lists them, both from the one slash-command registry every surface reads. `--plain`, or a pipe, gets the same chat as plain lines. Multiline editing, and tool calls and diffs in panes come next.
 - **Web UI layout:**
   - rail: opens the projects, search and spend pages, one click from anywhere (profiles join it in M5);
   - sidebar: always lists threads by recency, each with its project, live status and cost;
@@ -916,6 +916,7 @@ Trajectories from open or local models don't have this restriction. The exporter
   - **The model never names a destination.** No tool lets the agent send a message to a channel of its choosing: gateway messages are untrusted data, and an injected instruction plus such a tool would be a way to send your code or memory out.
   - **Triage:** the decision layer sorts incoming messages by project, by whether the agent needs to act, and by urgency (§9.8).
   - Only users on each channel's allowlist can use it.
+  - **Commands** come from the slash-command registry the terminal chat and web composer read: each platform's menu (Telegram's command list, Discord's app commands) is built from it, owner-only commands stay with the owner, and a command marked to run while a turn is busy (approve, stop, status) never waits behind the turn it controls.
   - Connections are outbound only, so no ports need opening.
   - Webhooks for inbound triggers, e.g. CI failed → start a fix task.
 - **Profiles:** completely separate homes (`work`, `personal`), each with its own database, credentials, memory, skills and channels. Switch in the UI, or with `--profile` on the CLI.

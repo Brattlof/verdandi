@@ -5,6 +5,7 @@ import { testRender } from "@opentui/react/test-utils";
 import type { CommandId, ThreadId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { act } from "react";
 import { Client, type Io, openSession } from "../cli/chat-session.ts";
 import { connect } from "../rpc/client.ts";
 import { ServerInfo, ServerLayer } from "../rpc/server.ts";
@@ -125,4 +126,33 @@ test("/skills pins a skill through verdandid, lists it pinned, and shows its his
   expect(await seen("(pinned)")).toContain("My own steps. (pinned)");
   await send("/skills history mine");
   await seen("No change to mine was written by Verdandi yet.");
+});
+
+test("/diff answers while an approval waits, /revert is refused while the turn runs, and y still answers the approval", async () => {
+  const { send, seen } = await openChat();
+  await send("approve");
+  await seen("[approval]");
+  await send("/diff");
+  // The test home isn't a git repository, so the diff says so: the command ran instead of answering the request.
+  expect(await seen("is not a git repository")).toContain("Answer the request above: y or n");
+  await send("/revert");
+  await seen("[A turn is running in this thread. Interrupt it or let it finish, then revert.]");
+  await send("y");
+  const frame = await seen("[success");
+  expect(frame).not.toContain("Answer y or n");
+});
+
+test("Tab completes a slash command, then its argument, and the hint shows what it does", async () => {
+  const { ui } = await openChat();
+  // act lets React commit the draft's state before the frame is drawn.
+  const press = async (text: string) => {
+    await act(async () => {
+      await ui.mockInput.typeText(text);
+      ui.mockInput.pressTab();
+    });
+    await ui.renderOnce();
+    return ui.captureCharFrame();
+  };
+  expect(await press("/ra")).toContain("/rate <up|down|clear>: rates the latest task");
+  expect(await press("u")).toMatch(/│\/rate up\s*│/);
 });
