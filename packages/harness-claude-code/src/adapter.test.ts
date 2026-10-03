@@ -440,8 +440,8 @@ describe("Claude Code adapter", () => {
         Effect.runPromise(Stream.runCollect(adapter.run({ ...input(home, text, turnId, "sess-1"), ...(limits && { limits }) })));
       await run("one", U1);
       const task = { taskId: U2 as TaskId, maxCost: 2, maxTurns: 30 };
-      await run("two", U2, { ...task, spentUsd: 0 });
-      await run("three", U3, { ...task, spentUsd: 0.5 });
+      await run("two", U2, { ...task, spentUsd: 0, spentTurns: 0 });
+      await run("three", U3, { ...task, spentUsd: 0.5, spentTurns: 4 });
       await run("four", "00000000-0000-4000-8000-000000000004");
       // One process per task with guards, and one to drop them again; the same task keeps its process.
       expect(spawns.map((s) => [s.options.resume, s.options.maxBudgetUsd, s.options.maxTurns])).toEqual([
@@ -450,6 +450,37 @@ describe("Claude Code adapter", () => {
         ["sess-1", undefined, undefined],
       ]);
       expect(spawns[1]?.prompts.map((p) => p.message.content)).toEqual(["two", "three"]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("a task resumed in a new process spawns with the model calls it has left, and one with none left stops at once", async () => {
+    const home = makeTempHome();
+    try {
+      // One reply split over two messages that share its id, then a second reply: two model calls.
+      const reply = (id: string, content: object[]) => {
+        const m = assistant(content) as Extract<SDKMessage, { type: "assistant" }>;
+        return { ...m, message: { ...m.message, id } } as SDKMessage;
+      };
+      const { query, spawns } = stubQuery(() => [
+        reply("msg_1", [{ type: "text", text: "Reading it." }]),
+        reply("msg_1", [{ type: "tool_use", id: "toolu_1", name: "Read", input: { file_path: "a.ts" } }]),
+        toolResult("toolu_1", "x"),
+        reply("msg_2", [{ type: "text", text: "Done." }]),
+        result(turn1Usage),
+      ]);
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const limits = { taskId: U2 as TaskId, maxTurns: 10, spentUsd: 0 };
+      const run = (turnId: string, spentTurns: number) =>
+        Effect.runPromise(Stream.runCollect(adapter.run({ ...input(home, "go", turnId, "sess-1"), limits: { ...limits, spentTurns } })));
+      const events = Array.from(await run(U1, 7));
+      expect(spawns.map((s) => s.options.maxTurns)).toEqual([3]);
+      expect(events.filter((e) => e.type === "model.called")).toHaveLength(2);
+      expect(Array.from(await run(U3, 10))).toEqual([
+        { type: "turn.finished", status: "limit", error: "Stopped at the task's turn limit (maxTurns in the routing policy)." },
+      ]);
+      expect(spawns).toHaveLength(1);
     } finally {
       removeTempHome(home);
     }

@@ -30,7 +30,8 @@ import { Effect, Stream } from "effect";
  * it proposes remembering, in project memory, whatever follows the digest's first "remember", and creating the skill
  * named after its first "skill:".
  * Every reply costs $0.01. Like Claude Code, it checks the task's `maxCost` after the call: when the task's
- * spend then exceeds it, the turn ends with status `limit`. `calls` records every run.
+ * spend then exceeds it, the turn ends with status `limit`. Each turn is one model call against the task's `maxTurns`:
+ * a task with none left ends its next turn with status `limit` at once. `calls` records every run.
  */
 export const makeFakeHarness = () => {
   const calls: {
@@ -302,10 +303,22 @@ export const makeFakeHarness = () => {
     closes,
     release: () => release(),
     run(input: HarnessRunInput) {
+      // Each turn is one model call, reported first, as a real harness reports each as it's made.
+      const maxTurns = input.limits?.maxTurns;
+      if (maxTurns !== undefined && input.limits && input.limits.spentTurns >= maxTurns)
+        return Stream.make<HarnessEvent[]>({
+          type: "turn.finished",
+          status: "limit",
+          error: `Stopped at the task's ${maxTurns}-turn limit.`,
+        });
+      const called = Stream.fromIterable<HarnessEvent>(maxTurns === undefined ? [] : [{ type: "model.called" }]);
       const maxCost = input.limits?.maxCost;
       const over = maxCost !== undefined && (input.limits?.spentUsd ?? 0) + 0.01 > maxCost;
       const stopped: HarnessEvent = { type: "turn.finished", status: "limit", error: `Stopped at the task's $${maxCost} cost limit.` };
-      return over ? Stream.map(script(input), (e) => (e.type === "turn.finished" && e.status === "success" ? stopped : e)) : script(input);
+      const turn = over
+        ? Stream.map(script(input), (e) => (e.type === "turn.finished" && e.status === "success" ? stopped : e))
+        : script(input);
+      return Stream.concat(called, turn);
     },
     respond: (_threadId, requestId, resolution) =>
       Effect.sync(() => {

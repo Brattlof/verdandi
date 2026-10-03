@@ -18,6 +18,11 @@ export const HarnessEvent = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text.delta"), text: Schema.String }),
   Schema.Struct({ type: Schema.Literal("item"), item: Item }),
   Schema.Struct({ type: Schema.Literal("usage"), ...UsageFields }),
+  /**
+   * The main agent made a model round trip, what a task's `maxTurns` counts. Report each as it starts, and only when
+   * the run has `limits.maxTurns`, so the count survives an interrupt or a new process.
+   */
+  Schema.Struct({ type: Schema.Literal("model.called") }),
   /** The subscription window changed. Report it only when it differs from the last one reported. */
   Schema.Struct({ type: Schema.Literal("quota"), quota: Quota }),
   /** The harness blocks until `respond` answers `requestId`. */
@@ -99,10 +104,11 @@ export type HarnessRunInput = {
   readonly steers: Stream.Stream<string>;
   /**
    * The running task's budget guards, as totals for the whole task; `spentUsd` is what its earlier turns
-   * cost. Stop the turn with status `limit` once one is reached (Claude Code: `maxBudgetUsd` and
-   * `maxTurns`, ADR 0005; native: checked after each model call, ADR 0022). Absent when the task has none.
+   * cost, and `spentTurns` how many `model.called` they reported. Stop the turn with status `limit` once one is
+   * reached (Claude Code: `maxBudgetUsd` and `maxTurns` with what's left, ADR 0005; native: checked before and
+   * after each model call, ADR 0022). Absent when the task has none.
    */
-  readonly limits?: TaskLimits & { readonly taskId: TaskId; readonly spentUsd: number };
+  readonly limits?: TaskLimits & { readonly taskId: TaskId; readonly spentUsd: number; readonly spentTurns: number };
   /**
    * The user reverted the conversation (DESIGN §13): continue `resumeSessionId` as it was at the end of turn
    * `atTurnId`, dropping `dropTurnIds` (the session's later turns, oldest first), in a new session the harness
