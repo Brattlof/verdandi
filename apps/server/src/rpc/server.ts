@@ -206,6 +206,20 @@ const Handlers = (home: string) =>
 const sameToken = (given: string | null, token: string) =>
   given !== null && given.length === token.length && timingSafeEqual(Buffer.from(given), Buffer.from(token));
 
+/**
+ * Whether a page at `origin` is verdandid's own web UI: on loopback, at the port the request came in on (`host`).
+ * DNS rebinding can point another site's hostname at 127.0.0.1, but its origin keeps that hostname.
+ */
+export const ownOrigin = (origin: string, host: string | undefined) => {
+  if (!URL.canParse(origin) || !URL.canParse(`http://${host}`)) return false;
+  const page = new URL(origin);
+  return (
+    page.protocol === "http:" &&
+    (page.hostname === "127.0.0.1" || page.hostname === "localhost") &&
+    page.port === new URL(`http://${host}`).port
+  );
+};
+
 const imageTypes: Record<string, string> = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 
 /**
@@ -234,7 +248,10 @@ const serveAttachment = (home: string, token: string) =>
     });
   });
 
-/** The WebSocket RPC protocol at /rpc, refusing upgrades without the profile's token, and attachments at /attachments/<id>. */
+/**
+ * The WebSocket RPC protocol at /rpc and attachments at /attachments/<id>. /rpc refuses a page on another site
+ * (a browser sends its `Origin`; the CLI and the LAN gate's relay send none), then an upgrade without the profile's token.
+ */
 const ProtocolWithToken = (home: string, token: string) =>
   Layer.effect(RpcServer.Protocol)(
     Effect.gen(function* () {
@@ -246,6 +263,13 @@ const ProtocolWithToken = (home: string, token: string) =>
         "/rpc",
         Effect.gen(function* () {
           const request = yield* HttpServerRequest.HttpServerRequest;
+          const origin = request.headers.origin;
+          if (origin !== undefined && !ownOrigin(origin, request.headers.host)) {
+            return HttpServerResponse.text(
+              `Refused a connection from a page at ${origin}: only verdandid's own web UI may connect. Open it with: verdandi open`,
+              { status: 403 },
+            );
+          }
           const given = new URL(request.url, "http://localhost").searchParams.get("token");
           if (!sameToken(given, token)) {
             return HttpServerResponse.text("Missing or wrong token. Clients read it from server.json in the Verdandi home.", {

@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { networkInterfaces } from "node:os";
 
 /** A private or loopback address: RFC 1918, link-local, loopback, and IPv6's unique-local and link-local ranges. */
 export const isLocalAddress = (address: string) => {
@@ -22,13 +23,29 @@ export const hostProblem = (host: string) => {
   return `--host ${host} is a public address, and verdandid only listens on your local network. Use 0.0.0.0, or this machine's address on your network (10.x, 172.16–31.x or 192.168.x).`;
 };
 
+/**
+ * Whether a page at `origin` was served by the gate: at an address the gate listens on (any of this machine's,
+ * for `0.0.0.0` or `::`), at its port. A hostname never is, so a DNS-rebound page is refused with any other site.
+ */
+export const gateOrigin = (origin: string, host: string, port: number) => {
+  if (!URL.canParse(origin)) return false;
+  const page = new URL(origin);
+  const address = page.hostname.replace(/^[(.*)]$/, "$1");
+  const own =
+    host === "0.0.0.0" || host === "::"
+      ? Object.values(networkInterfaces()).flatMap((list) => (list ?? []).map((a) => a.address.toLowerCase()))
+      : [host.toLowerCase()];
+  return page.protocol === "http:" && isIP(address) !== 0 && own.includes(address) && page.port === String(port);
+};
+
 type Relay = { readonly upstream: WebSocket; readonly pending: (string | Buffer)[] };
 
 /**
  * Opens verdandid (on `127.0.0.1:target`) to the local network at `host:port`. Every request, the web UI's
  * files included, is refused unless it comes from a private or loopback address (`allowed`), so even with
  * a public interface or a port forward the internet reaches nothing; the rest is relayed as is, WebSockets
- * too. The token still guards everything past the page. Returns the gate's server, to stop with verdandid.
+ * too. A WebSocket from a page the gate didn't serve (`gateOrigin`) is refused before it reaches verdandid, which
+ * can't check it itself: the relay sends no `Origin`. The token still guards everything past the page. Returns the gate's server, to stop with verdandid.
  */
 export const startLanGate = (host: string, port: number, target: number, allowed = isLocalAddress) =>
   Bun.serve<Relay>({
@@ -40,6 +57,11 @@ export const startLanGate = (host: string, port: number, target: number, allowed
       const url = new URL(request.url);
       const upstreamUrl = `http://127.0.0.1:${target}${url.pathname}${url.search}`;
       if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+        const origin = request.headers.get("origin");
+        if (origin !== null && !gateOrigin(origin, host, server.port ?? port))
+          return new Response(`Refused a connection from a page at ${origin}: only the web UI this gate serves may connect.`, {
+            status: 403,
+          });
         const upstream = new WebSocket(upstreamUrl.replace(/^http/, "ws"));
         upstream.binaryType = "arraybuffer";
         return server.upgrade(request, { data: { upstream, pending: [] } })

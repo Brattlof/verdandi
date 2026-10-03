@@ -77,6 +77,35 @@ test("the gate relays the web UI, the RPC WebSocket and attachments to verdandid
   expect(unauthorized.status).toBe(401); // verdandid's own answer, relayed
 });
 
+test("the gate refuses an upgrade from a page it didn't serve, even with the right token", async () => {
+  const info = await startServer();
+  const gate = startLanGate("127.0.0.1", 0, info.port);
+  cleanups.push(() => gate.stop(true));
+  const url = `ws://127.0.0.1:${gate.port}/rpc?token=${info.token}`;
+  const opens = (origin?: string) =>
+    new Promise<boolean>((resolve) => {
+      const ws = new WebSocket(url, origin === undefined ? {} : { headers: { Origin: origin } });
+      ws.onopen = () => {
+        ws.close();
+        resolve(true);
+      };
+      ws.onerror = () => resolve(false);
+    });
+  expect(await opens()).toBe(true);
+  expect(await opens(`http://127.0.0.1:${gate.port}`)).toBe(true);
+  // A hostname (DNS rebinding included), another port and another site are all refused.
+  for (const foreign of [
+    `http://localhost:${gate.port}`,
+    `http://127.0.0.1:${info.port}`,
+    "https://evil.example",
+    `http://evil.example:${gate.port}`,
+  ])
+    expect([foreign, await opens(foreign)]).toEqual([foreign, false]);
+  const refused = await fetch(url.replace(/^ws/, "http"), { headers: { upgrade: "websocket", origin: "https://evil.example" } });
+  expect(refused.status).toBe(403);
+  expect(await refused.text()).toContain("https://evil.example");
+});
+
 test("the gate refuses every request from outside the local network, the web UI's files included", async () => {
   const info = await startServer();
   const gate = startLanGate("127.0.0.1", 0, info.port, () => false);
