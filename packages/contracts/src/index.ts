@@ -14,6 +14,7 @@ export * from "./requests.ts";
 export * from "./route.ts";
 export * from "./routing.ts";
 export * from "./rpc.ts";
+export * from "./schedule.ts";
 export * from "./search.ts";
 export * from "./skills.ts";
 export * from "./spend.ts";

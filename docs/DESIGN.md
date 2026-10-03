@@ -902,7 +902,7 @@ Trajectories from open or local models don't have this restriction. The exporter
     - `contextFrom` to chain in earlier job outputs,
     - where its output goes: a channel, a thread or a notification, set in the job's config. A job the agent creates with `cronjob` delivers to its own thread's binding; pointing it anywhere else is your edit.
   - **Where:** in the job's project, or in the workspace when it names none (§13).
-  - **Who runs them:** only an always-on verdandid (§11).
+  - **Who runs them:** only an always-on verdandid (§11). Until it does, `verdandi schedule` registers OS jobs (crontab, launchd or Task Scheduler) that call `verdandi run --deny-requests --json`, which runs a verdandid for the run when none is up; each job has a cron expression, a folder, a mode and a route, and logs each run's exit code, thread and cost.
   - **Unattended runs:**
     - run in worktrees when their project is a git repo other than the workspace,
     - use a restricted permission profile,

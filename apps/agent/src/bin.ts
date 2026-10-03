@@ -10,6 +10,7 @@ import { requireBun } from "./home/bun-version.ts";
 import { start } from "./main.ts";
 import { key } from "./native/key-cli.ts";
 import { routing } from "./routing/routing-cli.ts";
+import { schedule } from "./schedule/schedule-cli.ts";
 import { search } from "./search/search-cli.ts";
 import { skills } from "./skills/skills-cli.ts";
 import { costs } from "./spend/costs-cli.ts";
@@ -25,7 +26,9 @@ const usage = `Usage:
   verdandi chat  --list [--archived] [--home <dir>]  list every thread by project; --archived includes archived ones
   verdandi chat  --archive <thread> | --unarchive <thread> [--home <dir>]   put a thread away, or bring it back
   verdandi chat  --worktree [--thread <id>] | --remove-worktree [--force]   start a new thread in a git worktree of its own (with --thread, recreate that thread's removed worktree), or remove the thread's worktree and keep its branch
-  verdandi run <task> [--project <path> | --here | --workspace | --thread <id>] [--mode ask|plan|build] [--route auto|<harness>/<model>/<effort>] [--deny-requests] [--json] [--home <dir>]   send one turn headless, on a new thread in --project (default: this folder when it's a project, else the workspace) or on the thread named, running verdandid for the run unless one is running, and print the agent's text, following the turns Verdandi sends when it escalates the task; --route pins the thread to a route or with auto lets the router pick; the agent's requests stop the run unless --deny-requests denies them, and nothing is ever approved; --json prints one object at the end instead (threadId, turnId, taskId, status, route, cost, reply, escalations, error); Ctrl+C interrupts the turn. Exits 0 completed, 1 couldn't run it, 2 bad flags, 3 failed (an agent error, or a failed verifier the task didn't escalate past), 4 stopped at a task limit, 5 the agent asked for approval or an answer, 130 interrupted
+  verdandi run <task> [--project <path> | --here | --workspace | --thread <id>] [--worktree] [--mode ask|plan|build] [--route auto|<harness>/<model>/<effort>] [--deny-requests] [--json] [--home <dir>]   send one turn headless, on a new thread in --project (default: this folder when it's a project, else the workspace), in a git worktree of its own with --worktree (never the workspace's), or on the thread named, running verdandid for the run unless one is running, and print the agent's text, following the turns Verdandi sends when it escalates the task; --route pins the thread to a route or with auto lets the router pick; the agent's requests stop the run unless --deny-requests denies them, and nothing is ever approved; --json prints one object at the end instead (threadId, turnId, taskId, status, route, cost, reply, escalations, error); Ctrl+C interrupts the turn. Exits 0 completed, 1 couldn't run it, 2 bad flags, 3 failed (an agent error, or a failed verifier the task didn't escalate past), 4 stopped at a task limit, 5 the agent asked for approval or an answer, 130 interrupted
+  verdandi schedule add <name> <task> --cron <expression> [--project <path> | --here | --workspace] [--worktree | --no-worktree] [--mode ask|plan|build] [--route auto|<harness>/<model>/<effort>] [--home <dir>]   have the OS scheduler (crontab, launchd or Task Scheduler) run the task on the cron expression, in local time, as verdandi run --deny-requests --json on a new thread in the folder named, or else the one verdandi run would pick here; in a project's git repo each run gets a worktree of its own unless --no-worktree. Every request is denied; spend caps and task limits apply
+  verdandi schedule list | remove <name> [--home <dir>]   list the jobs with their next run and how the last one went (status, exit code, cost, thread), or unregister one and delete its files and log
   verdandi costs [--home <dir>] [--days <n>] [--project <path>]   cost per completed task on each route, then spend, cost by task class, usage by model, override rate and estimated savings vs always-Opus
   verdandi search <query> [--project <path>] [--home <dir>]   find past sessions' messages containing the query (3 characters or more), newest first, archived threads included
   verdandi skills list | history <name> | revert <name> <n> | pin <name> | unpin <name> | restore <name> [--home <dir>]   list the profile's skills (which the agent proposes with skill_manage and you approve; those Verdandi created show stale after 14 days unused), the ones archived after 30 or deleted (kept, not loaded), and those in the read-only extra folders of skills.yaml; history lists the changes written to a skill, newest first, and revert puts change n's file back; pin stops agents changing a skill and Verdandi archiving it, unpin undoes that; restore brings an archived skill back; all but list go through the running verdandid
@@ -50,6 +53,7 @@ const commands: Record<string, (argv: readonly string[]) => Promise<void>> = {
   gc,
   skills,
   key,
+  schedule,
 };
 
 const args = Bun.argv.slice(2);

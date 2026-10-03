@@ -19,7 +19,7 @@ import {
 import { Effect, Fiber, Queue, Schema, Stream } from "effect";
 import { parseBatchRoute } from "../batch/batch.ts";
 import { flag, resolveHome, type ServerFile } from "../home/home.ts";
-import { defaultFolder } from "../home/workspace.ts";
+import { defaultFolder, isWorkspace } from "../home/workspace.ts";
 import { serverFor } from "../main.ts";
 import { expandHome } from "../projects/project.ts";
 import { connect } from "../rpc/client.ts";
@@ -59,11 +59,12 @@ type Options = {
   readonly projectPath: string;
   readonly json: boolean;
   readonly deny: boolean;
+  readonly worktree: boolean;
 };
 
 const valueFlags = ["--home", "--project", "--thread", "--mode", "--route"];
 // `--dev-fake-harness` goes to the verdandid a run starts when none is running.
-const switches = ["--json", "--deny-requests", "--here", "--workspace", "--dev-fake-harness"];
+const switches = ["--json", "--deny-requests", "--here", "--workspace", "--worktree", "--dev-fake-harness"];
 
 /** The task is every word that isn't a flag or a flag's value. Fails naming the flag or value at fault. */
 const parse = (argv: readonly string[]): Options => {
@@ -87,17 +88,23 @@ const parse = (argv: readonly string[]): Options => {
   const named = folderFlags.filter((f) => f !== false);
   if (threadId && named.length) throw new Error(`--thread continues a thread in its own folder, so leave out ${named.join(" and ")}.`);
   if (named.length > 1) throw new Error(`Pick one of ${named.join(" and ")}.`);
+  const worktree = argv.includes("--worktree");
+  if (worktree && threadId) throw new Error("--worktree starts a new thread in a worktree; leave out --thread, or --worktree.");
   const home = resolveHome(argv);
+  // Unless named, the current folder when it's a project, else the workspace (DESIGN §13).
+  const projectPath = threadId ? "" : project === undefined ? defaultFolder(home, process.cwd(), argv) : resolve(expandHome(project));
+  if (worktree && isWorkspace(home, projectPath))
+    throw new Error("--worktree runs a project's thread in a worktree of its own, never the workspace's. Name a project with --project.");
   return {
     home,
     text,
     mode,
     route: route === undefined ? undefined : parseBatchRoute(route),
     threadId,
-    // Unless named, the current folder when it's a project, else the workspace (DESIGN §13).
-    projectPath: threadId ? "" : project === undefined ? defaultFolder(home, process.cwd(), argv) : resolve(expandHome(project)),
+    projectPath,
     json: argv.includes("--json"),
     deny: argv.includes("--deny-requests"),
+    worktree,
   };
 };
 
@@ -131,7 +138,8 @@ const runTurn = (server: ServerFile, o: Options) =>
     const threadId = o.threadId ?? uuid<ThreadId>();
     if (!o.threadId) {
       const route = o.route !== "auto" && o.route ? { route: o.route } : {};
-      yield* dispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: o.projectPath, ...route });
+      const worktree = o.worktree ? { worktree: true } : {};
+      yield* dispatch({ type: "thread.create", commandId: uuid<CommandId>(), threadId, projectPath: o.projectPath, ...route, ...worktree });
     }
 
     // The consumer only hands messages over; every RPC call happens in the loop below, outside it (ADR 0008).
