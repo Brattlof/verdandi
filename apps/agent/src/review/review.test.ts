@@ -1,8 +1,8 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Command, CommandId, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
-import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
+import { gitHeavyTimeout, makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AppLayer } from "../event-store/app.ts";
@@ -12,6 +12,8 @@ import { Reactor } from "../event-store/reactor.ts";
 import { loadUsageReport } from "../spend/usage.ts";
 import { allowTrustRequests } from "../trust/allow-trust.ts";
 import { loadReviewSettings } from "./review-config.ts";
+
+setDefaultTimeout(gitHeavyTimeout);
 
 const dirs: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];

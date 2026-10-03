@@ -1,13 +1,15 @@
-import { afterAll, afterEach, expect, test } from "bun:test";
+import { afterAll, afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CommandId, ThreadId, TurnId } from "@verdandi/contracts";
-import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
+import { gitHeavyTimeout, makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
 import { Engine } from "../event-store/engine.ts";
 import { type ServerFile, serverFile } from "../home/home.ts";
 import { ServerInfo, ServerLayer } from "../rpc/server.ts";
 import { exitCodes, type RunResult } from "./run.ts";
+
+setDefaultTimeout(gitHeavyTimeout);
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {

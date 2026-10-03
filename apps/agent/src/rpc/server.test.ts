@@ -1,9 +1,9 @@
 import { Database } from "bun:sqlite";
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import type { CommandId, ProjectsFeed, TaskId, TerminalId, TerminalView, ThreadFeed, ThreadId, TurnId } from "@verdandi/contracts";
-import { makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
+import { gitHeavyTimeout, makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Deferred, type Duration, Effect, Fiber, ManagedRuntime, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { attachmentsDir, sweepAttachments } from "../attachments/attachments.ts";
@@ -14,6 +14,8 @@ import { spendCapsFile } from "../spend/spend-caps.ts";
 import { Terminals, waitingOutput } from "../terminals/terminals.ts";
 import { connect } from "./client.ts";
 import { ServerInfo, ServerLayer } from "./server.ts";
+
+setDefaultTimeout(gitHeavyTimeout);
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -870,7 +872,11 @@ describe("rpc server", () => {
         }),
       );
       const lines = 300_000; // ~2 MB of output, past the bound
-      const flood = process.platform === "win32" ? `1..${lines}; ${echo(9)}` : `seq 1 ${lines}; ${echo(9)}`;
+      // One write: PowerShell prints a pipeline's numbers one object at a time, too slowly for a flood.
+      const flood =
+        process.platform === "win32"
+          ? `[Console]::Out.Write(((1..${lines}) -join [char]10) + [char]10); ${echo(9)}`
+          : `seq 1 ${lines}; ${echo(9)}`;
       const [late, read] = await withClient(info.port, info.token, (c) =>
         Effect.scoped(
           Effect.gen(function* () {

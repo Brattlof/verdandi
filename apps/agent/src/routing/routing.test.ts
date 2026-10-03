@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -15,13 +15,15 @@ import {
   type ThreadId,
   type TurnId,
 } from "@verdandi/contracts";
-import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
+import { gitHeavyTimeout, makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { AppLayer } from "../event-store/app.ts";
 import { Engine } from "../event-store/engine.ts";
 import { loadThreadView } from "../event-store/projector.ts";
 import { Reactor } from "../event-store/reactor.ts";
+
+setDefaultTimeout(gitHeavyTimeout);
 
 const dirs: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];

@@ -22,7 +22,7 @@ const tempDir = () => {
 
 const route = { harness: "fake", model: "fake", effort: "low" } as const;
 const secret = `sk-${"x".repeat(24)}`;
-const excluded = "/work/client";
+const excluded = resolve("/work/client");
 
 /** Records a two-turn task in a project and a turn in an excluded one, and returns verdandid's home and the first project. */
 const record = async () => {
