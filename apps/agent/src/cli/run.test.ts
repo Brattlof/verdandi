@@ -2,7 +2,7 @@ import { afterAll, afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CommandId, ThreadId, TurnId } from "@verdandi/contracts";
-import { gitHeavyTimeout, makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
+import { git, gitHeavyTimeout, makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
 import { Engine } from "../event-store/engine.ts";
 import { type ServerFile, serverFile } from "../home/home.ts";
@@ -332,6 +332,24 @@ test(
     expect(stderr).toContain("The verifier exit 1 failed (exit 1)");
     expect(stderr).toContain("the thread was reverted before Verdandi decided whether to escalate it");
     expect(code).toBe(exitCodes.failed);
+  },
+  spawnTimeout,
+);
+
+test(
+  "--worktree runs the new thread in a worktree of its own, never in the workspace",
+  async () => {
+    const { home } = await startServer();
+    const repo = makeTempRepo({ "a.txt": "one\n" });
+    cleanups.push(async () => removeTempHome(repo));
+    const { stdout, code } = await verdandiRun(home, [...pinned, "--json", "--project", repo, "--worktree", "hello"]);
+    const result = JSON.parse(stdout) as RunResult;
+    expect(code).toBe(exitCodes.completed);
+    expect(git(repo, "branch", "--list", `verdandi/${result.threadId}`)).toContain(`verdandi/${result.threadId}`);
+
+    const workspace = await verdandiRun(home, [...pinned, "--workspace", "--worktree", "hello"]);
+    expect(workspace.stderr).toContain("never the workspace's");
+    expect(workspace.code).toBe(exitCodes.usage);
   },
   spawnTimeout,
 );

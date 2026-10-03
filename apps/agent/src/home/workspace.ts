@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Schema } from "effect";
 import { expandHome } from "../projects/project.ts";
 
@@ -24,10 +24,16 @@ export const ensureWorkspace = (home: string) => {
 };
 
 /** Whether `folder` is inside a git repo: it or a folder above it holds `.git` (a folder, or a worktree's file). */
-const inRepo = (folder: string): boolean => {
+export const inRepo = (folder: string): boolean => {
   if (existsSync(join(folder, ".git"))) return true;
   const up = dirname(folder);
   return up !== folder && inRepo(up);
+};
+
+/** Whether `folder` is the profile's workspace, however it's spelled (a symlink, a trailing slash). */
+export const isWorkspace = (home: string, folder: string) => {
+  const real = (path: string) => (existsSync(path) ? realpathSync.native(path) : resolve(path));
+  return real(folder) === real(workspaceDir(home));
 };
 
 /** The CLI remembers one thread per folder, in the Verdandi home. */
