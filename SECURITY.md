@@ -33,9 +33,9 @@ A bypass of a boundary in ADR 0025:
 
 | Area | Where |
 |---|---|
-| RPC socket, token and `Origin` check | `apps/server/src/rpc/server.ts` |
-| LAN gate | `apps/server/src/rpc/lan-gate.ts` |
-| Process spawning and its environment | `apps/server/src/home/child-env.ts`, `apps/server/src/verifiers/verify.ts`, `apps/server/src/terminals/` |
-| Project paths and attachments | `apps/server/src/projects/project.ts`, `apps/server/src/attachments/attachments.ts` |
-| Memory and skill writes | `apps/server/src/memory/`, `apps/server/src/skills/skill-files.ts` |
-| Trusting a project's own commands (verifiers, worktree setup) | `apps/server/src/trust/`, `apps/server/src/event-store/reactor.ts` |
+| RPC socket, token and `Origin` check | `apps/agent/src/rpc/server.ts` |
+| LAN gate | `apps/agent/src/rpc/lan-gate.ts` |
+| Process spawning and its environment | `apps/agent/src/home/child-env.ts`, `apps/agent/src/verifiers/verify.ts`, `apps/agent/src/terminals/` |
+| Project paths and attachments | `apps/agent/src/projects/project.ts`, `apps/agent/src/attachments/attachments.ts` |
+| Memory and skill writes | `apps/agent/src/memory/`, `apps/agent/src/skills/skill-files.ts` |
+| Trusting a project's own commands (verifiers, worktree setup) | `apps/agent/src/trust/`, `apps/agent/src/event-store/reactor.ts` |

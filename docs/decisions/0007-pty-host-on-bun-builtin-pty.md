@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for Windows (M0 spike 007, 2026-09-29). macOS verified by the terminal tests in `apps/server/src/rpc/server.test.ts` (2026-10-01): open, output, reattach, close with no shell left, and a host crash. Linux is unverified.
+Accepted for Windows (M0 spike 007, 2026-09-29). macOS verified by the terminal tests in `apps/agent/src/rpc/server.test.ts` (2026-10-01): open, output, reattach, close with no shell left, and a host crash. Linux is unverified.
 
 ## Context
 

@@ -11,8 +11,8 @@
         "typescript": "7.0.2",
       },
     },
-    "apps/server": {
-      "name": "@verdandi/server",
+    "apps/agent": {
+      "name": "@verdandi/agent",
       "bin": {
         "verdandi": "./src/bin.ts",
       },
@@ -268,6 +268,8 @@
 
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
 
+    "@verdandi/agent": ["@verdandi/agent@workspace:apps/agent"],
+
     "@verdandi/contracts": ["@verdandi/contracts@workspace:packages/contracts"],
 
     "@verdandi/decisions": ["@verdandi/decisions@workspace:packages/decisions"],
@@ -277,8 +279,6 @@
     "@verdandi/harness-native": ["@verdandi/harness-native@workspace:packages/harness-native"],
 
     "@verdandi/router": ["@verdandi/router@workspace:packages/router"],
-
-    "@verdandi/server": ["@verdandi/server@workspace:apps/server"],
 
     "@verdandi/testkit": ["@verdandi/testkit@workspace:packages/testkit"],
 

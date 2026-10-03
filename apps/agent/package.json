@@ -1,5 +1,5 @@
 {
-  "name": "@verdandi/server",
+  "name": "@verdandi/agent",
   "private": true,
   "type": "module",
   "dependencies": {

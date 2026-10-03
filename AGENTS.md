@@ -158,7 +158,7 @@ The most common defect is a change that works on the path you tested and is miss
 
 | Working in | Read |
 |---|---|
-| `apps/server/src/event-store/` | [`apps/server/src/event-store/AGENTS.md`](apps/server/src/event-store/AGENTS.md) |
+| `apps/agent/src/event-store/` | [`apps/agent/src/event-store/AGENTS.md`](apps/agent/src/event-store/AGENTS.md) |
 
 ## How it works
 
@@ -212,7 +212,7 @@ Not built yet: the native harness's file, terminal and subagent tools and provid
 ## Where code lives
 
 - **Now:**
-  - `apps/server`: verdandid and the `verdandi` CLI (`start`, `open`, `chat`, `run`, `doctor`, `gc`, `costs`, `routing`, `decisions`, `batch`, `search`, `skills`, `trajectories`, `key`); `src/batch` runs eval sets. `src` has a folder per feature (`routing`, `decisions`, `memory`, `skills`, `review`, `spend`, `tasks`, `search`, `worktrees`, `checkpoints`, `diffs`, `terminals`, `attachments`, `verifiers`, `gc`, `batch`, `projects`, `home`, `native`), each holding its logic, tests and CLI command (`*-cli.ts`). `src/event-store` holds the decider, projector, engine, reactor, SQLite and migrations; `src/rpc` the WebSocket API; `src/cli` `verdandi chat`, `run`, `open` and `doctor`;
+  - `apps/agent`: the agent, verdandid and the `verdandi` CLI in one binary (`start`, `open`, `chat`, `run`, `doctor`, `gc`, `costs`, `routing`, `decisions`, `batch`, `search`, `skills`, `trajectories`, `key`); `src/batch` runs eval sets. `src` has a folder per feature (`routing`, `decisions`, `memory`, `skills`, `review`, `spend`, `tasks`, `search`, `worktrees`, `checkpoints`, `diffs`, `terminals`, `attachments`, `verifiers`, `gc`, `batch`, `projects`, `home`, `native`), each holding its logic, tests and CLI command (`*-cli.ts`). `src/event-store` holds the decider, projector, engine, reactor, SQLite and migrations; `src/rpc` the WebSocket API; `src/cli` `verdandi chat`, `run`, `open` and `doctor`;
   - `apps/web`: the web UI (React). `src/state.ts` folds feed messages into what the page shows, `src/client.ts` is the RPC connection, `src/ui` holds shared widgets, and each feature (`threads`, `composer`, `routing`, `spend`, `diffs`, `memory`, `terminals`, `worktrees`) has its own folder;
   - `packages/contracts`: every schema sent over the wire or persisted (commands, events, RPC, harness contract, routes);
   - `packages/harness-claude-code`: the Claude Code adapter and event normalization. `src/smoke.ts` is a manual live check, never run in tests;
@@ -226,7 +226,7 @@ Not built yet: the native harness's file, terminal and subagent tools and provid
   - `.agents/`: agent configuration and skills;
   - `scripts/`: repo tooling.
 - **Planned (DESIGN.md §20):**
-  - `apps/desktop`;
+  - `apps/desktop`: an Electron shell with no UI of its own; its window loads `apps/web` from the verdandid it runs (DESIGN §11), so UI changes go in `apps/web` only;
   - more `packages/harness-*`, `packages/models`, `packages/memory`, `packages/skills`;
   - `plugins/`;
   - `lab/` (Python, offline).

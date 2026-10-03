@@ -1,6 +1,6 @@
 // Times the two read paths that rebuild from scratch (#140): a turn end's task-outcome rebuild on a long
 // thread, and a routed turn.send's routing-memory load in a project with many tasks.
-//   bun apps/server/scripts/bench-rebuilds.ts [--turns 1000] [--tasks 5000] [--runs 30]
+//   bun apps/agent/scripts/bench-rebuilds.ts [--turns 1000] [--tasks 5000] [--runs 30]
 // Everything runs in-process on a temporary home and project folder, removed at the end; never ~/.verdandi.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { arch, cpus, platform, release, tmpdir, totalmem } from "node:os";

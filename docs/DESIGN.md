@@ -713,7 +713,9 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 
 **Who runs verdandid.** One per profile. Bare `verdandi` and `verdandi run` connect to the one running, or else start one in their own process that stops when they end; meanwhile other clients can connect to it (`verdandi open`) and lose it when the chat quits. Whatever has to outlive a chat needs an always-on verdandid, `verdandi start` or the desktop app: other devices, and in M5 the scheduler and gateway, which only an always-on verdandid starts, so a bot doesn't go offline when a terminal closes.
 
-**One repo, separate apps.** The agent is the `verdandi` binary (verdandid and the CLI, `apps/server`); the web UI is served by it (`apps/web`); the desktop app is a separate Electron app (`apps/desktop`) that ships its own installer and runs that binary. They share `packages/contracts`, which is why they stay in one repo, as Hermes keeps its agent and desktop app.
+**One repo, separate apps.** The agent is the `verdandi` binary (verdandid and the CLI, `apps/agent`); the web UI is served by it (`apps/web`); the desktop app is a separate Electron app (`apps/desktop`) that ships its own installer and runs that binary. They share `packages/contracts`, which is why they stay in one repo, as Hermes keeps its agent and desktop app.
+
+**One UI for web and desktop.** The desktop app has no UI of its own: its window loads `apps/web` from the verdandid it runs, the same bundle a browser gets, so a UI change is made once. What only a desktop app can do (tray, OS notifications, open at login, auto-update) lives in Electron's main process, and the page reaches it through one small preload bridge (`window.verdandiDesktop`) that it feature-detects; each such feature has a browser fallback or is simply absent in the browser. Nothing in `apps/web` is forked per app, and the bridge check is the only place the page asks where it runs.
 
 **Protocol:** a WebSocket on `127.0.0.1`, with a per-profile token. Typed RPC contracts shared by server and clients:
 - `command.dispatch`
@@ -966,7 +968,7 @@ The ADR also lists what isn't a vulnerability, who the principals are once the g
   - tool outputs are marked as untrusted data;
   - untrusted text that Verdandi hands the agent itself goes through the same scan: what an escalation passes on (a verifier's output, the agent's blocked reason, a repeated tool error), and Verdandi tools' results built from stored text, such as search hits. A hit isn't withheld, since the agent needs the text to go on. It's handed over under a warning, recorded, and shown on the turn;
   - gateway messages from senders not on the allowlist are ignored;
-  - **turn taint:** content scanning can't catch every poisoned fact, so untrusted input is also tracked by where it came from. Once a turn calls a network tool (Claude Code's `WebFetch` and `WebSearch`, the native harness's `web_fetch` and `web_search`) or gets text flagged as an injection, the rest of the turn is tainted, and its session holds untrusted input from then on. The list is closed and kept in one place (`apps/server/src/routing/untrusted.ts`); a shell command that fetches can't be told apart reliably, and the user's own MCP servers are trusted like the shell. A `memory_save` in a tainted turn becomes a proposal the user approves, whatever `approveSaves` says, and the session's taint floors its route (§8.7).
+  - **turn taint:** content scanning can't catch every poisoned fact, so untrusted input is also tracked by where it came from. Once a turn calls a network tool (Claude Code's `WebFetch` and `WebSearch`, the native harness's `web_fetch` and `web_search`) or gets text flagged as an injection, the rest of the turn is tainted, and its session holds untrusted input from then on. The list is closed and kept in one place (`apps/agent/src/routing/untrusted.ts`); a shell command that fetches can't be told apart reliably, and the user's own MCP servers are trusted like the shell. A `memory_save` in a tainted turn becomes a proposal the user approves, whatever `approveSaves` says, and the session's taint floors its route (§8.7).
 - **A project's own commands run only once you trust them.** Its verifiers (`escalation.verifiers` in `.verdandi/routing.yaml`) and worktree setup (`.verdandi/worktree.yaml`) are shell commands a cloned repo's author, or an agent allowed only to edit files, can write. The first time verdandid would run a list, it asks on the turn (a worktree's setup waits for the thread's next turn), showing the exact commands; allowing it records trust in that project for that exact list, by hash, and a changed list asks again, so a turn that rewrites them can't run its new commands unasked. Denying skips them: the turn says so, and the task records no verifier run. Unattended runs only run trusted lists: `verdandi run` stops at the request (exit code 5), and a batch never trusts a repository's own commands, using each task's `verify` instead. The projects page and `verdandi chat`'s `/trusted` and `/untrust` list and revoke them. Like other approvals, this is consent, not containment.
 - **Plugins never run inside verdandid.** In process, a plugin could read the database, the profile token and every key verdandid holds, and a malicious one would be out of reach of any defence. So:
   - content-only bundles (skills, MCP server config, commands) come first; they carry no code verdandid loads;
@@ -1035,7 +1037,7 @@ The ADR also lists what isn't a vulnerability, who the principals are once the g
 | Decision models | `rules` by default; Laya (ONNX through `onnxruntime-node`) in a worker process where it beats rules (ADR 0009); ollaya for larger local models; the Jev API if turned on | §9.8 |
 | Web UI | React 19 + TanStack Virtual, bundled by Bun from an HTML import and served by verdandid. A router, a state library or the React Compiler are added when a view needs them. | Virtualized long threads, no separate bundler or dev server |
 | UI kit | Tailwind 4 (through `bun-plugin-tailwind`), Base UI used directly for accessible widgets, Streamdown, Shiki, `@pierre/diffs`, Tiptap | Each is built for its job. Base UI is unstyled, so Tailwind styles everything and there is no component layer to copy in (ADR 0012) |
-| Desktop | **Electron** + electron-builder, with auto-update. It runs the compiled verdandid binary as a separate process. | Same Chromium on every OS. VS Code, Cursor, T3 Code and Hermes all ship on it. The server runs independently of the window, which the scheduler and gateway need anyway. |
+| Desktop | **Electron** + electron-builder, with auto-update. It runs the compiled verdandid binary as a separate process, and its window loads the web UI from it (§11). | Same Chromium on every OS. VS Code, Cursor, T3 Code and Hermes all ship on it. The server runs independently of the window, which the scheduler and gateway need anyway. |
 | Gateway | Official or leading SDK for each platform, as plugins | — |
 | Local models | Ollama (and any OpenAI-compatible local server) | Free auxiliary and classifier work, and a local agent option |
 | Tests | `bun test` (with Effect's test services, e.g. TestClock), Playwright, golden tests for the router, install and update end-to-end tests on all three OSes | Covers everything from the router's rules to the installer |
@@ -1051,7 +1053,7 @@ The ADR also lists what isn't a vulnerability, who the principals are once the g
 ```
 verdandi/
 ├─ apps/
-│  ├─ server/                    # verdandid + `verdandi` CLI
+│  ├─ agent/                     # the agent: verdandid + `verdandi` CLI, one binary
 │  │  └─ src/                    # one folder per feature: its logic, tests and CLI command
 │  │     ├─ bin.ts · main.ts      # CLI entry · service wiring (Layer composition)
 │  │     ├─ event-store/          # engine · decider · projector · reactor · sqlite + migrations
@@ -1067,7 +1069,8 @@ verdandi/
 │  ├─ web/                       # React UI; src/ has one folder per feature: threads,
 │  │                             #   composer, routing, spend, diffs, terminals, memory,
 │  │                             #   worktrees, skills, automations, settings; ui/ is shared
-│  └─ desktop/                   # Electron: main, preload, server manager, tray, updater
+│  └─ desktop/                   # Electron shell with no UI of its own (it loads apps/web):
+│                                #   main, preload bridge, verdandid process, tray, updater
 ├─ packages/
 │  ├─ contracts/                 # schemas: ids, commands, events, harness events,
 │  │                             #   routing, catalog, rpc, trajectories
@@ -1084,7 +1087,6 @@ verdandi/
 │  │                             #   (rules, laya, ollaya, jev, llm)
 │  ├─ trajectories/              # trajectory builder, redaction, exporters, batch runner core
 │  ├─ exec/                      # execution backends: local, docker, ssh
-│  ├─ client/                    # shared client runtime (web + desktop)
 │  └─ testkit/                   # FAKE harness + fake provider, fixtures, helpers
 ├─ plugins/                      # first-party: platform-telegram, platform-discord,
 │                                #   platform-slack, memory-*, exec-*
@@ -1103,8 +1105,8 @@ verdandi/
 - `contracts` depends on nothing.
 - `router` depends only on `contracts`, and never imports I/O code.
 - Harness, model, decisions, memory, skills, tools and trajectories packages depend on `contracts` and `shared` helpers.
-- `apps/server` depends on everything.
-- `web` never imports from `server`.
+- `apps/agent` depends on everything.
+- `web` never imports from `agent`, and `desktop` imports neither: it runs the agent binary and loads the web UI from it.
 - `lab/` never imports TypeScript code. It reads exported files only.
 
 Bun's isolated installs enforce these rules at the package level: an import fails if the package isn't declared as a dependency.

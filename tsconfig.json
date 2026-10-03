@@ -9,7 +9,7 @@
     { "path": "packages/tools" },
     { "path": "packages/harness-claude-code" },
     { "path": "packages/harness-native" },
-    { "path": "apps/server" },
+    { "path": "apps/agent" },
     { "path": "apps/web" }
   ]
 }
