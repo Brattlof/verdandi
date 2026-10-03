@@ -240,6 +240,11 @@ const runTurn = (server: ServerFile, o: Options) =>
         taskPinned = e.decision?.source === "pin";
       }
       if (e.type === "task.rerouted" || e.type === "task.deescalated") route = e.to;
+      // A fallback moves this turn only; the task's route stays (DESIGN §9.5).
+      if (e.type === "turn.rerouted" && e.turnId === current) {
+        if (!atLineStart) write("\n");
+        if (!o.json) process.stderr.write(`[fell back to ${e.to.model} ${e.to.effort} for this turn: ${e.reason}]\n`);
+      }
       if (e.type === "thread.route.changed") pinned = true;
       if (e.type === "thread.route.unpinned") pinned = false;
       if (e.type === "task.escalated" && e.turnId === current) {

@@ -7,7 +7,7 @@ export type FakeBlock =
 /**
  * One scripted response of the fake Anthropic API. `stop` defaults to `tool_use` when a block calls a tool, else
  * `end_turn`. `hang` streams the blocks, then keeps the response open until the request is aborted. `error` answers
- * with that HTTP status instead.
+ * with that HTTP status instead, and `headers`, e.g. `retry-after-ms: 1` to make the SDK's retries quick.
  */
 export type FakeReply =
   | {
@@ -16,7 +16,10 @@ export type FakeReply =
       readonly usage?: { readonly input?: number; readonly output?: number; readonly cacheRead?: number; readonly cacheWrite?: number };
       readonly hang?: boolean;
     }
-  | { readonly error: { readonly status: number; readonly type: string; readonly message: string } };
+  | {
+      readonly error: { readonly status: number; readonly type: string; readonly message: string };
+      readonly headers?: Readonly<Record<string, string>>;
+    };
 
 const encoder = new TextEncoder();
 const frame = (data: { readonly type: string }) => encoder.encode(`event: ${data.type}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -77,17 +80,17 @@ const events = (reply: Extract<FakeReply, { blocks: unknown }>, model: string) =
 /**
  * A fake Anthropic Messages API for tests: a `fetch` to hand the SDK client, which answers each request with the next
  * scripted reply as a real server-sent event stream, so no test reaches the network. `requests` keeps each request's
- * body and signal, in order; `arrived(n)` resolves once the `n`th request (1-based) has come in. A request past the
+ * body, headers and signal, in order; `arrived(n)` resolves once the `n`th request (1-based) has come in. A request past the
  * script fails the test with a 500 that says so.
  */
 export const makeFakeAnthropic = (script: readonly FakeReply[]) => {
   const queue = [...script];
-  const requests: { readonly body: Record<string, unknown>; readonly signal: AbortSignal | undefined }[] = [];
+  const requests: { readonly body: Record<string, unknown>; readonly headers: Headers; readonly signal: AbortSignal | undefined }[] = [];
   const waiters: { n: number; resolve: () => void }[] = [];
   const fetch = async (_url: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     const signal = init?.signal ?? undefined;
-    requests.push({ body, signal });
+    requests.push({ body, headers: new Headers(init?.headers), signal });
     for (const w of waiters.filter((w) => w.n <= requests.length)) w.resolve();
     const reply = queue.shift();
     if (!reply || "error" in reply) {
@@ -98,7 +101,7 @@ export const makeFakeAnthropic = (script: readonly FakeReply[]) => {
       };
       return new Response(JSON.stringify({ type: "error", error: { type: error.type, message: error.message } }), {
         status: error.status,
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...(reply && "headers" in reply ? reply.headers : {}) },
       });
     }
     const frames = events(reply, String(body.model));

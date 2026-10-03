@@ -567,6 +567,13 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
       </span>
     </p>
   ),
+  effort: ({ item }) => (
+    <p className="my-3 flex items-center gap-3 text-xs text-muted before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">
+      <span className="max-w-[80%] text-center">
+        Effort for this turn: {item.from} → {item.to}. {item.reason}
+      </span>
+    </p>
+  ),
   escalation: ({ item }) => (
     <p className="my-3 flex items-center gap-3 text-xs text-muted before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">
       <span className="max-w-[80%] text-center">

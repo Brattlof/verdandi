@@ -281,6 +281,23 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         sql`insert into quota (harness, payload, at) values (${e.harness}, ${JSON.stringify(e.quota)}, ${at})
             on conflict (harness) do update set payload = excluded.payload, at = excluded.at`,
     ),
+  // A context overflow is the request's fault, not the provider's.
+  "provider.failed": (e, at) =>
+    e.reason === "context_overflow"
+      ? Effect.void
+      : withSql(
+          (sql) =>
+            sql`insert into provider_health (provider, model, reason, until, reset, error, at)
+              values (${e.provider}, ${e.model ?? ""}, ${e.reason}, ${e.until}, ${e.reset ? 1 : 0}, ${e.error}, ${at})
+              on conflict (provider, model) do update set reason = excluded.reason, until = excluded.until, reset = excluded.reset,
+                error = excluded.error, at = excluded.at`,
+        ),
+  // A success on one model clears its own failure and its whole provider's, never another model's.
+  "provider.recovered": (e) =>
+    withSql((sql) => sql`delete from provider_health where provider = ${e.provider} and model in ('', ${e.model})`),
+  // The turn goes on at `to`; the thread keeps its route, which the next turn starts on.
+  "turn.rerouted": (e) => addItem(e.turnId, { kind: "route.switch", from: e.from, to: e.to, reason: e.reason }),
+  "turn.effort.set": (e) => addItem(e.turnId, { kind: "effort", from: e.from, to: e.to, reason: e.reason }),
   "approval.requested": insertRequest,
   "user-input.requested": insertRequest,
   "skill.proposed": (e, at) =>
@@ -476,7 +493,9 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         turns: number;
         last_turn_id: TurnId | null;
         task_escalations: number;
+        turn_fell_back: number;
         last_turn_verified: number;
+        last_turn_verifier_failed: number;
         task_decision: string | null;
         task_mode: string | null;
         cached_tokens: number;
@@ -493,12 +512,17 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           (select count(*) from turns n where n.thread_id = t.id) as turns,
           (select id from turns n where n.thread_id = t.id order by started_at desc, rowid desc limit 1) as last_turn_id,
           coalesce((select escalations from tasks where id = t.task_id), 0) as task_escalations,
+          exists (select 1 from events e where e.thread_id = t.id and e.type = 'turn.rerouted'
+            and json_extract(e.payload, '$.turnId') = t.running_turn_id) as turn_fell_back,
           -- The latest turn succeeded, and ran verifiers that all passed.
           coalesce((select n.status = 'success'
               and exists (select 1 from items i where i.turn_id = n.id and json_extract(i.payload, '$.kind') = 'verifier')
               and not exists (select 1 from items i where i.turn_id = n.id and json_extract(i.payload, '$.kind') = 'verifier'
                 and not json_extract(i.payload, '$.passed'))
             from turns n where n.thread_id = t.id order by n.started_at desc, n.rowid desc limit 1), 0) as last_turn_verified,
+          coalesce((select exists (select 1 from items i where i.turn_id = n.id and json_extract(i.payload, '$.kind') = 'verifier'
+                and not json_extract(i.payload, '$.passed'))
+            from turns n where n.thread_id = t.id order by n.started_at desc, n.rowid desc limit 1), 0) as last_turn_verifier_failed,
           (select payload from route_decisions where task_id = t.task_id) as task_decision,
           (select mode from turns where id = t.task_id) as task_mode,
           -- ponytail: the context a warm session has cached, read as every token the thread wrote to cache. Harnesses
@@ -553,7 +577,9 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           turns: row.turns,
           lastTurnId: row.last_turn_id,
           taskEscalations: row.task_escalations,
+          turnFellBack: row.turn_fell_back === 1,
           lastTurnVerified: row.last_turn_verified === 1,
+          lastTurnVerifierFailed: row.last_turn_verifier_failed === 1,
           pinned: row.pinned === 1,
           archived: row.archived === 1,
           worktree: row.worktree === null ? null : (JSON.parse(row.worktree) as WorktreeView),

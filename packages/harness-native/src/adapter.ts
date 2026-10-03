@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { VERSION } from "@anthropic-ai/sdk/version";
 import {
+  describeFailure,
   type HarnessAdapter,
   HarnessError,
   type HarnessEvent,
@@ -17,6 +18,7 @@ import { type CacheBreaks, cacheBreak, fingerprint, type Sent } from "./cache-ch
 import { nativeCatalog } from "./catalog.ts";
 import { access, fileTools, type Reach, runFileTool } from "./file-tools.ts";
 import { modeNotes, opensFiles, planTool, sessionPrefix, turnContent } from "./prompt.ts";
+import { classify } from "./provider-failure.ts";
 import { runTerminal, type Terminal, terminalTool } from "./terminal.ts";
 import {
   appendEntry,
@@ -25,6 +27,7 @@ import {
   entriesThrough,
   loadTranscript,
   requestMessages,
+  saidEffort,
   type Transcript,
 } from "./transcript.ts";
 
@@ -49,17 +52,14 @@ type Session = {
 };
 
 const maxTokens = 64_000;
+/** The beta that takes an effort-only system message within a conversation (ADR 0022). */
+const perMessageEffort = "mid-conversation-output-config-2026-07-01";
 const setKey = "Replace it with `verdandi key set anthropic` (or VERDANDI_ANTHROPIC_API_KEY), then restart verdandid.";
 
-/** What each HTTP status from the Anthropic API means for the user, and the fix. */
+/** What each HTTP status that isn't a provider failure (`classify`) means for the user, and the fix. */
 const statusFailures: Record<number, string> = {
   400: "The Anthropic API refused the request.",
-  401: `The Anthropic API rejected the API key. ${setKey}`,
   403: "The API key isn't allowed to do this, e.g. use this model. Check its workspace's permissions in the Anthropic Console, or pick another route.",
-  404: "The Anthropic API doesn't know this model. Pick another route.",
-  413: "The conversation is too large for one request. Start a new thread.",
-  429: "The Anthropic API is rate-limiting this key, even after retries. Wait a minute and try again, or pick a Claude Code route.",
-  529: "The Anthropic API is overloaded, even after retries. Try again shortly, or pick a Claude Code route.",
 };
 
 /** A failure of the turn, as the user reads it: the cause and the fix. Never holds the key. */
@@ -217,6 +217,12 @@ export const makeNativeAdapter = (options: {
   const reach = { ...options.reach, readable: [...options.reach.readable, options.terminal.outputs] };
   // Per transcript, so a fork (a new transcript) starts fresh; a diagnostic, kept in memory only.
   const lastSent = new WeakMap<Transcript, Sent>();
+  /**
+   * The providers and models this process reported failing, as `provider model` (model empty for the whole provider): a
+   * later success on one reports it's over. ponytail: kept in memory, so after a restart a failure lasts until its `until`;
+   * report every turn's first success instead if that turns out to keep a recovered provider out too long.
+   */
+  const failing = new Set<string>();
 
   /** Fingerprints a request and names what broke the cache since the session's last one (DESIGN §9.4). */
   const checkCache = (session: Session, body: Anthropic.MessageCreateParams) => {
@@ -293,6 +299,12 @@ export const makeNativeAdapter = (options: {
       ...(error !== undefined && { error }),
     });
     const text = (steer: string): Anthropic.TextBlockParam => ({ type: "text", text: steer });
+    // A turn's own effort (DESIGN §8.7 auto effort) goes in as an effort message before it, which keeps the cache; the
+    // next turn without one goes back to the route's the same way. A model without effort levels takes neither.
+    const wanted = input.effort ?? session.route.effort;
+    const levels = nativeCatalog.find((e) => e.model === session.route.model)?.efforts ?? [];
+    if (levels.length > 0 && wanted !== (saidEffort(session.transcript.entries) ?? session.route.effort))
+      append({ role: "system", content: [], output_config: { effort: wanted } });
     append({ role: "user", content });
     let spent = 0;
     for (let requests = 1; ; requests++) {
@@ -315,15 +327,34 @@ export const makeNativeAdapter = (options: {
         tools: session.transcript.prefix.tools,
         // The second breakpoint moves along with the conversation; the first ends the fixed prefix.
         cache_control: { type: "ephemeral" },
-        messages: requestMessages(session.transcript.entries),
+        messages: requestMessages(session.transcript.entries, entry.efforts.length > 0),
         // A model without effort levels (Haiku 4.5) takes neither effort nor adaptive thinking.
         ...(entry.efforts.length === 0 ? {} : { thinking: { type: "adaptive" as const }, output_config: { effort } }),
       };
       checkCache(session, body);
-      const stream = client.messages.stream(body, { signal });
-      for await (const event of stream)
-        if (event.type === "content_block_delta" && event.delta.type === "text_delta") yield { type: "text.delta", text: event.delta.text };
-      const reply = await stream.finalMessage();
+      let reply: Anthropic.Message;
+      try {
+        const perTurn = body.messages.some((m) => m.role === "system");
+        const stream = client.messages.stream(body, { signal, ...(perTurn && { headers: { "anthropic-beta": perMessageEffort } }) });
+        for await (const event of stream)
+          if (event.type === "content_block_delta" && event.delta.type === "text_delta")
+            yield { type: "text.delta", text: event.delta.text };
+        reply = await stream.finalMessage();
+      } catch (e) {
+        const failed = signal.aborted ? undefined : classify(e, model);
+        if (!failed) throw e;
+        failing.add(`${entry.provider} ${failed.model ?? ""}`);
+        // Verdandi records it and answers: allowed once `reroute` moved the turn to a fallback, else why it stops (DESIGN §9.5).
+        const r = yield* request(turn, (requestId) => ({ type: "provider.failed", requestId, provider: entry.provider, ...failed }));
+        if (r.decision === "allow") continue;
+        const why =
+          r.decision === "deny" && r.feedback
+            ? r.feedback
+            : `${describeFailure({ provider: entry.provider, ...failed })}. Try again then, or pick another route.`;
+        throw new HarnessError({ message: `${why} The API said: ${failed.error}${failed.reason === "auth" ? ` ${setKey}` : ""}` });
+      }
+      const recovered = [`${entry.provider} ${model}`, `${entry.provider} `].filter((key) => failing.delete(key));
+      if (recovered.length > 0) yield { type: "provider.succeeded", provider: entry.provider, model };
       // Whole and unchanged, thinking blocks included: they go back to the model exactly as it sent them.
       append({ role: "assistant", content: reply.content as Anthropic.ContentBlockParam[] });
       const tokens = {

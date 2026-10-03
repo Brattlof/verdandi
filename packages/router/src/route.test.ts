@@ -18,7 +18,7 @@ describe("pins", () => {
         text: `${SEARCH} src/auth.ts`,
         mode: "build",
         pin: { target: cc("haiku"), effort: "max" },
-        providers: { "claude-subscription": { healthy: false } },
+        health: [{ provider: "claude-subscription", reason: "overloaded", until: "2099-01-01T00:00:00.000Z", reset: false, error: "down" }],
       },
       strict,
       rules,

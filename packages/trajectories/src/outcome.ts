@@ -31,6 +31,7 @@ type Draft = {
   override: { readonly from: Route; readonly to: Route } | undefined;
   readonly verifierRuns: { command: string; passed: boolean }[];
   escalations: number;
+  fallbacks: number;
   readonly triggers: TaskOutcome["triggers"][number][];
   readonly usage: Map<string, Usage>;
   rating: TaskRating | null;
@@ -46,6 +47,7 @@ export const outcomeEventTypes = [
   "task.rerouted",
   "task.escalated",
   "task.deescalated",
+  "turn.rerouted",
   "turn.started",
   "turn.steered",
   "verifier.ran",
@@ -85,6 +87,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         override: undefined,
         verifierRuns: [],
         escalations: 0,
+        fallbacks: 0,
         triggers: [],
         usage: new Map(),
         rating: null,
@@ -120,6 +123,10 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
           task.current = e.to;
           task.escalations++;
         }
+        break;
+      // A fallback moves one turn, never the task's route.
+      case "turn.rerouted":
+        task.fallbacks++;
         break;
       case "turn.started":
         taskOf.set(e.turnId, task);
@@ -182,7 +189,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         : taskStatus[t.last];
     return [
       {
-        v: 3,
+        v: 4,
         taskId: t.taskId,
         threadId: t.threadId,
         route: t.route,
@@ -193,6 +200,7 @@ export const buildTaskOutcomes = (events: readonly StoredEvent[]): TaskOutcome[]
         verifierRuns: t.verifierRuns,
         escalations: t.escalations,
         triggers: t.triggers,
+        fallbacks: t.fallbacks,
         usage: [...t.usage.values()],
         wallMs: t.wallMs,
         ...(t.rating === null ? {} : { rating: t.rating }),

@@ -7,7 +7,7 @@ import { signals } from "./signals.ts";
 /** Work left after a build that a cheaper model finishes as well: commits, renames, changelogs (DESIGN §8.7). */
 const MECHANICAL: ReadonlySet<TaskClass> = new Set(["chore.git", "code.edit.mechanical", "docs.write"]);
 
-export type DeescalationInput = Pick<RouteInput, "text" | "providers" | "capped" | "untrusted"> & {
+export type DeescalationInput = Pick<RouteInput, "text" | "providers" | "health" | "capped" | "untrusted"> & {
   /** The task's route now, with what its session has cached (0 without one) and the subagents it keeps. */
   readonly current: NonNullable<RouteInput["current"]>;
 };

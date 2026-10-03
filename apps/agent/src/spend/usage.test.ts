@@ -25,7 +25,7 @@ const usage = (accessMode: "metered" | "subscription", costUsd: number) => ({
   costUsd,
 });
 const outcome = (status: TaskOutcome["status"], extra: Partial<TaskOutcome> = {}): TaskOutcome => ({
-  v: 3,
+  v: 4,
   taskId: crypto.randomUUID() as TaskId,
   threadId: "t1" as ThreadId,
   route,
@@ -35,6 +35,7 @@ const outcome = (status: TaskOutcome["status"], extra: Partial<TaskOutcome> = {}
   verifierRuns: [],
   escalations: 0,
   triggers: [],
+  fallbacks: 0,
   usage: [],
   wallMs: 0,
   ...extra,

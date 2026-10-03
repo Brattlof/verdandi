@@ -5,6 +5,7 @@ import type {
   AttachmentRef,
   Command,
   CommandId,
+  Effort,
   HarnessAdapter,
   HarnessEvent,
   HarnessId,
@@ -539,7 +540,14 @@ export const ReactorLive = Layer.effect(
         const cwd = threadFolder(thread.path, thread.worktree);
         // A setup command held for want of trust is asked about, and run if allowed, before the agent starts.
         if (worktree?.held && worktree.path) yield* runHeldSetup(threadId, turnId, worktree.held, worktree.path);
-        const route = JSON.parse(thread.route) as Route;
+        // A turn whose route's provider reported a reset still ahead starts on its fallback (DESIGN §9.5), and a light or
+        // heavy one runs at its own effort (§8.7).
+        const own = yield* sql<{ type: string; moved: string }>`
+          select type, json_extract(payload, '$.to') as moved from events
+          where thread_id = ${threadId} and type in ('turn.rerouted', 'turn.effort.set') and json_extract(payload, '$.turnId') = ${turnId}`;
+        const sticky = own.find((e) => e.type === "turn.rerouted");
+        const effort = own.find((e) => e.type === "turn.effort.set")?.moved as Effort | undefined;
+        const route = JSON.parse(sticky?.moved ?? thread.route) as Route;
         const adapter = registry[route.harness];
         if (!adapter) return yield* fail(`The ${route.harness} harness is not available in this verdandid. Pick another route.`);
         live.set(threadId, adapter);
@@ -570,6 +578,31 @@ export const ReactorLive = Layer.effect(
         const calls: Item[] = [];
         // Whether a tool call failed, so the task's tool errors are counted at the turn's end.
         let toolFailed = false;
+        /**
+         * Records a provider's failure and answers the harness waiting on it (DESIGN §9.5): moved to the fallback the decider
+         * chose, then allowed, or denied with why it stops. A failed dispatch denies it too, so the harness never waits forever.
+         */
+        const answerFailure = (event: Extract<HarnessEvent, { type: "provider.failed" }>) =>
+          Effect.gen(function* () {
+            const commandId = randomUUID() as CommandId;
+            yield* engine.dispatch({ type: "harness.report", commandId, threadId, turnId, event });
+            const recorded = yield* sql<{
+              type: string;
+              payload: string;
+            }>`select type, payload from events where command_id = ${commandId}`;
+            const moved = recorded.find((r) => r.type === "turn.rerouted");
+            if (moved) {
+              yield* adapter.reroute(threadId, (JSON.parse(moved.payload) as { to: Route }).to);
+              return yield* adapter.respond(threadId, event.requestId, { decision: "allow" });
+            }
+            const failed = recorded.find((r) => r.type === "provider.failed");
+            const why = failed && (JSON.parse(failed.payload) as { noFallback?: string }).noFallback;
+            yield* adapter.respond(threadId, event.requestId, { decision: "deny", ...(why && { feedback: why }) });
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.andThen(adapter.respond(threadId, event.requestId, { decision: "deny" }), Effect.failCause(cause)),
+            ),
+          );
         yield* adapter
           .run({
             threadId,
@@ -588,6 +621,7 @@ export const ReactorLive = Layer.effect(
             // Every Nth turn of the thread nudges the agent to save memory, in the turn's message, never the system prompt.
             ...(nudge && { nudge }),
             ...(limits && { limits }),
+            ...(effort && { effort }),
             // A revert waits to fork the conversation until this turn (ADR 0004).
             ...(thread.pending_fork && {
               fork: {
@@ -601,6 +635,7 @@ export const ReactorLive = Layer.effect(
               if (event.type === "text.delta") return engine.publishDelta(threadId, turnId, event.text);
               if (event.type === "item" && event.item.kind === "tool.call") calls.push(event.item);
               if (event.type === "item" && event.item.kind === "tool.result" && event.item.isError) toolFailed = true;
+              if (event.type === "provider.failed") return answerFailure(event);
               if (event.type !== "turn.finished") return report(threadId, turnId, event);
               finished = true;
               return Effect.gen(function* () {

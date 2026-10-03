@@ -44,15 +44,22 @@ const TaskOutcomeV2 = Schema.Struct({
   /** The user's latest rating of the task; absent when there's none, or it was cleared. */
   rating: Schema.optionalKey(TaskRating),
 });
+/** v3 reads as v4 with no fallbacks. */
+const TaskOutcomeV3 = Schema.Struct({
+  ...TaskOutcomeV2.fields,
+  v: Schema.Literal(3),
+  /** Each escalation trigger that fired on the task, in order, and the ladder step it took; `escalations` counts those that moved it. */
+  triggers: Schema.Array(Schema.Struct({ trigger: EscalationTrigger, step: EscalationStep })),
+});
 /**
  * How a task went, for routing memory and the lab (DESIGN §8.8). Rewritten after each of its turns and each
  * rating; its turns are final once the next task starts.
  */
 export const TaskOutcome = Schema.Struct({
-  ...TaskOutcomeV2.fields,
-  v: Schema.Literal(3),
-  /** Each escalation trigger that fired on the task, in order, and the ladder step it took; `escalations` counts those that moved it. */
-  triggers: Schema.Array(Schema.Struct({ trigger: EscalationTrigger, step: EscalationStep })),
+  ...TaskOutcomeV3.fields,
+  v: Schema.Literal(4),
+  /** How many of its turns moved to another target when a provider failed (DESIGN §9.5); `route` stays the one it started on. */
+  fallbacks: Schema.Number,
 });
 export type TaskOutcome = typeof TaskOutcome.Type;
 

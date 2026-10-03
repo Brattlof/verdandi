@@ -21,6 +21,7 @@ import {
   type MemoryScope,
   type MemoryView,
   type ProjectId,
+  type ProviderHealth,
   profileStream,
   type Resolution,
   type Route,
@@ -47,7 +48,9 @@ import {
   decideDeescalation,
   decideEscalation,
   decideExecuteRoute,
+  decideFallback,
   decideRoute,
+  decideTurnEffort,
   type RoutingContext,
   type RoutingThread,
   routeInputs,
@@ -120,8 +123,12 @@ export type DeciderState = {
         readonly aux?: AuxStarted;
         /** How many escalation steps the current task has taken (DESIGN §8.7). */
         readonly taskEscalations: number;
+        /** The running turn moved to a fallback once already (DESIGN §9.5). */
+        readonly turnFellBack: boolean;
         /** The latest turn succeeded and ran the project's verifiers, which all passed: the next one may de-escalate (DESIGN §8.7). */
         readonly lastTurnVerified: boolean;
+        /** A verifier failed on the latest turn: the next one is heavier (DESIGN §8.7 auto effort). */
+        readonly lastTurnVerifierFailed: boolean;
         /** Why that task runs on its route, and whether it started in plan mode. Null without a task, or one from before routing. */
         readonly taskDecision: RouteDecision | null;
         readonly taskPlanned: boolean;
@@ -166,6 +173,13 @@ export type DeciderState = {
    * background review's or a handoff's turn: background work leaves what's left to the user (DESIGN §14.5).
    */
   readonly shortQuota?: readonly HarnessId[];
+  /** The provider failures in force (DESIGN §9.5), loaded for a harness's provider reports. */
+  readonly health?: readonly ProviderHealth[];
+  /**
+   * The failure that keeps a `turn.send`'s continuing turn off its route's provider: one with a reset still ahead, so the
+   * turn starts on a fallback. Loaded for an unpinned thread's continuing task.
+   */
+  readonly stickyFailure?: ProviderHealth;
 };
 
 type Decision = Result.Result<Event[], CommandRejected>;
@@ -395,6 +409,37 @@ const worktreeProblem = (threadId: ThreadId, worktree: WorktreeView | null): str
 
 const memoryEntries = (memory: MemoryView) => [...memory.user, ...memory.project];
 
+/**
+ * The fallback for running turn `turnId` after `failure` (DESIGN §9.5): a `turn.rerouted` to commit, or why there's
+ * none. A background review or handoff, or a verdandid that routes nothing, never falls back.
+ */
+const fallbackFor = (
+  state: DeciderState,
+  threadId: ThreadId,
+  turnId: TurnId,
+  failure: ProviderHealth,
+  requestId?: string,
+): { readonly moved: Event } | { readonly reason: string } => {
+  const { thread, routing } = state;
+  if (!thread?.taskId || thread.aux || !routing) return { reason: "this thread doesn't fall back" };
+  const cap = reachedCap(state.spend);
+  const decided = decideFallback(thread, cap ? { ...routing, capped: cap } : routing, failure, thread.turnFellBack);
+  if (!("target" in decided)) return decided;
+  const { harness, model } = decided.target;
+  const to = { harness, model, effort: decided.effort, ...(thread.route.subagents && { subagents: thread.route.subagents }) };
+  const moved = {
+    type: "turn.rerouted",
+    v: 1,
+    threadId,
+    taskId: thread.taskId,
+    turnId,
+    from: thread.route,
+    to,
+    reason: decided.reason,
+  } as const;
+  return { moved: requestId === undefined ? moved : { ...moved, requestId } };
+};
+
 /** The catalog's target for `route`, when the catalog is loaded. */
 const targetFor = (state: DeciderState, route: Route) => state.catalog && targetOf(route, state.catalog);
 
@@ -422,6 +467,19 @@ const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, ev
       return state.thread
         ? accept({ type: "harness.quota.reported", v: 1, threadId, turnId, harness: state.thread.route.harness, quota: event.quota })
         : accept();
+    // Recorded either way; the fallback, when there is one, right after, so the harness retries there (DESIGN §9.5).
+    case "provider.failed": {
+      if (!state.thread) return accept();
+      const { type: _, requestId, ...failure } = event;
+      const failed = { type: "provider.failed", v: 1, threadId, turnId, harness: state.thread.route.harness, ...failure } as const;
+      const next = fallbackFor(state, threadId, turnId, failure, requestId);
+      return "moved" in next ? accept(failed, next.moved) : accept({ ...failed, noFallback: next.reason });
+    }
+    case "provider.succeeded": {
+      const { provider, model } = event;
+      const cleared = state.health?.some((h) => h.provider === provider && (h.model === undefined || h.model === model));
+      return cleared ? accept({ type: "provider.recovered", v: 1, threadId, turnId, provider, model }) : accept();
+    }
     case "approval.requested":
     case "user-input.requested":
       return state.thread?.aux
@@ -539,7 +597,28 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
               state.decisions?.answers ?? [],
             )
           : undefined;
-      if (!down) return onRoute ?? accept(...recorded, ...turn);
+      if (!down) {
+        // A route whose provider reported a reset still ahead starts the turn on a fallback (DESIGN §9.5).
+        const sticky = state.stickyFailure && fallbackFor(state, c.threadId, c.turnId, state.stickyFailure);
+        // A light or heavy turn runs at its own effort, inside the task's band (DESIGN §8.7 auto effort).
+        const { thread } = state;
+        const verifiers = thread.lastTurnVerifierFailed ? "failed" : thread.lastTurnVerified ? "passed" : undefined;
+        const own = state.routing && decideTurnEffort(thread, state.routing, text, verifiers);
+        const effort: Event[] = own
+          ? [
+              {
+                type: "turn.effort.set",
+                v: 1,
+                threadId: c.threadId,
+                turnId: c.turnId,
+                from: thread.route.effort,
+                to: own.effort,
+                reason: own.reason,
+              },
+            ]
+          : [];
+        return onRoute ?? accept(...recorded, ...turn, ...(sticky && "moved" in sticky ? [sticky.moved] : []), ...effort);
+      }
       const moved = { type: "task.deescalated", v: 1, threadId: c.threadId, taskId, turnId: c.turnId } as const;
       return (
         capped(state.spend, down.target) ??

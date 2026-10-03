@@ -7,6 +7,7 @@ import type {
   HarnessRunInput,
   InteractionMode,
   Item,
+  ProviderFailure,
   Resolution,
   Route,
   ThreadId,
@@ -26,6 +27,9 @@ import { Effect, Stream } from "effect";
  * A turn with a `fork` starts a new session holding the old one's turns up to the fork; `history` keeps each session's turns.
  * "tool <name> <json args>" calls one of the Verdandi tools the run was given, reporting the call and its result as items.
  * "fetch <url>" reads that page through a WebFetch tool call first, then runs the turn's next lines as its text.
+ * "provider <reason>" fails its model request with that provider failure (`overloaded`, `billing`, …, scoped to the
+ * route's model, for a minute) and waits for the answer: allowed, it answers on the model `reroute` moved the turn to;
+ * denied, it fails the turn with the denial's feedback.
  * A background review's prompt ("Verdandi is reviewing a finished task …") is answered as a reviewer would, in JSON:
  * it proposes remembering, in project memory, whatever follows the digest's first "remember", and creating the skill
  * named after its first "skill:". A handoff's prompt ("Verdandi is handing a thread over …") is answered with the
@@ -45,6 +49,7 @@ export const makeFakeHarness = () => {
     memory: HarnessRunInput["memory"];
     handoff: HarnessRunInput["handoff"];
     nudge: HarnessRunInput["nudge"];
+    effort: HarnessRunInput["effort"];
   }[] = [];
   /** Every `reroute`, in order. A rerouted turn answers on its new route's model. */
   const reroutes: { threadId: ThreadId; route: Route }[] = [];
@@ -114,6 +119,7 @@ export const makeFakeHarness = () => {
       memory: input.memory,
       handoff: input.handoff,
       nudge: input.nudge,
+      effort: input.effort,
     });
     routes.set(input.threadId, input.route);
     // A fork starts a new session holding the old one's turns up to `atTurnId`, like Claude Code's (ADR 0004).
@@ -131,6 +137,35 @@ export const makeFakeHarness = () => {
         quota: { status: "rejected", window: "five_hour", utilization: 1, resetsAt: "2099-01-01T00:00:00.000Z", usingOverage: true },
       };
       return Stream.concat(Stream.fromIterable([...start, quota]), reply(input.route.model, "on extra usage", "metered"));
+    }
+    if (input.text.startsWith("provider ")) {
+      const reason = input.text.slice("provider ".length) as ProviderFailure;
+      const requestId = `fake-request-${++requests}`;
+      const answered = new Promise<Resolution>((resolve) => waiting.set(requestId, resolve));
+      const failed: HarnessEvent = {
+        type: "provider.failed",
+        requestId,
+        provider: "fake",
+        model: routeOf(input).model,
+        reason,
+        until: new Date(Date.now() + 60_000).toISOString(),
+        reset: false,
+        error: `fake ${reason}`,
+      };
+      const after = Stream.unwrap(
+        Effect.promise(() => answered).pipe(
+          Effect.map((r) =>
+            r.decision === "allow"
+              ? reply(routeOf(input).model, `recovered on ${routeOf(input).model}`)
+              : Stream.make<HarnessEvent[]>({
+                  type: "turn.finished",
+                  status: "error",
+                  error: r.decision === "deny" && r.feedback ? r.feedback : `fake ${reason}`,
+                }),
+          ),
+        ),
+      );
+      return Stream.concat(Stream.fromIterable([...start, failed]), after);
     }
     if (input.text === "approve") {
       const edit = request(

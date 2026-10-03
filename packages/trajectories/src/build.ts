@@ -96,6 +96,12 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
       case "task.rerouted":
         items.push({ kind: "route.switch", from: e.from, to: e.to, reason: e.decision.reason });
         break;
+      case "turn.rerouted":
+        items.push({ kind: "route.switch", from: e.from, to: e.to, reason: e.reason });
+        break;
+      case "turn.effort.set":
+        items.push({ kind: "effort", from: e.from, to: e.to, reason: e.reason });
+        break;
       case "task.blocked":
         items.push({ kind: "blocked", reason: e.reason });
         break;

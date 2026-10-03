@@ -5,8 +5,9 @@ import { DevicePaired, DeviceRevoked } from "./devices.ts";
 import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { HandedSource, Item, Quota, UsageFields, VerifierRun } from "./items.ts";
 import { MemoryScope } from "./memory.ts";
+import { ProviderHealth } from "./provider-health.ts";
 import { Question, Resolution } from "./requests.ts";
-import { HarnessId, InteractionMode, Route } from "./route.ts";
+import { Effort, HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInputs, RouteInputsV1, UntrustedInput } from "./routing.ts";
 import { SkillAction, SkillChange, SkillState } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
@@ -167,6 +168,61 @@ export const HarnessQuotaReported = Schema.Struct({
   turnId: TurnId,
   harness: HarnessId,
   quota: Quota,
+});
+/**
+ * A model request of turn `turnId` on `harness` failed once its provider's SDK stopped retrying (DESIGN §9.5): `model`,
+ * or the whole `provider` when it's absent, is out of new routes until `until`, unless a success ends it sooner
+ * (`provider.recovered`); a `context_overflow` marks nothing. `noFallback` says why the turn didn't move to another
+ * target and fails instead; absent when it moved (`turn.rerouted`, right after this).
+ */
+export const ProviderFailed = Schema.Struct({
+  type: Schema.Literal("provider.failed"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  harness: HarnessId,
+  ...ProviderHealth.fields,
+  noFallback: Schema.optionalKey(Schema.String),
+});
+/** A request of turn `turnId` on `model` succeeded, so the failure recorded for it, or for its whole `provider`, is over. */
+export const ProviderRecovered = Schema.Struct({
+  type: Schema.Literal("provider.recovered"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  provider: Schema.String,
+  model: Schema.String,
+});
+/**
+ * Turn `turnId`'s provider failed, so the turn goes on at `to` (DESIGN §9.5): for this turn only, never as the thread's
+ * or task `taskId`'s route, which the next turn starts on again. With `requestId`, the harness's `provider.failed`
+ * request: committed before Verdandi answers it, so the harness retries there. Without one, committed right after the
+ * turn's `turn.started`, which runs on `to` from the start, since the route's provider reported a reset still ahead.
+ * Projected as a `route.switch` item of that turn.
+ */
+export const TurnRerouted = Schema.Struct({
+  type: Schema.Literal("turn.rerouted"),
+  v: v1,
+  threadId: ThreadId,
+  taskId: TaskId,
+  turnId: TurnId,
+  requestId: Schema.optionalKey(Schema.String),
+  from: Route,
+  to: Route,
+  reason: Schema.String,
+});
+/**
+ * Auto effort (DESIGN §8.7) runs turn `turnId` at `to` instead of its task's `from`, for this turn only: committed right
+ * after its `turn.started`. Projected as an `effort` item of that turn.
+ */
+export const TurnEffortSet = Schema.Struct({
+  type: Schema.Literal("turn.effort.set"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  from: Effort,
+  to: Effort,
+  reason: Schema.String,
 });
 /** The harness waits for the user to allow or deny a tool call. */
 export const ApprovalRequested = Schema.Struct({
@@ -733,6 +789,10 @@ export const Event = Schema.Union([
   TurnModelCalled,
   TurnUsageRecorded,
   HarnessQuotaReported,
+  ProviderFailed,
+  ProviderRecovered,
+  TurnRerouted,
+  TurnEffortSet,
   ApprovalRequested,
   UserInputRequested,
   PlanRequested,
@@ -838,6 +898,10 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "turn.model.called@1": TurnModelCalled,
   "turn.usage.recorded@1": TurnUsageRecorded,
   "harness.quota.reported@1": HarnessQuotaReported,
+  "provider.failed@1": ProviderFailed,
+  "provider.recovered@1": ProviderRecovered,
+  "turn.rerouted@1": TurnRerouted,
+  "turn.effort.set@1": TurnEffortSet,
   "approval.requested@1": ApprovalRequested,
   "user-input.requested@1": UserInputRequested,
   "plan.requested@1": PlanRequested,

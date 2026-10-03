@@ -379,8 +379,34 @@ test("a model the native harness doesn't run, or a key the API rejects, fails th
     Effect.exit(Stream.runCollect(adapter.run(input("t1", "hi", { route: { ...sonnet, model: "sonnet" } })))),
   );
   expect(JSON.stringify(unknown)).toContain("doesn't run sonnet. Pick one of claude-haiku-4-5");
-  const rejected = await Effect.runPromise(Effect.exit(Stream.runCollect(adapter.run(input("t2", "hi")))));
-  expect(JSON.stringify(rejected)).toContain("rejected the API key");
+  // Verdandi records the failure and, finding no fallback, denies it.
+  const failures: HarnessEvent[] = [];
+  const rejected = await Effect.runPromise(
+    Effect.exit(
+      Stream.runCollect(
+        Stream.tap(adapter.run(input("t2", "hi")), (e) =>
+          e.type === "provider.failed"
+            ? Effect.andThen(
+                Effect.sync(() => failures.push(e)),
+                adapter.respond(threadId, e.requestId, { decision: "deny" }),
+              )
+            : Effect.void,
+        ),
+      ),
+    ),
+  );
+  expect(failures).toEqual([
+    {
+      type: "provider.failed",
+      requestId: expect.any(String),
+      provider: "anthropic",
+      reason: "auth",
+      until: expect.any(String),
+      reset: false,
+      error: "401 invalid x-api-key",
+    },
+  ]);
+  expect(JSON.stringify(rejected)).toContain("anthropic rejected the API key until");
   expect(JSON.stringify(rejected)).toContain("verdandi key set anthropic");
   expect(JSON.stringify(rejected)).not.toContain("sk-ant-test");
 });
@@ -455,6 +481,32 @@ test("the cache check names a changed system prompt, an earlier message, or a pa
   expect(cacheBreak(first, fingerprint(sonnet, { ...b, output_config: { effort: "high" } }))).toBe("effort changed without a route change");
   // The same change through a route change the task records is allowed.
   expect(cacheBreak(first, fingerprint({ ...sonnet, effort: "high" }, { ...b, output_config: { effort: "high" } }))).toBeUndefined();
+});
+
+test("a turn's own effort extends the cache, and a model without effort levels is sent the conversation without it", async () => {
+  const { fake, adapter } = setup([
+    { blocks: [{ type: "text", text: "Planned." }] },
+    { blocks: [{ type: "text", text: "Done." }] },
+    { blocks: [{ type: "text", text: "Short." }] },
+  ]);
+  const haiku: Route = { harness: "native", model: "claude-haiku-4-5", effort: "medium" };
+  const first = await run(adapter, input("t1", "Plan it"));
+  const resume = first.find((e) => e.type === "session.started");
+  const session = resume?.type === "session.started" ? resume.sessionId : undefined;
+  await run(adapter, input("t2", "go ahead", { resumeSessionId: session, effort: "low" }));
+  await run(adapter, input("t3", "and now?", { resumeSessionId: session, route: haiku }));
+  const [a, b, c] = fake.requests.map((r) => r.body as unknown as Anthropic.MessageCreateParams);
+  if (!a || !b || !c) throw new Error("expected three requests");
+  const effort: unknown = { role: "system", content: [], output_config: { effort: "low" } };
+  expect(b.messages.at(-2)).toEqual(effort as Anthropic.MessageParam);
+  expect(b.output_config?.effort).toBe("medium");
+  expect(fake.requests[1]?.headers.get("anthropic-beta")).toBe("mid-conversation-output-config-2026-07-01");
+  // Haiku 4.5 has no effort levels: no effort messages, no effort, and no beta header; the switch is a route change.
+  expect(c.messages.some((m) => m.role === "system")).toBe(false);
+  expect(fake.requests[2]?.headers.get("anthropic-beta")).toBeNull();
+  // On the same model, losing the effort message would break the cache.
+  const lost = { ...b, messages: b.messages.filter((m) => m.role !== "system") };
+  expect(cacheBreak(fingerprint(sonnet, b), fingerprint(sonnet, lost))).toBe("message 3 changed (its effort)");
 });
 
 test("a file tool asks before going outside the thread's folder, refuses Verdandi's home unasked, and ask mode can't write", async () => {

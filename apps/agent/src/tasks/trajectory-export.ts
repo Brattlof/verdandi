@@ -121,7 +121,7 @@ export const exportTrajectories = (home: string, options: ExportOptions) => {
         decision: e.decision ?? null,
         inputs: e.inputs ?? null,
         // Older outcomes read as v3: v1 without a rating, v1 and v2 without escalation triggers.
-        outcome: decodeOutcome({ triggers: [], ...JSON.parse(row.outcome), v: 3 }),
+        outcome: decodeOutcome({ triggers: [], fallbacks: 0, ...JSON.parse(row.outcome), v: 4 }),
         costUsd: row.cost_usd,
       };
       lines.push(`${JSON.stringify(redact(example))}\n`);

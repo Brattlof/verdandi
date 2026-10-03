@@ -180,6 +180,8 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
           if (e.type === "task.rerouted") {
             io.write(`[plan approved: the build runs on ${e.to.model} ${e.to.effort}: ${e.decision.reason}]\n`);
           }
+          if (e.type === "turn.effort.set") io.write(`[${e.to} effort for this turn: ${e.reason}]\n`);
+          if (e.type === "turn.rerouted") io.write(`[fell back to ${e.to.model} ${e.to.effort} for this turn: ${e.reason}]\n`);
           if (e.type === "task.deescalated") {
             io.write(`[de-escalated to ${e.to.model} ${e.to.effort}: ${e.decision.reason}]\n`);
           }

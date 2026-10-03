@@ -141,6 +141,12 @@ export const RouteRule = Schema.Struct({
   tokens: Schema.optionalKey(Schema.Int),
   /** Budget guards for each task of this class (DESIGN §8.9); `fallback`'s apply to classes that set none. */
   ...TaskLimits.fields,
+  /**
+   * How many effort levels a turn of this class's tasks may move either side of its route's effort (DESIGN §8.7 auto
+   * effort), on a harness that changes effort without a cache miss: default 1, 0 off. `fallback`'s applies to classes
+   * that set none.
+   */
+  effortBand: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 4 }))),
 });
 export type RouteRule = typeof RouteRule.Type;
 
@@ -259,7 +265,8 @@ export const RouteInputsV1 = Schema.Struct({
 
 /**
  * What the router read about a new task besides its text and mode (kept in its `task.started`), so offline
- * replay (DESIGN §8.8 level 2) can route it again exactly. Provider health and quota aren't router inputs yet.
+ * replay (DESIGN §8.8 level 2) can route it again exactly. Provider health and quota aren't recorded: replay routes as
+ * if every provider were healthy.
  */
 export const RouteInputs = Schema.Struct({
   ...RouteInputsV1.fields,
