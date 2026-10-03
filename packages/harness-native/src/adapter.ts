@@ -13,6 +13,7 @@ import {
   type ThreadId,
 } from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
+import { type CacheBreaks, cacheBreak, fingerprint, type Sent } from "./cache-check.ts";
 import { nativeCatalog } from "./catalog.ts";
 import { modeNotes, planTool, sessionPrefix, turnContent } from "./prompt.ts";
 import {
@@ -130,12 +131,15 @@ async function* runTool(
 /**
  * Verdandi's own agent loop on the Anthropic Messages API (DESIGN §9.4, ADR 0022), metered at list price. Each
  * thread keeps one session, whose system prompt and tool list are fixed when it opens and whose transcript is kept
- * in `sessionsDir`, so a thread resumes after a restart. Tests pass the fake provider's `fetch`.
+ * in `sessionsDir`, so a thread resumes after a restart. Each request is checked against the session's last one, and a
+ * break of the prompt cache is logged as a warning, or thrown with `cacheBreaks: "throw"`, as every test sets. Tests
+ * pass the fake provider's `fetch`.
  */
 export const makeNativeAdapter = (options: {
   readonly apiKey: string;
   readonly sessionsDir: string;
   readonly fetch?: typeof globalThis.fetch;
+  readonly cacheBreaks?: CacheBreaks;
 }): HarnessAdapter => {
   // Everything explicit, so nothing in the environment meant for Claude Code (a base URL, a token, debug logging) applies here.
   const client = new Anthropic({
@@ -147,6 +151,20 @@ export const makeNativeAdapter = (options: {
   });
   const sessions = new Map<ThreadId, Session>();
   const harnessVersion = `native (@anthropic-ai/sdk ${VERSION})`;
+  // Per transcript, so a fork (a new transcript) starts fresh; a diagnostic, kept in memory only.
+  const lastSent = new WeakMap<Transcript, Sent>();
+
+  /** Fingerprints a request and names what broke the cache since the session's last one (DESIGN §9.4). */
+  const checkCache = (session: Session, body: Anthropic.MessageCreateParams) => {
+    const sent = fingerprint(session.route, body);
+    const previous = lastSent.get(session.transcript);
+    lastSent.set(session.transcript, sent);
+    const what = previous && cacheBreak(previous, sent);
+    if (!what) return;
+    const message = `Native session ${session.transcript.id} broke the prompt cache: ${what}. Within a session the system prompt, tools and earlier messages never change, and the model, thinking and effort only with the route (ADR 0022).`;
+    if (options.cacheBreaks === "throw") throw new HarnessError({ message });
+    console.warn(message);
+  };
 
   /** The thread's session for this turn, and what to report before it starts. */
   const open = (input: HarnessRunInput): { readonly session: Session; readonly events: HarnessEvent[] } => {
@@ -223,20 +241,19 @@ export const makeNativeAdapter = (options: {
       const { model, effort } = session.route;
       const entry = nativeCatalog.find((e) => e.model === model);
       if (!entry) throw new HarnessError({ message: unknownModel(model) });
-      const stream = client.messages.stream(
-        {
-          model,
-          max_tokens: maxTokens,
-          system: session.transcript.prefix.system,
-          tools: session.transcript.prefix.tools,
-          // The second breakpoint moves along with the conversation; the first ends the fixed prefix.
-          cache_control: { type: "ephemeral" },
-          messages: requestMessages(session.transcript.entries),
-          // A model without effort levels (Haiku 4.5) takes neither effort nor adaptive thinking.
-          ...(entry.efforts.length === 0 ? {} : { thinking: { type: "adaptive" as const }, output_config: { effort } }),
-        },
-        { signal },
-      );
+      const body: Anthropic.MessageCreateParamsNonStreaming = {
+        model,
+        max_tokens: maxTokens,
+        system: session.transcript.prefix.system,
+        tools: session.transcript.prefix.tools,
+        // The second breakpoint moves along with the conversation; the first ends the fixed prefix.
+        cache_control: { type: "ephemeral" },
+        messages: requestMessages(session.transcript.entries),
+        // A model without effort levels (Haiku 4.5) takes neither effort nor adaptive thinking.
+        ...(entry.efforts.length === 0 ? {} : { thinking: { type: "adaptive" as const }, output_config: { effort } }),
+      };
+      checkCache(session, body);
+      const stream = client.messages.stream(body, { signal });
       for await (const event of stream)
         if (event.type === "content_block_delta" && event.delta.type === "text_delta") yield { type: "text.delta", text: event.delta.text };
       const reply = await stream.finalMessage();

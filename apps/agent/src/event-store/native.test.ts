@@ -34,7 +34,12 @@ test("verdandid runs a native turn end to end: streamed text, a Verdandi tool th
     },
     { blocks: [{ type: "text", text: "Saved." }], usage: { input: 30, output: 5, cacheRead: 3500 } },
   ]);
-  const native = makeNativeAdapter({ apiKey: "sk-ant-test", sessionsDir: join(home, "native-sessions"), fetch: fake.fetch });
+  const native = makeNativeAdapter({
+    apiKey: "sk-ant-test",
+    sessionsDir: join(home, "native-sessions"),
+    fetch: fake.fetch,
+    cacheBreaks: "throw",
+  });
   const runtime = ManagedRuntime.make(AppLayer(home, { native }));
   runtimes.push(runtime as never);
   const threadId = "thread-native" as ThreadId;
