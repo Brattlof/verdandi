@@ -4,12 +4,12 @@
 |---|---|
 | **Status** | Draft v0.3 — for review |
 | **Owner** | @Brattlof |
-| **Last updated** | 2026-09-29 |
+| **Last updated** | 2026-10-02 |
 | **Repo** | [Brattlof/verdandi](https://github.com/Brattlof/verdandi) (private) |
 
 > **Changes since v0.2**
 > - The runtime is **Bun** instead of Node (§19).
-> - New **decision layer** (§9.8). Small judgments go to decision models instead of LLM calls: Laya runs locally, and Jev is a cloud option you have to turn on. The layer is used for routing, background review, memory selection, compaction, approvals, injection scanning and gateway triage.
+> - New **decision layer** (§9.8). Small judgments go to decision models instead of LLM calls: Laya runs locally, and Jev is a cloud option you have to turn on. The layer is used for routing, background review, memory selection, approvals, injection scanning and gateway triage.
 > - Terminals run in a separate PTY host process (§13).
 
 ---
@@ -24,7 +24,7 @@ Verdandi is a local-first workspace and personal agent platform for AI coding an
    - **Claude Code**, driven through your installed and logged-in CLI, which uses your subscription;
    - **Verdandi's own native agent**, which calls model APIs directly: Anthropic API credits, OpenAI, OpenRouter, Google, local models through Ollama, and more;
    - other agent CLIs later.
-4. **A task router.** This is the defining feature. For every task it picks the harness, provider, model and effort level that will finish the task at the lowest *effective* cost. It shows why, and it learns from the outcome. The small judgments along the way go to fast decision models instead of LLMs. Examples: what type of task this is, whether a command is safe, what to remember, which context to keep.
+4. **A task router.** This is the defining feature. For every task it picks the harness, provider, model and effort level that will finish the task at the lowest *effective* cost. It shows why, and it learns from the outcome. The small judgments along the way go to fast decision models instead of LLMs. Examples: what type of task this is, whether a command is safe, what to remember.
 
 Verdandi starts with Claude Code, because that's what the owner uses every day. Every other part is designed from the start to work with any harness and any provider.
 
@@ -172,7 +172,7 @@ flowchart LR
 | **Harness registry** | Holds one adapter per harness: Claude Code, native, and later others. Each declares its capabilities. |
 | **Native harness** | Verdandi's own agent loop. It handles tool use, subagents, context management and prompt caching across providers. |
 | **Model providers** | Adapters for each API format, the model catalog, credentials, fallbacks and health checks. Used by the native harness and for auxiliary tasks. |
-| **Verdandi tools** | Memory, skills, session search, scheduling, messaging and so on. Each tool is implemented **once**. The native harness calls it directly; other harnesses reach it over MCP. |
+| **Verdandi tools** | Memory, skills, session search, scheduling, escalation and so on. Each tool is implemented **once**. The native harness calls it directly; other harnesses reach it over MCP. |
 | **Learning** | Memory, session search, the skill lifecycle, background review, and recording trajectories. |
 | **Execution backends** | Where the native harness runs commands: locally, in Docker, over SSH, or in a cloud sandbox. |
 | **Scheduler** | Runs tasks on a schedule, without you present. |
@@ -557,10 +557,8 @@ interface HarnessAdapter {
   - subagents via `agents`, each with its own `model`.
 - **Approvals:** `canUseTool` becomes an approval event. `AskUserQuestion` becomes a user-input request.
 - **Sessions:** resume, fork, and resuming at a given message. Transcripts stay where Claude Code keeps them; Verdandi stores pointers (the session id, and the file its `UserPromptSubmit` hook reports) and a normalized copy for trajectories. Subagents' messages are forwarded whole (`forwardSubagentText`) and recorded as items tagged with the tool call that started the subagent. A turn ends when Claude Code goes idle, not at its first result, so a background subagent's steps, and Claude Code's answer to them, stay in the turn that started it (ADR 0011).
-- **Verdandi tools reach Claude Code over MCP**, through an MCP server running inside verdandid (§9.6). This gives Claude Code sessions Verdandi's memory, session search, scheduling, messaging and escalation.
-- **Hooks:**
-  - `PostToolUse` checks verifier results.
-  - `Stop` and `SubagentStop` mark the end of a task and its outcome.
+- **Verdandi tools reach Claude Code over MCP**, through an MCP server running inside verdandid (§9.6). This gives Claude Code sessions Verdandi's memory, session search, scheduling and escalation.
+- **Hooks:** only `UserPromptSubmit`, to learn the session's transcript path. Nothing else depends on Claude Code's hooks: verifiers run from the reactor once the agent finishes, the same for every harness (§8.7), and a turn ends when Claude Code goes idle (ADR 0011).
 - **Telemetry:** usage per message, and `modelUsage` from the result, go into the usage ledger.
 
 ### 9.4 Native harness (Verdandi's own agent loop)
@@ -607,8 +605,7 @@ interface HarnessAdapter {
 | `memory_save`, `memory_search` | ✔ | ✔ |
 | `session_search` | ✔ | ✔ |
 | `skills_list`, `skill_view`, `skill_manage` | ✔ | ✔ (Claude Code also loads skills natively) |
-| `cronjob` (create, list, pause jobs) | ✔ | ✔ |
-| `send_message` (to gateway channels) | ✔ | ✔ |
+| `cronjob` (create, list, pause jobs; a job delivers to its own thread's binding, §15) | ✔ | ✔ |
 | `report_blocked` | ✔ | ✔ |
 | `todo`, `clarify` | ✔ | — (Claude Code has its own) |
 | `delegate_task` | ✔ | — (Claude Code has Task subagents) |
@@ -622,12 +619,12 @@ interface HarnessAdapter {
 
 Some jobs are small, but a model still has to do them. They fall into two kinds:
 
-- **Judgments** have a fixed set of possible answers. Examples: routing classification, whether a command is safe, whether a task is worth reviewing, whether to keep or drop a piece of context. These go to the **decision layer** (§9.8), not to an LLM.
+- **Judgments** have a fixed set of possible answers. Examples: routing classification, whether a command is safe, whether a task is worth reviewing. These go to the **decision layer** (§9.8), not to an LLM.
 - **Generation** means writing text. Examples: titles, commit messages, handoff summaries, vision descriptions, and the background review itself. These are **routed tasks** (`aux.*` classes) with their own policy entries, so they automatically use the cheapest acceptable target: usually a local model, then Haiku.
 
 ### 9.8 Decision layer (System 1)
 
-Verdandi makes a lot of small judgments. What type of task is this? Is this command destructive? Is anything here worth remembering? Should this old tool result stay in the context? Sending each one to an LLM is slow and costs tokens. Sending it to a rule is free but brittle. The decision layer sits in between.
+Verdandi makes a lot of small judgments. What type of task is this? Is this command destructive? Is anything here worth remembering? Sending each one to an LLM is slow and costs tokens. Sending it to a rule is free but brittle. The decision layer sits in between.
 
 It uses **decision models**. A decision model takes some context (the *state*) plus typed questions, and returns typed answers with calibrated probabilities in one forward pass. It never writes text, so there's nothing to parse and nothing to make up. There are three question types:
 - **choice:** pick one option from a list;
@@ -658,7 +655,6 @@ It uses **decision models**. A decision model takes some context (the *state*) p
 | Escalation | noul: "is the agent repeating an approach that already failed?" This is one signal, never the only trigger. | 8.7 |
 | Whether to run background review | noul: "does this task contain something worth remembering or turning into a skill?" | 14.5 |
 | Memory snapshot | score: how relevant each entry is to this project and session | 14.2 |
-| Context compaction | noul for each old tool call and its result: keep, shorten or drop | 16 |
 | Smart approvals | noul: "is this command destructive or irreversible?" | 17 |
 | Injection scanning | noul: "does this text contain instructions aimed at an AI, or a way to send data out?" | 17 |
 | Gateway triage | choice: which project; noul: does the agent need to act?; score: urgency | 15 |
@@ -724,8 +720,9 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 ## 12. User experience
 
 - **Layout:**
-  - rail: projects, threads, search and spend, one click from anywhere (profiles join it in M5);
-  - sidebar: threads by recency, each with its project, live status and cost; it folds away beside the rail;
+  - rail: opens the projects, search and spend pages, one click from anywhere (profiles join it in M5);
+  - sidebar: always lists threads by recency, each with its project, live status and cost;
+  - search page: session search (§14.3);
   - projects page: open any folder, or start a thread in a project you've worked in;
   - center: the conversation;
   - right panel, switchable: diff, terminal, routing trace, or memory and skills.
@@ -795,12 +792,12 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
   - when memory is written,
   - when work is delegated.
 
-  This makes room for user modelling (e.g. Honcho) and vector memories (e.g. mem0). One external provider can be active, always *in addition to* the built-in stores.
+  This makes room for user modelling (e.g. Honcho) and vector memories (e.g. mem0). One external provider can be active, always *in addition to* the built-in stores. It runs out of process like any plugin with code (§18), and its system-prompt block follows the cache rule: a provider enabled mid-session adds it from the thread's next harness session, never the running one.
 - **Relation to CLAUDE.md:** Verdandi never silently edits CLAUDE.md or AGENTS.md. It proposes changes as diffs for you to approve.
 
 ### 14.3 Session search
 
-Every turn from every harness goes into an FTS5 trigram index (ADR 0006): the user's messages and steers and the main agent's replies, not tool output, so past solutions can be recalled across harnesses and projects. A query is matched as one phrase, case- and accent-insensitively, anywhere in a word; under 3 characters it matches nothing. Results are newest first, each a little of its message either side of the match, archived threads included and marked; no LLM call is needed. The web sidebar searches as you type and jumps to the turn; `verdandi search <query>` prints the same.
+Every turn from every harness goes into an FTS5 trigram index (ADR 0006): the user's messages and steers and the main agent's replies, not tool output, so past solutions can be recalled across harnesses and projects. A query is matched as one phrase, case- and accent-insensitively, anywhere in a word; under 3 characters it matches nothing. Results are newest first, each a little of its message either side of the match, archived threads included and marked; no LLM call is needed. The web's search page (`#view=search`, opened from the rail) searches as you type and jumps to the turn; `verdandi search <query>` prints the same.
 
 ### 14.4 Skills
 
@@ -811,13 +808,19 @@ Every turn from every harness goes into an FTS5 trigram index (ADR 0006): the us
   - read-only extra folders (e.g. `~/.agents/skills`).
 - **Progressive disclosure:** a compact skills index sits in the prompt. `skill_view(name)` loads the whole skill, and `skill_view(name, path)` loads a file inside it.
 - **Lifecycle:**
-  1. **Propose.** The agent calls `skill_manage` (create, patch, edit, delete, write file). It is nudged every *N* tool iterations. Background review can also propose skills, and `/learn` builds a skill from docs or URLs.
+  1. **Propose.** The agent calls `skill_manage` (create, patch, edit, delete, write file), background review proposes skills from finished tasks (§14.5), and `/learn` builds a skill from docs or URLs. Nothing prompts a proposal on a count of turns or tool calls: a counter fires whatever the task was, and skills end up made from fragments. Any automatic trigger for a skill proposal depends on how the task went: its verifiers passed, or the user rated it up.
   2. **Review.** Nothing is added without your approval by default. A linter gives advice.
   3. **Use.** Claude Code picks skills up natively: the project's, and the profile's through a local plugin, as `verdandi:<name>` (ADR 0020). The native harness uses the skills index plus `skill_view`.
-  4. **Improve.** When a run of a skill fails, a *patch* is proposed; small patches are preferred over full rewrites.
+  4. **Improve.** When a task fails, a *patch* is proposed only for a skill the task actually used (the use step 5 records), never for one it didn't load; small patches are preferred over full rewrites.
   5. **Curate.** A skill Verdandi created moves from *active* to *stale* after 14 days unused, and to *archived* after 30; skills you wrote, extra folders' and projects' are never touched. A use is the harness loading it (Claude Code: its `Skill` tool call), and makes a stale skill active again. A daily sweep records each move as an event. Archived skills leave the folder the harness loads for `<home>/skills-archive/` and are never deleted; the Skills panel and `verdandi skills` show them, and restoring one (an event too) brings it back with a fresh 14 days. Merging near-duplicate skills is opt-in.
 - **Routing link: learn with Opus, repeat with Haiku.** A skill's frontmatter can carry a routing hint, e.g. `verdandi: { route: { prefer: [cc-haiku], effort: low } }`. The hint is checked against outcome tracking like any other route.
-- **Skills hub (M6):** install skills from a curated index, Git repos, or other people's shared folders. Each installed skill is pinned to a version.
+- **Skills hub (M6):** a skill is instructions an agent follows plus scripts it may run, so installing one lets a stranger's code and instructions in. It goes through the same gate as the agent's own proposals.
+  - **Sources** are a short list in config, such as a curated index or git repos, never an open marketplace, and adding one is something you do explicitly. A shared folder is a source only if it can be pinned by content digest.
+  - **Pinning:** each install is pinned to a full commit SHA; a tag or branch is resolved to its SHA at install time and recorded. An update moves the SHA only when you ask.
+  - **Review:** installs and updates take the `skill.proposed` path: the path guards, the secret and injection scan, and a diff of every file, scripts included, that you approve. Scanners' verdicts are advice shown on the diff; a clean scan never skips your approval. Where the request lives when a CLI install has no thread is still to decide.
+  - **Your edits win:** each installed file's content digest is recorded. If a file changed locally, an update keeps your edit and shows the upstream change as a diff you can take or leave; it never overwrites silently.
+  - **Seeing and leaving:** each install records its source and SHA in an event, and the Skills panel and `verdandi skills list` show them. Uninstalling is the way out. The curator moves only skills Verdandi created, so it leaves installed skills alone unless that is changed.
+  - Installed skills live in the profile's skills folder, so Claude Code loads them through the profile's plugin (ADR 0020) and the native harness through its skills index.
 
 ### 14.5 Background review
 
@@ -878,7 +881,7 @@ Trajectories from open or local models don't have this restriction. The exporter
     - a route override,
     - a script to run first,
     - `contextFrom` to chain in earlier job outputs,
-    - a delivery target: a channel, a thread, or a notification.
+    - where its output goes: a channel, a thread or a notification, set in the job's config. A job the agent creates with `cronjob` delivers to its own thread's binding; pointing it anywhere else is your edit.
   - **Unattended runs:**
     - run in worktrees,
     - use a restricted permission profile,
@@ -888,7 +891,8 @@ Trajectories from open or local models don't have this restriction. The exporter
 - **Messaging gateway:**
   - One gateway process inside verdandid, with a `PlatformAdapter` for each platform.
   - **Platforms:** Telegram, Discord and Slack first. Then WhatsApp, Signal, Matrix and email as plugins.
-  - Each chat is **bound to a thread**. Approvals appear as buttons.
+  - Each chat is **bound to a thread**, and the thread's replies go to that chat. Approvals appear as buttons.
+  - **The model never names a destination.** No tool lets the agent send a message to a channel of its choosing: gateway messages are untrusted data, and an injected instruction plus such a tool would be a way to send your code or memory out.
   - **Triage:** the decision layer sorts incoming messages by project, by whether the agent needs to act, and by urgency (§9.8).
   - Only users on each channel's allowlist can use it.
   - Connections are outbound only, so no ports need opening.
@@ -904,13 +908,12 @@ Claude Code manages its own context. The native harness has a pluggable `Context
 
 1. **Trigger:** compression starts at a set fraction of the context window (about 50% by default, later for windows under 512K), and again as a safety measure at about 85%.
 2. **Save memory first** (a background review flush), so nothing worth keeping is lost.
-3. **Prune without an LLM call:** oversized tool results are written to disk, with a pointer left in their place.
-4. **Keep or drop, word for word.** The decision layer looks at the whole conversation and answers, for each old tool call, whether the call and its result are still needed (§9.8). Unneeded results are shortened, or dropped together with their call. Everything kept stays word for word, so exact paths, errors and constraints survive. If this frees enough room, compression stops here.
-5. **Otherwise, summarize the middle.** Keep a head and a tail within a token budget, never splitting a tool call from its result. Summarize what's between them with the auxiliary compression target, using the handoff sections (§8.2). The summary is updated on each later compression.
+3. **Prune without an LLM call:** oversized tool results are written to disk, with a pointer left in their place. If this frees enough room, compression stops here.
+4. **Otherwise, summarize the middle.** Keep a head and a tail within a token budget, never splitting a tool call from its result. Summarize what's between them with the auxiliary compression target, using the handoff sections (§8.2). The summary is updated on each later compression.
 
 **Compression is the only allowed cache break.**
 
-Claude Code manages its own context, but step 4 can replace its compaction summary through hooks, the way the `fast-jev-compaction` plugin does. Verdandi offers this as an optional, experimental plugin (M4).
+**No keep-or-drop step.** Having a decision model choose, for each old tool call, whether to keep it word for word (the `fast-jev-compaction` approach) is out, and so is a plugin that does it for Claude Code. Hermes tested exactly this with Jev on real transcripts: lower recall at twice the tokens, no better than plain recency at a matched budget, and more cache breaks with each compaction (Appendix A). What would bring it back is a recall exam on Verdandi's own long transcripts, graded by an LLM judge as [Hermes's](https://github.com/NousResearch/hermes-agent/blob/009afb3/evals/compaction/results/SCORECARD-2026-08-15.md) is, in which keep-or-drop beats prune-plus-summary at the same token budget.
 
 ---
 
@@ -939,7 +942,12 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
   - untrusted text Verdandi hands the agent itself (what an escalation passes on: a verifier's output, the agent's blocked reason, a repeated tool error; and Verdandi tools' results built from stored text, such as search hits) goes through the same scan. A hit isn't withheld, since the agent needs it to go on: it's handed over under a warning, recorded, and shown on the turn;
   - gateway messages from users not on the allowlist are ignored.
 - **A project's own commands run only once you trust them.** Its verifiers (`escalation.verifiers` in `.verdandi/routing.yaml`) and worktree setup (`.verdandi/worktree.yaml`) are shell commands a cloned repo's author, or an agent allowed only to edit files, can write. The first time verdandid would run a list, it asks on the turn (a worktree's setup waits for the thread's next turn), showing the exact commands; allowing it records trust in that project for that exact list, by hash, and a changed list asks again, so a turn that rewrites them can't run its new commands unasked. Denying skips them: the turn says so, and the task records no verifier run. Unattended runs only run trusted lists: `verdandi run` stops at the request (exit code 5), and a batch never trusts a repository's own commands, using each task's `verify` instead. The projects page and `verdandi chat`'s `/trusted` and `/untrust` list and revoke them. Like other approvals, this is consent, not containment.
-- **Plugins run inside verdandid with full trust.** They must be installed explicitly and pinned to a version, and each one is listed with the permissions it has.
+- **Plugins never run inside verdandid.** In process, a plugin could read the database, the profile token and every key verdandid holds, and a malicious one would be out of reach of any defence. So:
+  - content-only bundles (skills, MCP server config, commands) come first; they carry no code verdandid loads;
+  - a plugin with code runs in its own process, as an MCP server or a Bun subprocess speaking a typed contract (§18), started without verdandid's secrets in its environment. That keeps it out of verdandid's memory, but it is not a sandbox: it still runs as you;
+  - installs are explicit and pinned, to an exact version with an integrity hash or to a full commit SHA;
+  - you consent to the capabilities its manifest declares (tools, prompt sections, hooks, network hosts, commands it runs), and the consent is stored with a hash of that list. An update that declares more asks again, and nothing is granted when nobody is at the keyboard (scheduled, gateway and headless runs);
+  - enabling, disabling and uninstalling are recorded as events, and the plugin list shows each plugin's granted capabilities.
 - **Supply chain:**
   - every dependency pinned to an exact version;
   - a minimum release age for new package versions (Bun's install setting), so versions published only hours ago can't be installed;
@@ -960,7 +968,23 @@ Claude Code manages its own context, but step 4 can replace its compaction summa
   - execution backend,
   - skill source,
   - context engine.
-- **Packaging:** an npm package or a local folder, with a `verdandi-plugin.json` manifest. Loaded inside verdandid, and only when explicitly installed.
+- **Bundles first:** a content-only bundle holds skills, MCP server config and commands, and no code verdandid loads. Whether bundles take Claude Code's plugin layout, which verdandid already hands Claude Code for the profile's skills (ADR 0020), is open.
+- **Code runs out of process** (§17). Nothing from a third party is imported into verdandid. Each kind crosses the boundary like this:
+
+  | Kind | Runs as |
+  |---|---|
+  | Tool | An MCP server |
+  | Harness | A Bun subprocess speaking the harness contract (§9.2) |
+  | Model provider | A Bun subprocess that takes normalized requests and streams normalized blocks back (§9.5) |
+  | Gateway platform | A Bun subprocess speaking `PlatformAdapter` (§15) |
+  | Memory provider | A Bun subprocess answering the `MemoryProvider` hooks (§14.2) |
+  | Execution backend | A Bun subprocess that runs commands where it points (§13) |
+  | Skill source | A bundle, or a Bun subprocess that fetches files; either way installs go through the skill proposal flow (§14.4) |
+  | Context engine | A Bun subprocess that takes the transcript and returns the compressed entry (§16), called only when compression triggers |
+
+  Every contract is a schema in `packages/contracts`. No kind needs to run in process.
+- **Packaging:** an npm package pinned with its integrity hash, or a git repository or local folder pinned to a commit, with a `verdandi-plugin.json` manifest that declares its capabilities (§17). Started only when explicitly installed and enabled.
+- **The cache rule is part of the contract.** A plugin enabled mid-session gets its hooks at once; its tools and prompt sections arrive only with the thread's next harness session. Disabling one stops its hooks and refuses its tool calls at once, and its tools leave the list at the next session.
 - **First-party plugins** live in `plugins/` in the repo, as proof that the interfaces work.
 - **Footprint Ladder** (principle 10): a new capability starts as a skill or plugin, and only moves into the core when it has to.
 
@@ -1069,11 +1093,11 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 |---|---|---|
 | **M0 · Spike** (1–2 weeks) | Agent SDK under Bun on Windows; effort and model switching; the `agents` option; hooks; the in-process MCP server; `bun:sqlite` with FTS5; Effect 4 RC on `@effect/platform-bun`; the PTY host; `laya-ts` under Bun | Every item in Appendix D answered and written up as ADRs |
 | **M1 · Core loop** | verdandid + web UI on the Claude Code harness: threads, streaming, approvals, plan mode, diffs, resume, steer; event store; usage ledger; **trajectory recording**; fake harness for tests | You do a full day's work in Verdandi |
-| **M2 · Router v1** | `rules` classifier, policy files, pins, switch-cost gate, decision records and explanations, plan→execute split, subagent routing, budget modes, routing memory, spend dashboard; **decision layer** on `rules`, with decisions logged so Laya can be measured against it on real data | At least 30% lower cost per completed task than always-Opus, with no drop in success rate |
+| **M2 · Router v1** | `rules` classifier, policy files, pins, switch-cost gate, decision records and explanations, plan→execute split, subagent routing, budget modes, routing memory, spend dashboard, batch runner (`verdandi batch`) to measure it (ADR 0017); **decision layer** on `rules`, with decisions logged so Laya can be measured against it on real data | At least 30% lower cost per completed task than always-Opus, with no drop in success rate |
 | **M3 · Memory, skills, safe autonomy** | Worktrees, checkpoints and revert, terminal, verifiers and escalation; memory with fixed-size snapshots, scanners and panel; session search; skill lifecycle + curator; background review, skipped when the decision layer finds nothing worth saving; injection scanning; Verdandi tools over MCP to Claude Code | Skills are created and reused; escalation fixes more than half of first-attempt failures |
-| **M4 · Native harness and providers** | Agent loop, prompt assembly, context engine, subagents; Anthropic API, OpenAI-compatible (OpenRouter, Ollama…) and Gemini providers; credentials, fallbacks, health; auxiliary tasks routed; routing across harnesses; quota-based pricing and moving work to other targets; keep-or-drop compaction; Jev backend (off by default); optional compaction plugin for Claude Code | Chores run on local or cheap targets automatically; a thread can hand off between Claude Code and native |
+| **M4 · Native harness and providers** | Agent loop, prompt assembly, context engine, subagents; Anthropic API, OpenAI-compatible (OpenRouter, Ollama…) and Gemini providers; credentials, fallbacks, health; auxiliary tasks routed; routing across harnesses; quota-based pricing and moving work to other targets; Jev backend (off by default) | Chores run on local or cheap targets automatically; a thread can hand off between Claude Code and native |
 | **M5 · Always-on** | Scheduler, gateway (Telegram, Discord, Slack), webhooks, profiles, desktop app, smart approvals, remote access | Nightly jobs run unattended within budget; tasks are approved from your phone |
-| **M6 · Learn and reach** | `lab/` (datasets, router training), batch runner, race mode, a router fine-tuned from Laya, fine-tuned decision models; execution backends (Docker, SSH, cloud); plugins + skills hub; external memory providers; more harnesses (Codex, OpenCode, ACP); OpenAI-compatible API, ACP and MCP servers; `execute_code`, `browser`, mixture-of-agents | The learned router beats `rules` on APGR (or is dropped); at least one plugin of each major kind works |
+| **M6 · Learn and reach** | `lab/` (datasets, router training), race mode, a router fine-tuned from Laya, fine-tuned decision models; execution backends (Docker, SSH, cloud); plugins + skills hub; external memory providers; more harnesses (Codex, OpenCode, ACP); OpenAI-compatible API, ACP and MCP servers; `execute_code`, `browser`, mixture-of-agents | The learned router beats `rules` on APGR (or is dropped); at least one plugin of each major kind works |
 
 ---
 
@@ -1090,14 +1114,14 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 | The native harness is weaker than Claude Code at coding | Route coding to Claude Code by default. Native handles chores, chat, automation and non-Claude models. Measure before changing this. |
 | Effect 4 RC isn't ready, or Bun lacks something we need (PTY, a native-addon package) | Settle in M0. Fall back to Effect 3. The PTY host runs on Bun's built-in PTY (ADR 0007); `bun-pty` behaved the same and is the fallback. Use WASM builds (e.g. `onnxruntime-web`) instead of native addons. |
 | Decision models are new: Jev is weeks old, and Laya is weak out of the box | Local backends by default, each kind of question measured, LLM fallback below the confidence threshold, fine-tuning on our own data |
-| A malicious plugin or dependency | Explicit installs, pinned versions, supply-chain CI, scanners |
+| A malicious plugin or dependency | Plugins: content-only bundles first, code only out of process and never imported into verdandid, installs pinned with an integrity hash or commit SHA, consent bound to a hash of the declared capabilities and asked again when they grow (§17, §18). Dependencies: exact pins, minimum release age, supply-chain CI, scanners. |
 | Prompt injection through gateway messages, memory or skills | Allowlists, scanning, untrusted-data marking, approval gates |
 
 ---
 
 ## 23. Open questions (owner decisions)
 
-1. **Distribution:** stay personal, or share or open-source it someday? This decides how much work goes into the API-key path early.
+1. **Distribution:** decided. Verdandi will be open-sourced later; when is still open. Until then it stays a personal tool, and before it's published Anthropic's terms for using a subscription in third-party tools are checked again (§17).
 2. **Effect 4 RC vs. Effect 3 stable:** decided. Effect 4 RC, pinned, with one stream workaround (ADR 0008).
 3. **Default permission posture:** Ask (recommended) or Auto-edits?
 4. **Fable:** allow in Max mode only (recommended)?
@@ -1114,7 +1138,8 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 | Area | Project | What we take from it |
 |---|---|---|
 | Agent GUIs | T3 Code | Event-sourced orchestration; harness adapters with capability flags; per-turn git checkpoints; approval UX |
-| Personal agents | Hermes Agent | Its full feature set; see Appendix B |
+| Personal agents | [Hermes Agent](https://github.com/NousResearch/hermes-agent) (checked at `009afb3`) | Its full feature set; see Appendix B |
+| | [OpenClaw](https://github.com/openclaw/openclaw) (checked at `d0f7dcc`) | Driving the user's installed Claude Code without reading its credentials, with skills passed in as a plugin (as ADR 0020 does); external harnesses over ACP; code-free bundle plugins first, and plugin consent bound to declared capabilities (§17, §18); replies always go back to the channel they came from (§15); a maturity scorecard |
 | Routers | [RouteLLM](https://github.com/lm-sys/RouteLLM) | Threshold-calibrated strong/weak routing; APGR evaluation |
 | | [Arch-Router](https://huggingface.co/katanemo/Arch-Router-1.5B) | Routing policies written in plain language; fast local router |
 | | [claude-code-router](https://github.com/musistudio/claude-code-router) | Routing on request shape (background, thinking, long context) with no classifier |
@@ -1122,32 +1147,32 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 | | [FrugalGPT](https://arxiv.org/abs/2305.05176) | Cascade with escalation when a scorer judges the answer too weak |
 | | [Advisor strategy](https://claude.com/blog/the-advisor-strategy), `opusplan` | Planning with a big model and executing with a small one |
 | Decision models | [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) (TypeSafe AI), [Laya](https://github.com/NandhaKishorM/laya), [ollaya](https://github.com/ollaya-dev/ollaya) | Typed judgments with calibrated probabilities instead of LLM calls; one request format for cloud and local backends |
-| | [fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction) | Compaction by keeping or dropping tool calls, so whatever is kept stays word for word |
+| | [fast-jev-compaction](https://github.com/tamaratran/fast-jev-compaction) | Not taken: compaction by keeping or dropping tool calls. [Hermes's scorecard](https://github.com/NousResearch/hermes-agent/blob/009afb3/evals/compaction/results/SCORECARD-2026-09-19-jev.md) measured it with Jev at 75.5% recall on 115K tokens against its own 78.9% on 55K, no better than plain recency at a matched budget, with more cache breaks, though far faster and cheaper per compaction (§16) |
 | Evaluation | [RouterBench](https://arxiv.org/abs/2403.12031) | Cost–quality curves; offline router scoring |
 
 ## Appendix B — Hermes capability map
 
-Everything that makes Hermes Agent good, and where it lives in Verdandi.
+Everything that makes Hermes Agent good, and where it lives in Verdandi. Hermes's side was checked at hermes-agent `009afb3`.
 
 | Hermes capability | Verdandi equivalent | § | Milestone |
 |---|---|---|---|
 | Own agent loop: parallel tools, interrupts, `/steer`, iteration budgets | Native harness | 9.4 | M4 |
-| ~40 model providers, 3 API formats | Model provider layer: Anthropic, OpenAI-compatible, Gemini, and more as plugins | 9.5 | M4 → M6 |
+| About 30 provider families over five wire modes | Model provider layer: Anthropic, OpenAI-compatible, Gemini, and more as plugins | 9.5 | M4 → M6 |
 | Fallback providers, credential pools, key commands | Resilience + credentials | 9.5 | M4 |
 | Auxiliary models per task | Routed `aux.*` tasks | 9.7 | M4 |
-| *(Hermes reaches Claude through API credits)* | **Both** API credits and your Claude Code subscription through the CLI | 9.1 | M1 / M4 |
+| Claude through API credits, or a subscription: it adopts Claude Code's credentials by default (`auth.adopt_external_logins`), and an experimental plugin drives the Claude Code CLI | Both, without ever touching Claude Code's credentials: the Claude Code harness drives your logged-in CLI, and the native harness uses API credits | 9.1, 17 | M1 / M4 |
 | Fixed-size memory files, frozen snapshot, consolidation, nudges | Memory | 14.2 | M3 |
 | Scanning memory for injection and exfiltration | Scanners | 14.2, 17 | M3 |
 | External memory providers (Honcho, mem0, …) | `MemoryProvider` plugins | 14.2 | M6 |
 | Session store with FTS5 search (+ CJK) | Session index with a trigram index | 14.3 | M3 |
-| Skills: SKILL.md, progressive disclosure, `skill_manage`, nudges, `/learn` | Skills | 14.4 | M3 |
+| Skills: SKILL.md, progressive disclosure, `skill_manage`, nudges, `/learn` | Skills, without the skill nudge: a proposal is triggered by how a task went, never by a count | 14.4 | M3 |
 | Skill curator (active → stale → archived) | Curate step | 14.4 | M3 |
 | Skills Hub | Skills hub | 14.4 | M6 |
 | Background review on a forked, cache-sharing agent | Background review | 14.5 | M3 |
 | Delegation: fresh-context children, "frontier planner, cheap workers" | `delegate_task`, with **each child routed** | 9.4 | M4 |
 | `execute_code` (programmatic tool calling) | `execute_code` | 9.6 | M6 |
 | Terminal backends: local, Docker, SSH, Modal, Daytona, … | Execution backends | 13 | M4 → M6 |
-| Messaging gateway (~20 platforms) + webhooks + API server | Gateway + webhooks + OpenAI-compatible API | 11, 15 | M5 → M6 |
+| Messaging gateway (about 30 adapters) + webhooks + API server | Gateway + webhooks + OpenAI-compatible API | 11, 15 | M5 → M6 |
 | Cron: plain-language schedules, per-job skills and model, pre-run scripts, chaining, delivery, watchdog | Scheduler | 15 | M5 |
 | Context compression: pruning, structured summary, save memory first | Context engine | 16 | M4 |
 | Tool search for many MCP tools | Tool search | 9.4 | M4 |
@@ -1158,10 +1183,12 @@ Everything that makes Hermes Agent good, and where it lives in Verdandi.
 | Plugins + the Footprint Ladder | Extensibility | 18 | M6 |
 | ACP adapter, MCP server | ACP and MCP surfaces | 11 | M6 |
 | Mixture-of-agents | MoA route type | 9.4 | M6 |
-| Batch runner, trajectory compression, RL environments | Batch runner, trajectory exporters, `lab/` | 14.6, 14.7 | M1 (recording) → M6 |
+| Batch runner, trajectory compression | Batch runner, trajectory exporters, `lab/` | 14.6, 14.7 | M1 (recording), M2 (batch runner) → M6 |
 | Exact pins, supply-chain CI | Supply chain | 17 | M0 |
 | Terminal UI | `verdandi chat` (a full terminal UI is an open question) | 11 | M1 |
-| **Not in Hermes** | Task routing across harnesses and access modes, decision layer, workspace GUI, worktrees, checkpoints, race mode, learned routing | 8, 9.8, 12, 13 | M1 → M6 |
+| Opt-in checkpoints with `/rollback`, `hermes -w` worktrees | Checkpoints every turn, revert, worktrees per thread | 13 | M3 |
+| Desktop app (chat, preview rail, terminal, file browser) and web dashboard | Web UI, desktop app | 12, 19 | M1 / M5 |
+| **Not in Hermes** | Task routing across harnesses and access modes, decision layer, race mode, learned routing | 8, 9.8 | M1 → M6 |
 
 ## Appendix C — Glossary
 
