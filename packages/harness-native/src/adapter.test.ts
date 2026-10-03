@@ -13,6 +13,7 @@ import {
 import { type FakeReply, makeFakeAnthropic, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Fiber, Stream } from "effect";
 import { makeNativeAdapter } from "./adapter.ts";
+import { cacheBreak, fingerprint } from "./cache-check.ts";
 import { nativeCatalog } from "./catalog.ts";
 
 const homes: string[] = [];
@@ -41,7 +42,7 @@ const setup = (script: readonly FakeReply[]) => {
   homes.push(home);
   const fake = makeFakeAnthropic(script);
   const sessionsDir = `${home}/native-sessions`;
-  const adapter = makeNativeAdapter({ apiKey: "sk-ant-test", sessionsDir, fetch: fake.fetch });
+  const adapter = makeNativeAdapter({ apiKey: "sk-ant-test", sessionsDir, fetch: fake.fetch, cacheBreaks: "throw" });
   return { home, fake, adapter, sessionsDir };
 };
 
@@ -288,13 +289,13 @@ test("a thread resumes its session after a restart, with the same prefix; a reve
     { blocks: [{ type: "text", text: "three back" }] },
     { blocks: [{ type: "text", text: "forked back" }] },
   ]);
-  const before = makeNativeAdapter({ apiKey: "sk-ant-test", sessionsDir, fetch: fake.fetch });
+  const before = makeNativeAdapter({ apiKey: "sk-ant-test", sessionsDir, fetch: fake.fetch, cacheBreaks: "throw" });
   const [started] = await run(before, input("t1", "one"));
   const sessionId = started?.type === "session.started" ? started.sessionId : "";
   await run(before, input("t2", "two", { resumeSessionId: sessionId }));
 
   // A new adapter, as after a restart, given a different tool list: the session keeps the one it started with.
-  const after = makeNativeAdapter({ apiKey: "sk-ant-test", sessionsDir, fetch: fake.fetch });
+  const after = makeNativeAdapter({ apiKey: "sk-ant-test", sessionsDir, fetch: fake.fetch, cacheBreaks: "throw" });
   const resumed = await run(after, input("t3", "three", { resumeSessionId: sessionId, tools: [] }));
   expect(resumed.some((e) => e.type === "session.started")).toBe(false);
   const [r1, , r3] = fake.requests.map((r) => r.body);
@@ -362,4 +363,51 @@ test("a new session's memory leads its first message, an image goes in as an ima
   expect(text?.type === "text" && text.text).not.toContain("ignore previous instructions");
   expect(image).toEqual({ type: "image", source: { type: "base64", media_type: "image/png", data: Buffer.from(png).toString("base64") } });
   expect(nudge).toEqual({ type: "text", text: "Consider saving memory." });
+});
+
+test("a request that changes an earlier message of its session fails the turn, naming the message", async () => {
+  // A tool that rewrites an earlier call's arguments in place changes that call's message in the transcript.
+  let earlier: Record<string, unknown> | undefined;
+  const note: HarnessTool = {
+    name: "note",
+    description: "Notes a thing.",
+    params: { text: { type: "string", description: "The thing." } },
+    call: async (args) => {
+      if (earlier) earlier.text = "rewritten";
+      earlier = args;
+      return { text: "Noted." };
+    },
+  };
+  const { fake, adapter } = setup([
+    { blocks: [{ type: "tool_use", id: "toolu_1", name: "note", input: { text: "a" } }] },
+    { blocks: [{ type: "tool_use", id: "toolu_2", name: "note", input: { text: "b" } }] },
+    { blocks: [{ type: "text", text: "Done." }] },
+  ]);
+  const exit = await Effect.runPromise(Effect.exit(Stream.runCollect(adapter.run(input("t1", "note a and b", { tools: [note] })))));
+  expect(JSON.stringify(exit)).toContain("broke the prompt cache: message 2 changed (block 1)");
+  expect(fake.requests).toHaveLength(2);
+});
+
+test("the cache check names a changed system prompt, an earlier message, or a parameter changed without a route change", async () => {
+  const { fake, adapter } = setup([
+    { blocks: [{ type: "tool_use", id: "toolu_1", name: "memory_save", input: { text: "tea" } }] },
+    { blocks: [{ type: "text", text: "Saved." }] },
+  ]);
+  await run(adapter, input("t1", "Remember tea"), (e) => {
+    if (e.type === "approval.requested") void Effect.runPromise(adapter.respond(threadId, e.requestId, { decision: "allow" }));
+  });
+  const [a, b] = fake.requests.map((r) => r.body as unknown as Anthropic.MessageCreateParams);
+  if (!a || !b) throw new Error("expected two requests");
+  const first = fingerprint(sonnet, a);
+  expect(cacheBreak(first, fingerprint(sonnet, b))).toBeUndefined();
+  expect(cacheBreak(first, fingerprint(sonnet, { ...b, system: [{ type: "text", text: "Something else." }] }))).toBe(
+    "the system prompt changed",
+  );
+  const [, ...rest] = b.messages;
+  expect(cacheBreak(first, fingerprint(sonnet, { ...b, messages: [{ role: "user", content: "Remember coffee" }, ...rest] }))).toBe(
+    "message 1 changed (block 1)",
+  );
+  expect(cacheBreak(first, fingerprint(sonnet, { ...b, output_config: { effort: "high" } }))).toBe("effort changed without a route change");
+  // The same change through a route change the task records is allowed.
+  expect(cacheBreak(first, fingerprint({ ...sonnet, effort: "high" }, { ...b, output_config: { effort: "high" } }))).toBeUndefined();
 });
