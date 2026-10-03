@@ -10,6 +10,7 @@ import { Engine } from "../event-store/engine.ts";
 import { loadMemory, loadThreadView, project } from "../event-store/projector.ts";
 import { Reactor } from "../event-store/reactor.ts";
 import { memorySnapshot } from "./memory.ts";
+import { loadMemorySettings } from "./memory-config.ts";
 
 const homes: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];
@@ -164,4 +165,12 @@ test("a snapshot the cap forces to choose keeps an older entry relevant to the f
   expect(snapshot).not.toContain("Tailwind");
   // With nothing relevant, the newest wins.
   expect(memorySnapshot([relevant, unrelated], "/work/app", "hello")).toContain("Tailwind");
+});
+
+test("the agent's memory saves ask first unless memory.yaml turns approval off", () => {
+  const home = makeTempHome();
+  homes.push(home);
+  expect(loadMemorySettings(home).approveSaves).toBe(true);
+  writeFileSync(join(home, "memory.yaml"), "approveSaves: false\n");
+  expect(loadMemorySettings(home).approveSaves).toBe(false);
 });
