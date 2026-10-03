@@ -16,7 +16,7 @@ const layout = () => {
   const cwd = join(home, "workspace", "my project");
   mkdirSync(cwd, { recursive: true });
   mkdirSync(join(home, "attachments"));
-  const reach = { home, folders: [extra], attachments: join(home, "attachments") };
+  const reach = { home, folders: [extra], readable: [join(home, "attachments")] };
   return { home, extra, elsewhere, cwd, reach };
 };
 

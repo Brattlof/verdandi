@@ -35,6 +35,7 @@ A bypass of one of these is a vulnerability.
 5. **The asks Verdandi itself enforces.** Nothing runs or is written past one of these without the user's answer:
    - a project's own commands (its verifiers in `.verdandi/routing.yaml`, its worktree setup in `.verdandi/worktree.yaml`) run only once the user trusts that exact list in the project, by its hash (`apps/agent/src/trust/trust.ts`), and a changed list asks again. Unattended runs only run trusted lists;
    - a Verdandi tool marked `ask` (`packages/tools`) runs only once allowed;
+   - a native `terminal` command runs only once allowed, every one (`runTool` in `packages/harness-native/src/adapter.ts`);
    - a skill change, or a memory save or proposal that asks, writes nothing until allowed.
 
    Getting one of these past its ask is a vulnerability. What the approved step then does is not: an approval is consent, not containment.

@@ -3,11 +3,13 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Command, CommandId, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeNativeAdapter, nativeCatalog } from "@verdandi/harness-native";
-import { makeFakeAnthropic, makeTempHome, removeTempHome } from "@verdandi/testkit";
+import { type FakeReply, makeFakeAnthropic, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { threadDiff } from "../diffs/diff.ts";
+import { alive } from "../home/home.ts";
 import { catalogFor } from "../routing/routing.ts";
+import { runShell } from "../verifiers/verify.ts";
 import { AppLayer } from "./app.ts";
 import { Engine } from "./engine.ts";
 import { loadThreadView } from "./projector.ts";
@@ -25,7 +27,12 @@ const nativeFor = (home: string, fetch: typeof globalThis.fetch) =>
   makeNativeAdapter({
     apiKey: "sk-ant-test",
     sessionsDir: join(home, "native-sessions"),
-    reach: { home, folders: [], attachments: join(home, "attachments") },
+    reach: { home, folders: [], readable: [join(home, "attachments")] },
+    terminal: {
+      run: (command, cwd, { timeoutMs, outputFile, signal }) =>
+        Effect.runPromise(runShell(command, cwd, { timeoutMs, outputFile }), { signal }),
+      outputs: join(home, "terminal-output"),
+    },
     fetch,
     cacheBreaks: "throw",
   });
@@ -174,7 +181,125 @@ test("a native turn reads and edits a file, and the turn's diff shows it; in pla
     kind: "tool.result",
     toolUseId: "toolu_p",
     isError: true,
-    content: "You're planning: change no file until the user approves your plan with propose_plan.",
+    content: "You're planning: change nothing and run no command until the user approves your plan with propose_plan.",
   });
   expect(readFileSync(join(project, "rate.ts"), "utf8")).toBe("export const rate = 0.2;\n");
+});
+
+/** A native thread on the fake provider in its own project, whose approvals the test answers with `allow`. */
+const terminalThread = async (script: (home: string) => readonly FakeReply[]) => {
+  const home = makeTempHome();
+  const project = makeTempHome();
+  homes.push(home, project);
+  const fake = makeFakeAnthropic(script(home));
+  const runtime = ManagedRuntime.make(AppLayer(home, { native: nativeFor(home, fake.fetch) }));
+  runtimes.push(runtime as never);
+  const threadId = "thread-terminal" as ThreadId;
+  const dispatch = (c: Command) => Effect.flatMap(Engine, (e) => e.dispatch(c));
+  await runtime.runPromise(
+    Effect.gen(function* () {
+      const engine = yield* Engine;
+      yield* engine.react((s) =>
+        s.event.type === "approval.requested"
+          ? engine
+              .dispatch({
+                type: "approval.respond",
+                commandId: `allow-${s.event.requestId}` as CommandId,
+                threadId,
+                requestId: s.event.requestId,
+                resolution: { decision: "allow" },
+              })
+              .pipe(Effect.ignore)
+          : Effect.void,
+      );
+      yield* dispatch({
+        type: "thread.create",
+        commandId: "c1" as CommandId,
+        threadId,
+        projectPath: project,
+        route: { harness: "native", model: "claude-sonnet-5-5", effort: "medium" },
+      });
+    }),
+  );
+  const send = (turnId: string, text: string) =>
+    runtime.runPromise(
+      dispatch({ type: "turn.send", commandId: `s-${turnId}` as CommandId, threadId, turnId: turnId as TurnId, text, mode: "build" }),
+    );
+  const settle = () =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        yield* Effect.flatMap(Reactor, (r) => r.drain);
+        return (yield* loadThreadView(threadId))?.turns.at(-1);
+      }),
+    );
+  return { home, project, threadId, dispatch: (c: Command) => runtime.runPromise(dispatch(c)), send, settle };
+};
+
+test("an approved terminal command runs in the thread's folder, and its whole output is where the result says, for read_file", async () => {
+  const { home, send, settle } = await terminalThread((home) => [
+    { blocks: [{ type: "tool_use", id: "toolu_t", name: "terminal", input: { command: "echo hello from the shell" } }] },
+    { blocks: [{ type: "tool_use", id: "toolu_g", name: "grep", input: { pattern: "hello", path: join(home, "terminal-output") } }] },
+    { blocks: [{ type: "text", text: "It said hello." }] },
+  ]);
+  await send("turn-1", "Say hello");
+  const turn = await settle();
+  expect(turn?.status).toBe("success");
+  const result = turn?.items.find((i) => i.kind === "tool.result" && i.toolUseId === "toolu_t");
+  const content = result?.kind === "tool.result" ? String(result.content) : "";
+  expect(result).toMatchObject({ isError: false });
+  expect(content).toMatch(/^Exit code 0 \(\d+\.\d s\)\.\nhello from the shell/);
+  const file = /The whole output is at (.+); read it with read_file\./.exec(content)?.[1] ?? "";
+  expect(file.startsWith(join(home, "terminal-output"))).toBe(true);
+  expect(readFileSync(file, "utf8").trim()).toBe("hello from the shell");
+  // The outputs folder is in the home, and still readable.
+  expect(turn?.items).toContainEqual({
+    kind: "tool.result",
+    toolUseId: "toolu_g",
+    isError: false,
+    content: `${file}:1: hello from the shell`,
+  });
+});
+
+test("interrupting a turn mid-command kills the command's whole process tree before the interrupt settles", async () => {
+  const started = Promise.withResolvers<number[]>();
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: (req) => {
+      started.resolve((new URL(req.url).searchParams.get("pids") ?? "").split(",").map(Number));
+      return new Response("ok");
+    },
+  });
+  try {
+    const { project, threadId, dispatch, send, settle } = await terminalThread(() => [
+      {
+        blocks: [
+          {
+            type: "tool_use",
+            id: "toolu_t",
+            name: "terminal",
+            input: { command: `"${process.execPath}" tree.ts http://127.0.0.1:${server.port}/started` },
+          },
+        ],
+      },
+    ]);
+    // A command that starts a child of its own, reports both, and keeps running.
+    writeFileSync(
+      join(project, "tree.ts"),
+      [
+        `const child = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 1000)"]);`,
+        "await fetch(process.argv[2] + '?pids=' + process.pid + ',' + child.pid);",
+        "setInterval(() => {}, 1000);",
+      ].join("\n"),
+    );
+    await send("turn-1", "Run the long thing");
+    const pids = await started.promise;
+    expect(pids.map(alive)).toEqual([true, true]);
+    await dispatch({ type: "turn.interrupt", commandId: "i1" as CommandId, threadId, turnId: "turn-1" as TurnId });
+    const turn = await settle();
+    expect(turn?.status).toBe("interrupted");
+    expect(pids.map(alive)).toEqual([false, false]);
+  } finally {
+    server.stop(true);
+  }
 });

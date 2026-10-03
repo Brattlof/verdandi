@@ -5,9 +5,10 @@ import type Anthropic from "@anthropic-ai/sdk";
 
 /**
  * Where the native agent's file tools may go besides the thread's folder (DESIGN §13): the home's `workspace.yaml`
- * folders without asking, the attachments folder for reading, and never the rest of the Verdandi home.
+ * folders without asking, `readable` folders of the home (attachments, terminal outputs) for reading, and never the
+ * rest of the Verdandi home.
  */
-export type Reach = { readonly home: string; readonly folders: readonly string[]; readonly attachments: string };
+export type Reach = { readonly home: string; readonly folders: readonly string[]; readonly readable: readonly string[] };
 
 /** What a file tool may do with a path: go ahead, ask the user first, or refuse, saying why. */
 export type Access =
@@ -40,7 +41,7 @@ const inside = (root: string, path: string) => {
 export const access = (path: string, cwd: string, reach: Reach, write: boolean): Access => {
   const target = real(resolve(cwd, path));
   if ([cwd, ...reach.folders].some((root) => inside(real(root), target))) return { kind: "allow" };
-  if (!write && inside(real(reach.attachments), target)) return { kind: "allow" };
+  if (!write && reach.readable.some((root) => inside(real(root), target))) return { kind: "allow" };
   if (inside(real(reach.home), target))
     return {
       kind: "refuse",

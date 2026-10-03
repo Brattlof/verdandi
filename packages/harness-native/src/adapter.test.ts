@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type Anthropic from "@anthropic-ai/sdk";
 import {
   type HarnessEvent,
@@ -17,6 +17,7 @@ import { Effect, Fiber, Stream } from "effect";
 import { makeNativeAdapter } from "./adapter.ts";
 import { cacheBreak, fingerprint } from "./cache-check.ts";
 import { nativeCatalog } from "./catalog.ts";
+import type { RunCommand } from "./terminal.ts";
 import { createTranscript } from "./transcript.ts";
 
 const homes: string[] = [];
@@ -40,11 +41,19 @@ const memorySave: HarnessTool = {
   },
 };
 
+/** Commands the fake terminal ran; it answers each with its text. */
+const ranCommands: string[] = [];
+const fakeTerminal: RunCommand = async (command) => {
+  ranCommands.push(command);
+  return { exitCode: 0, output: `ran: ${command}`, durationMs: 1200 };
+};
+
 /** The adapter's options in a test: a temporary home, the fake provider, and every cache break thrown. */
 const options = (home: string, fetch: typeof globalThis.fetch) => ({
   apiKey: "sk-ant-test",
   sessionsDir: `${home}/native-sessions`,
-  reach: { home, folders: [], attachments: `${home}/attachments` },
+  reach: { home, folders: [], readable: [`${home}/attachments`] },
+  terminal: { run: fakeTerminal, outputs: `${home}/terminal-output` },
   fetch,
   cacheBreaks: "throw" as const,
 });
@@ -158,6 +167,7 @@ test("a native turn streams text, runs a Verdandi tool once the user approves it
     "edit_file",
     "glob",
     "grep",
+    "terminal",
     "propose_plan",
   ]);
   expect(a?.cache_control).toEqual({ type: "ephemeral" });
@@ -472,7 +482,7 @@ test("a file tool asks before going outside the thread's folder, refuses Verdand
       kind: "tool.result",
       toolUseId: "toolu_3",
       isError: true,
-      content: "This turn runs in ask mode: answer without changing any file.",
+      content: "This turn runs in ask mode: answer without changing anything or running commands.",
     },
   });
   expect(existsSync(`${cwd}/a.txt`)).toBe(false);
@@ -504,4 +514,51 @@ test("a session from before the file tools keeps its tool list: no file tools, a
     type: "item",
     item: { kind: "tool.result", toolUseId: "toolu_1", isError: true, content: "There's no tool named read_file." },
   });
+});
+
+test("the terminal asks before every command: an approved one's output comes back with where the rest is, a denied one never runs", async () => {
+  const { home, adapter } = setup([
+    {
+      blocks: [
+        { type: "tool_use", id: "toolu_1", name: "terminal", input: { command: "bun test" } },
+        { type: "tool_use", id: "toolu_2", name: "terminal", input: { command: "rm -rf build" } },
+      ],
+    },
+    { blocks: [{ type: "text", text: "Tests ran." }] },
+    { blocks: [{ type: "tool_use", id: "toolu_3", name: "terminal", input: { command: "git status" } }] },
+    { blocks: [{ type: "text", text: "Planning, then." }] },
+  ]);
+  ranCommands.length = 0;
+  const asked: unknown[] = [];
+  const events = await run(adapter, input("t1", "Run the tests"), (e) => {
+    if (e.type !== "approval.requested") return;
+    asked.push(e.input);
+    const decision = asked.length === 1 ? "allow" : "deny";
+    void Effect.runPromise(adapter.respond(threadId, e.requestId, { decision }));
+  });
+  expect(asked).toEqual([
+    { command: "bun test", folder: "/work/payments" },
+    { command: "rm -rf build", folder: "/work/payments" },
+  ]);
+  expect(ranCommands).toEqual(["bun test"]);
+  const results = events.flatMap((e) => (e.type === "item" && e.item.kind === "tool.result" ? [e.item] : []));
+  expect(results[0]?.isError).toBe(false);
+  expect(results[0]?.content).toStartWith("Exit code 0 (1.2 s).\nran: bun test\n[The whole output is at ");
+  expect(results[0]?.content).toContain(join(home, "terminal-output"));
+  expect(results[1]).toMatchObject({ isError: true, content: "The user denied this." });
+
+  // Plan mode refuses a command without asking.
+  const sessionId = events[0]?.type === "session.started" ? events[0].sessionId : "";
+  const planned = await run(adapter, input("t2", "Plan the fix", { mode: "plan", resumeSessionId: sessionId }));
+  expect(planned.some((e) => e.type === "approval.requested")).toBe(false);
+  expect(planned).toContainEqual({
+    type: "item",
+    item: {
+      kind: "tool.result",
+      toolUseId: "toolu_3",
+      isError: true,
+      content: "You're planning: change nothing and run no command until the user approves your plan with propose_plan.",
+    },
+  });
+  expect(ranCommands).toEqual(["bun test"]);
 });

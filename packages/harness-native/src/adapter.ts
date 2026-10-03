@@ -17,6 +17,7 @@ import { type CacheBreaks, cacheBreak, fingerprint, type Sent } from "./cache-ch
 import { nativeCatalog } from "./catalog.ts";
 import { access, fileTools, type Reach, runFileTool } from "./file-tools.ts";
 import { modeNotes, opensFiles, planTool, sessionPrefix, turnContent } from "./prompt.ts";
+import { runTerminal, type Terminal, terminalTool } from "./terminal.ts";
 import {
   appendEntry,
   createTranscript,
@@ -33,6 +34,8 @@ type Turn = {
   readonly steers: string[];
   /** Plan mode until the user approves the plan; then the turn goes on building. */
   planning: boolean;
+  /** The terminal command running, which an interrupt waits for until its process tree is gone. */
+  running: Promise<unknown> | undefined;
 };
 
 /** One native session per thread, kept between turns. */
@@ -90,16 +93,25 @@ async function* request(turn: Turn, event: (requestId: string) => HarnessEvent):
 
 const feedback = (r: Resolution) => (r.decision === "deny" && r.feedback ? ` Their feedback: ${r.feedback}` : "");
 
+/** Why this turn may change nothing and run no command yet (`ask`, or `plan` before the plan is approved), or undefined. */
+const heldBack = (turn: Turn, mode: InteractionMode) =>
+  turn.planning
+    ? `You're planning: change nothing and run no command until the user approves your plan with ${planTool}.`
+    : mode === "ask"
+      ? "This turn runs in ask mode: answer without changing anything or running commands."
+      : undefined;
+
 /**
  * Runs one tool call: the plan tool raises `plan.requested`, a file tool checks its path (asking outside the thread's
- * reach, ADR 0025), and a Verdandi tool that `ask`s raises `approval.requested` first.
+ * reach, ADR 0025), the terminal asks before every command, and a Verdandi tool that `ask`s raises
+ * `approval.requested` first. A file tool or the terminal runs only in a session whose tool list has it.
  */
 async function* runTool(
   use: Anthropic.ToolUseBlock,
   input: HarnessRunInput,
   session: Session,
   turn: Turn,
-  reach: Reach,
+  local: { readonly reach: Reach; readonly terminal: Terminal; readonly signal: AbortSignal },
 ): AsyncGenerator<HarnessEvent, { readonly text: string; readonly isError?: boolean }> {
   const args = (typeof use.input === "object" && use.input !== null ? use.input : {}) as Record<string, unknown>;
   if (use.name === planTool) {
@@ -125,19 +137,35 @@ async function* runTool(
         : "The user approved the plan. Build it now.",
     };
   }
+  // A session from before the file tools or the terminal keeps the tool list it started with.
+  const has = session.transcript.prefix.tools.some((t) => t.name === use.name);
+  if (use.name === terminalTool && has) {
+    const held = heldBack(turn, input.mode);
+    if (held) return { text: held, isError: true };
+    if (typeof args.command !== "string" || args.command.trim() === "") return { text: "`command` is required.", isError: true };
+    // ponytail: every command asks; smart approvals (DESIGN §17) rate a command's risk later, never auto-approving a destructive one.
+    const r = yield* request(turn, (requestId) => ({
+      type: "approval.requested",
+      requestId,
+      toolName: use.name,
+      input: { ...args, folder: input.cwd },
+    }));
+    if (r.decision !== "allow") return { text: `The user denied this.${feedback(r)}`, isError: true };
+    const running = runTerminal(args, input.cwd, local.terminal, use.id, local.signal);
+    turn.running = running;
+    try {
+      return await running;
+    } finally {
+      turn.running = undefined;
+    }
+  }
   const file = fileTools[use.name];
-  // A session from before the file tools keeps the tool list it started with.
-  if (file && session.transcript.prefix.tools.some((t) => t.name === use.name)) {
-    if (file.writes && (turn.planning || input.mode === "ask"))
-      return {
-        text: turn.planning
-          ? `You're planning: change no file until the user approves your plan with ${planTool}.`
-          : "This turn runs in ask mode: answer without changing any file.",
-        isError: true,
-      };
+  if (file && has) {
+    const held = file.writes ? heldBack(turn, input.mode) : undefined;
+    if (held) return { text: held, isError: true };
     const path = file.path(args);
     if (path === "") return { text: "`path` is required.", isError: true };
-    const allowed = access(path, input.cwd, reach, file.writes);
+    const allowed = access(path, input.cwd, local.reach, file.writes);
     if (allowed.kind === "refuse") return { text: allowed.why, isError: true };
     if (allowed.kind === "ask") {
       const note = allowed.note;
@@ -149,7 +177,7 @@ async function* runTool(
       }));
       if (r.decision !== "allow") return { text: `The user denied this.${feedback(r)}`, isError: true };
     }
-    return await runFileTool(file, args, input.cwd, reach);
+    return await runFileTool(file, args, input.cwd, local.reach);
   }
   const tool = input.tools?.find((t) => t.name === use.name);
   if (!tool) return { text: `There's no tool named ${use.name}.`, isError: true };
@@ -163,7 +191,8 @@ async function* runTool(
 /**
  * Verdandi's own agent loop on the Anthropic Messages API (DESIGN §9.4, ADR 0022), metered at list price. Each
  * thread keeps one session, whose system prompt and tool list are fixed when it opens and whose transcript is kept
- * in `sessionsDir`, so a thread resumes after a restart. Its file tools work in the thread's folder and `reach`. Each request is checked against the session's last one, and a
+ * in `sessionsDir`, so a thread resumes after a restart. Its file tools work in the thread's folder and `reach`, and its
+ * terminal runs commands through `terminal`, whose outputs folder `read_file` may read. Each request is checked against the session's last one, and a
  * break of the prompt cache is logged as a warning, or thrown with `cacheBreaks: "throw"`, as every test sets. Tests
  * pass the fake provider's `fetch`.
  */
@@ -171,6 +200,7 @@ export const makeNativeAdapter = (options: {
   readonly apiKey: string;
   readonly sessionsDir: string;
   readonly reach: Reach;
+  readonly terminal: Terminal;
   readonly fetch?: typeof globalThis.fetch;
   readonly cacheBreaks?: CacheBreaks;
 }): HarnessAdapter => {
@@ -184,6 +214,7 @@ export const makeNativeAdapter = (options: {
   });
   const sessions = new Map<ThreadId, Session>();
   const harnessVersion = `native (@anthropic-ai/sdk ${VERSION})`;
+  const reach = { ...options.reach, readable: [...options.reach.readable, options.terminal.outputs] };
   // Per transcript, so a fork (a new transcript) starts fresh; a diagnostic, kept in memory only.
   const lastSent = new WeakMap<Transcript, Sent>();
 
@@ -334,7 +365,7 @@ export const makeNativeAdapter = (options: {
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const use of uses) {
         yield { type: "item", item: { kind: "tool.call", toolUseId: use.id, name: use.name, input: use.input } };
-        const result = yield* runTool(use, input, session, turn, options.reach);
+        const result = yield* runTool(use, input, session, turn, { reach, terminal: options.terminal, signal });
         const isError = result.isError === true;
         results.push({ type: "tool_result", tool_use_id: use.id, content: result.text, ...(isError && { is_error: true }) });
         yield { type: "item", item: { kind: "tool.result", toolUseId: use.id, isError, content: result.text } };
@@ -377,7 +408,7 @@ export const makeNativeAdapter = (options: {
                 text: "This native session started before the agent could open files, so it sees only the attached files' names. A new thread can open them.",
               },
             });
-          const turn: Turn = { waiting: new Map(), steers: [], planning: input.mode === "plan" };
+          const turn: Turn = { waiting: new Map(), steers: [], planning: input.mode === "plan", running: undefined };
           session.turn = turn;
           const controller = new AbortController();
           const generator = loop(session, input, content, turn, controller.signal);
@@ -386,12 +417,16 @@ export const makeNativeAdapter = (options: {
           return Stream.fromAsyncIterable(reader, failure).pipe(
             (s) => (events.length > 0 ? Stream.concat(Stream.fromIterable(events), s) : s),
             Stream.drainFork(input.steers.pipe(Stream.tap((steer) => Effect.sync(() => void turn.steers.push(steer))))),
-            // An interrupt aborts the request in flight; a half-streamed reply is never committed.
+            // An interrupt aborts the request in flight, so a half-streamed reply is never committed, and kills a
+            // running command, waiting until its process tree is gone.
             Stream.onExit(() =>
-              Effect.sync(() => {
-                controller.abort();
-                if (session.turn === turn) session.turn = undefined;
-              }),
+              Effect.andThen(
+                Effect.sync(() => {
+                  controller.abort();
+                  if (session.turn === turn) session.turn = undefined;
+                }),
+                Effect.promise(() => turn.running ?? Promise.resolve()),
+              ),
             ),
           );
         }),
