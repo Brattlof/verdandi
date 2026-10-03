@@ -1,0 +1,38 @@
+name: Audit
+
+# Checks bun.lock against known advisories. Weekly, not per PR: every PR would get the same findings.
+on:
+  schedule:
+    - cron: "23 5 * * 1" # Mondays, 05:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: bun audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      # Reads bun.lock only: nothing is installed or run.
+      - run: |
+          status=0
+          bun audit --audit-level=high > audit.txt || status=$?
+          cat audit.txt
+          {
+            echo '### bun audit (high and critical)'
+            echo '```'
+            cat audit.txt
+            echo '```'
+            if [ "$status" -ne 0 ]; then
+              echo 'Fix each with `bun audit fix`, or an upgrade. A fixed version younger than 14 days waits out the age rule unless it goes into `minimumReleaseAgeExcludes` in bunfig.toml with a dated comment (AGENTS.md).'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
