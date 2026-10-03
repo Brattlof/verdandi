@@ -45,7 +45,7 @@ A bypass of one of these is a vulnerability.
 These lower risk, and they can be bypassed by design. A bypass is a bug worth fixing, not a vulnerability.
 
 - The injection question (`untrusted.injection`, `injectionRules` in `packages/decisions/src/rules.ts`), the secret scans on memory (`scanMemory`) and skills (`scanSkill`), and trajectory redaction (`packages/trajectories/src/redact.ts`).
-- "Marked as data" fences around untrusted text handed to the agent (escalation hand-offs, attachments, the memory snapshot), and the warning over a flagged search result. A model can still follow what's inside one (#198).
+- "Marked as data" fences around untrusted text handed to the agent (escalation hand-offs, the review digest, the memory snapshot's entries: `asData` in `apps/agent/src/trust/fence.ts`, a fence longer than any run of backticks in the text, so the text can't close it), attachments handed over as paths marked as data, and the warning over a flagged search result. A model can still follow what's inside one.
 - What an approval or plan mode limits. They're consent, not containment: they ask before a step, and don't limit what an approved step does or what the user's own harness settings already allow. The harness's own permission prompts and plan mode (Claude Code's read-only mode) are enforced by the harness.
 - The native harness's file tools' path rules (`access` in `packages/harness-native/src/file-tools.ts`): free in the thread's folder and the `workspace.yaml` folders, asking elsewhere, refusing the rest of the Verdandi home. They steer the agent's own tools, but anything run as the user, Claude Code's tools included, reaches the same files.
 - Spend caps (`spend-caps.yaml`) and task limits, which are a budget, not a security control.
@@ -96,4 +96,4 @@ The rivals' incidents argue for these defaults. Each one names what holds it tod
 - A report is triaged against the boundaries above. A heuristic's weakness is fixed as a bug, and no doc may present a heuristic as a boundary.
 - Containment comes from the OS (a separate account, a VM or a container) until M6's sandbox, and the docs say so rather than imply otherwise.
 - With `approveSaves` on by default, `memory_save` raises an approval on Claude Code and the native harness in every home without a `memory.yaml`. A headless `verdandi run` whose agent saves a memory therefore stops at it (exit code 5), unless `--deny-requests` is set or the home sets `approveSaves: false`.
-- Known gaps, tracked: one token for every device (#215); context files and skills that Claude Code loads by itself aren't scanned (#177); the memory snapshot's fence can be closed by an entry (#198).
+- Known gaps, tracked: one token for every device (#215); context files and skills that Claude Code loads by itself aren't scanned (#177).

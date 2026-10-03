@@ -38,7 +38,7 @@ import {
   type UntrustedInput,
   type WorktreeView,
 } from "@verdandi/contracts";
-import { flagged, injectionQuestion, injectionWarning } from "@verdandi/decisions";
+import { flagged, injectionQuestion } from "@verdandi/decisions";
 import { Result } from "effect";
 import { worktreeBranch } from "../checkpoints/refs.ts";
 import { memorySnapshot, overCap, sameAs, scanMemory } from "../memory/memory.ts";
@@ -56,6 +56,7 @@ import {
 } from "../routing/routing.ts";
 import { changeProblem, invertChange, nameProblem, pinnedProblem, scanSkill } from "../skills/skills.ts";
 import type { SpendState } from "../spend/spend.ts";
+import { asData } from "../trust/fence.ts";
 import { commandsHash } from "../trust/trust.ts";
 import type { StoredRevert } from "./projector.ts";
 
@@ -245,16 +246,6 @@ export const handedText = (trigger: EscalationTrigger) => {
     case "repeated-error":
       return trigger.error;
   }
-};
-
-/**
- * Untrusted `text` as Verdandi hands it to the agent: in a fence longer than any run of backticks in it, so it can't
- * close the fence, under a warning when the injection scan's `answer` flags it (DESIGN §17). Every piece of untrusted
- * text a turn Verdandi sends carries goes through here.
- */
-export const asData = (text: string, answer: DecisionAnswer | undefined) => {
-  const fence = "`".repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map((m) => m[0].length + 1)));
-  return [...(answer && flagged(answer) ? [injectionWarning] : []), fence, text, fence];
 };
 
 /**

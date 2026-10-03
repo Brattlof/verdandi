@@ -2,7 +2,7 @@ import { clip, decisionKinds, type Item, MemoryScope, type TaskId, type ThreadId
 import type { SkillEdit } from "@verdandi/tools";
 import { Effect, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { asData } from "../event-store/decider.ts";
+import { asData } from "../trust/fence.ts";
 
 type DigestTurn = { readonly text: string; readonly status: string; readonly items: readonly Item[] };
 
