@@ -8,16 +8,19 @@ import {
   CommandRejected,
   type HarnessAdapter,
   type HarnessId,
+  type PairMessage,
   type RouteDecision,
   RoutingUnavailable,
   SpendCapsUnavailable,
   TerminalUnavailable,
 } from "@verdandi/contracts";
-import { Context, Deferred, Effect, Layer, Result, Stream } from "effect";
+import { Context, Deferred, Effect, Layer, Option, Result, Stream } from "effect";
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import { Socket } from "effect/unstable/socket";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { AttachmentSweepLive, attachmentPath, attachmentsDir, storeAttachments } from "../attachments/attachments.ts";
+import { Devices, DevicesLive } from "../devices/devices.ts";
 import { threadDiff } from "../diffs/diff.ts";
 import { AppLayer } from "../event-store/app.ts";
 import { reachedCap } from "../event-store/decider.ts";
@@ -53,6 +56,7 @@ const Handlers = (home: string) =>
       const terminals = yield* Terminals;
       const gc = yield* Gc;
       const skillFolders = yield* ProfileSkills;
+      const devices = yield* Devices;
       const harnesses = Object.keys(registry) as HarnessId[];
       const routing = routingFor(registry);
       const subscriptions = new Map<string, Deferred.Deferred<void>>();
@@ -206,6 +210,10 @@ const Handlers = (home: string) =>
         TerminalWrite: ({ terminalId, data }) => terminals.write(terminalId, data),
         TerminalResize: ({ terminalId, cols, rows }) => terminals.resize(terminalId, cols, rows),
         TerminalClose: ({ terminalId }) => terminals.close(terminalId),
+        DevicesSubscribe: ({ subscriptionId }) => untilUnsubscribed(subscriptionId, devices.feed),
+        DevicesList: () => devices.view,
+        DeviceApprove: ({ requestId }) => devices.approve(requestId),
+        DeviceDeny: ({ requestId }) => devices.deny(requestId),
         TerminalSubscribe: ({ terminalId, subscriptionId }) => untilUnsubscribed(subscriptionId, terminals.feed(terminalId)),
       };
     }),
@@ -217,6 +225,29 @@ const sameToken = (given: string | null, token: string) =>
 const imageTypes: Record<string, string> = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 
 /**
+ * Who a request comes from (ADR 0028): the profile, whose token the CLI and `verdandi web`'s relay hold, sent as
+ * `?token=` or `Authorization: Bearer`; a paired device that isn't revoked, sent as `?device=` or
+ * `Authorization: Device`; or nobody. Each kind is checked only as itself, so a relay that passes device tokens
+ * through can't pass the profile's.
+ */
+const holder = (request: HttpServerRequest.HttpServerRequest, token: string) =>
+  Effect.gen(function* () {
+    const query = new URL(request.url, "http://localhost").searchParams;
+    const [scheme, value = null] = request.headers.authorization?.split(" ") ?? [];
+    const profile = query.get("token") ?? (scheme === "Bearer" ? value : null);
+    if (sameToken(profile, token)) return { kind: "profile" } as const;
+    const device = query.get("device") ?? (scheme === "Device" ? value : null);
+    const deviceId = device ? yield* (yield* Devices).authenticate(device) : undefined;
+    return deviceId ? ({ kind: "device", deviceId } as const) : undefined;
+  });
+
+const wrongToken = () =>
+  HttpServerResponse.text(
+    "Missing, wrong or revoked token. Clients on this machine read it from server.json in the Verdandi home; other devices pair first.",
+    { status: 401 },
+  );
+
+/**
  * An attachment's stored bytes, for the web UI's thumbnails. The token comes in an `Authorization: Bearer`
  * header, never the URL. Only the four image types are served inline; anything else downloads, and nothing
  * served here can run script.
@@ -224,9 +255,7 @@ const imageTypes: Record<string, string> = { png: "image/png", jpg: "image/jpeg"
 const serveAttachment = (home: string, token: string) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
-    if (!sameToken(request.headers.authorization?.replace(/^Bearer /, "") ?? null, token)) {
-      return HttpServerResponse.text("Missing or wrong token.", { status: 401 });
-    }
+    if (!(yield* holder(request, token))) return wrongToken();
     const id = new URL(request.url, "http://localhost").pathname.split("/").at(-1) ?? "";
     const path = attachmentPath(attachmentsDir(home), id);
     if (!path || !existsSync(path)) return HttpServerResponse.text("No such attachment.", { status: 404 });
@@ -242,37 +271,92 @@ const serveAttachment = (home: string, token: string) =>
     });
   });
 
+/** verdandid serves no page (ADR 0026): a browser sends its `Origin`, and the CLI and `verdandi web`'s relay send none. */
+const refusePage = (request: HttpServerRequest.HttpServerRequest) =>
+  request.headers.origin === undefined
+    ? undefined
+    : HttpServerResponse.text(
+        `Refused a connection from a page at ${request.headers.origin}: verdandid serves no web page, and browsers reach it only through the web UI. Open it with: verdandi web`,
+        { status: 403 },
+      );
+
 /**
- * The WebSocket RPC protocol at /rpc and attachments at /attachments/<id>. /rpc refuses every browser page (a browser
- * sends its `Origin`; the CLI and `verdandi web`'s relay send none), since pages reach verdandid only through the web
- * server (ADR 0026), then an upgrade without the profile's token.
+ * A device asking to pair (ADR 0028), over a WebSocket that sends `PairMessage`s: the request with its code, then the
+ * token once the owner approves, or why not. The request is withdrawn when the socket closes first. The address is the
+ * one `x-verdandi-client` names (the web server relaying it sets it), else the socket's: a hint for the owner, never a
+ * check, since the code is the check.
+ */
+const pair = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const refused = refusePage(request);
+  if (refused) return refused;
+  const devices = yield* Devices;
+  const address = request.headers["x-verdandi-client"] ?? Option.getOrElse(request.remoteAddress, () => "unknown");
+  const socket = yield* Effect.orDie(request.upgrade);
+  yield* Effect.scoped(
+    Effect.gen(function* () {
+      const writer = yield* socket.writer;
+      // Each answer but `pending` is the last: the socket closes after it.
+      const send = (message: PairMessage) =>
+        writer
+          .write(JSON.stringify(message))
+          .pipe(Effect.andThen(message.kind === "pending" ? Effect.void : writer.write(new Socket.CloseEvent(1000))));
+      const raised = yield* devices.request({ address, userAgent: request.headers["user-agent"] ?? "" });
+      if (typeof raised === "string") return yield* send({ kind: "refused", message: raised });
+      yield* Effect.addFinalizer(() => devices.withdraw(raised.request.requestId));
+      yield* send({ kind: "pending", requestId: raised.request.requestId, code: raised.request.code });
+      // Reading ends when the device closes the socket, which withdraws the request.
+      const reader = yield* socket.reader;
+      const outcome = yield* Effect.raceFirst(
+        Deferred.await(raised.outcome),
+        reader.pull.pipe(Effect.forever, Effect.ignore, Effect.as(undefined)),
+      );
+      if (outcome) yield* send(outcome);
+    }).pipe(Effect.ignore),
+  );
+  return HttpServerResponse.empty();
+});
+
+/**
+ * The WebSocket RPC protocol at /rpc, attachments at /attachments/<id>, pairing at /pair, and /auth, which says whose a
+ * token is. /rpc refuses every browser page, then an upgrade without the profile's token or a paired device's. A device's
+ * connection closes as soon as it's revoked.
  */
 const ProtocolWithToken = (home: string, token: string) =>
   Layer.effect(RpcServer.Protocol)(
     Effect.gen(function* () {
       const { httpEffect, protocol } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
       const router = yield* HttpRouter.HttpRouter;
-      yield* router.add("GET", "/attachments/:id", serveAttachment(home, token));
+      const devices = yield* Devices;
+      const withDevices = Effect.provideService(Devices, devices);
+      // Released before the HTTP server stops, which waits for open sockets: waiting pairings end first.
+      yield* Effect.addFinalizer(() => devices.refuseAll);
+      yield* router.add("GET", "/attachments/:id", withDevices(serveAttachment(home, token)));
+      yield* router.add("GET", "/pair", withDevices(pair));
+      yield* router.add(
+        "GET",
+        "/auth",
+        Effect.gen(function* () {
+          const who = yield* holder(yield* HttpServerRequest.HttpServerRequest, token);
+          return who ? HttpServerResponse.jsonUnsafe(who) : wrongToken();
+        }).pipe(withDevices),
+      );
       yield* router.add(
         "GET",
         "/rpc",
         Effect.gen(function* () {
           const request = yield* HttpServerRequest.HttpServerRequest;
-          const origin = request.headers.origin;
-          if (origin !== undefined) {
-            return HttpServerResponse.text(
-              `Refused a connection from a page at ${origin}: verdandid serves no web page, and browsers reach it only through the web UI. Open it with: verdandi web`,
-              { status: 403 },
-            );
-          }
-          const given = new URL(request.url, "http://localhost").searchParams.get("token");
-          if (!sameToken(given, token)) {
-            return HttpServerResponse.text("Missing or wrong token. Clients read it from server.json in the Verdandi home.", {
-              status: 401,
-            });
-          }
-          return yield* httpEffect;
-        }),
+          const refused = refusePage(request);
+          if (refused) return refused;
+          const who = yield* holder(request, token);
+          if (!who) return wrongToken();
+          if (who.kind === "profile") return yield* httpEffect;
+          return yield* Effect.scoped(
+            Effect.flatMap(devices.revoked(who.deviceId), (revoked) =>
+              Effect.raceFirst(httpEffect, Effect.as(Deferred.await(revoked), HttpServerResponse.empty())),
+            ),
+          );
+        }).pipe(withDevices),
       );
       return protocol;
     }),
@@ -315,6 +399,7 @@ export const ServerLayer = (
     Layer.provideMerge(http),
     Layer.provideMerge(TerminalsLive),
     Layer.provideMerge(GcLive(home)),
+    Layer.provideMerge(DevicesLive),
     Layer.provideMerge(AppLayer(home, harnesses)),
   );
 };

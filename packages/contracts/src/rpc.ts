@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { AttachmentRef } from "./attachments.ts";
 import { ClientCommand } from "./commands.ts";
+import { DevicesUnavailable, DevicesView, DeviceView } from "./devices.ts";
 import {
   ApprovalRequested,
   CommandsTrustRequested,
@@ -59,6 +60,8 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "SkillChangeNotFound",
     "ReviewSkipped",
     "CommandsNotTrusted",
+    "DeviceExists",
+    "DeviceNotFound",
   ]),
   message: Schema.String,
 }) {}
@@ -391,6 +394,12 @@ export class Api extends RpcGroup.make(
   /** Kills the shell and its process tree, then forgets the terminal. Answers once the shell is gone. */
   Rpc.make("TerminalClose", { payload: { terminalId: TerminalId }, error: TerminalUnavailable }),
   /** The terminal's kept output, then its live output. The server ends it when the terminal is closed. */
+  /** Paired devices and waiting pairing requests, then both again whenever either changes (ADR 0028). */
+  Rpc.make("DevicesSubscribe", { payload: { subscriptionId: Schema.String }, success: DevicesView, stream: true }),
+  Rpc.make("DevicesList", { success: DevicesView }),
+  /** Pairs the device that raised `requestId`: verdandid makes its token and hands it only to that device. */
+  Rpc.make("DeviceApprove", { payload: { requestId: Schema.String }, success: DeviceView, error: DevicesUnavailable }),
+  Rpc.make("DeviceDeny", { payload: { requestId: Schema.String }, error: DevicesUnavailable }),
   Rpc.make("TerminalSubscribe", {
     payload: { terminalId: TerminalId, subscriptionId: Schema.String },
     success: TerminalFeed,

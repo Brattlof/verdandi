@@ -296,6 +296,9 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     ),
   "skill.pinned": (e, at) => withSql((sql) => sql`insert or replace into skill_pins (name, pinned_at) values (${e.skill}, ${at})`),
   "skill.unpinned": (e) => withSql((sql) => sql`delete from skill_pins where name = ${e.skill}`),
+  "device.paired": (e, at) =>
+    withSql((sql) => sql`insert into devices (id, name, token_hash, paired_at) values (${e.deviceId}, ${e.name}, ${e.tokenHash}, ${at})`),
+  "device.revoked": (e, at) => withSql((sql) => sql`update devices set revoked_at = ${at} where id = ${e.deviceId}`),
   "memory.proposed": insertRequest,
   "commands.trust.requested": insertRequest,
   "commands.trusted": (e, at) =>

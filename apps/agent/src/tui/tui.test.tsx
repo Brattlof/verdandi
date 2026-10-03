@@ -86,7 +86,7 @@ const openChat = async () => {
     await ui.mockInput.typeText(text);
     ui.mockInput.pressEnter();
   };
-  return { home, ui, send, seen, quit: quit.promise };
+  return { home, ui, send, seen, quit: quit.promise, port: info.port };
 };
 
 test("a message typed in the terminal UI reaches the agent, and its reply streams into the transcript", async () => {
@@ -155,4 +155,14 @@ test("Tab completes a slash command, then its argument, and the hint shows what 
   };
   expect(await press("/ra")).toContain("/rate <up|down|clear>: rates the latest task");
   expect(await press("u")).toMatch(/│\/rate up\s*│/);
+});
+
+test("a device asking to pair shows a notice with its code and how to answer", async () => {
+  const { port, seen } = await openChat();
+  const pairing = new WebSocket(`ws://127.0.0.1:${port}/pair`, { headers: { "user-agent": "Mozilla/5.0 (Android) Firefox/130.0" } });
+  cleanups.push(() => pairing.close());
+  const code = await new Promise<string>((resolve) => {
+    pairing.onmessage = (e) => resolve((JSON.parse(String(e.data)) as { code: string }).code);
+  });
+  await seen(`Firefox on Android from`, `showing code ${code}: verdandi devices approve`);
 });

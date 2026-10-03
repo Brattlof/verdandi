@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { AttachmentRef, AttachmentUpload } from "./attachments.ts";
 import { DecisionAnswer } from "./decisions.ts";
+import { DevicePair, DeviceRevoke } from "./devices.ts";
 import { HarnessEvent } from "./harness.ts";
 import { CommandId, profileStream, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { HandedSource, VerifierRun } from "./items.ts";
@@ -478,6 +479,7 @@ export const ClientCommand = Schema.Union([
   SkillUnpin,
   ApprovalRespond,
   CommandsTrustRevoke,
+  DeviceRevoke,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
 
@@ -525,6 +527,8 @@ export const Command = Schema.Union([
   ReviewStart,
   ReviewPropose,
   CommandsTrustRequest,
+  DeviceRevoke,
+  DevicePair,
 ]);
 export type Command = typeof Command.Type;
 

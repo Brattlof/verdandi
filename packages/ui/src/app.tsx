@@ -11,6 +11,7 @@ import {
 } from "@verdandi/contracts";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
+import { DevicesPage, PairingBanner, useDevices } from "./devices/devices.tsx";
 import { SearchPage } from "./search/search.tsx";
 import { Dashboard } from "./spend/dashboard.tsx";
 import { applyProjectsFeed, groupByRecency, type Sidebar as SidebarData } from "./state.ts";
@@ -24,8 +25,8 @@ import { Rune, RuneMark, type RuneName, RuneText } from "./ui/runes.tsx";
 /** The open thread lives in the URL hash (`#thread=<id>`), so links, Back and reloads just work. */
 const hashThread = () => new URLSearchParams(location.hash.slice(1)).get("thread") as ThreadId | null;
 /**
- * `#view=spend` opens the spend dashboard instead of a thread, `#view=search` the search page; `#view=projects`, or no
- * thread and no view, the projects page.
+ * `#view=spend` opens the spend dashboard instead of a thread, `#view=search` the search page, `#view=devices` the paired
+ * devices; `#view=projects`, or no thread and no view, the projects page.
  */
 const hashView = () => new URLSearchParams(location.hash.slice(1)).get("view");
 const onHashChange = (listener: () => void) => {
@@ -52,16 +53,17 @@ const startThread = async (connection: Connection, projectPath: string, worktree
   return result;
 };
 
-type Page = "home" | "thread" | "spend" | "search";
+type Page = "home" | "thread" | "spend" | "search" | "devices";
 
 export const App = ({ connection }: { connection: Connection }) => {
   const [sidebar] = useState(() => createStore<SidebarData | undefined>(undefined));
   const threadId = useSyncExternalStore(onHashChange, hashThread);
   const view = useSyncExternalStore(onHashChange, hashView);
   const turn = useSyncExternalStore(onHashChange, hashTurn);
-  const page: Page = view === "spend" || view === "search" ? view : threadId ? "thread" : "home";
+  const page: Page = view === "spend" || view === "search" || view === "devices" ? view : threadId ? "thread" : "home";
   const data = useStore(sidebar);
   const lost = useStore(connection.lost);
+  const devices = useDevices(connection);
   // Showing archived threads asks verdandid for a feed that includes them; hiding them goes back to one that doesn't.
   const [archived, setArchived] = useState(false);
   // Below the md breakpoint the sidebar is a drawer over the page; it closes on navigation and on Escape.
@@ -144,7 +146,10 @@ export const App = ({ connection }: { connection: Connection }) => {
           </button>
           <Wordmark />
         </div>
-        {page === "spend" ? (
+        {page !== "devices" && <PairingBanner view={devices} />}
+        {page === "devices" ? (
+          <DevicesPage connection={connection} view={devices} />
+        ) : page === "spend" ? (
           <Dashboard connection={connection} projects={data?.projects ?? []} />
         ) : page === "search" ? (
           <SearchPage connection={connection} />
@@ -211,6 +216,15 @@ const Rail = ({ page }: { page: Page }) => (
       className={railItem}
     >
       <RailLabel rune="fehu" label="Spend" />
+    </a>
+    <a
+      href="#view=devices"
+      aria-label="Devices"
+      title="Devices (ehwaz: the horse, and the trust between horse and rider)"
+      aria-current={page === "devices" ? "page" : undefined}
+      className={railItem}
+    >
+      <RailLabel rune="ehwaz" label="Devices" />
     </a>
   </nav>
 );
@@ -292,6 +306,7 @@ const pages = [
   { page: "home", view: "projects", rune: "ingwaz", label: "Projects" },
   { page: "search", view: "search", rune: "kenaz", label: "Search past sessions" },
   { page: "spend", view: "spend", rune: "fehu", label: "Spend dashboard" },
+  { page: "devices", view: "devices", rune: "ehwaz", label: "Devices" },
 ] as const satisfies readonly { page: Page; view: string; rune: RuneName; label: string }[];
 
 const row = "flex min-h-9 items-center gap-2.5 rounded-md px-2 py-1.5";

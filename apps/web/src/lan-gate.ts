@@ -52,9 +52,13 @@ export const gateOrigin = (origin: string, host: string, port: number) => {
 /** A client WebSocket relayed to `upstream`, holding what the client sent before `upstream` opened. */
 export type Relay = { readonly upstream: WebSocket; readonly pending: (string | Buffer)[] };
 
-/** Opens the upstream side of a relayed WebSocket. Bun's client sends no `Origin`, so the side it reaches sees none. */
-export const relayTo = (url: string): Relay => {
-  const upstream = new WebSocket(url);
+/**
+ * Opens the upstream side of a relayed WebSocket, sending `headers`. Bun's client sends no `Origin`, so the side it
+ * reaches sees none.
+ */
+export const relayTo = (url: string, headers: Record<string, string> = {}): Relay => {
+  // Bun's WebSocket takes headers in its second argument, which the DOM typing (this package also types the page) lacks.
+  const upstream = new WebSocket(url, { headers } as unknown as string[]);
   upstream.binaryType = "arraybuffer";
   return { upstream, pending: [] };
 };
@@ -83,14 +87,19 @@ export const relaySockets: WebSocketHandler<Relay> = {
   },
 };
 
+/** Headers only the gate sets on what it relays: the client's address, and the secret that proves the gate set it. */
+export const gateHeaders = { client: "x-verdandi-client", secret: "x-verdandi-gate" } as const;
+
 /**
  * Opens the web server (on `127.0.0.1:target`) to the local network or tailnet at `host:port`. Every request, the
  * page's files included, is refused unless it comes from a private, tailnet or loopback address (`allowed`), so even
- * with a public interface or a port forward the internet reaches nothing; the rest is relayed as is, WebSockets too.
- * A WebSocket from a page the gate didn't serve (`gateOrigin`) is refused before it reaches the web server, which
- * can't check it itself: the relay sends no `Origin`. The page's token still guards everything past the page.
+ * with a public interface or a port forward the internet reaches nothing: a second line of defence, since devices pair
+ * (ADR 0028). The page token `verdandi web` makes is refused here (`?token=`, `Authorization: Bearer`), so only paired
+ * devices and pairing requests get through. The rest is relayed as is, WebSockets too, with the client's address and
+ * `secret` (`gateHeaders`), which the web server trusts the address on. A WebSocket from a page the gate didn't serve
+ * (`gateOrigin`) is refused before it reaches the web server, which can't check it itself: the relay sends no `Origin`.
  */
-export const startLanGate = (host: string, port: number, target: number, allowed = isLocalAddress) =>
+export const startLanGate = (host: string, port: number, target: number, secret: string, allowed = isLocalAddress) =>
   Bun.serve<Relay>({
     hostname: host,
     port,
@@ -98,18 +107,29 @@ export const startLanGate = (host: string, port: number, target: number, allowed
       const from = server.requestIP(request)?.address;
       if (!from || !allowed(from)) return new Response("Verdandi only answers on its local network.", { status: 403 });
       const url = new URL(request.url);
+      if (url.searchParams.has("token") || request.headers.get("authorization")?.startsWith("Bearer "))
+        return new Response(
+          "That token only works on the machine running verdandi web. Open this address without it to pair this device.",
+          { status: 403 },
+        );
       const upstreamUrl = `http://127.0.0.1:${target}${url.pathname}${url.search}`;
+      const relayed = { [gateHeaders.client]: from, [gateHeaders.secret]: secret };
       if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
         const origin = request.headers.get("origin");
         if (origin !== null && !gateOrigin(origin, host, server.port ?? port))
           return new Response(`Refused a connection from a page at ${origin}: only the web UI this gate serves may connect.`, {
             status: 403,
           });
-        return server.upgrade(request, { data: relayTo(upstreamUrl.replace(/^http/, "ws")) })
+        const userAgent = request.headers.get("user-agent");
+        return server.upgrade(request, {
+          data: relayTo(upstreamUrl.replace(/^http/, "ws"), { ...relayed, ...(userAgent && { "user-agent": userAgent }) }),
+        })
           ? undefined
           : new Response("WebSocket upgrade failed.", { status: 400 });
       }
-      return fetch(upstreamUrl, { method: request.method, headers: request.headers, body: request.body, redirect: "manual" });
+      const headers = new Headers(request.headers);
+      for (const [name, value] of Object.entries(relayed)) headers.set(name, value);
+      return fetch(upstreamUrl, { method: request.method, headers, body: request.body, redirect: "manual" });
     },
     websocket: relaySockets,
   });

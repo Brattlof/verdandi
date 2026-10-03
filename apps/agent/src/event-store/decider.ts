@@ -146,6 +146,8 @@ export type DeciderState = {
   readonly injection?: DecisionAnswer;
   /** The skill a `skill.curate` or `skill.restore` names, if Verdandi created it, loaded for those commands. */
   readonly skill?: { readonly state: SkillState; readonly usedAt: string } | null;
+  /** The device a `device.pair` or `device.revoke` names, or null when none was paired with that id. */
+  readonly device?: { readonly revoked: boolean } | null;
   /** Whether the user pinned the skill a proposal, `skill.curate`, `skill.pin` or `skill.unpin` names, loaded for those commands. */
   readonly pinned?: boolean;
   /** The written change a `skill.revert` names, from `skill_changes`, or null when there's none. */
@@ -795,6 +797,17 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (problem) return reject("InvalidSkill", `Can't revert it: ${problem}`);
     return accept({ type: "skill.reverted", v: 1, threadId: c.threadId, changeId: c.commandId, reverts: c.changeId, change });
   },
+  // Devices belong to the profile (ADR 0028): their events go on `profileStream`.
+  "device.pair": (state, c) =>
+    state.device
+      ? reject("DeviceExists", `Device ${c.deviceId} is already paired.`)
+      : accept({ type: "device.paired", v: 1, threadId: profileStream, deviceId: c.deviceId, name: c.name, tokenHash: c.tokenHash }),
+  "device.revoke": (state, c) =>
+    !state.device
+      ? reject("DeviceNotFound", `No device ${c.deviceId} is paired. verdandi devices list shows them.`)
+      : state.device.revoked
+        ? accept()
+        : accept({ type: "device.revoked", v: 1, threadId: profileStream, deviceId: c.deviceId }),
   // A pin belongs to the profile: its events go on `profileStream`, whatever thread the user is in.
   "skill.pin": (state, c) => {
     const wrong = nameProblem(c.skill);

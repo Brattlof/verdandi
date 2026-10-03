@@ -231,6 +231,14 @@ export const EngineLive = (options: EngineOptions = {}) =>
                     (r) => ({ ...r, change: JSON.parse(r.change) as SkillChange }),
                   )[0] ?? null)
                 : undefined;
+            const device =
+              command.type === "device.pair" || command.type === "device.revoke"
+                ? ((yield* sql<{
+                    revoked: number;
+                  }>`select revoked_at is not null as revoked from devices where id = ${command.deviceId}`).map((r) => ({
+                    revoked: r.revoked === 1,
+                  }))[0] ?? null)
+                : undefined;
             // A background review stays off a harness whose subscription window is short (DESIGN §14.5).
             const shortQuota = send && current?.review ? yield* loadShortQuota(new Date()) : undefined;
             const decision = decide(
@@ -243,6 +251,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ...(skill !== undefined && { skill }),
                 ...(pinned !== undefined && { pinned }),
                 ...(reverting !== undefined && { reverting }),
+                ...(device !== undefined && { device }),
                 ...(shortQuota && { shortQuota }),
               },
               command,

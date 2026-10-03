@@ -24,6 +24,7 @@ import {
   type TurnId,
 } from "@verdandi/contracts";
 import { Context, Effect, type ManagedRuntime, Stream } from "effect";
+import { pairingLine } from "../devices/devices-cli.ts";
 import { workspaceDir } from "../home/workspace.ts";
 import type { connect } from "../rpc/client.ts";
 import { skillsAction } from "../skills/skills-cli.ts";
@@ -345,6 +346,23 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
     }
   };
 
+  // A device asking to pair gets a notice once, with the code it shows and how to answer (ADR 0028).
+  const devicesSubscription = crypto.randomUUID();
+  const noticed = new Set<string>();
+  const devicesFeed = runtime.runPromise(
+    client.DevicesSubscribe({ subscriptionId: devicesSubscription }).pipe(
+      Stream.runForEach((view) =>
+        Effect.sync(() => {
+          for (const r of view.pending) {
+            if (noticed.has(r.requestId)) continue;
+            noticed.add(r.requestId);
+            io.write(`\n[${pairingLine(r)}]\n`);
+          }
+        }),
+      ),
+    ),
+  );
+
   const noSnapshot = new Error("The thread feed ended before its snapshot arrived. Restart verdandid and try again.");
   feed.then(() => snapshot.reject(noSnapshot), snapshot.reject);
   const thread = await snapshot.promise;
@@ -508,7 +526,8 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
   /** Ends the thread feed; the caller then disposes the client and any verdandid it started. */
   const close = async () => {
     await runtime.runPromise(client.Unsubscribe({ subscriptionId }));
-    await feed;
+    await runtime.runPromise(client.Unsubscribe({ subscriptionId: devicesSubscription }));
+    await Promise.all([feed, devicesFeed]);
   };
   return {
     input,

@@ -1,6 +1,7 @@
 import { Data, Effect, Schema } from "effect";
 import { AttachmentRef } from "./attachments.ts";
 import { DecisionAnswer, DecisionQuestion } from "./decisions.ts";
+import { DevicePaired, DeviceRevoked } from "./devices.ts";
 import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { HandedSource, Item, Quota, UsageFields, VerifierRun } from "./items.ts";
 import { MemoryScope } from "./memory.ts";
@@ -761,6 +762,8 @@ export const Event = Schema.Union([
   CommandsTrustRequested,
   CommandsTrusted,
   CommandsTrustRevoked,
+  DevicePaired,
+  DeviceRevoked,
 ]);
 export type Event = typeof Event.Type;
 
@@ -863,6 +866,8 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "commands.trust.requested@1": CommandsTrustRequested,
   "commands.trusted@1": CommandsTrusted,
   "commands.trust.revoked@1": CommandsTrustRevoked,
+  "device.paired@1": DevicePaired,
+  "device.revoked@1": DeviceRevoked,
 };
 
 /** The row shape an event is stored as. */
