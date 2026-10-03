@@ -635,6 +635,13 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     return accept({ type: "task.blocked", v: 1, threadId: c.threadId, taskId: state.thread.taskId, turnId: c.turnId, reason: c.reason });
   },
+  "task.error.repeat": (state, c) => {
+    if (state.thread?.runningTurnId !== c.turnId || !state.thread.taskId) {
+      return reject("TurnNotRunning", `Turn ${c.turnId} isn't running, so there's no task whose tool error repeated.`);
+    }
+    const { taskId } = state.thread;
+    return accept({ type: "task.error.repeated", v: 1, threadId: c.threadId, taskId, turnId: c.turnId, tool: c.tool, count: c.count });
+  },
   "memory.save": (state, c) => {
     if (!state.thread || !state.memory) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
     const entries = memoryEntries(state.memory);

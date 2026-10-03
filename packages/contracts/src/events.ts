@@ -500,6 +500,20 @@ export const TaskBlocked = Schema.Struct({
   reason: Schema.String,
 });
 /**
+ * Tool `tool` failed with the same error `count` times in task `taskId` since it last escalated, the last of them in
+ * turn `turnId`: the `repeated-error` escalation trigger fired (DESIGN §8.7). Recorded before the turn completes, so a
+ * follower knows a `task.escalated` decision comes after it.
+ */
+export const TaskErrorRepeated = Schema.Struct({
+  type: Schema.Literal("task.error.repeated"),
+  v: v1,
+  threadId: ThreadId,
+  taskId: TaskId,
+  turnId: TurnId,
+  tool: Schema.String,
+  count: Schema.Int,
+});
+/**
  * A fact was remembered (DESIGN §14.2), from thread `threadId` (and its turn `turnId`, when the agent saved it),
  * in place of the entries `replaces` names. Saving a fact the store already has confirms that entry instead:
  * `entryId` is then the existing one's.
@@ -722,6 +736,7 @@ export const Event = Schema.Union([
   ThreadFilesRestored,
   ThreadCheckpointsRemoved,
   TaskBlocked,
+  TaskErrorRepeated,
   MemorySaved,
   MemoryProposed,
   MemoryEdited,
@@ -822,6 +837,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.files.restored@2": ThreadFilesRestored,
   "thread.checkpoints.removed@1": ThreadCheckpointsRemoved,
   "task.blocked@1": TaskBlocked,
+  "task.error.repeated@1": TaskErrorRepeated,
   "memory.saved@1": MemorySaved,
   "memory.proposed@2": MemoryProposed,
   "memory.edited@1": MemoryEdited,
