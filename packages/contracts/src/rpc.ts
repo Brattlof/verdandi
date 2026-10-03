@@ -2,7 +2,16 @@ import { Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { AttachmentRef } from "./attachments.ts";
 import { ClientCommand } from "./commands.ts";
-import { ApprovalRequested, MemoryProposed, PlanRequested, SkillProposed, StoredEvent, TurnStatus, UserInputRequested } from "./events.ts";
+import {
+  ApprovalRequested,
+  CommandsTrustRequested,
+  MemoryProposed,
+  PlanRequested,
+  SkillProposed,
+  StoredEvent,
+  TurnStatus,
+  UserInputRequested,
+} from "./events.ts";
 import { GcReport, GcUnavailable } from "./gc.ts";
 import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { AccessMode, Item, Quota, Usage } from "./items.ts";
@@ -14,6 +23,7 @@ import { SkillsView } from "./skills.ts";
 import { SpendCap } from "./spend.ts";
 import { RouteCost, TaskRating } from "./task.ts";
 import { TerminalFeed, TerminalId, TerminalSize, TerminalUnavailable, TerminalView } from "./terminal.ts";
+import { TrustedCommands } from "./trust.ts";
 import { WorktreeView } from "./worktree.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
@@ -45,6 +55,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "SkillRejected",
     "SkillNotArchived",
     "ReviewSkipped",
+    "CommandsNotTrusted",
   ]),
   message: Schema.String,
 }) {}
@@ -163,7 +174,9 @@ export const ThreadView = Schema.Struct({
    * Requests still waiting for an answer, oldest first, so a client that reconnects can answer them. A background
    * review's proposals (`memory.proposed`, and `skill.proposed` on a turn that has ended) wait here too (DESIGN §14.5).
    */
-  pendingRequests: Schema.Array(Schema.Union([ApprovalRequested, UserInputRequested, PlanRequested, SkillProposed, MemoryProposed])),
+  pendingRequests: Schema.Array(
+    Schema.Union([ApprovalRequested, UserInputRequested, PlanRequested, SkillProposed, MemoryProposed, CommandsTrustRequested]),
+  ),
 });
 export type ThreadView = typeof ThreadView.Type;
 
@@ -345,6 +358,8 @@ export class Api extends RpcGroup.make(
   Rpc.make("MemoryList", { payload: { threadId: ThreadId }, success: MemoryView, error: CommandRejected }),
   /** The profile's skills and those in its read-only extra folders, for the Skills panel (DESIGN §14.4). */
   Rpc.make("SkillsList", { success: SkillsView }),
+  /** The command lists the user trusted, in thread `threadId`'s project or in all, newest first; each one's thread revokes it. */
+  Rpc.make("TrustedCommandsList", { payload: { threadId: Schema.optionalKey(ThreadId) }, success: Schema.Array(TrustedCommands) }),
   /**
    * Past sessions' messages containing `query` (DESIGN §14.3, ADR 0006), newest first, at most 50. A query
    * under 3 characters matches nothing.

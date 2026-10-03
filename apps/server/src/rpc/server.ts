@@ -37,6 +37,7 @@ import { loadSpendCaps } from "../spend/spend-caps.ts";
 import { loadUsageReport } from "../spend/usage.ts";
 import { loadTaskCosts } from "../tasks/task-outcome.ts";
 import { Terminals, TerminalsLive } from "../terminals/terminals.ts";
+import { listTrusted } from "../trust/trust.ts";
 import { loadThreadFolder } from "../worktrees/worktree.ts";
 
 /** Where the running server listens, and the token clients must present. */
@@ -138,6 +139,8 @@ const Handlers = (home: string) =>
             Effect.provideService(SqlClient.SqlClient, sql),
             Effect.catchTag("SqlError", Effect.die),
           ),
+        TrustedCommandsList: ({ threadId }) =>
+          listTrusted(threadId).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
         SessionSearch: (query) =>
           searchSessions(query).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
         TaskCostsList: () => loadTaskCosts.pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),

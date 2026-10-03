@@ -18,6 +18,8 @@ export const WorktreeView = Schema.Struct({
   path: Schema.optionalKey(Schema.String),
   /** The project's setup command, as it ran when the worktree was last created. Absent when the project has none. */
   setup: Schema.optionalKey(VerifierRun),
+  /** The setup command waiting for the user to trust it, which the thread's next turn asks about. */
+  held: Schema.optionalKey(Schema.String),
   /** Why adding or removing it last failed; cleared by the next try. */
   error: Schema.optionalKey(Schema.String),
 });
@@ -28,6 +30,7 @@ export const WorktreeReport = Schema.Union([
   Schema.Struct({ type: Schema.Literal("created"), root: Schema.String, path: Schema.String }),
   Schema.Struct({ type: Schema.Literal("failed"), action: Schema.Literals(["create", "remove"]), error: Schema.String }),
   Schema.Struct({ type: Schema.Literal("setup"), run: VerifierRun }),
+  Schema.Struct({ type: Schema.Literal("setup.held"), command: Schema.String }),
   Schema.Struct({ type: Schema.Literal("removed") }),
 ]);
 export type WorktreeReport = typeof WorktreeReport.Type;
@@ -39,7 +42,7 @@ export const nextWorktree = (current: WorktreeView | null, e: WorktreeEvent): Wo
   const { error: _, ...kept } = current ?? { branch: "", state: "creating" as const };
   switch (e.type) {
     case "thread.worktree.requested": {
-      const { setup: _s, ...rest } = kept;
+      const { setup: _s, held: _h, ...rest } = kept;
       return { ...rest, branch: e.branch, state: "creating" };
     }
     case "thread.worktree.created":
@@ -48,8 +51,12 @@ export const nextWorktree = (current: WorktreeView | null, e: WorktreeEvent): Wo
       return { ...kept, state: e.action === "create" ? "failed" : "ready", error: e.error };
     case "thread.worktree.setup.ran": {
       const { type: _t, v: _v, threadId: _i, ...run } = e;
-      return current && { ...current, setup: run };
+      if (!current) return current;
+      const { held: _h, ...rest } = current;
+      return { ...rest, setup: run };
     }
+    case "thread.worktree.setup.held":
+      return current && { ...current, held: e.command };
     case "thread.worktree.removal.requested":
       return { ...kept, state: "removing" };
     case "thread.worktree.removed":

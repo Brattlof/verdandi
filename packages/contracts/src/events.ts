@@ -10,6 +10,7 @@ import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInpu
 import { SkillAction, SkillChange, SkillState } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 import { TaskRating } from "./task.ts";
+import { TrustPurpose } from "./trust.ts";
 
 // Events are append-only and must stay readable forever. To change one, add a v2 schema
 // next to v1 and upgrade v1 to v2 when it is read; never edit or delete a published version.
@@ -392,6 +393,16 @@ export const ThreadWorktreeSetupRan = Schema.Struct({
   threadId: ThreadId,
   ...VerifierRun.fields,
 });
+/**
+ * The project's setup command `command` wasn't run in the thread's new worktree, since the user hasn't trusted it for the
+ * project: the thread's next turn asks first, and runs it if allowed.
+ */
+export const ThreadWorktreeSetupHeld = Schema.Struct({
+  type: Schema.Literal("thread.worktree.setup.held"),
+  v: v1,
+  threadId: ThreadId,
+  command: Schema.String,
+});
 /** The user asked to remove the thread's worktree, or archived the thread, or the cleanup policy did (ADR 0021). `force` removes it even with uncommitted changes. */
 export const ThreadWorktreeRemovalRequested = Schema.Struct({
   type: Schema.Literal("thread.worktree.removal.requested"),
@@ -558,6 +569,39 @@ export const SkillStateChanged = Schema.Struct({
   to: SkillState,
   by: Schema.Literals(["sweep", "user"]),
 });
+/**
+ * verdandid would run the project's own `commands` (its verifiers or worktree setup, from `trustFiles`), which the user hasn't trusted for the
+ * project, and asks first on running turn `turnId`: a pending request. Allowing it records `commands.trusted`; denying it
+ * runs nothing. `hash` names the exact list, so a changed list asks again.
+ */
+export const CommandsTrustRequested = Schema.Struct({
+  type: Schema.Literal("commands.trust.requested"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  requestId: Schema.String,
+  purpose: TrustPurpose,
+  commands: Schema.Array(Schema.String),
+  hash: Schema.String,
+});
+/** The user trusted command list `hash` in project `projectId`: verdandid runs it there without asking until revoked. */
+export const CommandsTrusted = Schema.Struct({
+  type: Schema.Literal("commands.trusted"),
+  v: v1,
+  threadId: ThreadId,
+  projectId: ProjectId,
+  purpose: TrustPurpose,
+  commands: Schema.Array(Schema.String),
+  hash: Schema.String,
+});
+/** The user revoked their trust in command list `hash` of project `projectId`: running it asks again. */
+export const CommandsTrustRevoked = Schema.Struct({
+  type: Schema.Literal("commands.trust.revoked"),
+  v: v1,
+  threadId: ThreadId,
+  projectId: ProjectId,
+  hash: Schema.String,
+});
 /** `limit`: a budget guard of the task (its `maxCost` or `maxTurns`) stopped the turn, which ends the task. */
 export const TurnStatus = Schema.Literals(["success", "error", "interrupted", "limit"]);
 export const TurnCompleted = Schema.Struct({
@@ -604,6 +648,7 @@ export const Event = Schema.Union([
   ThreadWorktreeCreated,
   ThreadWorktreeFailed,
   ThreadWorktreeSetupRan,
+  ThreadWorktreeSetupHeld,
   ThreadWorktreeRemovalRequested,
   ThreadWorktreeRemoved,
   ThreadReverted,
@@ -619,6 +664,9 @@ export const Event = Schema.Union([
   SkillProposed,
   SkillApplied,
   SkillStateChanged,
+  CommandsTrustRequested,
+  CommandsTrusted,
+  CommandsTrustRevoked,
 ]);
 export type Event = typeof Event.Type;
 
@@ -683,6 +731,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.worktree.created@1": ThreadWorktreeCreated,
   "thread.worktree.failed@1": ThreadWorktreeFailed,
   "thread.worktree.setup.ran@1": ThreadWorktreeSetupRan,
+  "thread.worktree.setup.held@1": ThreadWorktreeSetupHeld,
   "thread.worktree.removal.requested@1": ThreadWorktreeRemovalRequested,
   "thread.worktree.removed@1": ThreadWorktreeRemoved,
   "thread.reverted@1": ThreadReverted,
@@ -698,6 +747,9 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "skill.proposed@1": SkillProposed,
   "skill.applied@1": SkillApplied,
   "skill.state.changed@1": SkillStateChanged,
+  "commands.trust.requested@1": CommandsTrustRequested,
+  "commands.trusted@1": CommandsTrusted,
+  "commands.trust.revoked@1": CommandsTrustRevoked,
 };
 
 /** The row shape an event is stored as. */

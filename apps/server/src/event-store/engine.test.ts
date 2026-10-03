@@ -502,7 +502,7 @@ describe("engine", () => {
       Layer.provideMerge(Layer.succeed(AttachmentsDir, "unused")),
       Layer.provideMerge(Layer.succeed(WorktreesDir, "unused")),
       Layer.provideMerge(Layer.succeed(ToolSettings, { approveMemorySaves: false, memoryNudgeEvery: 0 })),
-      Layer.provideMerge(Layer.succeed(ProjectEscalation, () => Effect.succeed({ verifiers: [], repeatedErrors: 0 }))),
+      Layer.provideMerge(Layer.succeed(ProjectEscalation, () => Effect.succeed({ verifiers: [], fromProject: false, repeatedErrors: 0 }))),
       Layer.provideMerge(Layer.succeed(Decide, rulesDecide)),
       Layer.provideMerge(Layer.succeed(ProfileSkills, { profile: "unused", archive: "unused", extra: [] })),
       Layer.provideMerge(Layer.succeed(ReviewSettings, { enabled: false, allowMetered: false })),

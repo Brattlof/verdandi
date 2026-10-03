@@ -11,6 +11,7 @@ import { BudgetMode } from "./routing.ts";
 import { SkillAction, SkillChange } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 import { TaskRating } from "./task.ts";
+import { TrustPurpose } from "./trust.ts";
 import { WorktreeReport } from "./worktree.ts";
 
 export const ThreadCreate = Schema.Struct({
@@ -381,6 +382,28 @@ export const ReviewPropose = Schema.Struct({
     Schema.Struct({ kind: Schema.Literal("skill"), change: SkillChange }),
   ]),
 });
+/**
+ * Internal: the reactor would run the project's own `commands`, which the user hasn't trusted for the project, and asks
+ * on running turn `turnId` first. Its request id is the command's. Clients cannot send it.
+ */
+export const CommandsTrustRequest = Schema.Struct({
+  type: Schema.Literal("commands.trust.request"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  purpose: TrustPurpose,
+  commands: Schema.Array(Schema.String),
+});
+/**
+ * The user revokes their trust in command list `hash` of the thread's project, from the projects page or `verdandi chat`'s
+ * `/untrust`: verdandid asks again before it runs that list.
+ */
+export const CommandsTrustRevoke = Schema.Struct({
+  type: Schema.Literal("commands.trust.revoke"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  hash: Schema.String,
+});
 /** Internal: marks a turn left running by a previous verdandid as interrupted. */
 export const TurnRecover = Schema.Struct({
   type: Schema.Literal("turn.recover"),
@@ -412,6 +435,7 @@ export const ClientCommand = Schema.Union([
   MemoryDelete,
   SkillRestore,
   ApprovalRespond,
+  CommandsTrustRevoke,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
 
@@ -437,6 +461,7 @@ export const Command = Schema.Union([
   MemoryDelete,
   SkillRestore,
   ApprovalRespond,
+  CommandsTrustRevoke,
   HarnessReport,
   FilesReport,
   CheckpointsReport,
@@ -453,5 +478,6 @@ export const Command = Schema.Union([
   TaskReview,
   ReviewStart,
   ReviewPropose,
+  CommandsTrustRequest,
 ]);
 export type Command = typeof Command.Type;

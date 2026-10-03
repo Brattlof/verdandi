@@ -4,7 +4,7 @@ import { type Connection, uuid } from "../client.ts";
 
 const said: Record<WorktreeView["state"], (w: WorktreeView) => string | undefined> = {
   creating: (w) => `Adding a worktree on branch ${w.branch}. The first turn starts once it's ready.`,
-  ready: (w) => w.error,
+  ready: (w) => w.error ?? (w.held && `Setup ${w.held} waits for you to trust it: the next turn asks before the agent starts.`),
   failed: (w) => `The worktree couldn't be added: ${w.error ?? "no reason recorded"}`,
   removing: () => "Removing the worktree…",
   removed: (w) => `The worktree was removed; its branch ${w.branch} is kept. Recreate it to send turns.`,

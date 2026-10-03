@@ -31,6 +31,7 @@ import {
   type TaskId,
   type TaskRating,
   type ThreadId,
+  type TrustPurpose,
   type TurnId,
   type WorktreeView,
 } from "@verdandi/contracts";
@@ -52,18 +53,21 @@ import {
 } from "../routing/routing.ts";
 import { changeProblem, scanSkill } from "../skills/skills.ts";
 import type { SpendState } from "../spend/spend.ts";
+import { commandsHash } from "../trust/trust.ts";
 import type { StoredRevert } from "./projector.ts";
 
 export type PendingRequest = {
   readonly requestId: string;
   readonly turnId: TurnId;
-  readonly kind: "approval" | "user-input" | "plan" | "skill" | "memory";
+  readonly kind: "approval" | "user-input" | "plan" | "skill" | "memory" | "trust";
   /** A plan's text as proposed, which an approval's edit is compared with. */
   readonly plan?: string;
   /** A plan's route for the build, when approving it moves the task (`plan.requested`'s `execute`). */
   readonly execute?: RouteDecision;
   /** A background review's proposed memory, which allowing it saves. */
   readonly memory?: { readonly scope: MemoryScope; readonly text: string };
+  /** The project's own commands a trust request asks to run, which allowing it trusts. */
+  readonly trust?: { readonly purpose: TrustPurpose; readonly commands: readonly string[]; readonly hash: string };
 };
 
 type ReviewStarted = Extract<Event, { type: "review.started" }>;
@@ -106,6 +110,8 @@ export type DeciderState = {
         readonly taskDecision: RouteDecision | null;
         readonly taskPlanned: boolean;
         readonly pendingRequests: readonly PendingRequest[];
+        /** The command lists the user trusts in the thread's project, by hash. */
+        readonly trustedCommands: readonly string[];
       })
     | undefined;
   /**
@@ -158,6 +164,7 @@ const fits: Record<PendingRequest["kind"], readonly Resolution["decision"][]> = 
   plan: ["allow", "deny"],
   skill: ["allow", "deny"],
   memory: ["allow", "deny"],
+  trust: ["allow", "deny"],
 };
 
 const configKey: Record<CapScope, Record<CapPeriod, string>> = {
@@ -666,6 +673,26 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (refused) return reject("SkillRejected", `Not proposed. ${refused}`);
     return accept({ type: "skill.proposed", v: 1, threadId: c.threadId, turnId: c.turnId, requestId: c.commandId, change: c.change });
   },
+  // The reactor asks before it runs a command list the user hasn't trusted in the project; a turn that ended asks nothing.
+  "commands.trust.request": (state, c) =>
+    state.thread?.runningTurnId === c.turnId
+      ? accept({
+          type: "commands.trust.requested",
+          v: 1,
+          threadId: c.threadId,
+          turnId: c.turnId,
+          requestId: c.commandId,
+          purpose: c.purpose,
+          commands: c.commands,
+          hash: commandsHash(c.commands),
+        })
+      : reject("TurnNotRunning", `Turn ${c.turnId} isn't running, so nothing waits to run the project's commands.`),
+  "commands.trust.revoke": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    if (!state.thread.trustedCommands.includes(c.hash))
+      return reject("CommandsNotTrusted", `Command list ${c.hash} isn't trusted in this thread's project, so there's nothing to revoke.`);
+    return accept({ type: "commands.trust.revoked", v: 1, threadId: c.threadId, projectId: state.thread.projectId, hash: c.hash });
+  },
   "skill.report": (state, c) => {
     if (!state.thread) return accept();
     const { type: _, commandId: _c, ...report } = c;
@@ -769,6 +796,8 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
         return accept({ type: "thread.worktree.failed", v: 1, threadId, action: report.action, error: report.error });
       case "setup":
         return accept({ type: "thread.worktree.setup.ran", v: 1, threadId, ...report.run });
+      case "setup.held":
+        return accept({ type: "thread.worktree.setup.held", v: 1, threadId, command: report.command });
       case "removed":
         return accept({ type: "thread.worktree.removed", v: 1, threadId });
     }
@@ -849,6 +878,19 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
         text,
         turnId: request.turnId,
         replaces: [],
+      });
+    }
+    // Allowing the project's own commands trusts that exact list in the project, until revoked.
+    if (request.trust && c.resolution.decision === "allow") {
+      const { purpose, commands, hash } = request.trust;
+      return accept(resolved, {
+        type: "commands.trusted",
+        v: 1,
+        threadId: c.threadId,
+        projectId: state.thread.projectId,
+        purpose,
+        commands,
+        hash,
       });
     }
     // The build moves only if the thread is still routed and on the task the plan was made for.

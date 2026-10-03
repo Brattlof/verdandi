@@ -9,6 +9,7 @@ import { AppLayer } from "../event-store/app.ts";
 import { Engine } from "../event-store/engine.ts";
 import { loadThreadView } from "../event-store/projector.ts";
 import { Reactor } from "../event-store/reactor.ts";
+import { allowTrustRequests } from "../trust/allow-trust.ts";
 
 const dirs: string[] = [];
 const runtimes: ManagedRuntime.ManagedRuntime<unknown, unknown>[] = [];
@@ -40,6 +41,7 @@ const buildThenCommit = async (pin?: Route) => {
   );
   const runtime = ManagedRuntime.make(AppLayer(tempDir(), { "claude-code": makeFakeHarness() }));
   runtimes.push(runtime as never);
+  await runtime.runPromise(allowTrustRequests);
   const run = <A>(effect: Effect.Effect<A, unknown, Engine | Reactor>) => runtime.runPromise(effect as Effect.Effect<A>);
   const dispatch = (c: Command) => run(Effect.flatMap(Engine, (e) => e.dispatch(c)));
   const send = async (text: string) => {

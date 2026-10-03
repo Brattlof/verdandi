@@ -10,6 +10,7 @@ import {
   type ThreadId,
   type ThreadView,
   type TurnId,
+  trustFiles,
 } from "@verdandi/contracts";
 import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { type Connection, type Routed, uuid } from "../client.ts";
@@ -490,6 +491,7 @@ const RequestCard = ({
         {request.type === "plan.requested" && <PlanApproval request={request} sending={sending} respond={respond} />}
         {request.type === "skill.proposed" && <SkillApproval request={request} sending={sending} respond={respond} />}
         {request.type === "memory.proposed" && <MemoryApproval request={request} sending={sending} respond={respond} />}
+        {request.type === "commands.trust.requested" && <TrustApproval request={request} sending={sending} respond={respond} />}
         {error && (
           <p role="alert" className="mt-2 text-error">
             {error}
@@ -607,6 +609,33 @@ const MemoryApproval = ({ request, sending, respond }: CardProps<"memory.propose
         onClick={() => respond({ decision: "allow" })}
       >
         Remember
+      </button>
+    </div>
+  </>
+);
+
+/** The project's own commands, which Verdandi runs only once trusted: allowing trusts this exact list in the project. */
+const TrustApproval = ({ request, sending, respond }: CardProps<"commands.trust.requested">) => (
+  <>
+    <h3 className="font-serif text-lg font-semibold">
+      Run this project's {request.purpose === "verifiers" ? "verifiers" : "worktree setup"}?
+    </h3>
+    <p className="text-xs text-muted">
+      From <span className="font-mono">{trustFiles[request.purpose]}</span> in the project. Allowing trusts this exact list there until you
+      revoke it on the projects page; if the file changes, Verdandi asks again.
+    </p>
+    <pre>{request.commands.join("\n")}</pre>
+    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+      <button type="button" disabled={sending} onClick={() => respond({ decision: "deny" })}>
+        Don't run
+      </button>
+      <button
+        type="button"
+        className="border-go bg-go text-on-go hover:bg-go-hover"
+        disabled={sending}
+        onClick={() => respond({ decision: "allow" })}
+      >
+        Trust and run
       </button>
     </div>
   </>

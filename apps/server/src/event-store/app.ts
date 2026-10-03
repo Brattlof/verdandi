@@ -27,28 +27,33 @@ export const AppLayer = (
   harnesses: Partial<Record<HarnessId, HarnessAdapter>>,
   /**
    * `spendCapsHome`: the home whose `spend-caps.yaml` applies, when not `home` (a batch run's own home).
-   * `defaultVerifiers`: verifiers for a project whose policy names none (a batch task's `verify`, kept out of its copy).
+   * `verifiers`: verifiers Verdandi's caller supplies for a project in place of its policy's (a batch task's `verify`,
+   * kept out of its copy), which run without asking, since they aren't the project's own.
    */
   options: {
     readonly project?: Projector;
     readonly spendCapsHome?: string;
-    readonly defaultVerifiers?: (projectPath: string) => readonly string[];
+    readonly verifiers?: (projectPath: string) => readonly string[];
   } = {},
 ) => {
   const routing = routingFor(harnesses);
   // A broken policy runs no verifiers and counts no repeated errors; it already rejects the next routed turn, naming the file and key.
   const escalation = (projectPath: string) =>
-    Effect.flatMap(routing(projectPath), ({ policy }) =>
-      Result.isSuccess(policy)
+    Effect.flatMap(routing(projectPath), ({ policy }) => {
+      const supplied = options.verifiers?.(projectPath) ?? [];
+      return Result.isSuccess(policy)
         ? Effect.succeed({
-            verifiers: policy.success.verifiers.length > 0 ? policy.success.verifiers : (options.defaultVerifiers?.(projectPath) ?? []),
+            ...(supplied.length > 0
+              ? { verifiers: supplied, fromProject: false }
+              : { verifiers: policy.success.verifiers, fromProject: true }),
             repeatedErrors: policy.success.escalation.repeatedErrors,
           })
         : Effect.as(Effect.logWarning(`Skipped the project's verifiers and repeated errors: ${policy.failure}`), {
             verifiers: [],
+            fromProject: false,
             repeatedErrors: 0,
-          }),
-    );
+          });
+    });
   return ReactorLive.pipe(
     Layer.provideMerge(
       EngineLive({

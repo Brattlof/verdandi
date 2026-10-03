@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { clip, lineDiff, type Question, type ThreadView } from "@verdandi/contracts";
+import { clip, lineDiff, type Question, type ThreadView, type TrustPurpose, trustFiles } from "@verdandi/contracts";
 import { shell } from "../verifiers/verify.ts";
 
 export type PendingRequest = ThreadView["pendingRequests"][number];
@@ -29,6 +29,16 @@ export const skillPrompt = (r: Extract<PendingRequest, { type: "skill.proposed" 
 /** A background review's proposed memory (DESIGN §14.5): what it would remember, and where. */
 export const memoryPrompt = (r: Extract<PendingRequest, { type: "memory.proposed" }>) =>
   `\n[memory] A background review of this thread's task proposes remembering, in ${r.scope === "user" ? "your user" : "this project's"} memory:\n${r.text}\nRemember it? [y/n] `;
+
+type TrustRequest = Extract<PendingRequest, { type: "commands.trust.requested" }>;
+
+/** What a trust request would run: the exact commands, and the project file they come from. */
+export const trustedCommandsLine = (r: { readonly purpose: TrustPurpose; readonly commands: readonly string[] }) =>
+  `the project's ${r.purpose === "verifiers" ? "verifiers" : "worktree setup"} from ${trustFiles[r.purpose]}: ${r.commands.map((c) => `\`${c}\``).join(", ")}`;
+
+/** The project's own commands, which Verdandi runs only once trusted: allowing them trusts this exact list in the project. */
+export const trustPrompt = (r: TrustRequest) =>
+  `\n[trust] Verdandi would run ${trustedCommandsLine(r)}\nAllowing trusts this list in this project until you revoke it with /untrust. Allow? [y/n] `;
 
 /** A plan and, when approving it moves the build to another route, where and why. */
 export const planPrompt = (r: Extract<PendingRequest, { type: "plan.requested" }>) => {

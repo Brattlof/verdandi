@@ -17,13 +17,15 @@ import type {
   TaskId,
   TaskLimits,
   ThreadId,
+  TrustPurpose,
   TurnId,
   WorktreeReport,
   WorktreeView,
 } from "@verdandi/contracts";
+import { trustFiles } from "@verdandi/contracts";
 import { Decide, flagged, injectionQuestion, injectionWarning } from "@verdandi/decisions";
 import { ToolFailed, verdandiTools } from "@verdandi/tools";
-import { Cause, Context, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
+import { Cause, Context, Deferred, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { changedSince, checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
 import { editedPaths } from "../diffs/diff.ts";
@@ -35,6 +37,7 @@ import { placeSkill, prepareChange, type SkillFolders } from "../skills/skill-fi
 import { makeSkillProposals } from "../skills/skill-proposals.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "../tasks/task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "../tasks/trajectory.ts";
+import { isTrusted } from "../trust/trust.ts";
 import { runVerifier } from "../verifiers/verify.ts";
 import { addWorktree, loadThreadFolder, removeWorktree, threadFolder, worktreeSetup } from "../worktrees/worktree.ts";
 import { Engine } from "./engine.ts";
@@ -70,10 +73,14 @@ export class AttachmentsDir extends Context.Service<AttachmentsDir, string>()("v
 /**
  * The project's verifiers and how many times the same tool error repeats before it escalates its task
  * (`escalation.verifiers` and `escalation.repeatedErrors` in its routing policy), read when a turn needs them.
+ * `fromProject`: the verifiers come from the project's own policy file, so they run only once the user trusts them;
+ * false for those Verdandi's caller supplied (a batch task's `verify`).
  */
 export class ProjectEscalation extends Context.Service<
   ProjectEscalation,
-  (projectPath: string) => Effect.Effect<{ readonly verifiers: readonly string[]; readonly repeatedErrors: number }>
+  (
+    projectPath: string,
+  ) => Effect.Effect<{ readonly verifiers: readonly string[]; readonly fromProject: boolean; readonly repeatedErrors: number }>
 >()("verdandi/ProjectEscalation") {}
 
 export class Reactor extends Context.Service<
@@ -127,6 +134,8 @@ export const ReactorLive = Layer.effect(
      * and the thread's next work waits for it to wind down.
      */
     const latest = new Map<ThreadId, { readonly key: object; readonly turnId?: TurnId; readonly fiber: Fiber.Fiber<void> }>();
+    /** Trust requests waiting for the user, by request id (the request's command id): true once allowed. */
+    const trustAnswers = new Map<string, Deferred.Deferred<boolean>>();
 
     /** Runs `work` once everything queued for the thread before it has finished, finalizers included. */
     const enqueue = (threadId: ThreadId, work: Effect.Effect<void>, turnId?: TurnId) =>
@@ -285,15 +294,42 @@ export const ReactorLive = Layer.effect(
       }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record what review ${reviewThreadId} proposed.`, cause)));
 
     /**
+     * Whether the project's own `commands` may run for running turn `turnId` (DESIGN §17): yes once the user trusts that
+     * exact list in the project, else Verdandi asks on the turn and waits. A list the agent rewrote asks again; a turn
+     * that ends first runs nothing.
+     */
+    const trusted = (threadId: ThreadId, turnId: TurnId, purpose: TrustPurpose, commands: readonly string[]) =>
+      Effect.gen(function* () {
+        if (yield* isTrusted(threadId, commands).pipe(Effect.provideService(SqlClient.SqlClient, sql))) return true;
+        const commandId = randomUUID() as CommandId;
+        const answer = yield* Deferred.make<boolean>();
+        // Registered before the request commits, so an answer can never arrive first.
+        trustAnswers.set(commandId, answer);
+        return yield* engine.dispatch({ type: "commands.trust.request", commandId, threadId, turnId, purpose, commands }).pipe(
+          Effect.andThen(Deferred.await(answer)),
+          Effect.catchTag("CommandRejected", () => Effect.succeed(false)),
+          Effect.ensuring(Effect.sync(() => trustAnswers.delete(commandId))),
+        );
+      });
+
+    /** How a list of commands reads in a notice: each in backticks. */
+    const listed = (commands: readonly string[]) => commands.map((c) => `\`${c}\``).join(", ");
+
+    /**
      * Runs the project's verifiers in order until one fails, recording each on the turn before it completes (DESIGN §8.7).
      * Returns the run that failed, if one did.
      */
     const verify = (threadId: ThreadId, turnId: TurnId, projectPath: string, cwd: string) =>
       Effect.gen(function* () {
-        const commands = (yield* projectEscalation(projectPath)).verifiers;
+        const { verifiers: commands, fromProject } = yield* projectEscalation(projectPath);
+        if (commands.length === 0) return undefined;
         // Before the first runs, so the decider refuses a steer the finished agent would never read.
-        if (commands.length > 0)
-          yield* engine.dispatch({ type: "verifiers.start", commandId: randomUUID() as CommandId, threadId, turnId });
+        yield* engine.dispatch({ type: "verifiers.start", commandId: randomUUID() as CommandId, threadId, turnId });
+        if (fromProject && !(yield* trusted(threadId, turnId, "verifiers", commands))) {
+          const text = `Verdandi didn't run this project's verifiers (${listed(commands)} from ${trustFiles.verifiers}): they weren't allowed to run. The task records no verifier run, and the next turn that changes files asks again.`;
+          yield* report(threadId, turnId, { type: "item", item: { kind: "notice", text } });
+          return undefined;
+        }
         for (const command of commands) {
           const run = yield* runVerifier(command, cwd);
           yield* engine.dispatch({ type: "verifier.report", commandId: randomUUID() as CommandId, threadId, turnId, run });
@@ -386,6 +422,8 @@ export const ReactorLive = Layer.effect(
           return yield* fail(`This thread's worktree isn't ready (${worktree.state}): ${worktree.error ?? "see the thread"}`);
         }
         const cwd = threadFolder(thread.path, thread.worktree);
+        // A setup command held for want of trust is asked about, and run if allowed, before the agent starts.
+        if (worktree?.held && worktree.path) yield* runHeldSetup(threadId, turnId, worktree.held, worktree.path);
         const route = JSON.parse(thread.route) as Route;
         const adapter = registry[route.harness];
         if (!adapter) return yield* fail(`The ${route.harness} harness is not available in this verdandid. Pick another route.`);
@@ -526,7 +564,10 @@ export const ReactorLive = Layer.effect(
         ([row]) => (row?.worktree ? { projectPath: row.path, worktree: JSON.parse(row.worktree) as WorktreeView } : undefined),
       );
 
-    /** Adds the thread's requested worktree, then runs the project's setup command in it (DESIGN §13). */
+    /**
+     * Adds the thread's requested worktree, then runs the project's setup command in it (DESIGN §13), if the user trusts it
+     * in the project; else holds it for the thread's next turn to ask about.
+     */
     const createWorktree = (threadId: ThreadId) =>
       Effect.gen(function* () {
         const found = yield* worktreeOf(threadId);
@@ -537,11 +578,32 @@ export const ReactorLive = Layer.effect(
           return yield* reportWorktree(threadId, { type: "failed", action: "create", error: added.failure.message });
         yield* reportWorktree(threadId, { type: "created", ...added.success });
         const setup = worktreeSetup(projectPath);
-        const run = Result.isFailure(setup)
-          ? { command: "setup", passed: false, exitCode: null, durationMs: 0, output: setup.failure }
-          : setup.success && (yield* runVerifier(setup.success, added.success.path));
-        if (run) yield* reportWorktree(threadId, { type: "setup", run });
+        if (Result.isFailure(setup))
+          return yield* reportWorktree(threadId, {
+            type: "setup",
+            run: { command: "setup", passed: false, exitCode: null, durationMs: 0, output: setup.failure },
+          });
+        const command = setup.success;
+        if (!command) return;
+        if (!(yield* isTrusted(threadId, [command]).pipe(Effect.provideService(SqlClient.SqlClient, sql))))
+          return yield* reportWorktree(threadId, { type: "setup.held", command });
+        yield* reportWorktree(threadId, { type: "setup", run: yield* runVerifier(command, added.success.path) });
       }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not add the worktree of thread ${threadId}.`, cause)));
+
+    /** Asks on turn `turnId` about the worktree setup command held for want of trust, and runs it if allowed. */
+    const runHeldSetup = (threadId: ThreadId, turnId: TurnId, command: string, path: string) =>
+      Effect.gen(function* () {
+        const run = (yield* trusted(threadId, turnId, "setup", [command]))
+          ? yield* runVerifier(command, path)
+          : {
+              command,
+              passed: false,
+              exitCode: null,
+              durationMs: 0,
+              output: `Not run: the project's setup command from ${trustFiles.setup} wasn't allowed to run. Run it in the worktree's terminal if you need it.`,
+            };
+        yield* reportWorktree(threadId, { type: "setup", run });
+      });
 
     /**
      * Restores the thread's files from checkpoint `from`, after saving them as `save` so the revert can be undone,
@@ -592,12 +654,16 @@ export const ReactorLive = Layer.effect(
         const error = placeSkill(skillFolders, e.skill, e.to === "archived");
         return error ? Effect.logWarning(`${error} The next skill curation sweep tries again.`) : Effect.void;
       }
-      // A skill proposal is Verdandi's own request: its answer writes the skill, in `turns` so `drain` waits for it.
-      if (e.type === "approval.resolved")
+      // A skill proposal is Verdandi's own request: its answer writes the skill, in `turns` so `drain` waits for it. So is a
+      // trust request, whose answer a turn waits on.
+      if (e.type === "approval.resolved") {
+        const trust = trustAnswers.get(e.requestId);
+        if (trust) return Deferred.succeed(trust, e.resolution.decision === "allow").pipe(Effect.asVoid);
         return Effect.andThen(
           live.get(e.threadId)?.respond(e.threadId, e.requestId, e.resolution) ?? Effect.void,
           FiberSet.run(turns, skills.settle(e)),
         ).pipe(Effect.asVoid);
+      }
       if (e.type === "turn.completed") {
         const turn = latest.get(e.threadId);
         // Forked into `turns`, so the dispatch doesn't wait for the harness to stop or the trajectory to be written, and `drain` does.

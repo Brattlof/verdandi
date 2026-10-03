@@ -16,6 +16,7 @@ import { Dashboard } from "./spend/dashboard.tsx";
 import { applyProjectsFeed, groupByRecency, type Sidebar as SidebarData } from "./state.ts";
 import { ArchiveButton } from "./threads/archive.tsx";
 import { ThreadPane } from "./threads/thread.tsx";
+import { TrustedCommandsList } from "./trust/trusted.tsx";
 import { Engraving, Plait, Raven } from "./ui/art.tsx";
 import { BranchIcon, CloseIcon, FolderIcon, MenuIcon } from "./ui/icons.tsx";
 import { Rune, RuneMark, type RuneName, RuneText } from "./ui/runes.tsx";
@@ -544,6 +545,7 @@ const Home = ({ connection, data }: { connection: Connection; data: SidebarData 
             </ul>
           </section>
         )}
+        <TrustedCommandsList connection={connection} />
         <p className="mt-16 border-t border-line pt-3 text-xs text-muted">
           Engraving by Ludwig Burger, 1882, in the public domain. Raven and longship by Lorc and Delapouite from{" "}
           <a href="https://game-icons.net" target="_blank" rel="noreferrer" className="underline underline-offset-2">

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, expect, test } from "bun:test";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { CommandId } from "@verdandi/contracts";
+import type { CommandId, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
 import { Engine } from "../event-store/engine.ts";
@@ -20,8 +20,33 @@ afterAll(() => removeTempHome(folder));
 /** Each test spawns the CLI, which takes a second or more on a cold Windows runner: a hang guard, not a wait. */
 const spawnTimeout = 30_000;
 
-/** A temp home with verdandid running on the fake harness and its server.json written, like `verdandi start`. */
-const startServer = async () => {
+/**
+ * Trusts `commands` in `project`, as the user allowing them in an earlier chat would: raised and allowed on a turn of a
+ * thread of its own, which is then interrupted, so nothing runs.
+ */
+const trustCommands = (engine: Engine["Service"], project: string, commands: readonly string[]) =>
+  Effect.gen(function* () {
+    const uuid = <T>() => crypto.randomUUID() as T;
+    const [threadId, turnId, requestId] = [uuid<ThreadId>(), uuid<TurnId>(), uuid<CommandId>()];
+    const projectPath = realpathSync.native(project);
+    yield* engine.dispatch({
+      type: "thread.create",
+      commandId: uuid(),
+      threadId,
+      projectPath,
+      route: { harness: "fake", model: "fake", effort: "low" },
+    });
+    yield* engine.dispatch({ type: "turn.send", commandId: uuid(), threadId, turnId, text: "hang", mode: "build" });
+    yield* engine.dispatch({ type: "commands.trust.request", commandId: requestId, threadId, turnId, purpose: "verifiers", commands });
+    yield* engine.dispatch({ type: "approval.respond", commandId: uuid(), threadId, requestId, resolution: { decision: "allow" } });
+    yield* engine.dispatch({ type: "turn.interrupt", commandId: uuid(), threadId, turnId });
+  });
+
+/**
+ * A temp home with verdandid running on the fake harness and its server.json written, like `verdandi start`, which
+ * trusts each of `trusted`'s projects' verifiers.
+ */
+const startServer = async (...trusted: readonly { readonly project: string; readonly commands: readonly string[] }[]) => {
   const home = makeTempHome();
   cleanups.push(async () => removeTempHome(home));
   const runtime = ManagedRuntime.make(ServerLayer(home, { fake: makeFakeHarness() }));
@@ -30,6 +55,9 @@ const startServer = async () => {
     Effect.gen(function* () {
       return yield* ServerInfo;
     }),
+  );
+  await runtime.runPromise(
+    Effect.flatMap(Engine, (engine) => Effect.forEach(trusted, ({ project, commands }) => trustCommands(engine, project, commands))),
   );
   writeFileSync(serverFile(home), JSON.stringify({ ...info, pid: process.pid } satisfies ServerFile));
   return { home, runtime };
@@ -118,12 +146,31 @@ test(
     // Made first, so it's removed after verdandid stops: the reactor checkpoints it once the turn has ended.
     const project = makeTempHome();
     cleanups.push(async () => removeTempHome(project));
-    const { home } = await startServer();
+    const { home } = await startServer({ project, commands: ["echo broken && exit 1"] });
     mkdirSync(join(project, ".verdandi"));
     writeFileSync(join(project, ".verdandi", "routing.yaml"), 'escalation: { verifiers: ["echo broken && exit 1"] }');
     const { stderr, code } = await verdandiRun(home, [...pinned, "--project", project, "edit", "a.txt"]);
     expect(stderr).toContain("The verifier echo broken && exit 1 failed (exit 1):\nbroken");
     expect(code).toBe(exitCodes.failed);
+  },
+  spawnTimeout,
+);
+
+test(
+  "a project whose verifiers aren't trusted stops the run as a request, naming the commands and how to answer",
+  async () => {
+    const project = makeTempHome();
+    cleanups.push(async () => removeTempHome(project));
+    const { home } = await startServer();
+    mkdirSync(join(project, ".verdandi"));
+    writeFileSync(join(project, ".verdandi", "routing.yaml"), 'escalation: { verifiers: ["echo checked"] }');
+    const { stdout, stderr, code } = await verdandiRun(home, [...pinned, "--project", project, "--json", "edit", "a.txt"]);
+    const result = JSON.parse(stdout) as RunResult;
+    expect(code).toBe(exitCodes.request);
+    expect(stderr).toContain(
+      "Verdandi stopped for approval to run the project's verifiers from .verdandi/routing.yaml: `echo checked`, which this project hasn't trusted",
+    );
+    expect(stderr).toContain(`verdandi chat --thread ${result.threadId}`);
   },
   spawnTimeout,
 );
@@ -152,8 +199,9 @@ const routedProject = (verifier: string) => {
 test(
   "follows the task through Verdandi's follow-up turn when a verifier fails and the escalation fixes it",
   async () => {
-    const project = routedProject(`"${process.execPath}" check.js`);
-    const { home } = await startServer();
+    const verifier = `"${process.execPath}" check.js`;
+    const project = routedProject(verifier);
+    const { home } = await startServer({ project, commands: [verifier] });
     const { stdout, stderr, code } = await verdandiRun(home, ["--project", project, "edit", "a.txt"]);
     const edited = `edited ${join(realpathSync.native(project), "a.txt")}\n`;
     expect(stdout).toBe(edited + edited);
@@ -168,7 +216,7 @@ test(
   "an escalation that stops to ask exits as failed naming the thread, and --json reports every step and turn's cost",
   async () => {
     const project = routedProject("exit 1");
-    const { home } = await startServer();
+    const { home } = await startServer({ project, commands: ["exit 1"] });
     const { stdout, stderr, code } = await verdandiRun(home, ["--project", project, "--json", "edit", "a.txt"]);
     const result = JSON.parse(stdout) as RunResult;
     expect(code).toBe(exitCodes.failed);
@@ -192,7 +240,7 @@ test(
   "follows the task when its agent reports it is blocked, whatever set off the escalation",
   async () => {
     const project = routedProject("exit 1");
-    const { home } = await startServer();
+    const { home } = await startServer({ project, commands: ["exit 1"] });
     const { stdout, code } = await verdandiRun(home, ["--project", project, "--json", 'tool report_blocked {"reason":"stuck"}']);
     const result = JSON.parse(stdout) as RunResult;
     expect(code).toBe(exitCodes.completed);
@@ -206,7 +254,7 @@ test(
   "stops waiting for Verdandi's decision once the thread is reverted, saying why",
   async () => {
     const project = routedProject("exit 1");
-    const { home, runtime } = await startServer();
+    const { home, runtime } = await startServer({ project, commands: ["exit 1"] });
     const first = JSON.parse((await verdandiRun(home, ["--project", project, "--json", "hello"])).stdout) as RunResult;
     // Reverted the moment the run's turn completes, before the reactor asks whether to escalate its failed verifier.
     await runtime.runPromise(

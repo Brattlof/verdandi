@@ -33,6 +33,8 @@ import {
   planPrompt,
   questionPrompt,
   skillPrompt,
+  trustedCommandsLine,
+  trustPrompt,
 } from "./requests.ts";
 import { budgetFromFlags, picksRoute, routeFromFlags } from "./route-flags.ts";
 import { threadList } from "./thread-list.ts";
@@ -188,6 +190,7 @@ export const chat = async (argv: readonly string[]) => {
     if (r.type === "approval.requested") process.stdout.write(approvalPrompt(r));
     else if (r.type === "skill.proposed") process.stdout.write(skillPrompt(r));
     else if (r.type === "memory.proposed") process.stdout.write(memoryPrompt(r));
+    else if (r.type === "commands.trust.requested") process.stdout.write(trustPrompt(r));
     else if (r.type === "plan.requested") {
       process.stdout.write(answered.length ? "Feedback for the agent to keep planning with (empty rejects without): " : planPrompt(r));
     } else {
@@ -284,9 +287,13 @@ export const chat = async (argv: readonly string[]) => {
             e.type === "user-input.requested" ||
             e.type === "plan.requested" ||
             e.type === "skill.proposed" ||
-            e.type === "memory.proposed"
+            e.type === "memory.proposed" ||
+            e.type === "commands.trust.requested"
           )
             addRequest(e);
+          if (e.type === "turn.item.added" && e.item.kind === "notice") process.stdout.write(`\n[${e.item.text}]\n`);
+          if (e.type === "thread.worktree.setup.held")
+            process.stdout.write(`[worktree setup ${e.command} waits for you to trust it; the next turn asks]\n`);
           if (e.type === "skill.applied")
             process.stdout.write(e.error ? `[skill not written: ${e.error}]\n` : `[skill ${e.skill} saved]\n`);
           if (e.type === "approval.resolved") removeRequest(e.requestId);
@@ -309,7 +316,12 @@ export const chat = async (argv: readonly string[]) => {
 
   /** A line typed while a request is waiting answers it. */
   const answer = async (request: PendingRequest, line: string) => {
-    if (request.type === "approval.requested" || request.type === "skill.proposed" || request.type === "memory.proposed") {
+    if (
+      request.type === "approval.requested" ||
+      request.type === "skill.proposed" ||
+      request.type === "memory.proposed" ||
+      request.type === "commands.trust.requested"
+    ) {
       const yes = /^y(es)?$/i.test(line);
       if (yes || /^no?$/i.test(line)) return resolve(request, { decision: yes ? "allow" : "deny" });
       return process.stdout.write("Answer y or n: ");
@@ -413,7 +425,7 @@ export const chat = async (argv: readonly string[]) => {
         ? `${harness} ${model} ${effort} (routed; --model or --effort pins a route)`
         : "the route the router picks for the next task";
   process.stdout.write(
-    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /rate up|down rates the latest task, /rate clear clears it; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
+    `Thread ${threadId} in ${thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /rate up|down rates the latest task, /rate clear clears it; /trusted lists the project commands you let Verdandi run, /untrust <n> revokes one; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
   );
   const tree = thread.worktree;
   if (tree) {
@@ -487,6 +499,21 @@ export const chat = async (argv: readonly string[]) => {
       else if (!lastTask) process.stdout.write("[this thread has no task to rate yet]\n");
       else if (await dispatch({ type: "task.rate", commandId: uuid<CommandId>(), threadId, taskId: lastTask, rating }))
         process.stdout.write(rating === null ? "[rating cleared]\n" : `[rated the latest task ${word}]\n`);
+      if (!running) prompt();
+    } else if (text === "/trusted" || /^\/untrust(\s|$)/.test(text)) {
+      // The project's trusted command lists, numbered as `/trusted` lists them; `/untrust <n>` revokes one.
+      const trusted = await runtime.runPromise(client.TrustedCommandsList({ threadId }));
+      const n = Number(text.split(/\s+/)[1]);
+      const revoke = text === "/trusted" ? undefined : trusted[n - 1];
+      if (text === "/trusted")
+        process.stdout.write(
+          trusted.length === 0
+            ? "[this project trusts none of its own commands yet; Verdandi asks before it runs them]\n"
+            : `${trusted.map((t, i) => `  ${i + 1}. ${trustedCommandsLine(t)}`).join("\n")}\n[/untrust <n> revokes one]\n`,
+        );
+      else if (!revoke) process.stdout.write(`[usage: /untrust <n>, with n from /trusted (1 to ${trusted.length})]\n`);
+      else if (await dispatch({ type: "commands.trust.revoke", commandId: uuid<CommandId>(), threadId, hash: revoke.hash }))
+        process.stdout.write("[revoked: Verdandi asks before it runs those commands again]\n");
       if (!running) prompt();
     } else if (text === "/diff" || text === "/diff all") {
       await showDiff(text === "/diff all", thread.projectPath);

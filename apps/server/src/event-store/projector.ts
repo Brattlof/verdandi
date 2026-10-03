@@ -20,6 +20,7 @@ import type {
   ThreadId,
   ThreadSummary,
   ThreadView,
+  TrustPurpose,
   TurnId,
   TurnView,
   Usage,
@@ -45,6 +46,7 @@ const requestKind = {
   "plan.requested": "plan",
   "skill.proposed": "skill",
   "memory.proposed": "memory",
+  "commands.trust.requested": "trust",
 } as const;
 
 const insertRequest = (e: Extract<Event, { type: keyof typeof requestKind }>, at: string) =>
@@ -259,6 +261,15 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "user-input.requested": insertRequest,
   "skill.proposed": insertRequest,
   "memory.proposed": insertRequest,
+  "commands.trust.requested": insertRequest,
+  "commands.trusted": (e, at) =>
+    withSql(
+      (sql) =>
+        sql`insert or replace into trusted_commands (project_id, hash, purpose, commands, thread_id, trusted_at)
+            values (${e.projectId}, ${e.hash}, ${e.purpose}, ${JSON.stringify(e.commands)}, ${e.threadId}, ${at})`,
+    ),
+  "commands.trust.revoked": (e) =>
+    withSql((sql) => sql`delete from trusted_commands where project_id = ${e.projectId} and hash = ${e.hash}`),
   // The digest and the review thread are in the event; the review thread is marked by its own `review.started`.
   "review.requested": () => Effect.void,
   "review.started": (e) => withSql((sql) => sql`update threads set review = ${JSON.stringify(e)} where id = ${e.threadId}`),
@@ -338,6 +349,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "thread.worktree.created": projectWorktree,
   "thread.worktree.failed": projectWorktree,
   "thread.worktree.setup.ran": projectWorktree,
+  "thread.worktree.setup.held": projectWorktree,
   "thread.worktree.removal.requested": projectWorktree,
   "thread.worktree.removed": projectWorktree,
   "verifiers.started": (e) => withSql((sql) => sql`update turns set verifying = 1 where id = ${e.turnId}`),
@@ -448,10 +460,15 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         execute: string | null;
         scope: MemoryScope | null;
         text: string | null;
+        purpose: TrustPurpose | null;
+        commands: string | null;
+        hash: string | null;
       }>`
         select id, turn_id, kind, json_extract(payload, '$.plan') as plan, json_extract(payload, '$.execute') as execute,
-          json_extract(payload, '$.scope') as scope, json_extract(payload, '$.text') as text
+          json_extract(payload, '$.scope') as scope, json_extract(payload, '$.text') as text,
+          json_extract(payload, '$.purpose') as purpose, json_extract(payload, '$.commands') as commands, json_extract(payload, '$.hash') as hash
         from requests where thread_id = ${threadId} and resolution is null`;
+      const trusted = yield* sql<{ hash: string }>`select hash from trusted_commands where project_id = ${row.project_id}`;
       const turnList = yield* sql<{ id: TurnId; reverted: 0 | 1 | 2 }>`
         select id, reverted from turns where thread_id = ${threadId} order by started_at, rowid`;
       return {
@@ -487,7 +504,11 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
             ...(r.plan === null ? {} : { plan: r.plan }),
             ...(r.execute === null ? {} : { execute: JSON.parse(r.execute) as RouteDecision }),
             ...(r.kind === "memory" && r.scope !== null && r.text !== null ? { memory: { scope: r.scope, text: r.text } } : {}),
+            ...(r.kind === "trust" && r.purpose !== null && r.commands !== null && r.hash !== null
+              ? { trust: { purpose: r.purpose, commands: JSON.parse(r.commands) as string[], hash: r.hash } }
+              : {}),
           })),
+          trustedCommands: trusted.map((t) => t.hash),
         },
       };
     }),
