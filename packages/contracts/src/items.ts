@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { TurnId } from "./ids.ts";
-import { HarnessId, Route } from "./route.ts";
+import { Effort, HarnessId, Route } from "./route.ts";
 import { EscalationStep } from "./routing.ts";
 
 /** Set on a subagent's steps: the tool call that started the subagent. Absent on the main agent's. */
@@ -82,6 +82,8 @@ export const Item = Schema.Union([
     requestId: Schema.optionalKey(Schema.String),
     reason: Schema.String,
   }),
+  /** Auto effort ran this turn at `to` instead of its task's `from` (DESIGN §8.7): a light or heavy turn. */
+  Schema.Struct({ kind: Schema.Literal("effort"), from: Effort, to: Effort, reason: Schema.String }),
   /** Verdandi ran a project verifier after the agent finished changing files. */
   Schema.Struct({ kind: Schema.Literal("verifier"), ...VerifierRun.fields }),
   /** The agent reported, through Verdandi's `report_blocked` tool, that it can't finish the task as asked. */

@@ -94,7 +94,7 @@ test("exports a task as a chat conversation and a routing example, masking secre
       images: 0,
       route,
       decision: expect.objectContaining({ source: "pin" }),
-      outcome: expect.objectContaining({ v: 3, status: "completed", turns: 2, triggers: [] }),
+      outcome: expect.objectContaining({ v: 4, status: "completed", turns: 2, triggers: [], fallbacks: 0 }),
       costUsd: 0.02,
     }),
   ]);

@@ -443,6 +443,24 @@ const sessionHarness = Effect.gen(function* () {
     order by r.seq desc limit 1)`;
 });
 
+/**
+ * Providers and models out of new routes since a request failed (DESIGN §9.5), until `until` or a later success. `model`
+ * is '' for a failure of the whole provider. Projected from `provider.failed` and `provider.recovered`.
+ */
+const providerHealth = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table provider_health (
+    provider text not null,
+    model text not null,
+    reason text not null,
+    until text not null,
+    reset integer not null,
+    error text not null,
+    at text not null,
+    primary key (provider, model)
+  )`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -473,4 +491,5 @@ export const migrations = {
   "27_skill_history": skillHistory,
   "28_devices": devices,
   "29_session_harness": sessionHarness,
+  "30_provider_health": providerHealth,
 };

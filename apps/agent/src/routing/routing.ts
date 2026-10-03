@@ -5,9 +5,12 @@ import {
   type Catalog,
   type DecisionAnswer,
   decisionKinds,
+  describeFailure,
   describeRouteChange,
   type HarnessId,
   type InteractionMode,
+  inSessionEffort,
+  type ProviderHealth,
   type Route,
   type RouteDecision,
   type RouteInputs,
@@ -33,6 +36,8 @@ import {
   deescalate,
   type Escalation,
   escalate,
+  type Fallback,
+  fallback,
   loadPolicy,
   PinError,
   PolicyError,
@@ -41,6 +46,7 @@ import {
   route,
   rules,
   signals,
+  turnEffort,
 } from "@verdandi/router";
 import { fakeCatalog } from "@verdandi/testkit";
 import { Effect, Result } from "effect";
@@ -69,6 +75,8 @@ export type RoutingContext = {
   readonly memory?: readonly RouteStats[];
   /** A reached metered spend cap over the thread: the router leaves targets that would spend metered dollars out. */
   readonly capped?: SpendCapped;
+  /** The provider failures in force (DESIGN §9.5): the router leaves the providers and models they name out. */
+  readonly health?: readonly ProviderHealth[];
 };
 
 /**
@@ -227,6 +235,7 @@ export const decideExecuteRoute = (
         // A running turn can't change harness.
         harnesses: [thread.route.harness],
         ...(routing.capped ? { capped: routing.capped } : {}),
+        ...(routing.health ? { health: routing.health } : {}),
         ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens, ...warmSubagents(thread) } }),
         ...warmUntrusted(thread),
       },
@@ -272,6 +281,7 @@ export const decideRoute = (
           harnesses: routing.harnesses,
           ...(routing.memory ? { memory: routing.memory } : {}),
           ...(routing.capped ? { capped: routing.capped } : {}),
+          ...(routing.health ? { health: routing.health } : {}),
           ...(thread.pinned ? { pin: current } : {}),
           ...(at === undefined ? {} : { at }),
           ...(thread.sessionId === null ? {} : { current: { ...current, cachedTokens: thread.cachedTokens, ...warmSubagents(thread) } }),
@@ -316,6 +326,7 @@ export const decideDeescalation = (
         text,
         current: { target, effort: thread.route.effort, cachedTokens, ...warmSubagents(thread) },
         ...(routing.capped ? { capped: routing.capped } : {}),
+        ...(routing.health ? { health: routing.health } : {}),
         ...warmUntrusted(thread),
       },
       policy,
@@ -338,4 +349,54 @@ export const decideEscalation = (thread: RoutingThread, routing: RoutingContext,
   const policy = thread.budgetMode ? { ...routing.policy.success, mode: thread.budgetMode } : routing.policy.success;
   const target = targetOf(thread.route, policy.catalog);
   return escalate({ target, effort: thread.route.effort, escalations, failure, harnesses: routing.harnesses }, policy);
+};
+
+/**
+ * Pure: where turn `turnId` of routed or pinned `thread` goes on when its provider reported `failure` (DESIGN §9.5): the
+ * router's fallback on the turn's harness, or why it stops. A broken policy stops it, naming the fault.
+ */
+export const decideFallback = (
+  thread: RoutingThread & { readonly taskDecision: RouteDecision | null },
+  routing: RoutingContext,
+  failure: ProviderHealth,
+  fellBack: boolean,
+): Fallback => {
+  if (Result.isFailure(routing.policy))
+    return { reason: `${describeFailure(failure)}, and Verdandi didn't fall back: ${routing.policy.failure}` };
+  const policy = thread.budgetMode ? { ...routing.policy.success, mode: thread.budgetMode } : routing.policy.success;
+  const task = thread.taskDecision;
+  const pinned = thread.pinned ? "thread" : task?.source === "pin" ? "at" : undefined;
+  return fallback(
+    {
+      target: targetOf(thread.route, policy.catalog),
+      effort: thread.route.effort,
+      failure,
+      ...(task && { taskClass: task.taskClass }),
+      ...(pinned && { pinned }),
+      fellBack,
+      ...(routing.health && { health: routing.health }),
+      ...(routing.capped && { capped: routing.capped }),
+    },
+    policy,
+  );
+};
+
+/**
+ * Pure: the effort a continuing turn of routed `thread`'s task runs at (DESIGN §8.7 auto effort), when it isn't the task's:
+ * inside the class's `effortBand`, on a harness that changes effort without a cache miss. Undefined when it stays: the
+ * thread or task is pinned (a pinned effort turns it off), the harness can't, the policy is broken, or the turn is plain.
+ */
+export const decideTurnEffort = (
+  thread: RoutingThread & { readonly taskDecision: RouteDecision | null },
+  routing: RoutingContext,
+  text: string,
+  verifiers: "passed" | "failed" | undefined,
+) => {
+  const task = thread.taskDecision;
+  if (thread.pinned || task?.source === "pin" || !inSessionEffort[thread.route.harness] || Result.isFailure(routing.policy))
+    return undefined;
+  const policy = routing.policy.success;
+  const band = (task && policy.routes[task.taskClass]?.effortBand) ?? policy.fallback.effortBand ?? 1;
+  const efforts = policy.catalog.find((e) => e.harness === thread.route.harness && e.model === thread.route.model)?.efforts ?? [];
+  return turnEffort({ text, effort: thread.route.effort, efforts, band, ...(verifiers && { verifiers }) });
 };

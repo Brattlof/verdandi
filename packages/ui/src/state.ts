@@ -142,6 +142,11 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     route: e.to,
     task: thread.task && { ...thread.task, source: e.decision.source, reason: e.decision.reason },
   }),
+  // A provider's failure shows through the turn's error, or the fallback's route switch; the thread keeps its route.
+  "provider.failed": (thread) => thread,
+  "provider.recovered": (thread) => thread,
+  "turn.rerouted": (thread, e) => addItem(thread, e.turnId, { kind: "route.switch", from: e.from, to: e.to, reason: e.reason }),
+  "turn.effort.set": (thread, e) => addItem(thread, e.turnId, { kind: "effort", from: e.from, to: e.to, reason: e.reason }),
   // A plan approved with the user's edit keeps both versions on its item.
   "approval.resolved": (thread, e) => {
     const edited = e.resolution.decision === "allow" ? e.resolution.plan : undefined;

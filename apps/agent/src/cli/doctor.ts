@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
-import { formatBytes } from "@verdandi/contracts";
+import { describeFailure, formatBytes } from "@verdandi/contracts";
 import { findClaude } from "@verdandi/harness-claude-code";
 import { Effect, Result } from "effect";
 import { attachmentFiles, attachmentsDir, referencedAttachmentsSql } from "../attachments/attachments.ts";
@@ -11,6 +11,7 @@ import { loadGcPolicy, planGc } from "../gc/gc.ts";
 import { requireBun } from "../home/bun-version.ts";
 import { childEnv } from "../home/child-env.ts";
 import { alive, resolveHome, type ServerFile, serverFile } from "../home/home.ts";
+import { loadHealth } from "../routing/provider-health.ts";
 import { connect } from "../rpc/client.ts";
 
 type Status = "ok" | "warn" | "fail";
@@ -187,6 +188,25 @@ export const cleanup = async (home: string, now = Date.now()): Promise<Check> =>
   }
 };
 
+/** The providers and models that failed and are still out of new routes at `now` (DESIGN §9.5). Read-only, like `database`. */
+export const providers = async (home: string, now = new Date()): Promise<Check> => {
+  const name = "Providers";
+  const file = join(home, "verdandi.db");
+  if (!existsSync(file)) return { name, status: "ok", detail: "none has failed" };
+  try {
+    const failing = await Effect.runPromise(loadHealth(now).pipe(Effect.provide(SqliteClient.layer({ filename: file, readonly: true }))));
+    if (failing.length === 0) return { name, status: "ok", detail: "none has failed recently" };
+    const each = failing.map((h) => `${describeFailure(h)} (${h.error})`).join("; ");
+    return {
+      name,
+      status: "warn",
+      detail: `${each}. New tasks route around ${failing.length === 1 ? "it" : "them"} until then, or until a request there succeeds.${failing.some((h) => h.reason === "auth") ? " Replace a rejected key with `verdandi key set anthropic`, then restart verdandid." : ""}`,
+    };
+  } catch (e) {
+    return { name, status: "warn", detail: `can't tell (${message(e)}). See the Database line.` };
+  }
+};
+
 /** The token must be accepted, so this calls the API with it; the token itself is never printed. */
 const server = async (home: string): Promise<Check> => {
   const name = "verdandid";
@@ -239,6 +259,7 @@ export const diagnose = async (
   database(home),
   attachments(home),
   await cleanup(home),
+  await providers(home),
   await server(home),
 ];
 

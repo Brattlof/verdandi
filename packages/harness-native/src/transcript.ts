@@ -1,14 +1,31 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type Anthropic from "@anthropic-ai/sdk";
+import type { Effort } from "@verdandi/contracts";
 
 /** What a session sends ahead of its conversation, fixed for its life: the cache rule (ADR 0022). */
 export type Prefix = { readonly system: Anthropic.TextBlockParam[]; readonly tools: Anthropic.Tool[] };
 
+/**
+ * An effort-only system message (beta `mid-conversation-output-config-2026-07-01`, ADR 0022): the effort from the next
+ * user message on, until another one changes it, without the cache miss a top-level effort change costs (DESIGN §8.7).
+ */
+export type EffortMessage = {
+  readonly role: "system";
+  readonly content: Anthropic.ContentBlockParam[];
+  readonly output_config: { readonly effort: Effort };
+};
+
 /** One message of a session, tagged with the Verdandi turn it belongs to, so a revert can fork after any turn. */
 export type Entry = {
   readonly turnId: string;
-  readonly message: { readonly role: "user" | "assistant"; readonly content: Anthropic.ContentBlockParam[] };
+  readonly message: { readonly role: "user" | "assistant"; readonly content: Anthropic.ContentBlockParam[] } | EffortMessage;
+};
+
+/** The effort the transcript's last effort message set, which holds from there on; undefined when there's none. */
+export const saidEffort = (entries: readonly Entry[]) => {
+  const said = entries.findLast((e) => e.message.role === "system")?.message;
+  return said?.role === "system" ? said.output_config.effort : undefined;
 };
 
 /**
@@ -69,9 +86,10 @@ const interrupted = (id: string): Anthropic.ToolResultBlockParam => ({
  * The messages a request sends, built from the transcript without changing it. A tool call an interrupt left without
  * a result gets one saying so, and user messages in a row (an interrupt before the reply) are joined, so user and
  * assistant turns alternate (DESIGN §9.4). The same transcript always builds the same messages, so the cache holds.
+ * Effort messages are left out for a model without effort levels (`efforts` false), which refuses them.
  */
-export const requestMessages = (entries: readonly Entry[]): Anthropic.MessageParam[] => {
-  const out: { role: "user" | "assistant"; content: Anthropic.ContentBlockParam[] }[] = [];
+export const requestMessages = (entries: readonly Entry[], efforts = true): Anthropic.MessageParam[] => {
+  const out: ({ role: "user" | "assistant"; content: Anthropic.ContentBlockParam[] } | EffortMessage)[] = [];
   let open: string[] = [];
   const answer = (content: readonly Anthropic.ContentBlockParam[]) => {
     const answered = new Set(content.flatMap((b) => (b.type === "tool_result" ? [b.tool_use_id] : [])));
@@ -80,6 +98,13 @@ export const requestMessages = (entries: readonly Entry[]): Anthropic.MessagePar
     return [...missing, ...content];
   };
   for (const { message } of entries) {
+    if (message.role === "system") {
+      if (!efforts) continue;
+      // A tool call left open gets its result before it, where the next user message would have put it.
+      if (open.length > 0) out.push({ role: "user", content: answer([]) });
+      out.push(message);
+      continue;
+    }
     if (message.role === "user") {
       const content = answer(message.content);
       const last = out.at(-1);

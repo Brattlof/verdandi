@@ -1,8 +1,11 @@
 import {
   type CatalogEntry,
+  describeFailure,
   type Effort,
   type HarnessId,
+  healthCovers,
   type InteractionMode,
+  type ProviderHealth,
   type RouteDecision,
   type RouteRule,
   type RouteStats,
@@ -36,8 +39,13 @@ export type RouteInput = {
   readonly current?: Pinned & { readonly cachedTokens: number; readonly subagents?: SubagentRoutes };
   /** Files the task touches beyond those its text names, matched against policy restrictions. */
   readonly paths?: readonly string[];
-  /** Provider health and the share of quota left (0..1), by provider id (DESIGN §9.5). */
-  readonly providers?: Readonly<Record<string, { readonly healthy?: boolean; readonly remaining?: number }>>;
+  /** The share of quota left (0..1), by provider id (DESIGN §9.5). */
+  readonly providers?: Readonly<Record<string, { readonly remaining?: number }>>;
+  /**
+   * Providers, or their models, that failed and are out of routes until their `until` (DESIGN §9.5); the caller leaves out
+   * those whose `until` has passed. Pins ignore it.
+   */
+  readonly health?: readonly ProviderHealth[];
   /** The harnesses verdandid runs; targets on any other are dropped. Absent, every harness counts. */
   readonly harnesses?: readonly HarnessId[];
   /**
@@ -242,13 +250,15 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const tainted = input.untrusted && input.current;
   const read = input.untrusted && `this session read untrusted input (${input.untrusted.source}, turn ${input.untrusted.turn})`;
   const untrustedFloor = policy.untrusted;
+  const unhealthy = (t: RouteTarget) => input.health?.find((h) => healthCovers(h, t.provider, t.model));
   const unavailable = (t: CatalogEntry) => {
     if (input.harnesses && !input.harnesses.includes(t.harness)) return `the ${t.harness} harness isn't running`;
     if (input.images && !t.vision) return `it can't read the attached image${input.images === 1 ? "" : "s"}`;
     if (capped && spendsMetered(t, input.capped?.paying ?? [])) return capped;
-    const provider = input.providers?.[t.provider];
-    if (provider?.healthy === false) return `${t.provider} is unhealthy`;
-    if (provider?.remaining !== undefined && provider.remaining <= 0) return `${t.provider} is out of quota`;
+    const sick = unhealthy(t);
+    if (sick) return describeFailure(sick);
+    const remaining = input.providers?.[t.provider]?.remaining;
+    if (remaining !== undefined && remaining <= 0) return `${t.provider} is out of quota`;
     // Headroom so the task has room to work after the context moves over.
     if (t.context < cachedTokens * 1.25) return `its ${kTokens(t.context)} context can't hold ${kTokens(cachedTokens)} of cached context`;
     for (const r of restrictions) {
@@ -316,15 +326,25 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const floored = read ? accepted.flatMap((n) => (dropped.get(n)?.endsWith(read) ? (policy.targets.get(n) ?? []) : [])) : [];
   const unfloored = floored.length > 0 ? cheapest([...preferred, ...floored]) : undefined;
   const heldBy = unfloored && floored.includes(unfloored) ? read : undefined;
+  // So did a provider's failure, when the class would have run on a target it took out.
+  const sickly = accepted.flatMap((n) => {
+    const t = policy.targets.get(n);
+    const sick = t && unhealthy(t);
+    return t && sick && dropped.get(n) === describeFailure(sick) ? [t] : [];
+  });
+  const healthy = sickly.length > 0 ? cheapest([...preferred, ...sickly]) : undefined;
+  const sickness = healthy && sickly.includes(healthy) ? unhealthy(healthy) : undefined;
   const stays = (t: RouteTarget) => (input.current && same(input.current.target, t) ? "stays" : "runs");
   let reason =
     instead && skipped.includes(instead)
       ? `${lead}, but ${capped}, so it runs on ${describe(pick, effort)} instead of ${instead.access === "metered" ? `the metered ${instead.model}` : `${instead.model} on extra usage`}.`
-      : heldBy
-        ? `${lead}, but ${heldBy}, so it ${stays(pick)} on ${describe(pick, effort)}.`
-        : preferred.length > 0
-          ? `${lead}, so ${unsure ? `it runs on the ${policy.mode} default, ` : `${byMode}it runs on `}${describe(pick, effort)}.`
-          : `${lead}, but ${accepted.map((n) => policy.targets.get(n)?.model ?? n).join(" and ")} ${accepted.length === 1 ? "is" : "are"} unavailable, so it runs on ${describe(pick, effort)}, the ${above.length > 0 ? "cheapest capable" : "strongest"} target left.`;
+      : sickness
+        ? `${lead}, but ${describeFailure(sickness)}, so it runs on ${describe(pick, effort)} instead.`
+        : heldBy
+          ? `${lead}, but ${heldBy}, so it ${stays(pick)} on ${describe(pick, effort)}.`
+          : preferred.length > 0
+            ? `${lead}, so ${unsure ? `it runs on the ${policy.mode} default, ` : `${byMode}it runs on `}${describe(pick, effort)}.`
+            : `${lead}, but ${accepted.map((n) => policy.targets.get(n)?.model ?? n).join(" and ")} ${accepted.length === 1 ? "is" : "are"} unavailable, so it runs on ${describe(pick, effort)}, the ${above.length > 0 ? "cheapest capable" : "strongest"} target left.`;
 
   // Stage 4, continued: routing memory. How this project's tasks of the class went on the policy's route
   // can move it: to where the user kept moving them, or else one tier up from where they kept failing.

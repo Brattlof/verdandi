@@ -8,6 +8,7 @@ import {
   commandStream,
   type Event,
   encodeEvent,
+  inSessionEffort,
   isCorrection,
   type ProjectsFeed,
   type Receipt,
@@ -21,6 +22,7 @@ import {
 import { correctingQuestion, type Decide, injectionQuestion, reviewQuestion } from "@verdandi/decisions";
 import { Context, Effect, Layer, PubSub, Result, Stream } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
+import { loadHealth, stickyFailure } from "../routing/provider-health.ts";
 import { type RoutingContext, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
 import { loadShortQuota, loadSpendState } from "../spend/spend.ts";
@@ -131,7 +133,8 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 command.type === "spend.cap.raise" ||
                 command.type === "task.escalate" ||
                 rejectsPlan ||
-                (command.type === "harness.report" && command.event.type === "plan.requested")) &&
+                (command.type === "harness.report" &&
+                  (command.event.type === "plan.requested" || command.event.type === "provider.failed"))) &&
               loaded.thread &&
               options.spendCaps;
             const state = capped
@@ -156,12 +159,26 @@ export const EngineLive = (options: EngineOptions = {}) =>
             const starts = send && current && (current.taskId === null || at);
             // A routed task's turn after one whose verifiers all passed is classified too: mechanical work de-escalates it.
             const deescalates = send && !starts && current?.pinned === false && current.lastTurnVerified;
+            // Provider health (DESIGN §9.5): routing leaves failing providers out, a harness's provider report records or clears a
+            // failure and may move its turn to a fallback, and a continuing turn whose route's provider reported a reset still
+            // ahead starts on one.
+            const reported =
+              command.type === "harness.report" && (command.event.type === "provider.failed" || command.event.type === "provider.succeeded")
+                ? command.event.type
+                : undefined;
+            const continues = send && current && current.taskId !== null && !at && !current.pinned ? current : undefined;
+            const now = new Date();
+            const health =
+              reported || continues || starts || plans || escalates || rejectsPlan || deescalates ? yield* loadHealth(now) : undefined;
+            const sticky =
+              continues && health && options.catalog ? stickyFailure(health, continues.route, options.catalog, now) : undefined;
             // Routing reads the project's policy file, so only when this command starts a task, routes a planned task's build,
-            // escalates or may de-escalate.
+            // escalates, may de-escalate, or may fall back.
             const routing =
-              current && (starts || plans || escalates || rejectsPlan || deescalates) && options.routing
+              current && (starts || plans || escalates || rejectsPlan || deescalates || reported === "provider.failed") && options.routing
                 ? {
                     ...(yield* options.routing(current.projectPath)),
+                    ...(health && { health }),
                     // Routing memory moves where a task starts, not an approved plan's build or a running task.
                     ...(starts ? { memory: yield* loadRoutingMemory(stream) } : {}),
                   }
@@ -182,7 +199,14 @@ export const EngineLive = (options: EngineOptions = {}) =>
             // A follow-up correcting the agent may escalate its routed task (DESIGN §8.7), which reads the project's policy.
             const corrects =
               current && send && !routing && !at && current.taskId !== null && !current.pinned && decisions?.answers.some(isCorrection);
-            const policy = routing ?? (current && corrects && options.routing ? yield* options.routing(current.projectPath) : undefined);
+            // A continuing turn reads it too to fall back from a provider with a reset ahead, or to set its own effort (DESIGN
+            // §8.7) on a harness that takes one per turn; neither classifies the turn.
+            const turnRouting = corrects || sticky || (continues && inSessionEffort[continues.route.harness]);
+            const policy =
+              routing ??
+              (current && turnRouting && options.routing
+                ? { ...(yield* options.routing(current.projectPath)), ...(health && { health }) }
+                : undefined);
             // Memory: read for memory commands, a background review's proposals and the answer to one, and for a turn whose
             // new harness session starts with a snapshot of it.
             const remembers =
@@ -253,6 +277,8 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ...(reverting !== undefined && { reverting }),
                 ...(device !== undefined && { device }),
                 ...(shortQuota && { shortQuota }),
+                ...(health && { health }),
+                ...(sticky && { stickyFailure: sticky }),
               },
               command,
             );

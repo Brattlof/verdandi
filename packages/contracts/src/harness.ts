@@ -2,8 +2,9 @@ import { Data, type Effect, Schema, type Stream } from "effect";
 import type { AttachmentRef } from "./attachments.ts";
 import type { TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields } from "./items.ts";
+import { ProviderFailure } from "./provider-health.ts";
 import { Question, type Resolution } from "./requests.ts";
-import type { HarnessId, InteractionMode, Route } from "./route.ts";
+import type { Effort, HarnessId, InteractionMode, Route } from "./route.ts";
 import type { TaskLimits } from "./routing.ts";
 
 /** What every harness adapter reports, normalized. */
@@ -35,6 +36,27 @@ export const HarnessEvent = Schema.Union([
     plan: Schema.String,
     filePath: Schema.optionalKey(Schema.String),
   }),
+  /**
+   * A model request failed once the provider's SDK stopped retrying (DESIGN §9.5), classified into the closed set of
+   * `reason`s. `model` scopes it to that model when the provider's limits are per model, and is absent when the whole
+   * provider failed; `until` (ISO) is when to try again, the provider's own reset when `reset`, else `failureCooldownMs`.
+   * The harness blocks until `respond` answers `requestId`: allowing it means `reroute` has moved the turn to a fallback,
+   * so it retries the request there; denying it ends the turn with an error naming the provider, the reason, `until`
+   * and the denial's `feedback`, Verdandi's reason not to fall back. Native reports it; Claude Code doesn't (its
+   * models share one subscription window, ADR 0005), nor does the fake harness unless scripted.
+   */
+  Schema.Struct({
+    type: Schema.Literal("provider.failed"),
+    requestId: Schema.String,
+    provider: Schema.String,
+    model: Schema.optionalKey(Schema.String),
+    reason: ProviderFailure,
+    until: Schema.String,
+    reset: Schema.Boolean,
+    error: Schema.String,
+  }),
+  /** The turn's first model request on `model` succeeded: a failure Verdandi recorded for it, or its provider, is over. */
+  Schema.Struct({ type: Schema.Literal("provider.succeeded"), provider: Schema.String, model: Schema.String }),
   /** `limit`: the task's `maxCost` or `maxTurns` stopped the turn; `error` says which. */
   Schema.Struct({
     type: Schema.Literal("turn.finished"),
@@ -142,7 +164,19 @@ export type HarnessRunInput = {
    */
   readonly nudge?: string;
   readonly fork?: { readonly atTurnId: TurnId; readonly dropTurnIds: readonly TurnId[]; readonly transcriptPath?: string };
+  /**
+   * The turn's own effort, when auto effort (DESIGN §8.7) moved it off `route.effort`: apply it for this turn without
+   * changing the cached prefix (native: a per-message effort before the turn's message, ADR 0022; fake: records it). Only
+   * given to a harness that `inSessionEffort` lists; the next turn without one goes back to `route.effort`.
+   */
+  readonly effort?: Effort;
 };
+
+/**
+ * Harnesses that change effort within a session without a cache miss, so auto effort moves a turn's effort on them
+ * (DESIGN §8.7). Claude Code rewrites the conversation's cache on an effort change (ADR 0002), so its tasks keep theirs.
+ */
+export const inSessionEffort: Record<HarnessId, boolean> = { "claude-code": false, native: true, fake: true };
 
 /**
  * Slice-1 subset of the harness contract (DESIGN §9.2): one `run` per turn. The adapter keeps its
