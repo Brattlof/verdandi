@@ -33,6 +33,7 @@ import {
   type ThreadId,
   type TrustPurpose,
   type TurnId,
+  type UntrustedInput,
   type WorktreeView,
 } from "@verdandi/contracts";
 import { flagged, injectionQuestion, injectionWarning } from "@verdandi/decisions";
@@ -64,8 +65,8 @@ export type PendingRequest = {
   readonly plan?: string;
   /** A plan's route for the build, when approving it moves the task (`plan.requested`'s `execute`). */
   readonly execute?: RouteDecision;
-  /** A background review's proposed memory, which allowing it saves. */
-  readonly memory?: { readonly scope: MemoryScope; readonly text: string };
+  /** A proposed memory, which allowing it saves, replacing those of `replaces` that still exist. */
+  readonly memory?: { readonly scope: MemoryScope; readonly text: string; readonly replaces: readonly string[] };
   /** The project's own commands a trust request asks to run, which allowing it trusts. */
   readonly trust?: { readonly purpose: TrustPurpose; readonly commands: readonly string[]; readonly hash: string };
 };
@@ -92,8 +93,16 @@ export type DeciderState = {
         /** How many turns the thread has had, and the latest one's id. */
         readonly turns: number;
         readonly lastTurnId: TurnId | null;
-        /** Every turn in order, and whether it is reverted: 0 shown, 1 reverted but still in the session, 2 forked away. */
-        readonly turnList: readonly { readonly turnId: TurnId; readonly reverted: 0 | 1 | 2 }[];
+        /**
+         * Every turn in order, whether it is reverted (0 shown, 1 reverted but still in the session, 2 forked away), and
+         * the first untrusted input it took in (DESIGN §17), null for none.
+         */
+        readonly turnList: readonly { readonly turnId: TurnId; readonly reverted: 0 | 1 | 2; readonly untrusted: string | null }[];
+        /**
+         * The first untrusted input the warm session took in, when it has tools that write files or run commands: the
+         * policy's floor holds its route (DESIGN §17). Null otherwise.
+         */
+        readonly untrusted: UntrustedInput | null;
         /** A revert's fork waits for the next turn. */
         readonly pendingFork: boolean;
         /** The turn the harness session started with; null when it's the thread's first, or unknown. */
@@ -152,10 +161,13 @@ export const projectIdFor = (path: string): ProjectId => {
 const reject = (reason: CommandRejected["reason"], message: string): Decision => Result.fail(new CommandRejected({ reason, message }));
 const accept = (...events: Event[]): Decision => Result.succeed(events);
 
-/** A turn that ends can no longer use an answer, so its open requests are denied, with the reason recorded. */
+/**
+ * A turn that ends can no longer use an answer, so its open requests are denied, with the reason recorded. A proposed
+ * memory waits for the user however the turn ends: allowing it later needs nothing from the turn.
+ */
 const denyPending = (state: DeciderState, threadId: ThreadId, turnId: TurnId, reason: string): Event[] =>
   (state.thread?.pendingRequests ?? [])
-    .filter((r) => r.turnId === turnId)
+    .filter((r) => r.turnId === turnId && r.kind !== "memory")
     .map((r) => ({ type: "approval.resolved", v: 1, threadId, turnId, requestId: r.requestId, resolution: { decision: "deny" }, reason }));
 
 const fits: Record<PendingRequest["kind"], readonly Resolution["decision"][]> = {
@@ -482,7 +494,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
         accept(...recorded, { ...moved, from: state.thread.route, to: routeOf(down), decision: down }, ...turn)
       );
     }
-    const task = { type: "task.started", v: 2, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
+    const task = { type: "task.started", v: 3, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
     if (!state.routing) return onRoute ?? accept(...recorded, { ...task, route: state.thread.route }, ...turn);
     const routing = cap ? { ...state.routing, capped: cap } : state.routing;
     const images = c.attachments?.filter((a) => a.kind === "image").length ?? 0;
@@ -632,6 +644,21 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     const same = sameAs(entries, c.scope, text);
     const full = overCap(entries, c.scope, text, same ? [...replaces, same.entryId] : replaces);
     if (full) return reject("MemoryFull", full);
+    // A fact saved in a turn that read untrusted input may be what that input planted: the user decides (DESIGN §17).
+    const index = state.thread.turnList.findIndex((t) => t.turnId === c.turnId);
+    const source = state.thread.turnList[index]?.untrusted;
+    if (c.turnId && source && !same)
+      return accept({
+        type: "memory.proposed",
+        v: 2,
+        threadId: c.threadId,
+        turnId: c.turnId,
+        requestId: c.commandId,
+        scope: c.scope,
+        text,
+        untrusted: { source, turn: index + 1 },
+        ...(replaces.length > 0 && { replaces }),
+      });
     return accept({
       type: "memory.saved",
       v: 1,
@@ -770,7 +797,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (refused) return reject("MemoryRejected", `Not proposed. ${refused}`);
     // A fact the store already has needs no one's approval.
     if (state.memory && sameAs(memoryEntries(state.memory), proposal.scope, text)) return accept();
-    return accept({ type: "memory.proposed", ...at, scope: proposal.scope, text, reviewThreadId: c.reviewThreadId });
+    return accept({ type: "memory.proposed", ...at, v: 2, scope: proposal.scope, text, reviewThreadId: c.reviewThreadId });
   },
   "files.report": (state, c) =>
     state.thread
@@ -858,12 +885,13 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       // An edit identical to the proposal is just an approval.
       resolution: edit !== undefined && edit.trim() === request.plan?.trim() ? { decision: "allow" } : c.resolution,
     };
-    // Allowing a background review's memory saves it, if the store has room (DESIGN §14.5).
+    // Allowing a proposed memory saves it, if the store has room (DESIGN §14.5, §17).
     if (request.memory && c.resolution.decision === "allow") {
       const { scope, text } = request.memory;
       const entries = state.memory ? memoryEntries(state.memory) : [];
       const same = sameAs(entries, scope, text);
-      if (overCap(entries, scope, text, same ? [same.entryId] : []))
+      const replaces = request.memory.replaces.filter((id) => entries.some((e) => e.entryId === id));
+      if (overCap(entries, scope, text, same ? [...replaces, same.entryId] : replaces))
         return reject(
           "MemoryFull",
           `${scope === "user" ? "User" : "Project"} memory has no room for it. Edit or delete entries in the Memory panel, then allow it again, or decline it.`,
@@ -877,7 +905,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
         ...(scope === "project" && { projectId: state.thread.projectId }),
         text,
         turnId: request.turnId,
-        replaces: [],
+        replaces,
       });
     }
     // Allowing the project's own commands trusts that exact list in the project, until revoked.

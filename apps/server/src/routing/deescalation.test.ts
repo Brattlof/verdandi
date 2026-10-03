@@ -30,9 +30,10 @@ const opus: Route = { harness: "claude-code", model: "opus", effort: "high" };
 
 /**
  * A thread whose first turn edits a file on Opus (the fake harness runs as Claude Code, so the catalog's prices apply)
- * and passes the project's verifier, then asks for a commit message: routed unless `pin` is given.
+ * and passes the project's verifier, then asks for a commit message: routed unless `pin` is given. With `fetch`, the
+ * first turn reads a web page through WebFetch before it edits.
  */
-const buildThenCommit = async (pin?: Route) => {
+const buildThenCommit = async (pin?: Route, fetch?: string) => {
   const projectPath = tempDir();
   mkdirSync(join(projectPath, ".verdandi"));
   writeFileSync(
@@ -49,7 +50,14 @@ const buildThenCommit = async (pin?: Route) => {
     await run(Effect.flatMap(Reactor, (r) => r.drain));
   };
   await dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId, projectPath, ...(pin && { route: pin }) });
-  await send(`edit ${join(projectPath, "a.txt")}`);
+  await send(
+    `${
+      fetch
+        ? `fetch ${fetch}
+`
+        : ""
+    }edit ${join(projectPath, "a.txt")}`,
+  );
   await send("Write a commit message for these changes");
   return runtime.runPromise(
     Effect.gen(function* () {
@@ -87,6 +95,14 @@ test("a chore after a turn whose verifiers passed moves the rest of the task to 
   expect(outcome).toMatchObject({ status: "completed", turns: 2, escalations: 0, route: opus });
   expect(outcome).not.toHaveProperty("userOverride");
   expect(ran).toEqual(["opus", "haiku"]);
+});
+
+test("a session that read a web page de-escalates no lower than the untrusted-input floor, and says why", async () => {
+  const { view } = await buildThenCommit(undefined, "https://example.com/changelog");
+  const reason =
+    "The verifiers passed and what's left looks like chore.git, but this session read untrusted input (WebFetch, turn 1), so it runs on sonnet at low effort.";
+  expect(view?.routeChanges).toMatchObject([{ by: "router", from: opus, to: { model: "sonnet", effort: "low" }, reason }]);
+  expect(view?.turns.map((t) => t.usage.map((u) => u.model))).toEqual([["opus"], ["sonnet"]]);
 });
 
 test("a pinned thread never de-escalates: the user picked its route", async () => {

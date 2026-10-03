@@ -12,6 +12,7 @@ import {
   type SubagentRoutes,
   spendsMetered,
   type Tier,
+  type UntrustedInput,
 } from "@verdandi/contracts";
 import { clampEffort, type ResolvedPolicy, resolveSpec } from "./policy.ts";
 import type { Classifier } from "./rules.ts";
@@ -56,6 +57,12 @@ export type RouteInput = {
   readonly memory?: readonly RouteStats[];
   /** A reached metered spend cap: targets that would spend metered dollars drop out (DESIGN §8.9). Pins ignore it. */
   readonly capped?: SpendCapped;
+  /**
+   * The untrusted input `current`'s warm session holds, given only when the session has tools that write files or run
+   * commands (DESIGN §17). No route keeps that session, i.e. stays on its harness, below the policy's `untrusted`
+   * floor. Pins ignore it.
+   */
+  readonly untrusted?: UntrustedInput;
 };
 
 /** No target is available at all. The message says why each one dropped out. */
@@ -232,6 +239,9 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const restrictions = policy.restrictions.filter((r) => paths.some((p) => new Bun.Glob(r.match).match(p)));
   const cachedTokens = input.current?.cachedTokens ?? 0;
   const capped = input.capped && `the ${input.capped.cap} of metered spend is reached`;
+  const tainted = input.untrusted && input.current;
+  const read = input.untrusted && `this session read untrusted input (${input.untrusted.source}, turn ${input.untrusted.turn})`;
+  const untrustedFloor = policy.untrusted;
   const unavailable = (t: CatalogEntry) => {
     if (input.harnesses && !input.harnesses.includes(t.harness)) return `the ${t.harness} harness isn't running`;
     if (input.images && !t.vision) return `it can't read the attached image${input.images === 1 ? "" : "s"}`;
@@ -244,6 +254,12 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
     for (const r of restrictions) {
       if (r.forbid?.includes(t.access)) return `${t.access} is forbidden for ${r.match}`;
       if (r.minTier && rank(t.tier) < rank(r.minTier)) return `tier ${t.tier} is below ${r.minTier} for ${r.match}`;
+    }
+    // Only a target on the session's harness keeps the session, and its context with it.
+    if (tainted && read && t.harness === tainted.target.harness) {
+      if (untrustedFloor.forbid?.includes(t.access)) return `${t.access} is forbidden while ${read}`;
+      if (untrustedFloor.minTier && rank(t.tier) < rank(untrustedFloor.minTier))
+        return `tier ${t.tier} is below ${untrustedFloor.minTier} while ${read}`;
     }
     return undefined;
   };
@@ -296,12 +312,19 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   // The cap moved the task when, without it, the class would have run on a target the cap dropped.
   const skipped = capped ? accepted.flatMap((n) => (dropped.get(n) === capped ? (policy.targets.get(n) ?? []) : [])) : [];
   const instead = skipped.length > 0 ? cheapest([...preferred, ...skipped]) : undefined;
+  // So did the untrusted-input floor, when the class would have run on a target it dropped.
+  const floored = read ? accepted.flatMap((n) => (dropped.get(n)?.endsWith(read) ? (policy.targets.get(n) ?? []) : [])) : [];
+  const unfloored = floored.length > 0 ? cheapest([...preferred, ...floored]) : undefined;
+  const heldBy = unfloored && floored.includes(unfloored) ? read : undefined;
+  const stays = (t: RouteTarget) => (input.current && same(input.current.target, t) ? "stays" : "runs");
   let reason =
     instead && skipped.includes(instead)
       ? `${lead}, but ${capped}, so it runs on ${describe(pick, effort)} instead of ${instead.access === "metered" ? `the metered ${instead.model}` : `${instead.model} on extra usage`}.`
-      : preferred.length > 0
-        ? `${lead}, so ${unsure ? `it runs on the ${policy.mode} default, ` : `${byMode}it runs on `}${describe(pick, effort)}.`
-        : `${lead}, but ${accepted.map((n) => policy.targets.get(n)?.model ?? n).join(" and ")} ${accepted.length === 1 ? "is" : "are"} unavailable, so it runs on ${describe(pick, effort)}, the ${above.length > 0 ? "cheapest capable" : "strongest"} target left.`;
+      : heldBy
+        ? `${lead}, but ${heldBy}, so it ${stays(pick)} on ${describe(pick, effort)}.`
+        : preferred.length > 0
+          ? `${lead}, so ${unsure ? `it runs on the ${policy.mode} default, ` : `${byMode}it runs on `}${describe(pick, effort)}.`
+          : `${lead}, but ${accepted.map((n) => policy.targets.get(n)?.model ?? n).join(" and ")} ${accepted.length === 1 ? "is" : "are"} unavailable, so it runs on ${describe(pick, effort)}, the ${above.length > 0 ? "cheapest capable" : "strongest"} target left.`;
 
   // Stage 4, continued: routing memory. How this project's tasks of the class went on the policy's route
   // can move it: to where the user kept moving them, or else one tier up from where they kept failing.
@@ -364,7 +387,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   // A de-escalation only moves down a tier: up is escalation's job, and an effort change alone rewrites the cache (ADR 0002).
   if (input.verified && current && currentEntry && rank(pick.tier) >= rank(currentEntry.tier)) {
     trace.push({ stage: "switch", note: `stay: ${describe(pick, effort)} is no cheaper model than the task's ${currentEntry.model}` });
-    reason = `${lead}, but no cheaper model takes it, so it stays on ${describe(currentEntry, current.effort)}.`;
+    reason = `${lead}, but ${heldBy ?? "no cheaper model takes it"}, so it stays on ${describe(currentEntry, current.effort)}.`;
     pick = currentEntry;
     effort = current.effort;
   }

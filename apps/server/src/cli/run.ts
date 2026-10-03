@@ -267,6 +267,9 @@ const runTurn = (server: ServerFile, o: Options) =>
       if (e.type === "turn.usage.recorded") usage.push(e);
       if (e.type === "task.blocked") blocked = true;
       if (e.type === "verifier.ran") verifier = e;
+      // A proposed memory doesn't hold the turn up: it waits for the user (DESIGN §17).
+      if (e.type === "memory.proposed")
+        process.stderr.write(`[a memory waits for your approval in verdandi chat --thread ${threadId}: ${e.text}]\n`);
       if (
         e.type === "approval.requested" ||
         e.type === "user-input.requested" ||

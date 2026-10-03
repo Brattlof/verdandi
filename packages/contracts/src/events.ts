@@ -6,7 +6,7 @@ import { HandedSource, Item, Quota, UsageFields, VerifierRun } from "./items.ts"
 import { MemoryScope } from "./memory.ts";
 import { Question, Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
-import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInputs } from "./routing.ts";
+import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInputs, RouteInputsV1, UntrustedInput } from "./routing.ts";
 import { SkillAction, SkillChange, SkillState } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 import { TaskRating } from "./task.ts";
@@ -42,7 +42,8 @@ export const ThreadRouteChanged = Schema.Struct({
 });
 /**
  * A task (DESIGN §7) starts with the turn `taskId` names: a thread's first turn, and the first after a route
- * change. Committed right before that turn's `turn.started`; its turns run on `route`. v1 is read as v2 without `inputs`.
+ * change. Committed right before that turn's `turn.started`; its turns run on `route`. v1 is read as v3 without
+ * `inputs`, v2 as v3 without `inputs.untrusted`.
  */
 const TaskStartedV1 = Schema.Struct({
   type: Schema.Literal("task.started"),
@@ -53,9 +54,10 @@ const TaskStartedV1 = Schema.Struct({
   /** Why the task runs on `route`: the router's pick or the user's pin. Absent on tasks from before routing. */
   decision: Schema.optionalKey(RouteDecision),
 });
+const TaskStartedV2 = Schema.Struct({ ...TaskStartedV1.fields, v: Schema.Literal(2), inputs: Schema.optionalKey(RouteInputsV1) });
 export const TaskStarted = Schema.Struct({
   ...TaskStartedV1.fields,
-  v: Schema.Literal(2),
+  v: Schema.Literal(3),
   /** What the router read besides the turn's text and mode, for offline replay. Absent on v1 tasks, and when routing didn't run. */
   inputs: Schema.optionalKey(RouteInputs),
 });
@@ -485,12 +487,7 @@ export const MemorySaved = Schema.Struct({
   turnId: Schema.optionalKey(TurnId),
   replaces: Schema.Array(Schema.String),
 });
-/**
- * Review thread `reviewThreadId` proposes remembering `text` in the thread's `scope` memory, after its turn `turnId`
- * (DESIGN §14.5): a pending request until the user allows it, which records `memory.saved`, or denies it. Scanned
- * before it was recorded.
- */
-export const MemoryProposed = Schema.Struct({
+const MemoryProposedV1 = Schema.Struct({
   type: Schema.Literal("memory.proposed"),
   v: v1,
   threadId: ThreadId,
@@ -499,6 +496,20 @@ export const MemoryProposed = Schema.Struct({
   scope: MemoryScope,
   text: Schema.String,
   reviewThreadId: ThreadId,
+});
+/**
+ * A memory waiting for the user's approval on turn `turnId`: proposed by review thread `reviewThreadId` after the turn
+ * (DESIGN §14.5), or saved by the agent in a turn that read `untrusted` input (§17), which outlives the turn. A pending
+ * request until the user allows it, which records `memory.saved`, or denies it. Scanned before it was recorded. v1 is
+ * read as v2.
+ */
+export const MemoryProposed = Schema.Struct({
+  ...MemoryProposedV1.fields,
+  v: Schema.Literal(2),
+  reviewThreadId: Schema.optionalKey(ThreadId),
+  untrusted: Schema.optionalKey(UntrustedInput),
+  /** The entries the agent's save replaces, if they still exist when it's allowed. */
+  replaces: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 /** The user rewrote remembered fact `entryId`. */
 export const MemoryEdited = Schema.Struct({
@@ -684,7 +695,11 @@ export class EventDecodeError extends Data.TaggedError("EventDecodeError")<{ rea
 /** Published versions that are no longer current, each with its upgrade to the current one. */
 const upgrades: Record<string, (payload: string) => Effect.Effect<Event, Schema.SchemaError>> = {
   "task.started@1": (payload) =>
-    Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TaskStartedV1))(payload), (e): Event => ({ ...e, v: 2 })),
+    Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TaskStartedV1))(payload), (e): Event => ({ ...e, v: 3 })),
+  "task.started@2": (payload) =>
+    Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TaskStartedV2))(payload), (e): Event => ({ ...e, v: 3 })),
+  "memory.proposed@1": (payload) =>
+    Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(MemoryProposedV1))(payload), (e): Event => ({ ...e, v: 2 })),
   "turn.started@1": (payload) =>
     Effect.map(Schema.decodeUnknownEffect(Schema.fromJsonString(TurnStartedV1))(payload), (e): Event => ({ ...e, v: 2 })),
   "decision.recorded@1": (payload) =>
@@ -705,7 +720,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "task.rated@1": TaskRated,
   "thread.archived@1": ThreadArchived,
   "thread.unarchived@1": ThreadUnarchived,
-  "task.started@2": TaskStarted,
+  "task.started@3": TaskStarted,
   "turn.started@2": TurnStarted,
   "harness.session.bound@1": HarnessSessionBound,
   "turn.item.added@1": TurnItemAdded,
@@ -740,7 +755,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.checkpoints.removed@1": ThreadCheckpointsRemoved,
   "task.blocked@1": TaskBlocked,
   "memory.saved@1": MemorySaved,
-  "memory.proposed@1": MemoryProposed,
+  "memory.proposed@2": MemoryProposed,
   "memory.edited@1": MemoryEdited,
   "memory.deleted@1": MemoryDeleted,
   "memory.snapshot.taken@1": MemorySnapshotTaken,

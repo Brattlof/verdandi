@@ -8,6 +8,7 @@ import {
   type Policy,
   type RouteRule,
   type RouteSpec,
+  Tier,
 } from "@verdandi/contracts";
 import { builtInCatalog } from "./catalog.ts";
 import builtInPolicy from "./policy.json";
@@ -19,6 +20,8 @@ export class PolicyError extends Error {
 
 export type PolicyLayer = { readonly source: string; readonly data: unknown };
 
+type Floor = NonNullable<Policy["untrusted"]>;
+
 export type ResolvedPolicy = {
   readonly mode: BudgetMode;
   readonly minConfidence: number;
@@ -28,6 +31,8 @@ export type ResolvedPolicy = {
   readonly routes: NonNullable<Policy["routes"]>;
   readonly fallback: RouteRule;
   readonly restrictions: NonNullable<Policy["restrictions"]>;
+  /** The floor for a warm session that holds untrusted input and can do harm with it (DESIGN §17). */
+  readonly untrusted: NonNullable<Policy["untrusted"]>;
   /** Commands that check a task's work, run in order after a turn that changed files (DESIGN §8.7). */
   readonly verifiers: readonly string[];
   /**
@@ -126,10 +131,24 @@ const effortConflict = (merged: Policy, catalog: Catalog) => {
   return undefined;
 };
 
+const tiers = Tier.literals;
+
+/** The stricter of two floors: the higher tier, and every access mode either forbids. */
+const strictest = (a: Floor | undefined, b: Floor | undefined): Floor | undefined => {
+  if (!a || !b) return a ?? b;
+  const minTier = [a.minTier, b.minTier].reduce<Tier | undefined>(
+    (top, t) => (t && (!top || tiers.indexOf(t) > tiers.indexOf(top)) ? t : top),
+    undefined,
+  );
+  const forbid = [...new Set([...(a.forbid ?? []), ...(b.forbid ?? [])])];
+  return { ...(minTier && { minTier }), ...(forbid.length > 0 && { forbid }) };
+};
+
 /**
  * The built-in policy with `layers` merged over it in order (profile, then project: DESIGN §8.6).
- * `data` is the parsed file, e.g. `Bun.YAML.parse` of `.verdandi/routing.yaml`. Restrictions add up
- * across layers instead of replacing each other, so a later layer can't lift an earlier one's.
+ * `data` is the parsed file, e.g. `Bun.YAML.parse` of `.verdandi/routing.yaml`. Restrictions and the
+ * untrusted-input floor add up across layers instead of replacing each other, so a later layer, such
+ * as a cloned repository's, can't lift an earlier one's.
  * Throws a `PolicyError` naming the layer's `source` and the bad key.
  */
 export const loadPolicy = (layers: readonly PolicyLayer[] = [], catalog: Catalog = builtInCatalog): ResolvedPolicy => {
@@ -142,7 +161,8 @@ export const loadPolicy = (layers: readonly PolicyLayer[] = [], catalog: Catalog
       throw new PolicyError(`${source}: ${e instanceof Error ? e.message : String(e)}`);
     }
     const restrictions = [...(merged.restrictions ?? []), ...(layer.restrictions ?? [])];
-    merged = decodePolicy(merge(merged, restrictions.length > 0 ? { ...layer, restrictions } : layer));
+    const untrusted = strictest(merged.untrusted, layer.untrusted);
+    merged = decodePolicy(merge(merged, { ...layer, ...(restrictions.length > 0 && { restrictions }), ...(untrusted && { untrusted }) }));
     for (const [name, t] of Object.entries(layer.targets ?? {})) {
       if (!catalog.some((e) => e.harness === t.harness && e.provider === t.provider && e.model === t.model))
         throw new PolicyError(
@@ -170,6 +190,7 @@ export const loadPolicy = (layers: readonly PolicyLayer[] = [], catalog: Catalog
     routes: merged.routes ?? {},
     fallback: merged.fallback ?? {},
     restrictions: merged.restrictions ?? [],
+    untrusted: merged.untrusted ?? {},
     verifiers: merged.escalation?.verifiers ?? [],
     escalation: {
       ladder: merged.escalation?.ladder ?? ["effort", "model", "ask"],

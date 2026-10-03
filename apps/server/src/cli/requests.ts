@@ -27,9 +27,18 @@ export const skillPrompt = (r: Extract<PendingRequest, { type: "skill.proposed" 
   return `\n[skill] The agent proposes to ${skillChangeTitle(r.change)}:\n${diff.join("\n")}\nAllow? [y/n] `;
 };
 
-/** A background review's proposed memory (DESIGN §14.5): what it would remember, and where. */
+/**
+ * A proposed memory: from a background review (DESIGN §14.5), or the agent's own save in a turn that read untrusted
+ * input (§17). What it would remember, where, and why it asks.
+ */
 export const memoryPrompt = (r: Extract<PendingRequest, { type: "memory.proposed" }>) =>
-  `\n[memory] A background review of this thread's task proposes remembering, in ${r.scope === "user" ? "your user" : "this project's"} memory:\n${r.text}\nRemember it? [y/n] `;
+  `\n[memory] ${proposer(r)} proposes remembering, in ${r.scope === "user" ? "your user" : "this project's"} memory:\n${r.text}\nRemember it? [y/n] `;
+
+/** Who proposes a memory, and why it waits for the user. */
+const proposer = (r: Extract<PendingRequest, { type: "memory.proposed" }>) =>
+  r.untrusted
+    ? `The agent saved this after reading untrusted input (${r.untrusted.source}, turn ${r.untrusted.turn}), which may have planted it, so it`
+    : "A background review of this thread's task";
 
 type TrustRequest = Extract<PendingRequest, { type: "commands.trust.requested" }>;
 

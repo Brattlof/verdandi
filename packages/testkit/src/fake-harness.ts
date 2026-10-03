@@ -25,6 +25,7 @@ import { Effect, Stream } from "effect";
  * agent's reply, the way Claude Code's adapter delivers it; anything else is echoed back, with its attachments' names, kinds and sizes, and fixed usage on the route's model.
  * A turn with a `fork` starts a new session holding the old one's turns up to the fork; `history` keeps each session's turns.
  * "tool <name> <json args>" calls one of the Verdandi tools the run was given, reporting the call and its result as items.
+ * "fetch <url>" reads that page through a WebFetch tool call first, then runs the turn's next lines as its text.
  * A background review's prompt ("Verdandi is reviewing a finished task …") is answered as a reviewer would, in JSON:
  * it proposes remembering, in project memory, whatever follows the digest's first "remember".
  * Every reply costs $0.01. Like Claude Code, it checks the task's `maxCost` after the call: when the task's
@@ -84,6 +85,21 @@ export const makeFakeHarness = () => {
   };
 
   const script = (input: HarnessRunInput): Stream.Stream<HarnessEvent> => {
+    if (input.text.startsWith("fetch ")) {
+      // `fetch <url>` reads a page through Claude Code's WebFetch, untrusted input from the network, then runs the
+      // turn's next lines as its text. The read comes once the session has started.
+      const [first = "", ...rest] = input.text.split("\n");
+      const url = first.slice("fetch ".length);
+      const read = Stream.fromIterable<HarnessEvent>([
+        { type: "item", item: { kind: "tool.call", toolUseId: "fake-fetch", name: "WebFetch", input: { url } } },
+        { type: "item", item: { kind: "tool.result", toolUseId: "fake-fetch", isError: false, content: `the page at ${url}` } },
+      ]);
+      const fresh = input.resumeSessionId === undefined || input.fork !== undefined;
+      const after = script({ ...input, text: rest.join("\n") || `fetched ${url}` });
+      return fresh
+        ? after.pipe(Stream.flatMap((e) => (e.type === "session.started" ? Stream.concat(Stream.succeed(e), read) : Stream.succeed(e))))
+        : Stream.concat(read, after);
+    }
     calls.push({
       resumeSessionId: input.resumeSessionId,
       route: input.route,

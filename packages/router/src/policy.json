@@ -3,6 +3,7 @@
   "classifier": "rules",
   "minConfidence": 0.6,
   "memory": { "minTasks": 5, "minShare": 0.5 },
+  "untrusted": { "minTier": "M", "forbid": ["local"] },
   "targets": {
     "cc-haiku": { "harness": "claude-code", "provider": "claude-subscription", "model": "haiku" },
     "cc-sonnet": { "harness": "claude-code", "provider": "claude-subscription", "model": "sonnet" },
