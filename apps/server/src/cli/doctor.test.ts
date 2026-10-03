@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { truncateSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { CommandId, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, ManagedRuntime } from "effect";
@@ -7,7 +8,7 @@ import { attachmentsDir, storeAttachments } from "../attachments/attachments.ts"
 import { Engine } from "../event-store/engine.ts";
 import { type ServerFile, serverFile } from "../home/home.ts";
 import { ServerInfo, ServerLayer } from "../rpc/server.ts";
-import { type Check, diagnose } from "./doctor.ts";
+import { type Check, diagnose, walWarnSize } from "./doctor.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -54,6 +55,19 @@ test("fails with the fix when verdandid has stopped but left its server.json", a
   const server = check(await diagnose(home, tools), "verdandid");
   expect(server?.status).toBe("fail");
   expect(server?.detail).toContain("verdandi start");
+});
+
+test("shows the database's and WAL's sizes, and warns with the cause and the fix once the WAL outgrows its bound", async () => {
+  const { home } = await healthyHome();
+  const healthy = check(await diagnose(home, tools), "Database");
+  expect(healthy?.status).toBe("ok");
+  expect(healthy?.detail).toContain(", WAL ");
+  // As a WAL grows while another program's open read keeps checkpoints from finishing.
+  truncateSync(join(home, "verdandi.db-wal"), walWarnSize + 1);
+  const oversized = check(await diagnose(home, tools), "Database");
+  expect(oversized?.status).toBe("warn");
+  expect(oversized?.detail).toContain("another program");
+  expect(oversized?.detail).toContain("restart verdandid");
 });
 
 test("counts the stored attachments no turn references", async () => {

@@ -65,10 +65,29 @@ const writable = (home: string): Check => {
 
 const latestMigration = Math.max(...Object.keys(migrations).map((id) => Number.parseInt(id, 10)));
 
+/** Far past what `walSizeLimit` leaves after a checkpoint: a WAL this big means checkpoints have stopped. */
+export const walWarnSize = 256 * 1024 * 1024;
+
+/**
+ * The database's and its WAL's sizes, and a warning naming the cause and the fix when the WAL has outgrown
+ * `walWarnSize`. Only reads the files' sizes: doctor never checkpoints, since verdandid is the only writer.
+ */
+const databaseFiles = (file: string) => {
+  const wal = existsSync(`${file}-wal`) ? statSync(`${file}-wal`).size : 0;
+  return {
+    sizes: `${formatBytes(statSync(file).size)}, WAL ${formatBytes(wal)}`,
+    walProblem:
+      wal > walWarnSize
+        ? ` The WAL is past ${formatBytes(walWarnSize)}, so checkpoints aren't keeping up, usually because another program (a database browser, a backup or sync tool) holds the database open. Close it, then restart verdandid: a clean stop checkpoints the WAL and removes it.`
+        : "",
+  };
+};
+
 /** Opens the database read-only: doctor never migrates or changes it. */
 const database = (home: string): Check => {
   const file = join(home, "verdandi.db");
   if (!existsSync(file)) return { name: "Database", status: "warn", detail: `no database yet at ${file}. \`verdandi start\` creates it.` };
+  const { sizes, walProblem } = databaseFiles(file);
   let db: Database | undefined;
   try {
     db = new Database(file, { readonly: true });
@@ -78,7 +97,7 @@ const database = (home: string): Check => {
       return {
         name: "Database",
         status: "warn",
-        detail: `at migration ${applied} of ${latestMigration}. Restart verdandid to apply the rest.`,
+        detail: `at migration ${applied} of ${latestMigration} (${sizes}). Restart verdandid to apply the rest.${walProblem}`,
       };
     if (applied > latestMigration)
       return {
@@ -86,12 +105,16 @@ const database = (home: string): Check => {
         status: "fail",
         detail: `at migration ${applied}, newer than this Verdandi knows (${latestMigration}). Upgrade Verdandi.`,
       };
-    return { name: "Database", status: "ok", detail: `${file}, migrations current (${applied})` };
+    return {
+      name: "Database",
+      status: walProblem ? "warn" : "ok",
+      detail: `${file} (${sizes}), migrations current (${applied}).${walProblem}`,
+    };
   } catch (e) {
     return {
       name: "Database",
       status: "fail",
-      detail: `can't read ${file} (${message(e)}). Stop anything else using it, and back it up before repairing it.`,
+      detail: `can't read ${file} (${message(e)}; ${sizes}). Stop anything else using it, and back it up before repairing it.${walProblem}`,
     };
   } finally {
     db?.close();
