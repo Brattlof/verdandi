@@ -152,6 +152,25 @@ describe("stored events", () => {
     expect(await roundTrip(v2)).toEqual(v2);
   });
 
+  test("reads a v1 skill.applied as v2, its turn kept; a revert's v2 has none", async () => {
+    const v1 = {
+      type: "skill.applied",
+      v: 1,
+      threadId,
+      turnId,
+      requestId: "r1",
+      action: "patch",
+      skill: "deploy-notes",
+      path: "SKILL.md",
+    } as const;
+    expect(await Effect.runPromise(decodeStoredEvent({ type: "skill.applied", v: 1, payload: JSON.stringify(v1) }))).toEqual({
+      ...v1,
+      v: 2,
+    });
+    const { turnId: _, ...revert } = { ...v1, v: 2 } as const;
+    expect(await roundTrip(revert)).toEqual(revert);
+  });
+
   test("round-trips CRLF and unicode text", async () => {
     const e: Event = { type: "turn.started", v: 2, threadId, turnId, text: "räksmörgås\r\n日本語 \u{1F600}" };
     expect(await roundTrip(e)).toEqual(e);

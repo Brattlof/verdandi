@@ -385,6 +385,32 @@ const turnUntrusted = Effect.gen(function* () {
   for (const [turnId, source] of first) yield* sql`update turns set untrusted = ${source} where id = ${turnId}`;
 });
 
+/**
+ * Skill history (DESIGN §14.4): each skill change proposed or reverted, with when it was written (`applied_at`, null
+ * until then) and why not (`error`), which `SkillHistoryGet` lists and `skill.revert` reverts; and the skills the user
+ * pinned (`skill_pins`). Filled from the log's proposals and their `skill.applied`; nothing was reverted or pinned yet.
+ */
+const skillHistory = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table skill_changes (
+    id text primary key,
+    skill text not null,
+    thread_id text not null,
+    change text not null,
+    reverts text,
+    applied_at text,
+    error text
+  )`;
+  yield* sql`create index skill_changes_skill on skill_changes (skill, applied_at)`;
+  yield* sql`insert into skill_changes (id, skill, thread_id, change)
+    select json_extract(payload, '$.requestId'), json_extract(payload, '$.change.skill'), thread_id, json_extract(payload, '$.change')
+    from events where type = 'skill.proposed'`;
+  yield* sql`update skill_changes set (applied_at, error) = (
+    select a.at, json_extract(a.payload, '$.error') from events a
+    where a.type = 'skill.applied' and json_extract(a.payload, '$.requestId') = skill_changes.id)`;
+  yield* sql`create table skill_pins (name text primary key, pinned_at text not null)`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -412,4 +438,5 @@ export const migrations = {
   "24_review": review,
   "25_trusted_commands": trustedCommands,
   "26_turn_untrusted": turnUntrusted,
+  "27_skill_history": skillHistory,
 };

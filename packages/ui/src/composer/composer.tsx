@@ -548,7 +548,7 @@ const skillTitles = {
   ),
   delete: (c: SkillChange) => (
     <>
-      Delete the skill <span className="font-mono">{c.skill}</span> and its folder?
+      Delete the skill <span className="font-mono">{c.skill}</span>? Its folder moves to the archive.
     </>
   ),
 } as const;

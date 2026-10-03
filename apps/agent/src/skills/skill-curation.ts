@@ -13,24 +13,29 @@ const archiveAfter = 30 * day;
 
 const curated = Effect.flatMap(
   SqlClient.SqlClient,
-  (sql) => sql<{ name: string; state: SkillState; usedAt: string; threadId: ThreadId }>`
-    select name, state, used_at as usedAt, thread_id as threadId from skills`,
+  (sql) => sql<{ name: string; state: SkillState; usedAt: string; threadId: ThreadId; pinned: number }>`
+    select name, state, used_at as usedAt, thread_id as threadId, exists (select 1 from skill_pins p where p.name = skills.name) as pinned
+    from skills`,
 );
 
-/** The Skills panel's view: the skill folders read from disk, each skill Verdandi created with its curation. */
+/** The Skills panel's view: the skill folders read from disk, each skill Verdandi created with its curation, and the pins. */
 export const loadSkillsView = Effect.gen(function* () {
   const folders = yield* ProfileSkills;
+  const sql = yield* SqlClient.SqlClient;
   const rows = yield* curated;
+  const pins = yield* sql<{ name: string }>`select name from skill_pins`;
   return listSkills(
     folders,
     new Map(rows.map((r): [string, SkillCuration] => [r.name, { state: r.state, usedAt: r.usedAt, threadId: r.threadId }])),
+    new Set(pins.map((p) => p.name)),
   );
 });
 
 /**
  * The curate step (DESIGN §14.4) at `now`: moves each skill Verdandi created that went unused to stale or archived,
  * through `skill.curate`, whose reactor moves an archived one out of the loaded folder. First it puts every such
- * skill's folder where its state says, so a move that failed before is tried again. User-written skills have no row.
+ * skill's folder where its state says, so a move that failed before is tried again. User-written skills have no row, and
+ * a pinned skill keeps its state.
  */
 export const curateSkills = (now: number) =>
   Effect.gen(function* () {
@@ -39,7 +44,7 @@ export const curateSkills = (now: number) =>
     for (const skill of yield* curated) {
       const error = placeSkill(folders, skill.name, skill.state === "archived");
       if (error) yield* Effect.logWarning(`${error} The next sweep tries again.`);
-      if (skill.state === "archived") continue;
+      if (skill.state === "archived" || skill.pinned) continue;
       const unused = now - Date.parse(skill.usedAt);
       const to = unused >= archiveAfter ? "archived" : unused >= staleAfter ? "stale" : undefined;
       if (to && to !== skill.state)

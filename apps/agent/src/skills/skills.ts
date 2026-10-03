@@ -59,11 +59,36 @@ export const changeProblem = (change: SkillChange): string | undefined => {
   if ((action === "create" || action === "delete") && path !== "SKILL.md") return `A skill is ${action}d by its SKILL.md, not ${path}.`;
   if (action === "create" && before !== null) return `The skill ${skill} already exists. Patch it, or pick another name.`;
   if ((action === "patch" || action === "delete") && before === null) return `The skill ${skill} has no ${path} to ${action}.`;
-  if ((action === "delete") !== (after === null)) return `A ${action} must ${action === "delete" ? "drop" : "give"} the file's contents.`;
+  if ((action === "delete") !== (after === null) && action !== "write_file")
+    return `A ${action} must ${action === "delete" ? "drop" : "give"} the file's contents.`;
+  if (action === "write_file" && after === null && (before === null || path === "SKILL.md"))
+    return before === null ? `The skill ${skill} has no ${path} to remove.` : "A skill's SKILL.md is removed by deleting the skill.";
   if (after !== null && after.length > skillFileCap)
     return `${path} would be ${after.length} characters, over the ${skillFileCap} a skill file may hold. Split it into references/ files.`;
   return path === "SKILL.md" && after !== null ? skillMdProblem(skill, after) : undefined;
 };
+
+const inverse: Record<SkillChange["action"], SkillChange["action"]> = {
+  create: "delete",
+  delete: "create",
+  patch: "patch",
+  write_file: "write_file",
+};
+
+/**
+ * The change that undoes `change`: its `before` goes back. Reverting a create deletes the skill, a delete creates it
+ * again, and a `write_file` that added a file removes it.
+ */
+export const invertChange = (change: SkillChange): SkillChange => ({
+  ...change,
+  action: inverse[change.action],
+  before: change.after,
+  after: change.before,
+});
+
+/** Why agents can't change skill `skill`: the user pinned it. Says how to go on. */
+export const pinnedProblem = (skill: string) =>
+  `The user pinned the skill ${skill}, so agents can't change it. Ask the user to unpin it (the Skills panel, or verdandi skills unpin ${skill}), or create a skill of your own.`;
 
 /**
  * Why the proposed file can't be a skill's, or undefined when it can: it holds a secret, or the decision layer's

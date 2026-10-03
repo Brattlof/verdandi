@@ -13,7 +13,7 @@ const done: Record<SkillChange["action"], (c: SkillChange) => string> = {
   create: (c) => `created the skill ${c.skill}`,
   patch: (c) => `patched ${c.skill}/${c.path}`,
   write_file: (c) => `wrote ${c.skill}/${c.path}`,
-  delete: (c) => `deleted the skill ${c.skill}`,
+  delete: (c) => `deleted the skill ${c.skill} (its folder moved to the archive)`,
 };
 
 /**

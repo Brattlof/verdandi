@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { AttachmentRef, AttachmentUpload } from "./attachments.ts";
 import { DecisionAnswer } from "./decisions.ts";
 import { HarnessEvent } from "./harness.ts";
-import { CommandId, TaskId, ThreadId, TurnId } from "./ids.ts";
+import { CommandId, profileStream, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { HandedSource, VerifierRun } from "./items.ts";
 import { MemoryScope } from "./memory.ts";
 import { Resolution } from "./requests.ts";
@@ -260,12 +260,15 @@ export const SkillPropose = Schema.Struct({
   turnId: TurnId,
   change: SkillChange,
 });
-/** Internal: the reactor reporting that it wrote the allowed skill proposal `requestId`, or why it couldn't. */
+/**
+ * Internal: the reactor reporting that it wrote the allowed skill proposal or the revert `requestId` (a revert has no
+ * turn), or why it couldn't.
+ */
 export const SkillReport = Schema.Struct({
   type: Schema.Literal("skill.report"),
   commandId: CommandId,
   threadId: ThreadId,
-  turnId: TurnId,
+  turnId: Schema.optionalKey(TurnId),
   requestId: Schema.String,
   action: SkillAction,
   skill: Schema.String,
@@ -295,6 +298,22 @@ export const SkillRestore = Schema.Struct({
   threadId: ThreadId,
   skill: Schema.String,
 });
+/**
+ * The user reverts the written skill change `changeId` (an entry of `SkillHistoryGet`), from the Skills panel or
+ * `verdandi skills revert`: its `before` goes back. `threadId` is the change's, whose log holds it, and records the revert.
+ */
+export const SkillRevert = Schema.Struct({
+  type: Schema.Literal("skill.revert"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  changeId: Schema.String,
+});
+/**
+ * The user pins the profile skill `skill`, so no agent's proposal can change it and curation leaves it alone, or
+ * unpins it. A pin belongs to the profile, not a thread: recorded on `profileStream`.
+ */
+export const SkillPin = Schema.Struct({ type: Schema.Literal("skill.pin"), commandId: CommandId, skill: Schema.String });
+export const SkillUnpin = Schema.Struct({ type: Schema.Literal("skill.unpin"), commandId: CommandId, skill: Schema.String });
 
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
@@ -441,6 +460,9 @@ export const ClientCommand = Schema.Union([
   MemoryEdit,
   MemoryDelete,
   SkillRestore,
+  SkillRevert,
+  SkillPin,
+  SkillUnpin,
   ApprovalRespond,
   CommandsTrustRevoke,
 ]);
@@ -467,6 +489,9 @@ export const Command = Schema.Union([
   MemoryEdit,
   MemoryDelete,
   SkillRestore,
+  SkillRevert,
+  SkillPin,
+  SkillUnpin,
   ApprovalRespond,
   CommandsTrustRevoke,
   HarnessReport,
@@ -488,3 +513,6 @@ export const Command = Schema.Union([
   CommandsTrustRequest,
 ]);
 export type Command = typeof Command.Type;
+
+/** The stream a command's events go on: its thread's, or the profile's for a command about the profile. */
+export const commandStream = (command: Command): ThreadId => ("threadId" in command ? command.threadId : profileStream);

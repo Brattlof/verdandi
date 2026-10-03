@@ -18,7 +18,7 @@ export const skillChangeTitle = ({ action, skill, path }: Extract<PendingRequest
   action === "create"
     ? `create the skill ${skill}`
     : action === "delete"
-      ? `delete the skill ${skill} (its whole folder)`
+      ? `delete the skill ${skill} (its whole folder moves to the archive)`
       : `${action === "patch" ? "patch" : "write"} ${skill}/${path}`;
 
 /** A skill proposal prints its whole diff, like a plan: the user approves what they read. */

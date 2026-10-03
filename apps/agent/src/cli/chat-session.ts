@@ -22,6 +22,7 @@ import {
 import { Context, Effect, type ManagedRuntime, Stream } from "effect";
 import { workspaceDir } from "../home/workspace.ts";
 import type { connect } from "../rpc/client.ts";
+import { skillsAction } from "../skills/skills-cli.ts";
 import { readAttachment } from "./attach.ts";
 import {
   approvalPrompt,
@@ -371,7 +372,7 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
         ? `${harness} ${model} ${effort} (routed; --model or --effort pins a route)`
         : "the route the router picks for the next task";
   io.write(
-    `Thread ${threadId} in ${thread.projectPath === workspaceDir(home) ? `the workspace (${thread.projectPath}; --here works on the current folder instead)` : thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /rate up|down rates the latest task, /rate clear clears it; /trusted lists the project commands you let Verdandi run, /untrust <n> revokes one; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
+    `Thread ${threadId} in ${thread.projectPath === workspaceDir(home) ? `the workspace (${thread.projectPath}; --here works on the current folder instead)` : thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /rate up|down rates the latest task, /rate clear clears it; /trusted lists the project commands you let Verdandi run, /untrust <n> revokes one; /skills lists your skills, and /skills history|revert|pin|unpin|restore manages one; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
   );
   const tree = thread.worktree;
   if (tree) {
@@ -461,6 +462,10 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
       else if (!revoke) io.write(`[usage: /untrust <n>, with n from /trusted (1 to ${trusted.length})]\n`);
       else if (await dispatch({ type: "commands.trust.revoke", commandId: uuid<CommandId>(), threadId, hash: revoke.hash }))
         io.write("[revoked: Verdandi asks before it runs those commands again]\n");
+      if (!running) prompt();
+    } else if (text === "/skills" || text.startsWith("/skills ")) {
+      // The Skills panel's controls: list with pins, a skill's history, revert, pin, unpin and restore.
+      io.write(await runtime.runPromise(skillsAction(client, text.split(/\s+/).slice(1))));
       if (!running) prompt();
     } else if (text === "/diff" || text === "/diff all") {
       await showDiff(text === "/diff all", thread.projectPath);

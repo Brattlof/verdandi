@@ -6,6 +6,12 @@ export type ProjectId = typeof ProjectId.Type;
 export const ThreadId = Schema.String.pipe(Schema.brand("ThreadId"));
 export type ThreadId = typeof ThreadId.Type;
 
+/**
+ * The stream of events about the profile rather than one thread, such as skill pins: what they record has no thread.
+ * Never a thread's id, which are UUIDs.
+ */
+export const profileStream = "profile" as ThreadId;
+
 /** Also sent to Claude Code as the prompt's `uuid`, so a turn can be forked at later (ADR 0004). */
 export const TurnId = Schema.String.pipe(Schema.brand("TurnId"));
 export type TurnId = typeof TurnId.Type;

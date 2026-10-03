@@ -49,6 +49,7 @@ These lower risk, and they can be bypassed by design. A bypass is a bug worth fi
 - What an approval or plan mode limits. They're consent, not containment: they ask before a step, and don't limit what an approved step does or what the user's own harness settings already allow. The harness's own permission prompts and plan mode (Claude Code's read-only mode) are enforced by the harness.
 - The native harness's file tools' path rules (`access` in `packages/harness-native/src/file-tools.ts`): free in the thread's folder and the `workspace.yaml` folders, asking elsewhere, refusing the rest of the Verdandi home. They steer the agent's own tools, but anything run as the user, Claude Code's tools included, reaches the same files.
 - Spend caps (`spend-caps.yaml`) and task limits, which are a budget, not a security control.
+- Skill pins (`skill_pins`). The decider refuses a pinned skill's change on Verdandi's own path (`skill_manage`, a background review's proposal) and curation leaves it alone, but a harness's own file tools that the user allows can still write the skills folder.
 
 ### Out of scope as vulnerabilities
 

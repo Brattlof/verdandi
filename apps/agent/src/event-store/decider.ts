@@ -21,10 +21,12 @@ import {
   type MemoryScope,
   type MemoryView,
   type ProjectId,
+  profileStream,
   type Resolution,
   type Route,
   type RouteDecision,
   type RouteTarget,
+  type SkillChange,
   type SkillState,
   type SpendCapped,
   spendsMetered,
@@ -52,7 +54,7 @@ import {
   routeOf,
   targetOf,
 } from "../routing/routing.ts";
-import { changeProblem, scanSkill } from "../skills/skills.ts";
+import { changeProblem, invertChange, nameProblem, pinnedProblem, scanSkill } from "../skills/skills.ts";
 import type { SpendState } from "../spend/spend.ts";
 import { commandsHash } from "../trust/trust.ts";
 import type { StoredRevert } from "./projector.ts";
@@ -143,6 +145,15 @@ export type DeciderState = {
   readonly injection?: DecisionAnswer;
   /** The skill a `skill.curate` or `skill.restore` names, if Verdandi created it, loaded for those commands. */
   readonly skill?: { readonly state: SkillState; readonly usedAt: string } | null;
+  /** Whether the user pinned the skill a proposal, `skill.curate`, `skill.pin` or `skill.unpin` names, loaded for those commands. */
+  readonly pinned?: boolean;
+  /** The written change a `skill.revert` names, from `skill_changes`, or null when there's none. */
+  readonly reverting?: {
+    readonly threadId: ThreadId;
+    readonly change: SkillChange;
+    readonly appliedAt: string | null;
+    readonly error: string | null;
+  } | null;
   /**
    * Harnesses whose subscription window is nearly or fully used up, with no extra usage paying for more, loaded for a
    * background review's turn: background work leaves what's left to the user (DESIGN §14.5).
@@ -695,6 +706,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (state.thread?.runningTurnId !== c.turnId) {
       return reject("TurnNotRunning", `Turn ${c.turnId} isn't running, so there's no agent to propose a skill.`);
     }
+    if (state.pinned) return reject("SkillPinned", pinnedProblem(c.change.skill));
     const problem = changeProblem(c.change);
     if (problem) return reject("InvalidSkill", problem);
     const refused = c.change.after === null ? undefined : scanSkill(c.change.after, state.injection);
@@ -724,12 +736,13 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
   "skill.report": (state, c) => {
     if (!state.thread) return accept();
     const { type: _, commandId: _c, ...report } = c;
-    return accept({ ...report, type: "skill.applied", v: 1 });
+    return accept({ ...report, type: "skill.applied", v: 2 });
   },
   // The disk is the reactor's: it moves an archived skill out of the loaded folder, and a restored one back.
   "skill.curate": (state, c) => {
     const skill = state.skill;
-    if (!state.thread || !skill || skill.state === c.to || skill.state === "archived" || skill.usedAt !== c.usedAt) return accept();
+    if (!state.thread || !skill || state.pinned || skill.state === c.to || skill.state === "archived" || skill.usedAt !== c.usedAt)
+      return accept();
     return accept({ type: "skill.state.changed", v: 1, threadId: c.threadId, skill: c.skill, from: skill.state, to: c.to, by: "sweep" });
   },
   "skill.restore": (state, c) => {
@@ -741,6 +754,34 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       );
     return accept({ type: "skill.state.changed", v: 1, threadId: c.threadId, skill: c.skill, from: "archived", to: "active", by: "user" });
   },
+  // The user's own revert: checked like a proposal but not scanned, since it puts back what the skill held. Pins stop only agents.
+  "skill.revert": (state, c) => {
+    const written = state.reverting;
+    if (!written || written.threadId !== c.threadId)
+      return reject(
+        "SkillChangeNotFound",
+        `There's no skill change ${c.changeId} in thread ${c.threadId}. The skill's history lists them.`,
+      );
+    if (written.appliedAt === null || written.error !== null)
+      return reject("SkillChangeNotFound", `Skill change ${c.changeId} was never written, so there's nothing to revert.`);
+    const change = invertChange(written.change);
+    const problem = changeProblem(change);
+    if (problem) return reject("InvalidSkill", `Can't revert it: ${problem}`);
+    return accept({ type: "skill.reverted", v: 1, threadId: c.threadId, changeId: c.commandId, reverts: c.changeId, change });
+  },
+  // A pin belongs to the profile: its events go on `profileStream`, whatever thread the user is in.
+  "skill.pin": (state, c) => {
+    const wrong = nameProblem(c.skill);
+    if (wrong) return reject("InvalidSkill", wrong);
+    return state.pinned ? accept() : accept({ type: "skill.pinned", v: 1, threadId: profileStream, skill: c.skill });
+  },
+  "skill.unpin": (state, c) =>
+    state.pinned
+      ? accept({ type: "skill.unpinned", v: 1, threadId: profileStream, skill: c.skill })
+      : reject(
+          "SkillNotPinned",
+          `${c.skill} isn't pinned, so there's nothing to unpin. The Skills panel and verdandi skills list show the pins.`,
+        ),
   // A no is logged and ends there, at no model cost; a yes asks the reactor to review the digest (DESIGN §14.5).
   "task.review": (state, c) => {
     if (!state.thread || state.thread.review || !state.decisions) return accept();
@@ -787,6 +828,7 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     const { proposal } = c;
     const at = { v: 1, threadId: c.threadId, turnId: c.turnId, requestId: c.commandId } as const;
     if (proposal.kind === "skill") {
+      if (state.pinned) return reject("SkillPinned", pinnedProblem(proposal.change.skill));
       const problem = changeProblem(proposal.change);
       if (problem) return reject("InvalidSkill", problem);
       const refused = proposal.change.after === null ? undefined : scanSkill(proposal.change.after, state.injection);

@@ -33,7 +33,7 @@ import { memoryNudge } from "../memory/memory.ts";
 import { loadTaskDigest, parseReview, reviewPrompt } from "../review/review.ts";
 import { repeatedError } from "../routing/repeated-error.ts";
 import { searchSessions } from "../search/search.ts";
-import { placeSkill, prepareChange, type SkillFolders } from "../skills/skill-files.ts";
+import { applyChange, placeSkill, prepareChange, revertStale, type SkillFolders } from "../skills/skill-files.ts";
 import { makeSkillProposals } from "../skills/skill-proposals.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "../tasks/task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "../tasks/trajectory.ts";
@@ -682,6 +682,23 @@ export const ReactorLive = Layer.effect(
       if (e.type === "skill.state.changed") {
         const error = placeSkill(skillFolders, e.skill, e.to === "archived");
         return error ? Effect.logWarning(`${error} The next skill curation sweep tries again.`) : Effect.void;
+      }
+      // The user's revert is written at once, inside its dispatch, so its receipt means the outcome is recorded too.
+      if (e.type === "skill.reverted") {
+        const { action, skill, path } = e.change;
+        const error = applyChange(skillFolders, e.change, revertStale(e.change));
+        return engine
+          .dispatch({
+            type: "skill.report",
+            commandId: randomUUID() as CommandId,
+            threadId: e.threadId,
+            requestId: e.changeId,
+            action,
+            skill,
+            path,
+            ...(error && { error }),
+          })
+          .pipe(Effect.ignoreCause({ log: "Warn", message: `Could not record how skill revert ${e.changeId} went.` }));
       }
       // A skill proposal is Verdandi's own request: its answer writes the skill, in `turns` so `drain` waits for it. So is a
       // trust request, whose answer a turn waits on.

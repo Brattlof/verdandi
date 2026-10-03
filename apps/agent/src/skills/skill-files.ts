@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSy
 import { dirname, join, resolve, sep } from "node:path";
 import type { SkillChange, SkillCuration, SkillSource, SkillsView } from "@verdandi/contracts";
 import type { SkillEdit } from "@verdandi/tools";
-import { frontmatter, nameProblem, pathProblem } from "./skills.ts";
+import { frontmatter, invertChange, nameProblem, pathProblem } from "./skills.ts";
 
 /**
  * The profile's own skills folder, which Verdandi writes after the user approves and Claude Code loads, the folder
@@ -67,7 +67,7 @@ export const prepareChange = (folders: SkillFolders, edit: SkillEdit): { readonl
   const exists = existsSync(join(folders.profile, edit.skill));
   if (edit.action === "create" && present(join(folders.archive, edit.skill)))
     return {
-      error: `An archived skill is named ${edit.skill}. Ask the user to restore it (the Skills panel, or verdandi skills restore ${edit.skill}) and patch it, or pick another name.`,
+      error: `An archived skill is named ${edit.skill}. Ask the user to bring it back (Restore, or Revert on its delete in its history, in the Skills panel or verdandi skills) and patch it, or pick another name.`,
     };
   if (edit.action !== "create" && !exists) {
     const elsewhere = folders.extra.find((f) => existsSync(join(f, edit.skill)));
@@ -98,23 +98,62 @@ export const prepareChange = (folders: SkillFolders, edit: SkillEdit): { readonl
 };
 
 /**
- * Writes an approved `change` to the profile's skills folder (a delete removes the skill's folder), or says why it
- * didn't: the guard refused, or the file changed since it was proposed. Only the reactor calls it.
+ * How `change` would be written now: to its file, or by moving its archived folder back (a create that reverts a
+ * delete, which archived the whole folder), or why it can't be: the guard refused, or the file isn't the change's
+ * `before` any more, which `stale` says.
  */
-export const applyChange = (folders: SkillFolders, change: SkillChange): string | undefined => {
+const plan = (
+  folders: SkillFolders,
+  change: SkillChange,
+  stale: string,
+): { readonly file: string } | { readonly unarchive: true } | { readonly error: string } => {
   const at = target(folders, change.skill, change.path);
-  if ("error" in at) return at.error;
+  if ("error" in at) return at;
+  if (
+    change.action === "create" &&
+    !present(join(folders.profile, change.skill)) &&
+    readIfFile(join(folders.archive, change.skill, "SKILL.md")) === change.after
+  )
+    return { unarchive: true };
+  return readIfFile(at.file) === change.before ? at : { error: stale };
+};
+
+/**
+ * Writes an approved `change` to the profile's skills folder, or says why it didn't: the guard refused, or the file
+ * changed since (`stale`, by default a proposal's). A delete moves the skill's folder to the archive, never deleting it,
+ * and a create that reverts one moves it back. Only the reactor calls it.
+ */
+export const applyChange = (
+  folders: SkillFolders,
+  change: SkillChange,
+  stale = `${change.skill}/${change.path} changed since it was proposed, so nothing was written. Propose the change again against the file as it is now.`,
+): string | undefined => {
   try {
-    if (readIfFile(at.file) !== change.before)
-      return `${change.skill}/${change.path} changed since it was proposed, so nothing was written. Propose the change again against the file as it is now.`;
-    if (change.after === null) rmSync(dirname(at.file), { recursive: true, force: true });
+    const how = plan(folders, change, stale);
+    if ("error" in how) return how.error;
+    if ("unarchive" in how || change.action === "delete") return placeSkill(folders, change.skill, change.action === "delete");
+    if (change.after === null) rmSync(how.file, { force: true });
     else {
-      mkdirSync(dirname(at.file), { recursive: true });
-      writeFileSync(at.file, change.after);
+      mkdirSync(dirname(how.file), { recursive: true });
+      writeFileSync(how.file, change.after);
     }
     return undefined;
   } catch (e) {
     return `Couldn't write ${change.skill}/${change.path}: ${e instanceof Error ? e.message : String(e)}`;
+  }
+};
+
+/** Why reverting the written `change` would be refused, as `revertStale` says it. */
+export const revertStale = (change: SkillChange) =>
+  `${change.skill}/${change.path} changed since this change was written (by a later change or by hand), so reverting it would lose that. Nothing was written.`;
+
+/** Why reverting the written `change` would be refused now, read from disk, or undefined when it can be reverted. */
+export const revertBlocked = (folders: SkillFolders, change: SkillChange) => {
+  try {
+    const how = plan(folders, invertChange(change), revertStale(change));
+    return "error" in how ? how.error : undefined;
+  } catch (e) {
+    return `Couldn't read ${change.skill}/${change.path}: ${e instanceof Error ? e.message : String(e)}`;
   }
 };
 
@@ -141,9 +180,13 @@ export const placeSkill = (folders: SkillFolders, name: string, archived: boolea
 
 /**
  * The profile's skills folder, its archive (when it holds any), then each extra folder, with its skills: the folders in
- * it that hold a SKILL.md, each with its `curation` when Verdandi created it.
+ * it that hold a SKILL.md, each with its `curation` when Verdandi created it, and its pin when the user pinned it.
  */
-export const listSkills = (folders: SkillFolders, curation: ReadonlyMap<string, SkillCuration> = new Map()): SkillsView => {
+export const listSkills = (
+  folders: SkillFolders,
+  curation: ReadonlyMap<string, SkillCuration> = new Map(),
+  pins: ReadonlySet<string> = new Set(),
+): SkillsView => {
   const skillsIn = (folder: string, source: SkillSource) => {
     let names: string[];
     try {
@@ -168,6 +211,7 @@ export const listSkills = (folders: SkillFolders, curation: ReadonlyMap<string, 
           description: typeof data?.description === "string" ? data.description : "",
           path,
           ...(curated && { curation: curated }),
+          ...(source === "profile" && pins.has(name) && { pinned: true }),
         },
       ];
     });

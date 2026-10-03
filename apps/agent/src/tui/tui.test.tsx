@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { testRender } from "@opentui/react/test-utils";
 import type { CommandId, ThreadId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
@@ -83,7 +85,7 @@ const openChat = async () => {
     await ui.mockInput.typeText(text);
     ui.mockInput.pressEnter();
   };
-  return { ui, send, seen, quit: quit.promise };
+  return { home, ui, send, seen, quit: quit.promise };
 };
 
 test("a message typed in the terminal UI reaches the agent, and its reply streams into the transcript", async () => {
@@ -111,4 +113,16 @@ test("/exit quits", async () => {
   const { send, quit } = await openChat();
   await send("/exit");
   await quit;
+});
+
+test("/skills pins a skill through verdandid, lists it pinned, and shows its history", async () => {
+  const { home, send, seen } = await openChat();
+  mkdirSync(join(home, "skills", "mine"), { recursive: true });
+  writeFileSync(join(home, "skills", "mine", "SKILL.md"), "---\nname: mine\ndescription: My own steps.\n---\nSteps.\n");
+  await send("/skills pin mine");
+  await seen("Pinned mine: agents can't change it");
+  await send("/skills");
+  expect(await seen("(pinned)")).toContain("My own steps. (pinned)");
+  await send("/skills history mine");
+  await seen("No change to mine was written by Verdandi yet.");
 });
