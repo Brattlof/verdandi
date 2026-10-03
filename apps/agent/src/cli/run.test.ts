@@ -239,6 +239,25 @@ test(
 );
 
 test(
+  "follows the turn on when denying its plan escalates the task inside it",
+  async () => {
+    const project = routedProject("exit 1");
+    const { home } = await startServer();
+    const { stdout, stderr, code } = await verdandiRun(home, ["--project", project, "--mode", "plan", "--deny-requests", "--json", "plan"]);
+    const result = JSON.parse(stdout) as RunResult;
+    expect(code).toBe(exitCodes.completed);
+    expect(result).toMatchObject({
+      status: "completed",
+      route: { effort: "high" },
+      escalations: [{ trigger: "plan-rejected", step: "effort", from: { effort: "medium" }, to: { effort: "high" } }],
+    });
+    expect(result.reply).toBe("kept planning");
+    expect(stderr).toContain("[denied approval of its plan");
+  },
+  spawnTimeout,
+);
+
+test(
   "follows the task when its agent reports it is blocked, whatever set off the escalation",
   async () => {
     const project = routedProject("exit 1");

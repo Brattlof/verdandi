@@ -70,7 +70,7 @@ export const Item = Schema.Union([
   /**
    * An escalation trigger fired on a routed task, and Verdandi escalated it (DESIGN §8.7): the task goes on at `to`,
    * starting with the turn `nextTurnId` Verdandi sent, or the user's own after a correction (no `nextTurnId`), or, at
-   * `ask`, stops for the user. Both absent at `ask`.
+   * `ask`, stops for the user. Both absent at `ask`. `requestId` is the plan whose rejection escalated this same turn.
    */
   Schema.Struct({
     kind: Schema.Literal("escalation"),
@@ -78,6 +78,7 @@ export const Item = Schema.Union([
     from: Route,
     to: Schema.optionalKey(Route),
     nextTurnId: Schema.optionalKey(TurnId),
+    requestId: Schema.optionalKey(Schema.String),
     reason: Schema.String,
   }),
   /** Verdandi ran a project verifier after the agent finished changing files. */

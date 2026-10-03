@@ -349,12 +349,14 @@ const TaskEscalatedV1 = Schema.Struct({
  * ladder (DESIGN §8.7). At `effort` and `model` the task goes on at `to` with the turn `nextTurnId`, committed right
  * after this, which hands the agent the failure, its own report or the repeated error; after a correction it goes on
  * with the user's own turn, committed right after this, and there's no `nextTurnId`. At `ask` it stops and the user
- * decides. Projected as an `escalation` item of `turnId`.
+ * decides. A rejected plan (`requestId`, the plan request) escalates the running turn `turnId` itself: committed right
+ * before the denial, so the agent plans again at `to`, and there's no `nextTurnId`. Projected as an `escalation` item of `turnId`.
  */
 export const TaskEscalated = Schema.Struct({
   ...TaskEscalatedV1.fields,
   v: Schema.Literal(2),
   trigger: EscalationTrigger,
+  requestId: Schema.optionalKey(Schema.String),
 });
 /**
  * Routed task `taskId`'s last turn passed its verifiers, and the turn `turnId` that goes on with it looks like mechanical

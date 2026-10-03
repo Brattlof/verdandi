@@ -377,6 +377,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         from: e.from,
         ...(e.to && { to: e.to }),
         ...(e.nextTurnId && { nextTurnId: e.nextTurnId }),
+        ...(e.requestId && { requestId: e.requestId }),
         reason: e.reason,
       }),
     ),

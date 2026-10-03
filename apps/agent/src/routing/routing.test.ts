@@ -371,18 +371,54 @@ minConfidence: 0.4
     expect(turn?.usage.map((u) => u.model)).toEqual(["fake-large"]);
   });
 
-  test("a rejected plan and a pinned thread stay on their route", async () => {
-    const denied = setup(planned);
-    const kept = await denied.run(planTurn(denied.projectPath, { decision: "deny" }));
-    expect(kept.request.execute).toBeDefined();
-    expect(denied.fake.reroutes).toEqual([]);
-    expect(kept.after?.route.model).toBe("fake-small");
+  test("a rejected plan escalates its routed task inside the turn, so the agent plans again on the stronger route", async () => {
+    // The model step first, so the next plan's usage shows the move.
+    const s = setup(`${planned}escalation: { ladder: [model, ask] }
+`);
+    const deny = { decision: "deny", feedback: "Cover the empty file too." } as const;
+    const { request, after, again, escalations } = await s.run(
+      Effect.gen(function* () {
+        const { request, after } = yield* planTurn(s.projectPath, deny);
+        // A second rejection in the task is past `maxAutoEscalations` (1): the denial goes back as it is.
+        const raised = yield* Deferred.make<string>();
+        yield* (yield* Engine).react((e) =>
+          e.event.type === "plan.requested" ? Deferred.succeed(raised, e.event.requestId).pipe(Effect.asVoid) : Effect.void,
+        );
+        yield* dispatch({ type: "turn.send", commandId: id<CommandId>(), threadId, turnId: id<TurnId>(), text: "plan", mode: "plan" });
+        const requestId = yield* Deferred.await(raised);
+        yield* dispatch({ type: "approval.respond", commandId: id<CommandId>(), threadId, requestId, resolution: deny });
+        yield* drain;
+        const rows = yield* (yield* SqlClient.SqlClient)<{ payload: string }>`select payload from events where type = 'task.escalated'`;
+        return { request, after, again: yield* view, escalations: rows.map((r) => JSON.parse(r.payload) as unknown) };
+      }),
+    );
+    const to = after?.route;
+    if (!to) throw new Error("no thread view");
+    expect(to.model).not.toBe("fake-small");
+    expect(escalations).toEqual([
+      expect.objectContaining({ trigger: "plan-rejected", step: "model", requestId: request.requestId, turnId: after?.turns[0]?.turnId }),
+    ]);
+    expect(escalations[0]).not.toHaveProperty("nextTurnId");
+    expect(s.fake.reroutes.map((r) => r.route)).toEqual([to]);
+    const [turn] = after?.turns ?? [];
+    expect(turn?.items.map((i) => i.kind)).toEqual(["plan", "escalation", "assistant.message"]);
+    expect(turn?.items[1]).toMatchObject({
+      kind: "escalation",
+      requestId: request.requestId,
+      reason: expect.stringContaining("You rejected the plan"),
+    });
+    expect(turn?.usage.map((u) => u.model)).toEqual([to.model]);
+    expect(again?.turns[1]?.items.map((i) => i.kind)).toEqual(["plan", "assistant.message"]);
+    expect(again?.route).toEqual(to);
+  });
 
-    const pinnedThread = setup(planned);
-    const onPin = await pinnedThread.run(planTurn(pinnedThread.projectPath, { decision: "allow" }, pinned));
-    expect(onPin.request.execute).toBeUndefined();
-    expect(pinnedThread.fake.reroutes).toEqual([]);
-    expect(onPin.after?.route).toEqual(pinned);
+  test("a rejected plan on a pinned thread stays on its route", async () => {
+    const s = setup(planned);
+    const { request, after } = await s.run(planTurn(s.projectPath, { decision: "deny" }, pinned));
+    expect(request.execute).toBeUndefined();
+    expect(s.fake.reroutes).toEqual([]);
+    expect(after?.route).toEqual(pinned);
+    expect(after?.turns[0]?.items.map((i) => i.kind)).toEqual(["plan", "assistant.message"]);
   });
 });
 

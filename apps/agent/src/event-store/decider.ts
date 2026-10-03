@@ -310,6 +310,32 @@ const correctionEscalation = (state: DeciderState, threadId: ThreadId, taskId: T
 };
 
 /**
+ * The escalation step denying plan request `requestId` of running turn `turnId` takes on a routed task (DESIGN §8.7
+ * trigger 3), committed before the denial so the agent plans again on the stronger route, inside the turn: an effort
+ * step too, which pays the cache rewrite (ADR 0018). Undefined when the task stays put, as for a correction.
+ */
+const planEscalation = (state: DeciderState, threadId: ThreadId, turnId: TurnId, requestId: string): Event | undefined => {
+  const { thread, routing } = state;
+  if (!thread?.taskId || !routing || thread.pinned || thread.taskDecision?.source === "pin" || thread.review) return undefined;
+  const step = decideEscalation(thread, routing, thread.taskEscalations, "You rejected the plan");
+  if (step.step === "ask" || capped(state.spend, step.target)) return undefined;
+  const { harness, model } = step.target;
+  return {
+    type: "task.escalated",
+    v: 2,
+    trigger: "plan-rejected",
+    threadId,
+    taskId: thread.taskId,
+    turnId,
+    requestId,
+    step: step.step,
+    from: thread.route,
+    to: { harness, model, effort: step.effort, ...(thread.route.subagents && { subagents: thread.route.subagents }) },
+    reason: step.reason,
+  };
+};
+
+/**
  * Why background review `review` can't run on `target` (DESIGN §14.5): it would spend metered dollars and `review.yaml`
  * doesn't allow that, or the harness's subscription window is short. Undefined when it can.
  */
@@ -966,6 +992,11 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
         commands,
         hash,
       });
+    }
+    // Rejecting a plan (an edit isn't) escalates a routed task before the agent plans again.
+    if (request.kind === "plan" && c.resolution.decision === "deny") {
+      const escalated = planEscalation(state, c.threadId, request.turnId, c.requestId);
+      return escalated ? accept(escalated, resolved) : accept(resolved);
     }
     // The build moves only if the thread is still routed and on the task the plan was made for.
     const { execute } = request;

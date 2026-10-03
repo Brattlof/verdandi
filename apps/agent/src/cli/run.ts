@@ -237,6 +237,13 @@ const runTurn = (server: ServerFile, o: Options) =>
       if (e.type === "task.escalated" && e.turnId === current) {
         const { trigger, step, from, to, reason } = e;
         escalations.push({ trigger, step, from, ...(to && { to }), reason });
+        // A plan denied with --deny-requests escalates the turn itself, which goes on.
+        if (trigger === "plan-rejected" && to) {
+          if (!atLineStart) write("\n");
+          if (!o.json) process.stderr.write(`[escalated to ${to.model} ${to.effort}: ${reason}]\n`);
+          route = to;
+          continue;
+        }
         // At `ask` the task stopped short of done, even when its last turn succeeded (an agent that reported it's blocked).
         if (!to || !e.nextTurnId) {
           const error = `${awaiting?.error ?? ""}\n${reason} Continue the thread with verdandi chat --thread ${threadId}.`.trimStart();
