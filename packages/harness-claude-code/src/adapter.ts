@@ -226,6 +226,7 @@ const openSession = (
   input: HarnessRunInput,
   additionalDirectories: readonly string[],
   plugins: readonly string[],
+  env: Readonly<Record<string, string | undefined>>,
   fork?: Fork,
 ): Session => {
   const queue: SDKUserMessage[] = [];
@@ -315,7 +316,7 @@ const openSession = (
         ],
       },
       // `idle` marks the real end of a turn: after the result, background subagents can still run and be answered (ADR 0011).
-      env: { ...process.env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1" },
+      env: { ...env, CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1" },
       // Connectors attach nondeterministically and would change the tool list between turns (ADR 0001).
       settings: { disableClaudeAiConnectors: true },
       canUseTool,
@@ -441,6 +442,8 @@ export const makeClaudeCodeAdapter = (options: {
   readonly additionalDirectories?: readonly string[];
   /** Local plugin folders every session loads, e.g. the Verdandi home, whose `skills/` holds the profile's skills (ADR 0020). */
   readonly plugins?: readonly string[];
+  /** The environment Claude Code runs with (default: this process's). verdandid passes its own without its secrets. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
 }): HarnessAdapter => {
   const sessions = new Map<ThreadId, Session>();
   const end = (threadId: ThreadId) => {
@@ -576,6 +579,7 @@ export const makeClaudeCodeAdapter = (options: {
               input,
               options.additionalDirectories ?? [],
               options.plugins ?? [],
+              options.env ?? process.env,
               f,
             );
             sessions.set(input.threadId, opened);

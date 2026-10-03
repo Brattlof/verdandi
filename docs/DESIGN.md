@@ -597,7 +597,7 @@ interface HarnessAdapter {
   Bedrock, Vertex and Foundry come later, through the same SDKs' platform clients.
 - **Internal message format:** normalized content blocks (text, image, tool use, tool result, thinking). Blocks specific to one provider are carried along unchanged, so they can be sent back exactly.
 - **Why our own thin layer instead of a generic multi-provider SDK:** cost control depends on provider-specific features, such as cache breakpoints, effort, passing thinking blocks back, cache diagnostics and task budgets. Generic abstractions tend to flatten these away. ADR 0022 confirms it for the first provider: the native harness calls the Anthropic SDK directly, and the internal layer arrives with the second provider.
-- **Credentials:** environment variables, the OS keychain, or a `keyCommand` (e.g. a password-manager CLI). Multiple keys per provider rotate when one hits a rate limit. Built so far: the Anthropic key, from `VERDANDI_ANTHROPIC_API_KEY` or the keychain (`verdandi key set anthropic`), never from `ANTHROPIC_API_KEY`, which Claude Code would pick up (ADR 0022).
+- **Credentials:** environment variables, the OS keychain, or a `keyCommand` (e.g. a password-manager CLI). Multiple keys per provider rotate when one hits a rate limit. Built so far: the Anthropic key, from `VERDANDI_ANTHROPIC_API_KEY` or the keychain (`verdandi key set anthropic`), never from `ANTHROPIC_API_KEY`, which Claude Code would pick up (ADR 0022). Verdandi's own keys never reach a process it starts.
 - **Resilience:** a fallback chain for rate limits, server errors and auth errors, with backoff until the limit resets. Per-provider health feeds router Stage 1.
 
 ### 9.6 Verdandi tools: implemented once, available everywhere

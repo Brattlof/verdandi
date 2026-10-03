@@ -21,6 +21,7 @@ import { SqlClient } from "effect/unstable/sql";
 import { AppLayer } from "../event-store/app.ts";
 import { Engine } from "../event-store/engine.ts";
 import { Reactor } from "../event-store/reactor.ts";
+import { childEnv } from "../home/child-env.ts";
 import { decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { runVerifier } from "../verifiers/verify.ts";
 
@@ -54,7 +55,7 @@ export const parseBatchRoute = (spec: string): Route | "auto" => {
 export const defaultBatchRoutes = ["auto", "claude-code/opus/medium", "claude-code/sonnet/high"];
 
 const git = (cwd: string, args: string[], input = "") => {
-  const r = Bun.spawnSync(["git", ...args], { cwd, stdin: Buffer.from(input), stdout: "pipe", stderr: "pipe" });
+  const r = Bun.spawnSync(["git", ...args], { cwd, env: childEnv(), stdin: Buffer.from(input), stdout: "pipe", stderr: "pipe" });
   if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${r.stderr.toString().trim()}`);
   return r.stdout.toString();
 };

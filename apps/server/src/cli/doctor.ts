@@ -9,6 +9,7 @@ import { attachmentFiles, attachmentsDir, referencedAttachmentsSql } from "../at
 import { migrations } from "../event-store/migrations.ts";
 import { loadGcPolicy, planGc } from "../gc/gc.ts";
 import { requireBun } from "../home/bun-version.ts";
+import { childEnv } from "../home/child-env.ts";
 import { alive, resolveHome, type ServerFile, serverFile } from "../home/home.ts";
 import { connect } from "../rpc/client.ts";
 
@@ -21,7 +22,7 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** The first line `<path> --version` prints, or undefined when it can't be run. */
 const version = async (path: string) => {
   try {
-    const proc = Bun.spawn([path, "--version"], { stdout: "pipe", stderr: "ignore" });
+    const proc = Bun.spawn([path, "--version"], { env: childEnv(), stdout: "pipe", stderr: "ignore" });
     const out = await new Response(proc.stdout).text();
     return (await proc.exited) === 0 ? out.trim().split(/\r?\n/)[0] : undefined;
   } catch {

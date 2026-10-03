@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clip, lineDiff, type Question, type ThreadView, type TrustPurpose, trustFiles } from "@verdandi/contracts";
+import { childEnv } from "../home/child-env.ts";
 import { shell } from "../verifiers/verify.ts";
 
 export type PendingRequest = ThreadView["pendingRequests"][number];
@@ -59,7 +60,7 @@ export const editPlan = async (plan: string, editor = defaultEditor()): Promise<
   try {
     const file = join(dir, "plan.md");
     writeFileSync(file, plan);
-    const exitCode = await Bun.spawn({ ...shell(`${editor} "${file}"`), stdio: ["inherit", "inherit", "inherit"] }).exited;
+    const exitCode = await Bun.spawn({ ...shell(`${editor} "${file}"`), env: childEnv(), stdio: ["inherit", "inherit", "inherit"] }).exited;
     if (exitCode !== 0)
       return {
         error: `The editor (${editor}) exited with ${exitCode}, so nothing was approved. Set $VISUAL or $EDITOR to one that works.`,

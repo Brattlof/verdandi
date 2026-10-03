@@ -1,5 +1,6 @@
 import { codePointStart, type VerifierRun } from "@verdandi/contracts";
 import { Effect, Option } from "effect";
+import { childEnv } from "../home/child-env.ts";
 
 /** How much of a verifier's output is kept: the end, where test runners print failures and totals. */
 const TAIL = 8 * 1024;
@@ -70,6 +71,7 @@ export const runVerifier = (command: string, cwd: string, timeoutMs = verifierTi
         return Bun.spawn({
           ...shell(command),
           cwd,
+          env: childEnv(),
           stdin: "ignore",
           stdout: "pipe",
           stderr: "pipe",

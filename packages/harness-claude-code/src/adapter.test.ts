@@ -94,6 +94,18 @@ describe("Claude Code adapter", () => {
     }
   });
 
+  test("Claude Code runs with the environment it's given, not this process's", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery();
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query, env: { PATH: "/bin" } });
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "hi", U1))));
+      expect(spawns[0]?.options.env).toEqual({ PATH: "/bin", CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1" });
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
   test("a pasted image reaches Claude Code as an image block, and a file as its path, both marked as data", async () => {
     const home = makeTempHome();
     try {

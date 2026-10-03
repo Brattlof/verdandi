@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { BatchReport, HarnessAdapter, HarnessId } from "@verdandi/contracts";
 import { findClaude, makeClaudeCodeAdapter } from "@verdandi/harness-claude-code";
 import { makeFakeHarness } from "@verdandi/testkit";
+import { childEnv } from "../home/child-env.ts";
 import { flag, flags, resolveHome } from "../home/home.ts";
 import { nativeHarness } from "../native/native-harness.ts";
 import { columns } from "../spend/costs-cli.ts";
@@ -32,7 +33,11 @@ export const batch = async (argv: readonly string[]) => {
   const harnesses: Partial<Record<HarnessId, HarnessAdapter>> = fake
     ? { fake: makeFakeHarness() }
     : {
-        "claude-code": makeClaudeCodeAdapter({ claudePath: claudePath ?? "claude", additionalDirectories: [join(runHome, "attachments")] }),
+        "claude-code": makeClaudeCodeAdapter({
+          claudePath: claudePath ?? "claude",
+          additionalDirectories: [join(runHome, "attachments")],
+          env: childEnv(),
+        }),
         ...(native && { native }),
       };
 

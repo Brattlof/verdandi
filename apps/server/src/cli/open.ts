@@ -1,3 +1,4 @@
+import { childEnv } from "../home/child-env.ts";
 import { readServerFile, resolveHome } from "../home/home.ts";
 
 /** The platform's own way to open a URL in the default browser. Windows skips `start`: cmd would parse the URL. */
@@ -10,7 +11,7 @@ const opener = (url: string) =>
 
 const launch = async (command: string[]) => {
   try {
-    return (await Bun.spawn(command, { stdout: "ignore", stderr: "ignore" }).exited) === 0;
+    return (await Bun.spawn(command, { env: childEnv(), stdout: "ignore", stderr: "ignore" }).exited) === 0;
   } catch {
     return false; // the opener isn't installed
   }
