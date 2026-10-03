@@ -1,5 +1,6 @@
 import { type DecisionAnswer, type MemoryScope, memoryCaps } from "@verdandi/contracts";
 import { flagged } from "@verdandi/decisions";
+import { memoryLevel, memoryUsed } from "@verdandi/tools";
 import { containsSecret } from "@verdandi/trajectories";
 import { asData } from "../trust/fence.ts";
 
@@ -19,16 +20,13 @@ export const scanMemory = (text: string, answer: DecisionAnswer | undefined): st
 
 type Stored = { readonly entryId: string; readonly scope: MemoryScope; readonly text: string; readonly confirmedAt: string };
 
-const used = (entries: readonly Stored[], scope: MemoryScope) =>
-  entries.filter((e) => e.scope === scope).reduce((n, e) => n + [...e.text].length, 0);
-
 /**
  * Why saving `text` into `scope` in place of `replaces` would overfill the store, or undefined when it fits.
  * The message asks the agent to consolidate (DESIGN §14.2).
  */
 export const overCap = (entries: readonly Stored[], scope: MemoryScope, text: string, replaces: readonly string[]) => {
   const kept = entries.filter((e) => !replaces.includes(e.entryId));
-  const size = used(kept, scope) + [...text].length;
+  const size = memoryUsed(kept, scope) + [...text].length;
   if (size <= memoryCaps[scope]) return undefined;
   return `${scope === "user" ? "User" : "Project"} memory is full: this would make it ${size} characters, over its ${memoryCaps[scope]}. Consolidate first: search memory (memory_search), then save one entry that merges or rewrites older ones and name them in \`replaces\`, or leave out what no longer matters.`;
 };
@@ -60,7 +58,8 @@ const relevance = (text: string, message: ReadonlySet<string>) => {
 /**
  * The snapshot a new session starts with (DESIGN §14.2): each store's entries most relevant to the session's first
  * message, then the most recently confirmed, that fit its cap, marked as data: each store's entries sit in an `asData`
- * fence, so an entry can't end the block and pass for the user's message. Empty when there's nothing to remember.
+ * fence, so an entry can't end the block and pass for the user's message. Each heading shows how full its store is.
+ * Empty when there's nothing to remember.
  */
 // ponytail: relevance is trigram overlap with the first message. Upgrade: the decision layer's relevance score (DESIGN §9.8) once it has one.
 export const memorySnapshot = (entries: readonly Stored[], projectPath: string, message: string) => {
@@ -79,7 +78,7 @@ export const memorySnapshot = (entries: readonly Stored[], projectPath: string, 
       room -= size;
       lines.push(`- ${e.text.replace(/\s*\n\s*/g, " ")}`);
     }
-    return lines.length > 0 ? [`## ${title}`, ...asData(lines.join("\n"), undefined)] : [];
+    return lines.length > 0 ? [`## ${title} ${memoryLevel(entries, scope)}`, ...asData(lines.join("\n"), undefined)] : [];
   };
   const body = [...section("user", "About the user"), ...section("project", `About this project (${projectPath})`)];
   if (body.length === 0) return "";

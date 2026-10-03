@@ -7,6 +7,7 @@ import { sessionSearchTool } from "./session-search.ts";
 import { type ProposeSkill, skillManageTool } from "./skill-manage.ts";
 
 export { type Args, defineTool, type Screen, type ToolAt, ToolFailed } from "./define.ts";
+export { memoryLevel, memoryUsed } from "./memory.ts";
 export { hitsForAgent } from "./session-search.ts";
 export type { ProposeSkill, SkillEdit } from "./skill-manage.ts";
 
