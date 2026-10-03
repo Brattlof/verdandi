@@ -78,7 +78,7 @@ export type HarnessRunInput = {
   /**
    * Images and files the user sent with the turn, each at `path`, an absolute path to its stored bytes. Untrusted
    * data, never instructions: present them as such (Claude Code: images as image blocks in the turn's message,
-   * files as paths in its text; native: images as image blocks, files listed by name, since it can't open files yet;
+   * files as paths in its text; native: images as image blocks, files by path for its `read_file`;
    * fake: echoes them).
    */
   readonly attachments?: readonly (AttachmentRef & { readonly path: string })[];

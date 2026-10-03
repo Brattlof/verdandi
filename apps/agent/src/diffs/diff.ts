@@ -10,8 +10,15 @@ import { threadFolder } from "../worktrees/worktree.ts";
 /** Payload limits: one file's diff, and the whole response. */
 export const limits = { fileBytes: 64 * 1024, totalBytes: 512 * 1024 };
 
-/** File tools and the input key that holds the path: Claude Code's. A harness with other names adds them here. */
-const fileTools: Record<string, string> = { Edit: "file_path", MultiEdit: "file_path", Write: "file_path", NotebookEdit: "notebook_path" };
+/** File tools and the input key that holds the path: Claude Code's, then the native harness's. A harness with other names adds them here. */
+const fileTools: Record<string, string> = {
+  Edit: "file_path",
+  MultiEdit: "file_path",
+  Write: "file_path",
+  NotebookEdit: "notebook_path",
+  write_file: "path",
+  edit_file: "path",
+};
 
 /** `path` with symlinks resolved as far up as it exists, so `/tmp/x` and `/private/tmp/x` (macOS) match. */
 const real = (path: string): string => {
