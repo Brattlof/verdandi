@@ -987,7 +987,7 @@ The ADR also lists what isn't a vulnerability, who the principals are once the g
   - every dependency pinned to an exact version;
   - a minimum release age for new package versions (Bun's install setting), so versions published only hours ago can't be installed;
   - OSV scanning;
-  - lockfile-diff review in CI (`bun.lock` is a text file, so its diffs can be reviewed);
+  - lockfile-diff review in CI (`scripts/lockfile-diff.ts`): a PR that changes `bun.lock` gets its added, removed and changed packages in the job summary, and fails when an added version is younger than the minimum release age, since Bun checks the age only when it resolves, not when it installs a committed lockfile, unless the package is excused in `bunfig.toml` with a dated comment (security fixes only); it also fails when `trustedDependencies`, the explicit list of packages whose install scripts may run, changes;
   - Python in `lab/` pinned through `uv.lock`.
 
 ---
