@@ -1,5 +1,4 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { networkInterfaces } from "node:os";
 import { type HarnessAdapter, HarnessError, type HarnessId } from "@verdandi/contracts";
 import { findClaude, makeClaudeCodeAdapter } from "@verdandi/harness-claude-code";
 import { makeFakeHarness } from "@verdandi/testkit";
@@ -9,7 +8,6 @@ import { childEnv } from "./home/child-env.ts";
 import { flag, resolveHome, runningServer, type ServerFile, serverFile } from "./home/home.ts";
 import { ensureWorkspace, loadTrustedFolders } from "./home/workspace.ts";
 import { nativeHarness } from "./native/native-harness.ts";
-import { hostProblem, isLocalAddress, startLanGate } from "./rpc/lan-gate.ts";
 import { ServerInfo, ServerLayer } from "./rpc/server.ts";
 import { skillsPlugin } from "./skills/skills-config.ts";
 
@@ -20,12 +18,6 @@ const claudeMissing: HarnessAdapter = {
   reroute: () => Effect.void,
   close: () => Effect.void,
 };
-
-/** This machine's addresses on its local network, for the URLs to open from other devices. */
-const lanAddresses = () =>
-  Object.values(networkInterfaces())
-    .flat()
-    .flatMap((a) => (a && a.family === "IPv4" && !a.internal && isLocalAddress(a.address) ? [a.address] : []));
 
 /**
  * Starts verdandid in this process, listening on 127.0.0.1 (`port`, or any free one), and writes `server.json` so clients
@@ -97,32 +89,19 @@ export const serverFor = async (home: string, argv: readonly string[]) => {
 
 /**
  * `verdandi start`: runs verdandid in the foreground until Ctrl+C, for the clients that need it to outlive a chat (the
- * web UI, other devices, and later the scheduler, gateway and desktop app). verdandid itself only listens on
- * 127.0.0.1; `--host` also opens it to the local network through a gate that refuses anything else.
+ * web UI, and later the scheduler, gateway and desktop app). It listens only on 127.0.0.1 and serves no web page
+ * (ADR 0026): `verdandi web` serves the UI, and its `--host` opens that to other devices.
  */
 export const start = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
-  const host = flag(argv, "--host");
-  const problem = host === undefined ? undefined : hostProblem(host);
-  if (problem) throw new Error(problem);
-  const lan = host !== undefined && host !== "127.0.0.1" && host !== "::1";
+  if (argv.some((a) => a === "--host" || a.startsWith("--host=")))
+    throw new Error("verdandid listens only on 127.0.0.1. To use the web UI from another device, run: verdandi web --host <address>");
   const port = flag(argv, "--port");
-  // With a LAN gate, --port is the gate's, the one other devices use, and verdandid takes any free loopback port.
-  const { server, status, stop: shutdown } = await serve(home, argv, port === undefined || lan ? {} : { port: Number(port) });
-  console.log(`verdandid listening on 127.0.0.1:${server.port} (home: ${home}). Open the web UI with: verdandi open`);
+  const { server, status, stop: shutdown } = await serve(home, argv, port === undefined ? {} : { port: Number(port) });
+  console.log(`verdandid listening on 127.0.0.1:${server.port} (home: ${home}). Chat with: verdandi; open the web UI with: verdandi web`);
   for (const line of status) console.log(line);
-  const gate = lan && host ? startLanGate(host, port === undefined ? 0 : Number(port), server.port) : undefined;
-  if (gate) {
-    const addresses = host === "0.0.0.0" || host === "::" ? lanAddresses() : [host ?? ""];
-    console.log(
-      `Also open on your local network at ${addresses.map((a) => `http://${a}:${gate.port}/`).join(", ") || `port ${gate.port}`}; requests from outside it are refused.`,
-    );
-    console.log(`From another device, open this URL. It holds your access token, so don't share it:`);
-    for (const a of addresses) console.log(`  http://${a}:${gate.port}/#token=${server.token}`);
-  }
 
   const stop = async () => {
-    gate?.stop(true);
     await shutdown();
     process.exit(0);
   };

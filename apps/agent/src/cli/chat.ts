@@ -111,7 +111,7 @@ export const chat = async (argv: readonly string[]) => {
   const served = await serverFor(home, argv);
   if (served.stop) {
     process.stdout.write(
-      `[verdandid runs in this chat and stops when you quit; \`verdandi open\` opens the web UI meanwhile, \`verdandi start\` keeps one running]\n`,
+      `[verdandid runs in this chat and stops when you quit; \`verdandi web\` opens the web UI meanwhile, \`verdandi start\` keeps one running]\n`,
     );
     for (const line of served.status) process.stdout.write(`[${line}]\n`);
   }

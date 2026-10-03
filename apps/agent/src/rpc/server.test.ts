@@ -124,20 +124,11 @@ describe("rpc server", () => {
     await runtime.dispose(); // must not wait for the client to leave
   });
 
-  test("serves the web UI and its bundle without the token", async () => {
+  test("serves no web page: the UI is verdandi web's (ADR 0026)", async () => {
     const { info } = await startServer();
     const page = await fetch(`http://127.0.0.1:${info.port}/`);
-    expect(page.status).toBe(200);
-    const html = await page.text();
-    expect(html).not.toContain(info.token);
-    const script = html.match(/<script[^>]+src="([^"]+)"/)?.[1];
-    expect(script).toBeDefined();
-    const bundle = await fetch(new URL(script ?? "", `http://127.0.0.1:${info.port}/`));
-    expect(bundle.status).toBe(200);
-    expect(bundle.headers.get("content-type")).toContain("javascript");
-    const stylesheet = html.match(/<link[^>]+href="([^"]+\.css)"/)?.[1];
-    const css = await (await fetch(new URL(stylesheet ?? "", `http://127.0.0.1:${info.port}/`))).text();
-    expect(css).not.toContain("@tailwind"); // Tailwind ran, rather than Bun inlining its source
+    expect(page.status).toBe(404);
+    expect(await page.text()).not.toContain('<div id="root">');
   });
 
   test("rejects a connection without the right token", async () => {
@@ -156,7 +147,7 @@ describe("rpc server", () => {
     expect(right.seq).toBeGreaterThan(0);
   });
 
-  test("refuses an upgrade from a page on another site even with the right token, and takes the CLI's and its own page's", async () => {
+  test("refuses an upgrade from every browser page even with the right token, its own address included, and takes the CLI's", async () => {
     const { info } = await startServer();
     const url = `ws://127.0.0.1:${info.port}/rpc?token=${info.token}`;
     // A browser sends its page's Origin; Bun's client sends none unless told to.
@@ -170,10 +161,14 @@ describe("rpc server", () => {
         ws.onerror = () => resolve(false);
       });
     expect(await opens()).toBe(true);
-    expect(await opens(`http://127.0.0.1:${info.port}`)).toBe(true);
-    expect(await opens(`http://localhost:${info.port}`)).toBe(true);
-    for (const foreign of ["https://evil.example", `http://evil.example:${info.port}`, `http://localhost:${info.port + 1}`, "null"])
-      expect([foreign, await opens(foreign)]).toEqual([foreign, false]);
+    for (const page of [
+      `http://127.0.0.1:${info.port}`,
+      `http://localhost:${info.port}`,
+      "https://evil.example",
+      `http://evil.example:${info.port}`,
+      "null",
+    ])
+      expect([page, await opens(page)]).toEqual([page, false]);
     const refused = await fetch(url.replace(/^ws/, "http"), { headers: { origin: "https://evil.example" } });
     expect(refused.status).toBe(403);
     expect(await refused.text()).toContain("https://evil.example");

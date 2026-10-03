@@ -105,7 +105,7 @@ export const App = ({ connection }: { connection: Connection }) => {
           <button type="button" className="border-bg bg-bg px-2 text-fg" onClick={() => location.reload()}>
             Reconnect
           </button>
-          If verdandid restarted, run <code>verdandi open</code> again.
+          {connection.endpoint.reconnectHint}
         </div>
       )}
       {navOpen && (
@@ -577,9 +577,6 @@ const Home = ({ connection, data }: { connection: Connection; data: SidebarData 
   );
 };
 
-/** The OS folder dialog is verdandid's, so it only makes sense when the page runs on the same machine, not over `--host`. */
-const sameMachine = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
-
 /**
  * Starts a thread in any folder, typed or chosen with Browse; verdandid checks the path and resolves it, so a known folder
  * gets a new thread, not a new project.
@@ -587,6 +584,8 @@ const sameMachine = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostna
 const OpenFolder = ({ connection, className = "mt-8 max-w-2xl" }: { connection: Connection; className?: string }) => {
   const [error, setError] = useState<string>();
   const [picking, setPicking] = useState(false);
+  // The OS folder dialog opens on verdandid's machine, so it's only offered when that's the one showing the page.
+  const { sameMachine } = connection.endpoint;
   const start = async (form: HTMLFormElement, projectPath: string) => {
     const result = await startThread(connection, projectPath, new FormData(form).get("worktree") === "on");
     setError(result.ok ? undefined : result.message);

@@ -57,7 +57,7 @@ export const useStore = <S>(store: Store<S>) => useSyncExternalStore(store.subsc
 
 /**
  * A random v4 UUID. Built from `crypto.getRandomValues`, since browsers drop `crypto.randomUUID` outside secure
- * contexts, and a page opened from another device on the local network (`verdandi start --host`) is one.
+ * contexts, and a page opened from another device on the local network (`verdandi web --host`) is one.
  */
 export const uuid = <T = string>() => {
   const b = crypto.getRandomValues(new Uint8Array(16));
@@ -80,13 +80,26 @@ export type Dispatched =
 
 const disconnected = { ok: false, reason: "Disconnected", message: "Lost the connection to verdandid." } as const;
 
+/** Where the UI reaches the agent, and what it should know about the host that shows it (the web server, later the desktop app). */
+export type Endpoint = {
+  /** The host's address, e.g. `http://127.0.0.1:4780`: the RPC WebSocket is at `/rpc`, attachments at `/attachments/<id>`. */
+  readonly base: string;
+  /** The host's token for this page; the host swaps it for the agent's, which the page never holds. */
+  readonly token: string;
+  /** Whether the agent runs on the machine showing the page, so its OS folder dialog reaches the user. */
+  readonly sameMachine: boolean;
+  /** What to do once the connection is lost, e.g. "If verdandid restarted, run `verdandi web` again." */
+  readonly reconnectHint: string;
+};
+
 /**
- * The page's connection to verdandid, over the same token-protected WebSocket RPC as `verdandi chat`.
+ * The page's connection to verdandid, over the same token-protected WebSocket RPC as `verdandi chat`, through its host.
  * `lost` turns true once a call fails for any reason but a rejected command; the page never
  * pretends to be connected after that.
  */
-export const connect = (token: string) => {
-  const url = `ws://${location.host}/rpc?token=${encodeURIComponent(token)}`;
+export const connect = (endpoint: Endpoint) => {
+  const { base, token } = endpoint;
+  const url = `${base.replace(/^http/, "ws")}/rpc?token=${encodeURIComponent(token)}`;
   const runtime = ManagedRuntime.make(
     Layer.effect(Client)(makeClient).pipe(
       Layer.provide(RpcClient.layerProtocolSocket()),
@@ -157,7 +170,7 @@ export const connect = (token: string) => {
   const attachmentUrl = (id: string) => {
     let url = attachments.get(id);
     if (!url) {
-      url = fetch(`/attachments/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${token}` } })
+      url = fetch(`${base}/attachments/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${token}` } })
         .then((r) => (r.ok ? r.blob() : undefined))
         .then(
           (blob) => blob && URL.createObjectURL(blob),
@@ -301,6 +314,7 @@ export const connect = (token: string) => {
     follow,
     models,
     lost,
+    endpoint,
   };
 };
 export type Connection = ReturnType<typeof connect>;

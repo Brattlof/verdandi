@@ -4,6 +4,6 @@ minimumReleaseAge = 1209600
 exact = true
 linker = "isolated"
 
-# The web UI's stylesheet is Tailwind, compiled when verdandid first bundles apps/web.
+# The web UI's stylesheet (packages/ui) is Tailwind, compiled when `verdandi web` first bundles the page. Bun reads this file from the current folder, so run from source in the repo root.
 [serve.static]
 plugins = ["bun-plugin-tailwind"]

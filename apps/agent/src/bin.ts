@@ -2,8 +2,8 @@
 import { batch } from "./batch/batch-cli.ts";
 import { chat } from "./cli/chat.ts";
 import { doctor } from "./cli/doctor.ts";
-import { open } from "./cli/open.ts";
 import { run } from "./cli/run.ts";
+import { web } from "./cli/web.ts";
 import { decisions } from "./decisions/decisions-cli.ts";
 import { gc } from "./gc/gc-cli.ts";
 import { requireBun } from "./home/bun-version.ts";
@@ -17,8 +17,8 @@ import { trajectories } from "./tasks/trajectories-cli.ts";
 
 const usage = `Usage:
   verdandi [chat flags]                           chat in the terminal: on the current folder when it's a project (inside a git repo, or one you've chatted in), else in the profile's workspace; --here or --workspace picks one. Runs verdandid in this process while you chat unless one is running already
-  verdandi start [--home <dir>] [--port <n>] [--host <ip>]   keep verdandid running in the foreground, for the web UI and other devices; --host 0.0.0.0 (or this machine's LAN address) also opens it to your local network on --port, never to the internet
-  verdandi open  [--home <dir>]                   open the web UI in your browser, while verdandid runs (verdandi start, or a chat)
+  verdandi start [--home <dir>] [--port <n>]      keep verdandid running in the foreground, for the web UI and, later, the scheduler and gateway; it listens only on 127.0.0.1 and serves no web page
+  verdandi web   [--home <dir>] [--port <n>] [--host <ip>] [--no-open]   serve the web UI until Ctrl+C and open it in your browser, relaying to the running verdandid or one it runs meanwhile; --host 0.0.0.0 (or this machine's LAN or Tailscale address) also opens it to your local network or tailnet on --port, never to the internet
   verdandi doctor [--home <dir>]                  check the setup: Bun, Claude Code, git, the home, the database, what the next cleanup sweep removes, and verdandid
   verdandi gc [--dry-run] [--home <dir>]          run the cleanup policy in gc.yaml now: remove old checkpoints and the worktrees of threads archived long ago (never one with uncommitted changes); --dry-run only lists them
   verdandi chat  [--home <dir>] [--here | --workspace] [--harness <h>] [--model <m>] [--effort <e> | --auto] [--budget thrifty|balanced|max|policy] [--raise-cap] [--thread <id>]   the same as bare verdandi: chat with the thread for this folder (or the workspace), or the one named; route flags pin a route, --auto lets the router pick, --budget sets how it trades cost for strength, --raise-cap raises each reached spend cap for the rest of its period
@@ -37,7 +37,7 @@ const usage = `Usage:
 
 const commands: Record<string, (argv: readonly string[]) => Promise<void>> = {
   start,
-  open,
+  web,
   chat,
   run,
   doctor,
