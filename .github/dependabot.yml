@@ -1,0 +1,28 @@
+# Version updates wait out the same 14 days as bunfig.toml's minimumReleaseAge (AGENTS.md). Security updates skip
+# the cooldown: that's the dated security-fix exception. A Dependabot PR's bun.lock diff is reviewed like ours.
+version: 2
+updates:
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      bun-minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Moved deliberately: Effect's 4.0 release candidates, and Bun's types, which move with the Bun version in ci.yml.
+      - dependency-name: effect
+      - dependency-name: "@effect/*"
+      - dependency-name: "@types/bun"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
