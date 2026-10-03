@@ -1,6 +1,17 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
-import type { SkillChange, SkillCuration, SkillSource, SkillsView } from "@verdandi/contracts";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { type SkillChange, type SkillCuration, type SkillSource, type SkillsView, skillFileCap } from "@verdandi/contracts";
 import type { SkillEdit } from "@verdandi/tools";
 import { frontmatter, invertChange, nameProblem, pathProblem } from "./skills.ts";
 
@@ -223,5 +234,72 @@ export const listSkills = (
   ];
   return {
     folders: all.map((f) => ({ ...f, skills: skillsIn(f.path, f.source) })).filter((f) => f.source !== "archived" || f.skills.length > 0),
+  };
+};
+
+/**
+ * The skills an agent can read (DESIGN §14.4), sorted by name: the profile's, then each extra folder's, each name once
+ * (the profile's wins), never the archive's. Each with its folder (`path`).
+ */
+export const readableSkills = (folders: SkillFolders) => {
+  const byName = new Map<string, { readonly name: string; readonly description: string; readonly path: string }>();
+  for (const folder of listSkills(folders).folders)
+    if (folder.source !== "archived") for (const skill of folder.skills) if (!byName.has(skill.name)) byName.set(skill.name, skill);
+  return [...byName.values()].toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+};
+
+/** The files in skill folder `root`, relative and with forward slashes, links inside it followed, at most `max`. */
+const filesIn = (root: string, max = 100) => {
+  const files: string[] = [];
+  const walk = (dir: string, depth: number) => {
+    let names: string[];
+    try {
+      names = readdirSync(dir).toSorted();
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (files.length >= max) return;
+      const path = join(dir, name);
+      let folder: boolean;
+      try {
+        folder = statSync(path).isDirectory();
+      } catch {
+        continue; // a broken link
+      }
+      if (!within(real(path), root)) continue;
+      if (!folder) files.push(relative(root, path).split(sep).join("/"));
+      else if (depth < 4) walk(path, depth + 1);
+    }
+  };
+  walk(root, 0);
+  return files;
+};
+
+/**
+ * File `path` (default SKILL.md) of skill `name`, for `skill_view`: with SKILL.md, the list of the skill's other
+ * files. Guarded like `skill_manage`'s paths: a kebab-case name, a relative path inside the skill with no `..`, and no
+ * link leading out of the skill's folder. Says why it can't be read otherwise.
+ */
+export const viewSkill = (
+  folders: SkillFolders,
+  name: string,
+  path = "SKILL.md",
+): { readonly text: string } | { readonly error: string } => {
+  const wrong = pathProblem(path);
+  if (wrong) return { error: wrong };
+  const skill = readableSkills(folders).find((s) => s.name === name);
+  if (!skill) return { error: nameProblem(name) ?? `There's no skill named ${name}. skills_list lists the skills there are.` };
+  const root = real(skill.path);
+  const file = real(join(root, ...path.split("/")));
+  if (!within(file, root)) return { error: `${path} leads out of the skill ${name}'s folder, so skill_view won't read it.` };
+  const text = readIfFile(file);
+  if (text === null) return { error: `The skill ${name} has no file ${path}. View its SKILL.md to see the files it has.` };
+  const body = text.length > skillFileCap ? `${text.slice(0, skillFileCap)}\n[cut at ${skillFileCap} characters]` : text;
+  if (path !== "SKILL.md") return { text: body };
+  const others = filesIn(root).filter((f) => f !== "SKILL.md");
+  return {
+    text:
+      others.length > 0 ? `${body}\n\nThe skill's other files, for skill_view's path:\n${others.map((f) => `- ${f}`).join("\n")}` : body,
   };
 };

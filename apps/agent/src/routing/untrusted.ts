@@ -14,8 +14,9 @@ const NETWORK_TOOLS: ReadonlySet<string> = new Set(["WebFetch", "WebSearch", "we
 export const untrustedSource = (item: Item): string | undefined =>
   item.kind === "tool.call" && NETWORK_TOOLS.has(item.name)
     ? item.name
-    : item.kind === "injection"
-      ? `${handedSourceLabel[item.source]}, flagged as an injection`
+    : // Text the harness left out (`withheld`) never reached the agent.
+      item.kind === "injection" && !item.withheld
+      ? `${item.file ?? handedSourceLabel[item.source]}, flagged as an injection`
       : undefined;
 
 /**

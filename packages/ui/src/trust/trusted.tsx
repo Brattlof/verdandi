@@ -27,9 +27,11 @@ export const TrustedCommandsList = ({ connection }: { connection: Connection }) 
   return (
     <section aria-labelledby="trusted-commands" className="mt-12">
       <h2 id="trusted-commands" className="eyebrow mb-1 text-muted">
-        Trusted project commands
+        Trusted project commands and files
       </h2>
-      <p className="mb-4 text-xs text-muted">Verdandi runs these without asking. If a project changes one, it asks again.</p>
+      <p className="mb-4 text-xs text-muted">
+        Verdandi runs these commands, and starts agents with these flagged files, without asking. If a project changes one, it asks again.
+      </p>
       {error && (
         <p role="alert" className="mb-2 text-xs text-error">
           {error}
@@ -40,7 +42,14 @@ export const TrustedCommandsList = ({ connection }: { connection: Connection }) 
           <li key={`${t.projectId}-${t.hash}`} className="flex flex-wrap items-start gap-x-4 gap-y-1 py-2 text-sm">
             <div className="min-w-0 flex-1">
               <p className="text-xs text-muted [overflow-wrap:anywhere]">
-                {t.purpose === "verifiers" ? "Verifiers" : "Worktree setup"} from <span className="font-mono">{trustFiles[t.purpose]}</span>{" "}
+                {t.purpose === "context" ? (
+                  "Context files the injection scan flagged"
+                ) : (
+                  <>
+                    {t.purpose === "verifiers" ? "Verifiers" : "Worktree setup"} from{" "}
+                    <span className="font-mono">{trustFiles[t.purpose]}</span>
+                  </>
+                )}{" "}
                 in <span className="font-mono">{t.projectPath}</span>
               </p>
               <pre className="mt-1 whitespace-pre-wrap font-mono">{t.commands.join("\n")}</pre>

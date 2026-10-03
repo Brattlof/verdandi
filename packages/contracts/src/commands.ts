@@ -371,8 +371,8 @@ export const TaskEscalate = Schema.Struct({
   ]),
 });
 /**
- * Internal: the decision layer flagged a Verdandi tool's result (`answer`) before it reached the agent running
- * `turnId`, which got it under a warning. Records `injection.flagged`.
+ * Internal: the decision layer flagged a Verdandi tool's result or a context `file` (`answer`) before it reached the
+ * agent running `turnId`. Records `injection.flagged`.
  */
 export const InjectionFlag = Schema.Struct({
   type: Schema.Literal("injection.flag"),
@@ -382,6 +382,8 @@ export const InjectionFlag = Schema.Struct({
   source: HandedSource,
   text: Schema.String,
   answer: DecisionAnswer,
+  file: Schema.optionalKey(Schema.String),
+  withheld: Schema.optionalKey(Schema.Boolean),
 });
 /**
  * Internal: task `taskId` of the thread finished turn `turnId`; `digest` sums up its turns since its last review

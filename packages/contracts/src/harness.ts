@@ -170,6 +170,13 @@ export type HarnessRunInput = {
    * given to a harness that `inSessionEffort` lists; the next turn without one goes back to `route.effort`.
    */
   readonly effort?: Effort;
+  /**
+   * Scans untrusted text the harness puts in front of the agent itself (DESIGN §17), from `file` (a context file, or
+   * a skill's SKILL.md for an index), and answers whether it's flagged; Verdandi records a hit on the turn, as
+   * `withheld` text. The harness leaves flagged text out and says so (native: a context file or a skill's description
+   * in a new session's prompt, with a `notice`). Absent when Verdandi doesn't scan, e.g. a background review.
+   */
+  readonly scan?: (file: string, text: string) => Promise<boolean>;
 };
 
 /**
@@ -186,6 +193,14 @@ export const inSessionEffort: Record<HarnessId, boolean> = { "claude-code": fals
  */
 export interface HarnessAdapter {
   readonly id: HarnessId;
+  /**
+   * The context and skill files the harness loads into the agent's context by itself when it starts or resumes a
+   * session in `cwd`, as absolute paths. Verdandi scans them before each turn and, when the scan flags one the user
+   * hasn't trusted, holds the turn for the user, since the harness can't leave one out (DESIGN §17; Claude Code: its
+   * CLAUDE.md files and imports, rules, skills, commands and agents, ADR 0020; fake: `CLAUDE.md` in `cwd`). Absent
+   * for a harness that loads none (native: it reads its own through `scan`).
+   */
+  loads?(cwd: string): readonly string[];
   run(input: HarnessRunInput): Stream.Stream<HarnessEvent, HarnessError>;
   /** Answers a request the running turn raised. Unknown ids are ignored: their turn has ended. */
   respond(threadId: ThreadId, requestId: string, resolution: Resolution): Effect.Effect<void>;

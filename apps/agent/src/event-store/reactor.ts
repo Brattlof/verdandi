@@ -5,6 +5,7 @@ import type {
   AttachmentRef,
   Command,
   CommandId,
+  DecisionAnswer,
   Effort,
   HarnessAdapter,
   HarnessEvent,
@@ -35,10 +36,19 @@ import { memoryNudge } from "../memory/memory.ts";
 import { loadFreshOutcome, loadTaskDigest, parseReview, reviewPrompt, skillsRefused } from "../review/review.ts";
 import { repeatedError } from "../routing/repeated-error.ts";
 import { searchSessions } from "../search/search.ts";
-import { applyChange, placeSkill, prepareChange, revertStale, type SkillFolders } from "../skills/skill-files.ts";
+import {
+  applyChange,
+  placeSkill,
+  prepareChange,
+  readableSkills,
+  revertStale,
+  type SkillFolders,
+  viewSkill,
+} from "../skills/skill-files.ts";
 import { makeSkillProposals } from "../skills/skill-proposals.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "../tasks/task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "../tasks/trajectory.ts";
+import { contextList, flaggedFiles, sha256 } from "../trust/context.ts";
 import { isTrusted } from "../trust/trust.ts";
 import { runVerifier } from "../verifiers/verify.ts";
 import { addWorktree, loadThreadFolder, removeWorktree, threadFolder, worktreeSetup } from "../worktrees/worktree.ts";
@@ -219,7 +229,61 @@ export const ReactorLive = Layer.effect(
           return `${injectionWarning}\n\n${text}`;
         }),
       proposeSkill: skills.propose,
+      skills: {
+        list: () => Effect.sync(() => readableSkills(skillFolders).map(({ name, description }) => ({ name, description }))),
+        view: (name, path) =>
+          Effect.suspend(() => {
+            const viewed = viewSkill(skillFolders, name, path);
+            return "error" in viewed ? Effect.fail(new ToolFailed({ message: viewed.error })) : Effect.succeed(viewed.text);
+          }),
+      },
     });
+
+    /** The injection question's answer per text, by its hash: a context file is scanned once per content (DESIGN §17). */
+    const scanned = new Map<string, DecisionAnswer | undefined>();
+    const scanText = (text: string) =>
+      Effect.gen(function* () {
+        const key = sha256(text);
+        if (scanned.has(key)) return scanned.get(key);
+        const [answer] = (yield* decide.decide({ state: text, questions: [injectionQuestion] })).answers;
+        // ponytail: forgets the oldest past 1,000 texts. Upgrade: an LRU, if a long-running verdandid rescans often.
+        if (scanned.size >= 1000) scanned.delete(scanned.keys().next().value ?? "");
+        scanned.set(key, answer);
+        return answer;
+      });
+    /** Records a flagged context `file` on the turn; best effort, as the turn goes on either way. */
+    const flagContext = (
+      at: { threadId: ThreadId; turnId: TurnId },
+      file: string,
+      text: string,
+      answer: DecisionAnswer,
+      withheld: boolean,
+    ) =>
+      engine
+        .dispatch({
+          type: "injection.flag",
+          commandId: randomUUID() as CommandId,
+          ...at,
+          source: "context",
+          text,
+          answer,
+          file,
+          ...(withheld && { withheld: true }),
+        })
+        .pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record the injection flag on turn ${at.turnId}.`, cause)));
+    /**
+     * `scan` for a harness that puts context files in front of the agent itself (native, DESIGN §17): whether `text` from
+     * `file` is flagged, recorded on the turn as left out.
+     */
+    const scanFor = (at: { threadId: ThreadId; turnId: TurnId }) => (file: string, text: string) =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const answer = yield* scanText(text);
+          if (!answer || !flagged(answer)) return false;
+          yield* flagContext(at, file, text, answer, true);
+          return true;
+        }),
+      );
 
     // A failed write is retried by the sweep below when verdandid next starts.
     const record = (threadId: ThreadId, turnId: TurnId) =>
@@ -340,6 +404,23 @@ export const ReactorLive = Layer.effect(
           Effect.catchTag("CommandRejected", () => Effect.succeed(false)),
           Effect.ensuring(Effect.sync(() => trustAnswers.delete(commandId))),
         );
+      });
+
+    /**
+     * Whether turn `turnId` may start `adapter` in `cwd` (DESIGN §17): yes when the injection scan flags none of the
+     * files it loads by itself, or the user trusts those exact files' contents in the project. Else each flagged file is
+     * recorded on the turn and Verdandi asks, since the harness can't leave one out; a turn that ends first starts nothing.
+     * An `unattended` turn (a background review) has nobody to ask, so it doesn't start.
+     */
+    const contextAllowed = (threadId: ThreadId, turnId: TurnId, adapter: HarnessAdapter, cwd: string, unattended: boolean) =>
+      Effect.gen(function* () {
+        const hits = yield* flaggedFiles(adapter.loads?.(cwd) ?? [], cwd, scanText);
+        if (hits.length === 0) return { allowed: true, files: [] };
+        const list = contextList(hits);
+        const files = hits.map((h) => h.file);
+        if (yield* isTrusted(threadId, list).pipe(Effect.provideService(SqlClient.SqlClient, sql))) return { allowed: true, files };
+        yield* Effect.forEach(hits, (h) => flagContext({ threadId, turnId }, h.file, h.text, h.answer, false), { discard: true });
+        return { allowed: !unattended && (yield* trusted(threadId, turnId, "context", list)), files };
       });
 
     /** How a list of commands reads in a notice: each in backticks. */
@@ -564,6 +645,11 @@ export const ReactorLive = Layer.effect(
         // before the user allows it.
         const aux = thread.review === null ? null : (JSON.parse(thread.review) as AuxStarted);
         const nudge = aux ? undefined : memoryNudge(thread.turn_number, toolSettings.memoryNudgeEvery);
+        const context = yield* contextAllowed(threadId, turnId, adapter, cwd, aux !== null);
+        if (!context.allowed)
+          return yield* fail(
+            `Verdandi didn't start the agent: its injection scan flagged ${listed(context.files)}, which the ${route.harness} harness would load into the agent's context, and they weren't allowed. Remove what the scan flagged, or send the turn again and allow them if you trust them.`,
+          );
         // A new session on another harness than the thread's last starts from a summary of the thread (DESIGN §8.2
         // lever 5). A revert's fork resumes its own session, so it needs none.
         const handoff =
@@ -614,7 +700,7 @@ export const ReactorLive = Layer.effect(
             mode,
             ...(attachments.length > 0 && { attachments: attachments.map((a) => ({ ...a, path: join(attachmentsDir, a.id) })) }),
             steers,
-            ...(aux ? {} : { tools }),
+            ...(aux ? {} : { tools, scan: scanFor({ threadId, turnId }) }),
             // The snapshot a new session starts with goes to its first turn only (DESIGN §14.2), and so does a handoff's summary.
             ...memoryFor(thread.memory_snapshot, turnId),
             ...(handoff && { handoff }),

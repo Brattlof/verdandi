@@ -5,9 +5,9 @@ import {
   codePointStart,
   describeRevertFiles,
   describeRouteChange,
-  handedSourceLabel,
   type InteractionMode,
   type Item,
+  injectionLead,
   type TaskId,
   type TaskRating,
   type ThreadId,
@@ -605,9 +605,7 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
   ),
   injection: ({ item }) => (
     <p role="note" className="my-2 border border-line border-l-2 border-l-warn bg-card px-3 py-1.5 text-xs">
-      <span className="font-medium text-warn">
-        Possible prompt injection in {handedSourceLabel[item.source]}, handed to the agent under a warning:{" "}
-      </span>
+      <span className="font-medium text-warn">{injectionLead(item)} </span>
       {item.why}
     </p>
   ),

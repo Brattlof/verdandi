@@ -687,32 +687,48 @@ const MemoryApproval = ({ request, sending, respond }: CardProps<"memory.propose
   </>
 );
 
-/** The project's own commands, which Verdandi runs only once trusted: allowing trusts this exact list in the project. */
-const TrustApproval = ({ request, sending, respond }: CardProps<"commands.trust.requested">) => (
-  <>
-    <h3 className="font-serif text-lg font-semibold">
-      Run this project's {request.purpose === "verifiers" ? "verifiers" : "worktree setup"}?
-    </h3>
-    <p className="text-xs text-muted">
-      From <span className="font-mono">{trustFiles[request.purpose]}</span> in the project. Allowing trusts this exact list there until you
-      revoke it on the projects page; if the file changes, Verdandi asks again.
-    </p>
-    <pre>{request.commands.join("\n")}</pre>
-    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-      <button type="button" disabled={sending} onClick={() => respond({ decision: "deny" })}>
-        Don't run
-      </button>
-      <button
-        type="button"
-        className="border-go bg-go text-on-go hover:bg-go-hover"
-        disabled={sending}
-        onClick={() => respond({ decision: "allow" })}
-      >
-        Trust and run
-      </button>
-    </div>
-  </>
-);
+/**
+ * The project's own commands, which Verdandi runs only once trusted, or context files the injection scan flagged, which
+ * the harness loads only once trusted: allowing trusts this exact list in the project.
+ */
+const TrustApproval = ({ request, sending, respond }: CardProps<"commands.trust.requested">) => {
+  const context = request.purpose === "context";
+  return (
+    <>
+      <h3 className="font-serif text-lg font-semibold">
+        {context
+          ? "Start the agent with these flagged files?"
+          : `Run this project's ${request.purpose === "verifiers" ? "verifiers" : "worktree setup"}?`}
+      </h3>
+      {context ? (
+        <p className="text-xs text-muted">
+          The injection scan flagged these files, which the agent's harness loads by itself and can't leave out; the turn shows why.
+          Allowing trusts these files as they are now in the project until you revoke it on the projects page; if one changes, Verdandi asks
+          again. Not starting ends the turn.
+        </p>
+      ) : (
+        <p className="text-xs text-muted">
+          From <span className="font-mono">{trustFiles[request.purpose]}</span> in the project. Allowing trusts this exact list there until
+          you revoke it on the projects page; if the file changes, Verdandi asks again.
+        </p>
+      )}
+      <pre>{request.commands.join("\n")}</pre>
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+        <button type="button" disabled={sending} onClick={() => respond({ decision: "deny" })}>
+          {context ? "Don't start" : "Don't run"}
+        </button>
+        <button
+          type="button"
+          className="border-go bg-go text-on-go hover:bg-go-hover"
+          disabled={sending}
+          onClick={() => respond({ decision: "allow" })}
+        >
+          {context ? "Trust and start" : "Trust and run"}
+        </button>
+      </div>
+    </>
+  );
+};
 
 /** Approve the plan, edit it first (the agent builds from the edit), or keep planning with feedback. */
 const PlanApproval = ({ request, sending, respond }: CardProps<"plan.requested">) => {

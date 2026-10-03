@@ -103,13 +103,22 @@ export const scanSkill = (text: string, answer: DecisionAnswer | undefined) => {
   return undefined;
 };
 
+/** The tool calls that load a skill, and the argument that names it. */
+const skillTools: ReadonlyMap<string, string> = new Map([
+  ["Skill", "skill"],
+  ["skill_view", "name"],
+  ["mcp__verdandi__skill_view", "name"],
+]);
+
 /**
- * The profile skill `item` shows the agent loading, or undefined. Claude Code: a `Skill` tool call, which names a
- * profile skill `verdandi:<name>` (ADR 0020); a bare name counts too, so a use is never missed. The fake harness
- * reports the same call; other harnesses report no skill use yet, so the skills they'd use go stale.
+ * The profile skill `item` shows the agent loading, or undefined, the same for every harness: Claude Code's `Skill`
+ * tool call, which names a profile skill `verdandi:<name>` (ADR 0020; a bare name counts too, so a use is never
+ * missed), and Verdandi's `skill_view` (native: `skill_view`; Claude Code: `mcp__verdandi__skill_view`). The fake
+ * harness reports a `Skill` call. A skill read another way (a file tool) goes unseen.
  */
 export const skillUsed = (item: Item) => {
-  if (item.kind !== "tool.call" || item.name !== "Skill" || typeof item.input !== "object" || item.input === null) return undefined;
-  const { skill } = item.input as { readonly skill?: unknown };
+  const key = item.kind === "tool.call" ? skillTools.get(item.name) : undefined;
+  if (item.kind !== "tool.call" || key === undefined || typeof item.input !== "object" || item.input === null) return undefined;
+  const skill = (item.input as Readonly<Record<string, unknown>>)[key];
   return typeof skill === "string" ? skill.replace(/^verdandi:/, "") : undefined;
 };
