@@ -86,12 +86,25 @@ export type StoredRevert = {
   /** The checkpoint of the files from before the revert. */
   readonly saved?: string | null;
   readonly filesError?: string | null;
+  /** The paths the revert restored, which undoing it puts back; null for a v1 revert, whose undo puts back the whole folder. */
+  readonly paths?: readonly string[] | null;
+  /** Whether it restored the whole folder, since a reverted turn had no checkpoints. */
+  readonly whole?: boolean | null;
+  /** Files the reverted turns changed outside the thread's folder, which it didn't restore. */
+  readonly outside?: readonly string[] | null;
 };
 
 const revertView = (stored: string | null): ThreadView["revert"] => {
   if (stored === null) return null;
   const r = JSON.parse(stored) as StoredRevert;
-  return { toTurnId: r.toTurnId, files: r.files, undone: r.undone, ...(r.filesError ? { filesError: r.filesError } : {}) };
+  return {
+    toTurnId: r.toTurnId,
+    files: r.files,
+    undone: r.undone,
+    ...(r.filesError ? { filesError: r.filesError } : {}),
+    ...(r.whole ? { whole: true } : {}),
+    ...(r.outside?.length ? { outside: r.outside } : {}),
+  };
 };
 
 /** Folds a worktree event into the thread's `worktree` column. */
@@ -230,7 +243,9 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "thread.files.restored": (e) =>
     withSql(
       (sql) =>
-        sql`update threads set revert = json_set(revert, '$.saved', ${e.saved ?? null}, '$.filesError', ${e.error ?? null})
+        sql`update threads set revert = json_set(revert, '$.saved', ${e.saved ?? null}, '$.filesError', ${e.error ?? null},
+              '$.paths', json(${e.paths ? JSON.stringify(e.paths) : null}), '$.whole', json(${JSON.stringify(e.whole)}),
+              '$.outside', json(${JSON.stringify(e.outside)}))
             where id = ${e.threadId} and revert is not null`,
     ),
   // Git holds checkpoints (ADR 0015); the event only records what the cleanup policy removed.

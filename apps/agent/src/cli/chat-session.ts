@@ -5,6 +5,7 @@ import {
   type CommandId,
   capReached,
   type DiffView,
+  describeRevertFiles,
   describeRouteChange,
   describeSpendCap,
   handedSourceLabel,
@@ -214,7 +215,10 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
             shown = [...shown, ...e.turnIds];
             io.write("[revert undone]\n");
           }
-          if (e.type === "thread.files.restored" && e.error) io.write(`[files not restored: ${e.error}]\n`);
+          if (e.type === "thread.files.restored") {
+            const notes = [...(e.error ? [`files not restored: ${e.error}`] : []), ...describeRevertFiles(e)];
+            io.write(notes.map((note) => `[${note}]\n`).join(""));
+          }
           if (e.type === "thread.worktree.created") io.write(`[worktree ready at ${e.path}]\n`);
           if (e.type === "thread.worktree.failed") io.write(`[worktree: ${e.error}]\n`);
           if (e.type === "thread.worktree.setup.ran") {

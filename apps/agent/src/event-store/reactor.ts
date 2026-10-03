@@ -27,8 +27,8 @@ import { Decide, flagged, injectionQuestion, injectionWarning } from "@verdandi/
 import { ToolFailed, verdandiTools } from "@verdandi/tools";
 import { Cause, Context, Deferred, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { changedSince, checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
-import { editedPaths } from "../diffs/diff.ts";
+import { changedByTurns, changedSince, checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
+import { editedFiles } from "../diffs/diff.ts";
 import { memoryNudge } from "../memory/memory.ts";
 import { loadTaskDigest, parseReview, reviewPrompt } from "../review/review.ts";
 import { repeatedError } from "../routing/repeated-error.ts";
@@ -384,7 +384,7 @@ export const ReactorLive = Layer.effect(
         Effect.catchCause((cause) =>
           Effect.as(Effect.logWarning(`Could not compare turn ${turnId}'s files with its start checkpoint.`, cause), undefined),
         ),
-        Effect.map((changed) => changed ?? editedPaths(cwd, calls).length > 0),
+        Effect.map((changed) => changed ?? editedFiles(cwd, calls).inside.length > 0),
       );
 
     const runTurn = (
@@ -611,22 +611,46 @@ export const ReactorLive = Layer.effect(
       });
 
     /**
-     * Restores the thread's files from checkpoint `from`, after saving them as `save` so the revert can be undone,
-     * and reports how it went (DESIGN §13).
+     * Restores the thread's files from checkpoint `from` and reports how it went (DESIGN §13). A revert saves them as
+     * `save` first, so it can be undone, then restores only the paths its `turnIds` changed in the thread's folder, or
+     * the whole folder when one of them has no checkpoints, and names the files their file tools changed outside it.
+     * Undoing it restores the `paths` it restored, or the whole folder without them.
      */
-    const restoreFiles = (threadId: ThreadId, from: string, save?: string) =>
+    const restoreFiles = (
+      threadId: ThreadId,
+      from: string,
+      scope: { readonly save: string; readonly turnIds: readonly TurnId[] } | { readonly paths: readonly string[] | undefined },
+    ) =>
       Effect.gen(function* () {
         const cwd = yield* loadThreadFolder(threadId).pipe(Effect.provideService(SqlClient.SqlClient, sql));
         if (!cwd) return;
-        const saved = save ? Effect.asVoid(checkpoint(cwd, save)) : Effect.void;
-        const done = yield* Effect.result(Effect.andThen(saved, restore(cwd, from)));
+        const calls =
+          "turnIds" in scope
+            ? yield* sql<{ payload: string }>`
+                select payload from items where turn_id in (select value from json_each(${JSON.stringify(scope.turnIds)}))
+                  and json_extract(payload, '$.kind') = 'tool.call'`
+            : [];
+        const { outside } = editedFiles(
+          cwd,
+          calls.map((c) => JSON.parse(c.payload) as Item),
+        );
+        const done = yield* Effect.result(
+          Effect.gen(function* () {
+            if ("save" in scope) yield* checkpoint(cwd, scope.save);
+            if (!("turnIds" in scope)) return { whole: false, paths: yield* restore(cwd, from, scope.paths && new Set(scope.paths)) };
+            const only = yield* changedByTurns(cwd, threadId, scope.turnIds);
+            return { whole: only === undefined, paths: yield* restore(cwd, from, only) };
+          }),
+        );
         yield* engine.dispatch({
           type: "files.report",
           commandId: randomUUID() as CommandId,
           threadId,
           from,
-          ...(save && Result.isSuccess(done) && { saved: save }),
-          ...(Result.isFailure(done) && { error: done.failure.message }),
+          ...(Result.isSuccess(done)
+            ? { ...("save" in scope && { saved: scope.save }), ...done.success }
+            : { error: done.failure.message, whole: false }),
+          outside,
         });
       }).pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not restore the files of thread ${threadId}.`, cause)));
 
@@ -689,8 +713,12 @@ export const ReactorLive = Layer.effect(
       if (e.type === "thread.reverted" || e.type === "thread.revert.undone") {
         const files =
           e.type === "thread.reverted"
-            ? e.files && restoreFiles(e.threadId, checkpointRef(e.threadId, e.toTurnId, "end"), revertRef(e.threadId, stored.seq))
-            : e.restore && restoreFiles(e.threadId, e.restore);
+            ? e.files &&
+              restoreFiles(e.threadId, checkpointRef(e.threadId, e.toTurnId, "end"), {
+                save: revertRef(e.threadId, stored.seq),
+                turnIds: e.turnIds,
+              })
+            : e.restore && restoreFiles(e.threadId, e.restore, { paths: e.paths });
         return Effect.andThen(files ? enqueue(e.threadId, files) : Effect.void, FiberSet.run(turns, recordOutcomes(e.threadId))).pipe(
           Effect.asVoid,
         );

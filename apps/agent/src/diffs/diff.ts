@@ -31,21 +31,25 @@ const real = (path: string): string => {
 };
 
 /**
- * The project-relative paths, `/`-separated, a turn's file tools touched; paths outside the project are
- * dropped. In a folder outside git, which has no checkpoints, verifiers run when this is non-empty.
+ * The files the file tools of a turn's `items` touched: `inside` the project, relative and `/`-separated, and
+ * `outside` it, absolute with symlinks resolved. In a folder outside git, which has no checkpoints, verifiers run
+ * when `inside` is non-empty; a revert names the `outside` ones, which have no checkpoints, as not restored.
  */
-export const editedPaths = (projectPath: string, items: readonly Item[]) => {
+export const editedFiles = (projectPath: string, items: readonly Item[]) => {
   const root = real(projectPath);
-  const paths = new Set<string>();
+  const inside = new Set<string>();
+  const outside = new Set<string>();
   for (const item of items) {
     if (item.kind !== "tool.call") continue;
     const key = fileTools[item.name];
     const path = key && typeof item.input === "object" && item.input !== null ? (item.input as Record<string, unknown>)[key] : undefined;
     if (typeof path !== "string") continue;
-    const rel = relative(root, real(resolve(projectPath, path)));
-    if (rel && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) paths.add(rel.split(sep).join("/"));
+    const file = real(resolve(projectPath, path));
+    const rel = relative(root, file);
+    if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) outside.add(file);
+    else if (rel) inside.add(rel.split(sep).join("/"));
   }
-  return [...paths];
+  return { inside: [...inside], outside: [...outside] };
 };
 
 const diffFlags = ["--no-color", "--no-ext-diff", "--no-renames", "--src-prefix=a/", "--dst-prefix=b/"];

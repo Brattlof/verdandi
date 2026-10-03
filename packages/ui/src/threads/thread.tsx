@@ -3,6 +3,7 @@ import {
   type CommandId,
   clip,
   codePointStart,
+  describeRevertFiles,
   describeRouteChange,
   handedSourceLabel,
   type InteractionMode,
@@ -637,7 +638,11 @@ const RevertBar = ({
     (revert?.undone
       ? "Revert undone."
       : revert &&
-        `Reverted ${what} to the end of turn ${number}. The next turn continues from there.${revert.filesError ? ` The files weren't restored: ${revert.filesError}` : ""}`);
+        [
+          `Reverted ${what} to the end of turn ${number}. The next turn continues from there.`,
+          ...(revert.filesError ? [`The files weren't restored: ${revert.filesError}`] : []),
+          ...describeRevertFiles(revert),
+        ].join(" "));
   return (
     <div className="flex items-center gap-3 border-b border-line bg-panel px-4 py-1.5 text-xs">
       <p role="status" className={`min-w-0 flex-1 ${error || revert?.filesError ? "text-error" : "text-muted"}`}>

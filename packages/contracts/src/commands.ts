@@ -163,8 +163,9 @@ export const WorktreeReported = Schema.Struct({
 });
 
 /**
- * Rolls the thread back to the end of turn `toTurnId` (DESIGN §13): the conversation, and with `files` the
- * project's files too, from that turn's checkpoint. The later turns stay in the log, shown as reverted.
+ * Rolls the thread back to the end of turn `toTurnId` (DESIGN §13): the conversation, and with `files` the files
+ * the later turns changed in the thread's folder too, from that turn's checkpoint. The later turns stay in the log,
+ * shown as reverted.
  */
 export const ThreadRevert = Schema.Struct({
   type: Schema.Literal("thread.revert"),
@@ -190,6 +191,12 @@ export const FilesReport = Schema.Struct({
   /** The checkpoint of the files as they were before, which undoing the revert restores. */
   saved: Schema.optionalKey(Schema.String),
   error: Schema.optionalKey(Schema.String),
+  /** The paths it restored, relative to the repo's top; undoing the revert puts back just these. */
+  paths: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Whether it restored the whole thread folder, since a reverted turn had no checkpoints. */
+  whole: Schema.Boolean,
+  /** Files, absolute, the reverted turns' file tools changed outside the thread folder, which it left as they are. */
+  outside: Schema.Array(Schema.String),
 });
 
 /** Internal: the cleanup sweep reporting the thread's checkpoint and revert refs it removed (ADR 0021). Clients cannot send it. */

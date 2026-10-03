@@ -154,7 +154,9 @@ export const ThreadView = Schema.Struct({
   sessionId: Schema.NullOr(Schema.String),
   /**
    * The thread's latest revert, until its next turn starts: `undone` once the user undid it. `files` says
-   * whether the files were reverted too; `filesError` why restoring them failed.
+   * whether the files were reverted too; `filesError` why restoring them failed. `whole` when it restored the whole
+   * folder, the user's own edits too, since a reverted turn had no checkpoints; `outside`, files the reverted turns
+   * changed outside the thread's folder, which it didn't restore.
    */
   revert: Schema.NullOr(
     Schema.Struct({
@@ -162,6 +164,8 @@ export const ThreadView = Schema.Struct({
       files: Schema.Boolean,
       undone: Schema.Boolean,
       filesError: Schema.optionalKey(Schema.String),
+      whole: Schema.optionalKey(Schema.Boolean),
+      outside: Schema.optionalKey(Schema.Array(Schema.String)),
     }),
   ),
   /** The git worktree the thread runs in; null when it runs in the project folder itself. */

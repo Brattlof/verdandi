@@ -186,7 +186,12 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "injection.flagged": (thread, e) => addItem(thread, e.turnId, injectionItem(e)),
   "thread.files.restored": (thread, e) => ({
     ...thread,
-    revert: thread.revert && (e.error ? { ...thread.revert, filesError: e.error } : thread.revert),
+    revert: thread.revert && {
+      ...thread.revert,
+      ...(e.error ? { filesError: e.error } : {}),
+      ...(e.whole && { whole: true }),
+      ...(e.outside.length > 0 && { outside: e.outside }),
+    },
   }),
   "thread.checkpoints.removed": (thread) => thread,
   "thread.worktree.requested": (thread, e) => ({ ...thread, worktree: nextWorktree(thread.worktree, e) }),

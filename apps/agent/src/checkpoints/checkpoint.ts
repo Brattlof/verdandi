@@ -80,6 +80,25 @@ export const listCheckpoints = (cwd: string, threadId: ThreadId) =>
     (out) => new Set(out.split("\n").filter(Boolean)),
   );
 
+/**
+ * The paths under `cwd`, relative to the repo's top, that turns `turnIds` changed: each one's start checkpoint
+ * against its end (ADR 0015). Undefined when one of them has no checkpoints, since saving one failed.
+ */
+export const changedByTurns = (cwd: string, threadId: ThreadId, turnIds: readonly TurnId[]) =>
+  Effect.gen(function* () {
+    const saved = yield* listCheckpoints(cwd, threadId);
+    const paths = new Set<string>();
+    for (const turnId of turnIds) {
+      const [start, end] = [checkpointRef(threadId, turnId, "start"), checkpointRef(threadId, turnId, "end")];
+      if (!saved.has(start) || !saved.has(end)) return undefined;
+      // From `cwd`, `.` limits it to the thread's folder, as `restore` does.
+      const out = yield* git(cwd, ["diff", "--name-only", "-z", "--no-renames", "--no-relative", start, end, "--", "."]);
+      if (out.code !== 0) return yield* gitFailed("diff", out);
+      for (const path of out.stdout.split("\0")) if (path) paths.add(path);
+    }
+    return paths;
+  });
+
 /** Where the files a revert replaced are saved, so it can be undone. */
 export const revertRef = (threadId: ThreadId, seq: number) => `refs/verdandi/reverts/${refPart(threadId)}/${seq}`;
 
@@ -87,8 +106,9 @@ export const revertRef = (threadId: ThreadId, seq: number) => `refs/verdandi/rev
  * Puts the files under `cwd` back as checkpoint `ref` has them: changed files rewritten, files it doesn't have
  * deleted, line endings as git checks them out (`core.autocrlf`, `.gitattributes`), as a checkout of a commit
  * would. Written through a temporary index, so the user's index stays as it was; ignored files are left alone.
+ * With `only` (paths relative to the repo's top), the other files stay as they are. Returns the paths it restored.
  */
-export const restore = (cwd: string, ref: string) =>
+export const restore = (cwd: string, ref: string, only?: ReadonlySet<string>) =>
   Effect.gen(function* () {
     const current = yield* snapshot(cwd);
     if (current === undefined) return yield* new GitError({ message: `${cwd} is not in a git repository, so it has no checkpoints.` });
@@ -102,13 +122,16 @@ export const restore = (cwd: string, ref: string) =>
     const changed = yield* git(cwd, ["diff", "--name-status", "-z", "--no-renames", "--no-relative", current, ref, "--", "."]);
     if (changed.code !== 0) return yield* gitFailed("diff", changed);
     const fields = changed.stdout.split("\0");
+    const restored: string[] = [];
     const written: string[] = [];
     for (let i = 0; i + 1 < fields.length; i += 2) {
       const [status, path] = [fields[i], fields[i + 1] ?? ""];
+      if (only && !only.has(path)) continue;
+      restored.push(path);
       if (status === "D") rmSync(join(top, path), { force: true, recursive: true });
       else written.push(path);
     }
-    if (written.length === 0) return;
+    if (written.length === 0) return restored;
     const temp = join(tmpdir(), `verdandi-index-${randomUUID()}`);
     const env = { GIT_INDEX_FILE: temp };
     yield* Effect.gen(function* () {
@@ -116,4 +139,5 @@ export const restore = (cwd: string, ref: string) =>
       const out = yield* git(top, ["checkout-index", "--force", "-z", "--stdin"], env, `${written.join("\0")}\0`);
       if (out.code !== 0) return yield* gitFailed("checkout-index", out);
     }).pipe(Effect.ensuring(Effect.sync(() => rmSync(temp, { force: true }))));
+    return restored;
   });
