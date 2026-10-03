@@ -1,72 +1,13 @@
 import { writeFileSync } from "node:fs";
-import {
-  type AttachmentUpload,
-  type ClientCommand,
-  type CommandId,
-  capReached,
-  type DiffView,
-  describeRouteChange,
-  describeSpendCap,
-  handedSourceLabel,
-  type InteractionMode,
-  injectionItem,
-  type ProjectsFeed,
-  type Resolution,
-  type TaskId,
-  type TaskRating,
-  type ThreadFeed,
-  type ThreadId,
-  type ThreadView,
-  type TurnId,
-} from "@verdandi/contracts";
-import { Context, Effect, Layer, ManagedRuntime, Stream } from "effect";
+import type { CommandId, ProjectsFeed, ThreadId } from "@verdandi/contracts";
+import { Effect, Layer, ManagedRuntime, Stream } from "effect";
 import { flag, resolveHome } from "../home/home.ts";
-import { cliThreadsFile, defaultFolder, readCliThreads, workspaceDir } from "../home/workspace.ts";
+import { cliThreadsFile, defaultFolder, readCliThreads } from "../home/workspace.ts";
 import { serverFor } from "../main.ts";
 import { connect } from "../rpc/client.ts";
-import { readAttachment } from "./attach.ts";
-import {
-  approvalPrompt,
-  editPlan,
-  memoryPrompt,
-  type PendingRequest,
-  parseAnswer,
-  planPrompt,
-  questionPrompt,
-  skillPrompt,
-  trustedCommandsLine,
-  trustPrompt,
-} from "./requests.ts";
+import { Client, type Io, openSession, type SessionSetup, uuid } from "./chat-session.ts";
 import { budgetFromFlags, picksRoute, routeFromFlags } from "./route-flags.ts";
 import { threadList } from "./thread-list.ts";
-
-class Client extends Context.Service<Client, Effect.Success<ReturnType<typeof connect>>>()("verdandi/cli/Client") {}
-
-const uuid = <T>() => crypto.randomUUID() as T;
-
-type Usage = { model: string; accessMode: string; inputTokens: number; outputTokens: number; costUsd: number };
-
-const summary = (status: string, error: string | undefined, usage: Usage[]) => {
-  const parts = usage.map((u) => `${u.model} ${u.inputTokens}→${u.outputTokens} tok $${u.costUsd.toFixed(4)} ${u.accessMode}`);
-  return `\n[${status}${error ? `: ${error}` : ""}${parts.length ? ` · ${parts.join(" · ")}` : ""}]\n`;
-};
-
-/** `/rate`'s words; `clear` takes the rating back. */
-const ratingWords = new Map<string, TaskRating | null>([
-  ["up", 1],
-  ["down", -1],
-  ["clear", null],
-]);
-const modeCommands = new Map<string, InteractionMode>([
-  ["/ask", "ask"],
-  ["/plan", "plan"],
-  ["/build", "build"],
-]);
-const modeHelp: Record<InteractionMode, string> = {
-  ask: "ask mode: the agent answers without changing anything",
-  plan: "plan mode: the agent proposes a plan for you to approve before it changes anything",
-  build: "build mode: the agent does the work",
-};
 
 /** Prints every thread from the projects feed's snapshot, archived ones only with `archived`, then ends the feed (ADR 0008). */
 const list = async (runtime: ManagedRuntime.ManagedRuntime<Client, never>, client: Client["Service"], archived: boolean) => {
@@ -85,17 +26,26 @@ const list = async (runtime: ManagedRuntime.ManagedRuntime<Client, never>, clien
   process.stdout.write(threadList(projects, threads, quotas));
 };
 
-/** Prints a `DiffGet` result, marking what was cut to keep the payload small. */
-const diffText = (view: DiffView, projectPath: string) => {
-  const cut = `[truncated: run git diff in ${projectPath} for the rest]\n`;
-  const files = view.files.map((f) => `${f.diff}${f.diff.endsWith("\n") ? "" : "\n"}${f.truncated ? cut : ""}`);
-  const omitted = view.omittedFiles ? `[${view.omittedFiles} more changed files not shown: run git diff in ${projectPath}]\n` : "";
-  return files.length || omitted ? files.join("") + omitted : "[no changes]\n";
+/** The line chat: reads lines from stdin and writes to stdout, for pipes, scripts and `--plain`. */
+const plainChat = async (setup: SessionSetup, notes: readonly string[], done: () => Promise<void>) => {
+  const io: Io = {
+    write: (text) => process.stdout.write(text),
+    prompt: (mode) => process.stdout.write(mode === "build" ? "> " : `${mode}> `),
+    suspend: (run) => run(),
+  };
+  const session = await openSession(setup, io, notes);
+  process.on("SIGINT", () => {
+    if (session.interrupt()) void done().finally(() => process.exit(130));
+  });
+  for await (const line of console) if (await session.input(line)) break;
+  await session.close();
+  await done();
 };
 
 /**
- * `verdandi` (or `verdandi chat`): a simple terminal chat with the thread for the current folder when it's a project,
- * else the workspace's (`defaultFolder`), or the one `--thread` names. Without a running verdandid it runs one in this
+ * `verdandi` (or `verdandi chat`): chat with the thread for the current folder when it's a project, else the
+ * workspace's (`defaultFolder`), or the one `--thread` names. In a terminal it opens the terminal UI (`src/tui`); with
+ * `--plain`, or when stdin or stdout isn't a terminal, the line chat. Without a running verdandid it runs one in this
  * process until you quit.
  */
 export const chat = async (argv: readonly string[]) => {
@@ -109,12 +59,12 @@ export const chat = async (argv: readonly string[]) => {
   const folder = picked ? undefined : defaultFolder(home, process.cwd(), argv);
 
   const served = await serverFor(home, argv);
-  if (served.stop) {
-    process.stdout.write(
-      `[verdandid runs in this chat and stops when you quit; \`verdandi web\` opens the web UI meanwhile, \`verdandi start\` keeps one running]\n`,
-    );
-    for (const line of served.status) process.stdout.write(`[${line}]\n`);
-  }
+  const notes = served.stop
+    ? [
+        "[verdandid runs in this chat and stops when you quit; `verdandi web` opens the web UI meanwhile, `verdandi start` keeps one running]\n",
+        ...served.status.map((line) => `[${line}]\n`),
+      ]
+    : [];
   const runtime = ManagedRuntime.make(Layer.effect(Client)(connect(served.server)));
   const done = async () => {
     await runtime.dispose();
@@ -167,384 +117,9 @@ export const chat = async (argv: readonly string[]) => {
     if (folder) writeFileSync(cliThreadsFile(home), JSON.stringify({ ...threads, [folder]: threadId }, null, 2));
   }
 
-  const dispatch = (command: ClientCommand) =>
-    runtime.runPromise(
-      client.CommandDispatch(command).pipe(
-        Effect.as(true),
-        Effect.catchTag("CommandRejected", (e) => Effect.sync(() => process.stdout.write(`${e.message}\n`)).pipe(Effect.as(false))),
-      ),
-    );
-
-  // Requests are answered one at a time, oldest first. `answered` collects the current user-input
-  // request's answers, or holds the "n" of a plan rejection waiting for its feedback.
-  const requests: PendingRequest[] = [];
-  let answered: string[] = [];
-  /** The turn a typed line steers; undefined while the thread is idle. */
-  let running: TurnId | undefined;
-  /** The turns still in the conversation, oldest first: `/revert <n>` counts them. */
-  let shown: TurnId[] = [];
-  /** The thread's latest turn, which `/diff` shows. */
-  let lastTurn: TurnId | undefined;
-  /** The thread's latest task, which `/rate` rates. */
-  let lastTask: TaskId | undefined;
-  /** The mode the next turn is sent in. */
-  let mode: InteractionMode = "build";
-  /** Files `/attach` read, which go with the next turn. */
-  let attached: AttachmentUpload[] = [];
-  const snapshot = Promise.withResolvers<ThreadView>();
-  let usage: Usage[] = [];
-  const prompt = () => process.stdout.write(mode === "build" ? "> " : `${mode}> `);
-  const showRequest = () => {
-    const r = requests[0];
-    if (!r) return;
-    if (r.type === "approval.requested") process.stdout.write(approvalPrompt(r));
-    else if (r.type === "skill.proposed") process.stdout.write(skillPrompt(r));
-    else if (r.type === "memory.proposed") process.stdout.write(memoryPrompt(r));
-    else if (r.type === "commands.trust.requested") process.stdout.write(trustPrompt(r));
-    else if (r.type === "plan.requested") {
-      process.stdout.write(answered.length ? "Feedback for the agent to keep planning with (empty rejects without): " : planPrompt(r));
-    } else {
-      const next = r.questions[answered.length];
-      if (next) process.stdout.write(questionPrompt(next));
-    }
-  };
-  const addRequest = (r: PendingRequest) => {
-    requests.push(r);
-    if (requests.length === 1) showRequest();
-  };
-  const removeRequest = (requestId: string) => {
-    const i = requests.findIndex((r) => r.requestId === requestId);
-    if (i < 0) return;
-    requests.splice(i, 1);
-    if (i === 0) {
-      answered = [];
-      showRequest();
-    }
-  };
-
-  const subscriptionId = crypto.randomUUID();
-  // The consumer only prints and updates state; every RPC call happens in the input loop below (ADR 0008).
-  const feed = runtime.runPromise(
-    client.ThreadSubscribe({ threadId, subscriptionId }).pipe(
-      Stream.runForEach((f: ThreadFeed) =>
-        Effect.sync(() => {
-          if (f.kind === "snapshot") {
-            running = f.thread.turns.find((t) => t.status === "running")?.turnId;
-            lastTurn = f.thread.turns.at(-1)?.turnId;
-            lastTask = f.thread.tasks.at(-1)?.taskId;
-            shown.push(...f.thread.turns.filter((t) => !t.reverted).map((t) => t.turnId));
-            requests.push(...f.thread.pendingRequests);
-            snapshot.resolve(f.thread);
-          }
-          if (f.kind === "delta") process.stdout.write(f.text);
-          if (f.kind !== "event") return;
-          const e = f.stored.event;
-          if (e.type === "task.started") lastTask = e.taskId;
-          // A pinned thread's tasks need no line; one a message pinned with `@name` gets one.
-          if (e.type === "task.started" && e.decision && (e.decision.source !== "pin" || e.inputs?.at)) {
-            const how = e.decision.source === "pin" ? "pinned" : "routed";
-            process.stdout.write(`[${how} to ${e.route.model} ${e.route.effort} on ${e.route.harness}: ${e.decision.reason}]\n`);
-          }
-          if (e.type === "task.rerouted") {
-            process.stdout.write(`[plan approved: the build runs on ${e.to.model} ${e.to.effort}: ${e.decision.reason}]\n`);
-          }
-          if (e.type === "task.deescalated") {
-            process.stdout.write(`[de-escalated to ${e.to.model} ${e.to.effort}: ${e.decision.reason}]\n`);
-          }
-          if (e.type === "verifier.ran") {
-            const result = e.passed ? "passed" : `failed${e.exitCode === null ? "" : ` (exit ${e.exitCode})`}`;
-            const tail = e.passed ? "" : `${e.output.trimEnd().split(/\r?\n/).slice(-10).join("\n")}\n`;
-            process.stdout.write(`\n[verifier ${e.command} ${result} in ${(e.durationMs / 1000).toFixed(1)}s]\n${tail}`);
-          }
-          if (e.type === "task.blocked") process.stdout.write(`\n[the agent is blocked: ${e.reason}]\n`);
-          if (e.type === "injection.flagged") {
-            const why = injectionItem(e).why;
-            process.stdout.write(
-              `\n[possible prompt injection in ${handedSourceLabel[e.source]}, handed to the agent under a warning: ${why}]\n`,
-            );
-          }
-          if (e.type === "task.escalated") {
-            const moved = e.to ? `escalated to ${e.to.model} ${e.to.effort}` : "not escalated";
-            // The way back is picking the route it escalated from, which pins the thread like any route pick.
-            const undo = e.to ? ` To undo it: verdandi chat --thread ${threadId} --model ${e.from.model} --effort ${e.from.effort}` : "";
-            process.stdout.write(`[${moved}: ${e.reason}${undo}]\n`);
-          }
-          if (e.type === "thread.reverted") {
-            const n = shown.indexOf(e.toTurnId) + 1;
-            shown = shown.filter((t) => !e.turnIds.includes(t));
-            process.stdout.write(
-              `[reverted the conversation${e.files ? " and files" : ""} to turn ${n}: the next turn continues from there; /undo-revert undoes it]\n`,
-            );
-          }
-          if (e.type === "thread.revert.undone") {
-            shown = [...shown, ...e.turnIds];
-            process.stdout.write("[revert undone]\n");
-          }
-          if (e.type === "thread.files.restored" && e.error) process.stdout.write(`[files not restored: ${e.error}]\n`);
-          if (e.type === "thread.worktree.created") process.stdout.write(`[worktree ready at ${e.path}]\n`);
-          if (e.type === "thread.worktree.failed") process.stdout.write(`[worktree: ${e.error}]\n`);
-          if (e.type === "thread.worktree.setup.ran") {
-            const tail = e.passed ? "" : `${e.output.trimEnd().split(/\r?\n/).slice(-10).join("\n")}\n`;
-            process.stdout.write(`[worktree setup ${e.command} ${e.passed ? "passed" : "failed"}]\n${tail}`);
-          }
-          if (e.type === "thread.worktree.removed") process.stdout.write("[worktree removed; its branch is kept]\n");
-          if (e.type === "turn.started") {
-            running = lastTurn = e.turnId;
-            shown.push(e.turnId);
-          }
-          if (
-            e.type === "approval.requested" ||
-            e.type === "user-input.requested" ||
-            e.type === "plan.requested" ||
-            e.type === "skill.proposed" ||
-            e.type === "memory.proposed" ||
-            e.type === "commands.trust.requested"
-          )
-            addRequest(e);
-          if (e.type === "turn.item.added" && e.item.kind === "notice") process.stdout.write(`\n[${e.item.text}]\n`);
-          if (e.type === "thread.worktree.setup.held")
-            process.stdout.write(`[worktree setup ${e.command} waits for you to trust it; the next turn asks]\n`);
-          if (e.type === "skill.applied")
-            process.stdout.write(e.error ? `[skill not written: ${e.error}]\n` : `[skill ${e.skill} saved]\n`);
-          if (e.type === "approval.resolved") removeRequest(e.requestId);
-          if (e.type === "turn.usage.recorded") usage.push(e);
-          if (e.type === "turn.completed") {
-            process.stdout.write(summary(e.status, e.error, usage));
-            usage = [];
-            if (running === e.turnId) running = undefined;
-            prompt();
-          }
-        }),
-      ),
-    ),
-  );
-
-  const resolve = async (request: PendingRequest, resolution: Resolution) => {
-    await dispatch({ type: "approval.respond", commandId: uuid<CommandId>(), threadId, requestId: request.requestId, resolution });
-    removeRequest(request.requestId);
-  };
-
-  /** A line typed while a request is waiting answers it. */
-  const answer = async (request: PendingRequest, line: string) => {
-    if (
-      request.type === "approval.requested" ||
-      request.type === "skill.proposed" ||
-      request.type === "memory.proposed" ||
-      request.type === "commands.trust.requested"
-    ) {
-      const yes = /^y(es)?$/i.test(line);
-      if (yes || /^no?$/i.test(line)) return resolve(request, { decision: yes ? "allow" : "deny" });
-      return process.stdout.write("Answer y or n: ");
-    }
-    if (request.type === "plan.requested") {
-      if (answered.length) return resolve(request, line ? { decision: "deny", feedback: line } : { decision: "deny" });
-      if (/^no?$/i.test(line)) {
-        answered.push(line);
-        return showRequest();
-      }
-      // The plan opens in the user's editor; what they save is what the agent builds from.
-      const edited = /^e(dit)?$/i.test(line) ? await editPlan(request.plan) : undefined;
-      if (edited && "error" in edited) return process.stdout.write(`[${edited.error}]\nAnswer y, n or e: `);
-      if (!edited && !/^y(es)?$/i.test(line)) return process.stdout.write("Answer y, n or e: ");
-      // An approved plan goes on in build mode, and so do the turns after it.
-      mode = "build";
-      return resolve(request, edited ? { decision: "allow", plan: edited.plan } : { decision: "allow" });
-    }
-    if (line === "/skip") return resolve(request, { decision: "deny" });
-    const question = request.questions[answered.length];
-    const picked = question && parseAnswer(question, line);
-    if (!question || picked === undefined) return showRequest();
-    answered.push(picked);
-    if (answered.length < request.questions.length) return showRequest();
-    const answers = Object.fromEntries(request.questions.map((q, i) => [q.question, answered[i] ?? ""]));
-    return resolve(request, { decision: "answer", answers });
-  };
-
-  /**
-   * Steers the running turn, saying whether it went or why not. False when that turn finished first, so the line goes
-   * out as the next turn.
-   */
-  const steer = (turnId: TurnId, text: string) =>
-    runtime.runPromise(
-      client.CommandDispatch({ type: "turn.steer", commandId: uuid<CommandId>(), threadId, turnId, text }).pipe(
-        Effect.andThen(Effect.sync(() => process.stdout.write("[steer sent: the agent reads it at its next step]\n"))),
-        Effect.as(true),
-        Effect.catchTag("CommandRejected", (e) =>
-          e.reason === "TurnNotRunning"
-            ? Effect.succeed(false)
-            : Effect.sync(() => process.stdout.write(`${e.message}\n`)).pipe(Effect.as(true)),
-        ),
-      ),
-    );
-
-  /** `/diff` shows what the last turn changed; `/diff all` everything since the thread's first turn. */
-  const showDiff = async (all: boolean, projectPath: string) => {
-    if (!all && !lastTurn) return process.stdout.write("[no turns yet: /diff all shows the project's changes]\n");
-    const text = await runtime.runPromise(
-      client.DiffGet(all || !lastTurn ? { threadId } : { threadId, turnId: lastTurn }).pipe(
-        Effect.map((view) => diffText(view, projectPath)),
-        Effect.catchTag("DiffUnavailable", (e) => Effect.succeed(`${e.message}\n`)),
-      ),
-    );
-    process.stdout.write(text);
-  };
-
-  // Ctrl+C interrupts the running turn. A second Ctrl+C before it ends, or one at the prompt, quits.
-  let interrupting: TurnId | undefined;
-  process.on("SIGINT", () => {
-    if (!running || interrupting === running) return void done().finally(() => process.exit(130));
-    interrupting = running;
-    process.stdout.write("\n[interrupting: Ctrl+C again to quit]\n");
-    void dispatch({ type: "turn.interrupt", commandId: uuid<CommandId>(), threadId, turnId: running });
-  });
-
-  /** How close the thread's project and profile are to their spend caps; `raise` first raises each reached one for the rest of its period. */
-  const showSpendCaps = async (raise: boolean) => {
-    const get = () =>
-      runtime.runPromise(client.SpendCapsGet({ threadId }).pipe(Effect.catchTag("SpendCapsUnavailable", (e) => Effect.succeed(e.message))));
-    const caps = await get();
-    if (typeof caps === "string") return process.stdout.write(`${caps}\n`);
-    const reached = raise ? caps.filter(capReached) : [];
-    for (const cap of reached) {
-      await dispatch({ type: "spend.cap.raise", commandId: uuid<CommandId>(), threadId, scope: cap.scope, period: cap.period });
-    }
-    if (raise && reached.length === 0) process.stdout.write("No spend cap is reached, so none was raised.\n");
-    const shown = reached.length > 0 ? await get() : caps;
-    for (const cap of typeof shown === "string" ? [] : shown) {
-      const hint = capReached(cap) ? " (reached: --raise-cap raises it for the rest of the period)" : "";
-      process.stdout.write(`Spend: ${describeSpendCap(cap)}${hint}\n`);
-    }
-  };
-
-  const noSnapshot = new Error("The thread feed ended before its snapshot arrived. Restart verdandid and try again.");
-  feed.then(() => snapshot.reject(noSnapshot), snapshot.reject);
-  const thread = await snapshot.promise;
-  mode = thread.turns.at(-1)?.mode ?? "build";
-  // Route flags pin the thread to their route from the next turn on; --auto hands it back to the router.
-  const wanted = routeFromFlags(argv, thread.route);
-  const change = describeRouteChange(thread.route, wanted);
-  const pin = picksRoute(argv) && (change !== "" || !thread.pinned);
-  const changed = pin && (await dispatch({ type: "thread.route.set", commandId: uuid<CommandId>(), threadId, route: wanted }));
-  const unpinned =
-    argv.includes("--auto") && thread.pinned && (await dispatch({ type: "thread.route.unpin", commandId: uuid<CommandId>(), threadId }));
-  const { harness, model, effort } = changed ? wanted : thread.route;
-  const on =
-    changed || (thread.pinned && !unpinned)
-      ? `${harness} ${model} ${effort} (pinned; --auto lets the router pick)`
-      : thread.task && !unpinned
-        ? `${harness} ${model} ${effort} (routed; --model or --effort pins a route)`
-        : "the route the router picks for the next task";
-  process.stdout.write(
-    `Thread ${threadId} in ${thread.projectPath === workspaceDir(home) ? `the workspace (${thread.projectPath}; --here works on the current folder instead)` : thread.projectPath} (${thread.turns.length} earlier turns) on ${on}, ${mode} mode. Start a message with @opus (or another model) to pin the task it starts to it; /ask, /plan and /build switch modes; /diff shows the last turn's edits, /diff all the project's; /attach <path> sends a file or image with your next message, /detach drops them; /forget-routing clears what the router learned from this project's tasks; /rate up|down rates the latest task, /rate clear clears it; /trusted lists the project commands you let Verdandi run, /untrust <n> revokes one; /revert [n] [files] goes back to the end of turn n (default: drops the latest turn), with its files too, and /undo-revert undoes that; Ctrl+C stops a turn; /exit quits.\n`,
-  );
-  const tree = thread.worktree;
-  if (tree) {
-    const where = tree.path ? ` at ${tree.path}` : "";
-    process.stdout.write(`Worktree on branch ${tree.branch}${where}: ${tree.state}${tree.error ? `. ${tree.error}` : ""}\n`);
-  }
-  if (picked && worktree) await dispatch({ type: "thread.worktree.add", commandId: uuid<CommandId>(), threadId });
-  if (argv.includes("--remove-worktree")) {
-    const force = argv.includes("--force");
-    await dispatch({ type: "thread.worktree.remove", commandId: uuid<CommandId>(), threadId, force });
-  }
-  if (thread.archived) {
-    process.stdout.write(`This thread is archived, so turns are rejected. Unarchive it with: verdandi chat --unarchive ${threadId}\n`);
-  }
-  if (changed) process.stdout.write(change ? `Route changed: ${change}\n` : `Route pinned: ${harness} ${model} ${effort}\n`);
-  if (unpinned) process.stdout.write("Route unpinned: the router picks the next task's route.\n");
-  if (budget !== undefined && budget !== thread.budgetMode) {
-    await dispatch({ type: "thread.budget.set", commandId: uuid<CommandId>(), threadId, mode: budget });
-    const which = budget === null ? "the routing policy's" : budget;
-    const pinnedNow = (thread.pinned && !unpinned) || changed;
-    process.stdout.write(
-      `Budget mode: ${which}, ${pinnedNow ? "once the router picks again (--auto)" : "from the next turn, which starts a new task"}.\n`,
-    );
-  }
-  await showSpendCaps(argv.includes("--raise-cap"));
-  if (running) process.stdout.write("A turn is running; lines you type steer it.\n");
-  else prompt();
-  showRequest();
-
-  for await (const line of console) {
-    const text = line.trim();
-    const request = requests[0];
-    const switchTo = modeCommands.get(text);
-    if (request) await answer(request, text);
-    else if (text === "/exit") break;
-    else if (text === "/attach" || text.startsWith("/attach ")) {
-      const read = readAttachment(text.slice("/attach".length), process.cwd());
-      if (typeof read === "string") process.stdout.write(`${read}\n`);
-      else {
-        attached.push(read);
-        const names = attached.map((a) => a.name).join(", ");
-        process.stdout.write(
-          `[attached ${read.name}; ${names} go${attached.length === 1 ? "es" : ""} with your next message${running ? ", after this turn" : ""}. /detach drops them]\n`,
-        );
-      }
-      if (!running) prompt();
-    } else if (text === "/detach") {
-      process.stdout.write(attached.length ? `[dropped ${attached.map((a) => a.name).join(", ")}]\n` : "[nothing attached]\n");
-      attached = [];
-      if (!running) prompt();
-    } else if (/^\/revert(\s|$)/.test(text)) {
-      // `/revert` drops the latest turn; `/revert <n>` goes back to the end of turn n; `files` restores the files too.
-      const args = text.split(/\s+/).slice(1);
-      const files = args.includes("files");
-      const n = Number(args.find((a) => a !== "files") ?? shown.length - 1);
-      const toTurnId = shown[n - 1];
-      if (!toTurnId || !Number.isInteger(n)) process.stdout.write(`[usage: /revert [n] [files], with n from 1 to ${shown.length - 1}]\n`);
-      else await dispatch({ type: "thread.revert", commandId: uuid<CommandId>(), threadId, toTurnId, files });
-      if (!running) prompt();
-    } else if (text === "/undo-revert") {
-      await dispatch({ type: "thread.revert.undo", commandId: uuid<CommandId>(), threadId });
-      if (!running) prompt();
-    } else if (text === "/forget-routing") {
-      if (await dispatch({ type: "routing.memory.clear", commandId: uuid<CommandId>(), threadId }))
-        process.stdout.write("[routing memory cleared: this project's next routed tasks go by the policy alone]\n");
-      if (!running) prompt();
-    } else if (/^\/rate(\s|$)/.test(text)) {
-      const word = text.split(/\s+/)[1] ?? "";
-      const rating = ratingWords.get(word);
-      if (rating === undefined) process.stdout.write("[usage: /rate up|down|clear]\n");
-      else if (!lastTask) process.stdout.write("[this thread has no task to rate yet]\n");
-      else if (await dispatch({ type: "task.rate", commandId: uuid<CommandId>(), threadId, taskId: lastTask, rating }))
-        process.stdout.write(rating === null ? "[rating cleared]\n" : `[rated the latest task ${word}]\n`);
-      if (!running) prompt();
-    } else if (text === "/trusted" || /^\/untrust(\s|$)/.test(text)) {
-      // The project's trusted command lists, numbered as `/trusted` lists them; `/untrust <n>` revokes one.
-      const trusted = await runtime.runPromise(client.TrustedCommandsList({ threadId }));
-      const n = Number(text.split(/\s+/)[1]);
-      const revoke = text === "/trusted" ? undefined : trusted[n - 1];
-      if (text === "/trusted")
-        process.stdout.write(
-          trusted.length === 0
-            ? "[this project trusts none of its own commands yet; Verdandi asks before it runs them]\n"
-            : `${trusted.map((t, i) => `  ${i + 1}. ${trustedCommandsLine(t)}`).join("\n")}\n[/untrust <n> revokes one]\n`,
-        );
-      else if (!revoke) process.stdout.write(`[usage: /untrust <n>, with n from /trusted (1 to ${trusted.length})]\n`);
-      else if (await dispatch({ type: "commands.trust.revoke", commandId: uuid<CommandId>(), threadId, hash: revoke.hash }))
-        process.stdout.write("[revoked: Verdandi asks before it runs those commands again]\n");
-      if (!running) prompt();
-    } else if (text === "/diff" || text === "/diff all") {
-      await showDiff(text === "/diff all", thread.projectPath);
-      if (!running) prompt();
-    } else if (switchTo) {
-      mode = switchTo;
-      process.stdout.write(`[${modeHelp[mode]}${running ? "; applies from the next turn" : ""}]\n`);
-      if (!running) prompt();
-    } else if (!text) {
-      if (!running) prompt();
-    } else if (!running || !(await steer(running, text))) {
-      const turnId = uuid<TurnId>();
-      running = turnId;
-      const attachments = attached.length > 0 ? { attachments: attached } : {};
-      if (!(await dispatch({ type: "turn.send", commandId: uuid<CommandId>(), threadId, turnId, text, mode, ...attachments }))) {
-        running = undefined;
-        prompt();
-      } else attached = [];
-    }
-  }
-  await runtime.runPromise(client.Unsubscribe({ subscriptionId }));
-  await feed;
-  await done();
+  const setup: SessionSetup = { runtime, client, threadId, home, argv, picked, worktree, budget };
+  if (argv.includes("--plain") || !process.stdin.isTTY || !process.stdout.isTTY) return plainChat(setup, notes, done);
+  // Loaded only here, so the line chat and headless commands never load OpenTUI's native engine.
+  const { terminalUi } = await import("../tui/tui.tsx");
+  return terminalUi(setup, notes, done);
 };

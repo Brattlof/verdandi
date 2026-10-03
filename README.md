@@ -60,9 +60,10 @@ bun install
 Chat in the terminal against a throwaway dev home. It runs the server while you chat:
 
 ```bash
-bun run verdandi --home ./.verdandi-dev              # chat with the thread for this folder (a project), or the workspace
+bun run verdandi --home ./.verdandi-dev              # the terminal UI, on the thread for this folder (a project), or the workspace
 bun run verdandi --home ./.verdandi-dev --model opus --effort high
 bun run verdandi --home ./.verdandi-dev --workspace  # the profile's workspace, for anything that isn't one project
+bun run verdandi --home ./.verdandi-dev --plain      # the same chat as plain lines, as a pipe gets
 ```
 
 The agent serves no web page. For the web UI, run its own small server, which opens your browser:
