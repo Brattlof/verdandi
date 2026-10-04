@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import type { CatalogEntry, HarnessEvent, HarnessRunInput, HarnessTool, Route, ThreadId, TurnId } from "@verdandi/contracts";
+import type { CatalogEntry, HarnessEvent, HarnessRunInput, HarnessTool, McpServer, Route, ThreadId, TurnId } from "@verdandi/contracts";
 import {
   type FakeChatReply,
   type FakeReply,
+  fakeMcpServer,
   makeFakeAnthropic,
   makeFakeChatCompletions,
   makeTempHome,
@@ -267,4 +268,139 @@ test("an endpoint that rate-limits is retried; one still failing reports a provi
   expect((await failure(setup([ollama], down), input("t1", "hi", { ...local, model: "claude-sonnet-5-5" }))).error).toContain(
     "doesn't run claude-sonnet-5-5. Pick one of qwen3:8b",
   );
+});
+
+/** The fake MCP server with `extra` more tools: 3 + 10 is enough to defer them (DESIGN §9.4). */
+const mcpServers = async () => ({
+  servers: [
+    {
+      name: "fake",
+      command: process.execPath,
+      args: [fakeMcpServer],
+      env: {
+        ...Object.fromEntries(Object.entries(process.env).flatMap(([k, v]) => (v === undefined ? [] : [[k, v]]))),
+        FAKE_MCP_TOOLS: "10",
+      },
+      ask: true,
+      tools: {},
+    } satisfies McpServer,
+  ],
+  notices: [],
+});
+const screened = async (text: string) => `[screened] ${text}`;
+/** A turn in a real folder, with the MCP servers and the reactor's screen, allowing every approval it asks for. */
+const mcpTurn = (adapter: ReturnType<typeof makeNativeAdapter>, turn: HarnessRunInput) => {
+  const cwd = makeTempHome();
+  homes.push(cwd);
+  return Effect.runPromise(
+    Stream.runCollect(
+      Stream.tap(adapter.run({ ...turn, cwd, mcp: mcpServers, screen: screened }), (e) =>
+        e.type === "approval.requested" ? adapter.respond(threadId, e.requestId, { decision: "allow" }) : Effect.void,
+      ),
+    ),
+  ).then((events) => Array.from(events) as HarnessEvent[]);
+};
+const toolNames = (body: Record<string, unknown> | undefined) =>
+  ((body?.tools ?? []) as { name?: string; function?: { name: string } }[]).map((t) => t.function?.name ?? t.name ?? "");
+const sessionOf = (events: readonly HarnessEvent[]) => {
+  const started = events.find((e) => e.type === "session.started");
+  return started?.type === "session.started" ? started.sessionId : undefined;
+};
+
+test("a session that opens on an endpoint takes the bridge for many MCP tools, and keeps it on the Anthropic API", async () => {
+  const chat = makeFakeChatCompletions([
+    { toolCalls: [{ id: "call_1", name: "tool_search", input: { query: "number 7" } }] },
+    { toolCalls: [{ id: "call_2", name: "tool_call", input: { name: "mcp__fake__tool_7", arguments: { text: "hi" } } }] },
+    { text: "Done." },
+  ]);
+  const anthropic = makeFakeAnthropic([
+    { blocks: [{ type: "tool_use", id: "toolu_1", name: "tool_call", input: { name: "mcp__fake__tool_3", arguments: { text: "yo" } } }] },
+    { blocks: [{ type: "text", text: "Done there too." }] },
+  ]);
+  const fetch = ((url: string | URL | Request, init?: RequestInit) =>
+    String(url).startsWith("https://api.anthropic.com") ? anthropic.fetch(url, init) : chat.fetch(url, init)) as typeof globalThis.fetch;
+  const adapter = setup([ollama], fetch, "sk-ant-test");
+
+  const local = await mcpTurn(adapter, input("t1", "Use tool 7"));
+  // The deferred tools stay out of the request; the bridge's three stand in for them.
+  const [first] = chat.requests.map((r) => r.body);
+  expect(toolNames(first)).toContain("tool_call");
+  expect(toolNames(first).filter((n) => n.startsWith("mcp__"))).toEqual([]);
+  expect(JSON.stringify(first)).not.toContain("defer_loading");
+  // tool_call runs the real tool, by its name, through its approval.
+  expect(local).toContainEqual({
+    type: "item",
+    item: { kind: "tool.call", toolUseId: "call_2", name: "mcp__fake__tool_7", input: { text: "hi" } },
+  });
+  expect(local.filter((e) => e.type === "approval.requested").map((e) => e.type === "approval.requested" && e.toolName)).toEqual([
+    "mcp__fake__tool_7",
+  ]);
+  expect(local).toContainEqual({
+    type: "item",
+    item: { kind: "tool.result", toolUseId: "call_2", isError: false, content: "[screened] tool_7" },
+  });
+
+  // The same session on the Anthropic API: the bridge's tools are ordinary ones, so its tool_call works there too.
+  const sonnet: Route = { harness: "native", model: "claude-sonnet-5-5", effort: "medium" };
+  const moved = await mcpTurn(adapter, input("t2", "Now tool 3", sonnet, sessionOf(local)));
+  const toAnthropic = anthropic.requests[0]?.body;
+  expect(toolNames(toAnthropic)).toContain("tool_call");
+  expect(toolNames(toAnthropic)).not.toContain("tool_search_tool_bm25");
+  expect(JSON.stringify(toAnthropic)).not.toContain("defer_loading");
+  expect(moved).toContainEqual({
+    type: "item",
+    item: { kind: "tool.result", toolUseId: "toolu_1", isError: false, content: "[screened] tool_3" },
+  });
+  expect(moved.at(-1)).toEqual({ type: "turn.finished", status: "success" });
+  await Effect.runPromise(adapter.close());
+});
+
+test("a session that opened on the API's server tool search, moved onto an endpoint, sends its deferred tools in full and none of the search's blocks", async () => {
+  const anthropic = makeFakeAnthropic([
+    {
+      blocks: [
+        {
+          type: "server",
+          block: { type: "server_tool_use", id: "srvtoolu_1", name: "tool_search_tool_bm25", input: { query: "number 7" } },
+        },
+        {
+          type: "server",
+          block: {
+            type: "tool_search_tool_result",
+            tool_use_id: "srvtoolu_1",
+            content: {
+              type: "tool_search_tool_search_result",
+              tool_references: [{ type: "tool_reference", tool_name: "mcp__fake__tool_7" }],
+            },
+          },
+        },
+        { type: "text", text: "There's a tool_7." },
+      ],
+    },
+  ]);
+  const chat = makeFakeChatCompletions([
+    { toolCalls: [{ id: "call_1", name: "mcp__fake__tool_7", input: { text: "hi" } }] },
+    { text: "Done." },
+  ]);
+  const fetch = ((url: string | URL | Request, init?: RequestInit) =>
+    String(url).startsWith("https://api.anthropic.com") ? anthropic.fetch(url, init) : chat.fetch(url, init)) as typeof globalThis.fetch;
+  const adapter = setup([ollama], fetch, "sk-ant-test");
+  const sonnet: Route = { harness: "native", model: "claude-sonnet-5-5", effort: "medium" };
+
+  const opened = await mcpTurn(adapter, input("t1", "Find tool 7", sonnet));
+  expect(toolNames(anthropic.requests[0]?.body)).toContain("tool_search_tool_bm25");
+  // Two requests on the endpoint: the cache check (which throws in tests) holds between them.
+  const moved = await mcpTurn(adapter, input("t2", "Use it", local, sessionOf(opened)));
+  const [a, b] = chat.requests.map((r) => r.body);
+  expect(toolNames(a)).not.toContain("tool_search_tool_bm25");
+  expect(toolNames(a)).toContain("mcp__fake__tool_7");
+  expect(JSON.stringify(a)).not.toContain("defer_loading");
+  expect(JSON.stringify(b?.messages)).toContain("There's a tool_7.");
+  expect(JSON.stringify(b?.messages)).not.toContain("srvtoolu_1");
+  expect(JSON.stringify(b?.tools)).toBe(JSON.stringify(a?.tools));
+  expect(moved).toContainEqual({
+    type: "item",
+    item: { kind: "tool.result", toolUseId: "call_1", isError: false, content: "[screened] tool_7" },
+  });
+  await Effect.runPromise(adapter.close());
 });

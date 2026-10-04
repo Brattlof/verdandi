@@ -35,6 +35,9 @@ export class EndpointError extends Error {
   }
 }
 
+/** The blocks a Chat Completions request carries, besides this endpoint's own carried ones. */
+const chatBlocks: ReadonlySet<Block["type"]> = new Set(["text", "image", "tool_use", "tool_result"]);
+
 const retried = (status: number) => status === 408 || status === 409 || status === 429 || status >= 500;
 const maxRetries = 2;
 
@@ -222,7 +225,8 @@ const errorMessage = async (response: Response) => {
  * endpoint's `fetch`.
  */
 export const chatCompletionsProvider = (endpoint: Endpoint, fetch: typeof globalThis.fetch = globalThis.fetch): Provider => {
-  const sends = (b: Block) => (b.type === "carried" ? b.provider === endpoint.id : b.type !== "thinking" && b.type !== "redacted_thinking");
+  // Only what Chat Completions can read back: thinking and the Anthropic API's tool search blocks stay behind.
+  const sends = (b: Block) => (b.type === "carried" ? b.provider === endpoint.id : chatBlocks.has(b.type));
   const url = `${endpoint.url.replace(/\/+$/, "")}/chat/completions`;
 
   const post = async (body: string, signal: AbortSignal) => {
@@ -252,6 +256,7 @@ export const chatCompletionsProvider = (endpoint: Endpoint, fetch: typeof global
 
   return {
     id: endpoint.id,
+    toolSearch: "bridge",
     version: "chat completions",
     classify: (error, model) => {
       if (!(error instanceof EndpointError) || error.endpoint !== endpoint.id) return undefined;

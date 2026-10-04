@@ -1,6 +1,7 @@
 import type { CatalogEntry, HarnessError, ProviderFailure, Route } from "@verdandi/contracts";
 import type { Sent } from "./cache-check.ts";
 import type { Failure } from "./provider-failure.ts";
+import type { ToolSearch } from "./tool-search.ts";
 import type { Block, Compression, Entry, Prefix } from "./transcript.ts";
 
 /** One model request of a native turn, as the loop hands it to the provider that serves its model. */
@@ -40,6 +41,8 @@ export type Provider = {
   readonly id: string;
   /** What the provider runs on, for `session.started`'s `harnessVersion`. */
   readonly version: string;
+  /** How a session that opens on this provider finds the MCP tools it defers (DESIGN §9.4). */
+  readonly toolSearch: ToolSearch;
   readonly send: (request: ProviderRequest) => AsyncGenerator<string, ProviderReply>;
   /**
    * What an error `send` raised for `model` says about the provider's health (`provider.failed`, DESIGN §9.5), or

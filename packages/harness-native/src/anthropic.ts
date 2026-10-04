@@ -4,6 +4,7 @@ import { HarnessError } from "@verdandi/contracts";
 import { fingerprint } from "./cache-check.ts";
 import type { Provider, ProviderReply } from "./provider.ts";
 import { classify } from "./provider-failure.ts";
+import type { ToolSearch } from "./tool-search.ts";
 import { type EffortMessage, type Message, requestMessages } from "./transcript.ts";
 
 /** The beta that takes an effort-only system message within a conversation (ADR 0022). */
@@ -39,7 +40,7 @@ const sendable = (m: Message | EffortMessage) =>
  * The Anthropic Messages API through `@anthropic-ai/sdk` (ADR 0022), metered. A turn's own effort goes as an effort
  * message under its beta. Tests pass the fake provider's `fetch`.
  */
-export const anthropicProvider = (apiKey: string, fetch?: typeof globalThis.fetch): Provider => {
+export const anthropicProvider = (apiKey: string, fetch?: typeof globalThis.fetch, toolSearch: ToolSearch = "server"): Provider => {
   // Everything explicit, so nothing in the environment meant for Claude Code (a base URL, a token, debug logging) applies here.
   const client = new Anthropic({
     apiKey,
@@ -50,6 +51,7 @@ export const anthropicProvider = (apiKey: string, fetch?: typeof globalThis.fetc
   });
   return {
     id: "anthropic",
+    toolSearch,
     version: `@anthropic-ai/sdk ${VERSION}`,
     classify,
     fix: (reason) =>

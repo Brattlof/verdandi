@@ -270,8 +270,9 @@ export const makeNativeAdapter = (options: {
   /** The skills a new session's index lists (DESIGN §14.4), read when it opens. */
   readonly skills?: () => readonly SkillEntry[];
   /**
-   * How a new session finds the MCP tools it defers once they're many (DESIGN §9.4): the API's own search (`server`,
-   * the default), or Verdandi's bridge (`bridge`), for a provider without one.
+   * How a session that opens on the Anthropic API finds the MCP tools it defers once they're many (DESIGN §9.4): the
+   * API's own search (`server`, the default), or Verdandi's bridge (`bridge`). One that opens on an endpoint always
+   * takes the bridge, since an endpoint has no server-side search (ADR 0035).
    */
   readonly toolSearch?: ToolSearch;
   /** False leaves sessions uncompressed (DESIGN §16): the recall exam, whose policies decide what a request keeps. */
@@ -279,7 +280,7 @@ export const makeNativeAdapter = (options: {
 }): HarnessAdapter => {
   const endpoints = options.endpoints ?? [];
   const providers = [
-    ...(options.apiKey === undefined ? [] : [anthropicProvider(options.apiKey, options.fetch)]),
+    ...(options.apiKey === undefined ? [] : [anthropicProvider(options.apiKey, options.fetch, options.toolSearch)]),
     ...endpoints.map((e) => chatCompletionsProvider(e, options.fetch)),
   ];
   const catalog: Catalog = [...(options.apiKey === undefined ? [] : nativeCatalog), ...endpoints.flatMap((e) => e.models)];
@@ -373,7 +374,9 @@ export const makeNativeAdapter = (options: {
         options.reach.folders,
         { context, skills, delegates },
         mcp?.definitions,
-        options.toolSearch,
+        // The provider it opens on decides, and the header keeps it (DESIGN §9.4); a bridge's tools are ordinary ones,
+        // so any provider takes them later.
+        served(input.route.model)?.provider.toolSearch,
       );
       const transcript = createTranscript(dir, randomUUID(), prefix);
       const flagged = skills.filter((s) => s.flagged).map((s) => s.name);
