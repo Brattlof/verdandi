@@ -21,7 +21,7 @@ DESIGN §9.4 gives the native harness "the full Verdandi tool set, plus MCP serv
 
 ## Consequences
 
-- The client is about 200 lines of Verdandi's own instead of `@modelcontextprotocol/sdk` (installed with the Agent SDK, but not a direct dependency). Remote servers, sampling, roots and elicitation need that SDK; it's the upgrade path.
+- The client is a small stdio client of Verdandi's own instead of `@modelcontextprotocol/sdk` (installed with the Agent SDK, but not a direct dependency). Remote servers, sampling, roots and elicitation need that SDK; it's the upgrade path.
 - An idle session keeps its servers running until verdandid stops or the session is replaced.
 - A user who wants one list for both harnesses keeps it in Claude Code's files and sets `importClaudeCode: true`; servers only in Verdandi's files reach native only.
 - Tool search (#206) can defer these tools, since they're fixed per session like the rest of the prefix.

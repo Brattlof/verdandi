@@ -99,10 +99,13 @@ export const connectMcp = async (server: McpServer, cwd: string): Promise<McpCon
   const pending = new Map<number, { readonly resolve: (m: Message) => void; readonly reject: (e: Error) => void }>();
   let exited: string | undefined;
   let nextId = 1;
+  /** Writes to the server. One that's gone is noticed through `exited`, which fails what waits on it. */
   const send = (message: Record<string, unknown>) => {
     if (exited) return;
-    proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
-    void proc.stdin.flush();
+    try {
+      proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+      Promise.resolve(proc.stdin.flush()).catch(() => {});
+    } catch {}
   };
   void proc.exited.then((code) => {
     exited = `it exited with code ${code}`;
@@ -140,7 +143,7 @@ export const connectMcp = async (server: McpServer, cwd: string): Promise<McpCon
         }
       }
     }
-  })();
+  })().catch(() => {});
   const request = (method: string, params: Record<string, unknown>, signal?: AbortSignal) =>
     new Promise<Message>((resolve, reject) => {
       if (exited) return reject(new Error(exited));
@@ -165,7 +168,7 @@ export const connectMcp = async (server: McpServer, cwd: string): Promise<McpCon
   const close = async () => {
     if (!exited) {
       try {
-        void proc.stdin.end();
+        Promise.resolve(proc.stdin.end()).catch(() => {});
       } catch {}
       await Promise.race([proc.exited, Bun.sleep(exitMs)]);
       if (!exited) killTree(proc.pid);
