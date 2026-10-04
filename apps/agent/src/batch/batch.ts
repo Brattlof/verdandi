@@ -283,7 +283,7 @@ export const summarize = (results: readonly BatchResult[]) =>
 export const estimateBatch = async (
   tasks: readonly LoadedTask[],
   routes: readonly string[],
-  harnesses: Partial<Record<HarnessId, unknown>>,
+  harnesses: Parameters<typeof routingFor>[0],
 ) => {
   const routing = routingFor(harnesses);
   const rows: { task: string; route: string; ran?: Route; tokens: number; usd: number | null; error?: string }[] = [];

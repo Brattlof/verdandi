@@ -7,6 +7,7 @@ import {
   decisionKinds,
   describeFailure,
   describeRouteChange,
+  type HarnessAdapter,
   type HarnessId,
   type InteractionMode,
   inSessionEffort,
@@ -32,7 +33,6 @@ import {
   routingRules,
   rulesBackend,
 } from "@verdandi/decisions";
-import { nativeCatalog } from "@verdandi/harness-native";
 import {
   builtInCatalog,
   deescalate,
@@ -155,15 +155,18 @@ export const projectRouting =
       }
     });
 
-/** The catalog of the harnesses verdandid runs: the native and fake harnesses' models join it while they run. */
-export const catalogFor = (harnesses: Partial<Record<HarnessId, unknown>>): Catalog => [
+/**
+ * The catalog of the harnesses verdandid runs: the native harness's models (its `catalog`: the Anthropic API's with a
+ * key, and its configured endpoints', ADR 0035) and the fake harness's join it while they run.
+ */
+export const catalogFor = (harnesses: Partial<Record<HarnessId, Pick<HarnessAdapter, "catalog">>>): Catalog => [
   ...builtInCatalog,
-  ...(harnesses.native ? nativeCatalog : []),
+  ...(harnesses.native?.catalog ?? []),
   ...(harnesses.fake ? fakeCatalog : []),
 ];
 
 /** Routing over the harnesses verdandid runs. */
-export const routingFor = (harnesses: Partial<Record<HarnessId, unknown>>) =>
+export const routingFor = (harnesses: Parameters<typeof catalogFor>[0]) =>
   projectRouting(Object.keys(harnesses) as HarnessId[], catalogFor(harnesses));
 
 /** The subagent routes a warm session started with, which it keeps. */
@@ -432,7 +435,7 @@ export const decideFallback = (
 
 /**
  * Pure: the effort a continuing turn of routed `thread`'s task runs at (DESIGN §8.7 auto effort), when it isn't the task's:
- * inside the class's `effortBand`, on a harness that changes effort without a cache miss. Undefined when it stays: the
+ * inside the class's `effortBand`, on a harness and model that change effort without a cache miss. Undefined when it stays: the
  * thread or task is pinned (a pinned effort turns it off), the harness can't, the policy is broken, or the turn is plain.
  */
 export const decideTurnEffort = (
@@ -446,6 +449,8 @@ export const decideTurnEffort = (
     return undefined;
   const policy = routing.policy.success;
   const band = (task && policy.routes[task.taskClass]?.effortBand) ?? policy.fallback.effortBand ?? 1;
-  const efforts = policy.catalog.find((e) => e.harness === thread.route.harness && e.model === thread.route.model)?.efforts ?? [];
+  const entry = policy.catalog.find((e) => e.harness === thread.route.harness && e.model === thread.route.model);
+  // A native endpoint's model takes effort only as a request parameter, whose change breaks the cache (ADR 0035).
+  const efforts = entry && (entry.harness !== "native" || entry.provider === "anthropic") ? entry.efforts : [];
   return turnEffort({ text, effort: thread.route.effort, efforts, band, ...(verifiers && { verifiers }) });
 };

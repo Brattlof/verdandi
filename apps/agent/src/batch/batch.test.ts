@@ -171,7 +171,7 @@ test("a task's copy shows its agent nothing past the task's commit", () => {
 
 test("a dry run estimates each task on each route without running anything", async () => {
   const { file } = evalSet();
-  const rows = await estimateBatch(loadEvalSet(file), ["auto", "fake/fake-large/high"], { fake: true });
+  const rows = await estimateBatch(loadEvalSet(file), ["auto", "fake/fake-large/high"], { fake: {} });
   expect(rows.map((r) => [r.task, r.route, r.ran?.model, r.ran?.effort])).toEqual([
     ["one-edit", "auto", "fake", "medium"],
     ["one-edit", "fake/fake-large/high", "fake-large", "high"],

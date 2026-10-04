@@ -3,6 +3,7 @@ import { clip, describeRouteChange, type Route } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { projectIdFor } from "../event-store/decider.ts";
 import { flag, resolveHome } from "../home/home.ts";
+import { endpointCatalog } from "../native/endpoints.ts";
 import { resolveProjectPath } from "../projects/project.ts";
 import { loadSavedTasks, type Replay, replay, sameRoute } from "./replay.ts";
 
@@ -51,5 +52,5 @@ export const routing = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
   const project = flag(argv, "--project");
   const projectId = project === undefined ? undefined : projectIdFor(await Effect.runPromise(resolveProjectPath(project)));
-  process.stdout.write(replayText(replay(loadSavedTasks(home, projectId), flag(argv, "--policy"))));
+  process.stdout.write(replayText(replay(loadSavedTasks(home, projectId), flag(argv, "--policy"), endpointCatalog(home))));
 };

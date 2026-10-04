@@ -137,3 +137,24 @@ test("a broken proposed policy fails naming the file and the key", () => {
   expect(() => replay([saved(null)], file)).toThrow(file);
   expect(() => replay([saved(null)], file)).toThrow(/\["routes"\]\["ask\.search"\]\["effort"\]/);
 });
+
+test("a proposed policy may route to a model in the profile's providers.yaml", () => {
+  const file = join(tempDir(), "local.yaml");
+  writeFileSync(
+    file,
+    "targets:\n  qwen: { harness: native, provider: ollama, model: qwen3:8b }\nroutes:\n  ask.search: { prefer: [qwen] }\n",
+  );
+  const qwen = {
+    harness: "native",
+    provider: "ollama",
+    model: "qwen3:8b",
+    access: "local",
+    tier: "S",
+    context: 32768,
+    vision: false,
+    efforts: [],
+    price: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  } as const;
+  expect(() => replay([saved(null)], file)).toThrow("qwen3:8b");
+  expect(replay([saved(null)], file, [qwen]).failed).toEqual([]);
+});

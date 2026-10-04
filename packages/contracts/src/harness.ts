@@ -5,7 +5,7 @@ import { Item, Quota, UsageFields } from "./items.ts";
 import { ProviderFailure } from "./provider-health.ts";
 import { Question, type Resolution } from "./requests.ts";
 import type { Effort, HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
-import type { TaskLimits } from "./routing.ts";
+import type { Catalog, TaskLimits } from "./routing.ts";
 
 /** What every harness adapter reports, normalized. */
 export const HarnessEvent = Schema.Union([
@@ -260,6 +260,11 @@ export const inSessionEffort: Record<HarnessId, boolean> = { "claude-code": fals
  */
 export interface HarnessAdapter {
   readonly id: HarnessId;
+  /**
+   * The models this harness serves that the built-in catalog doesn't list, which join the router's catalog while it
+   * runs (native: the Anthropic models with a key, and each configured endpoint's, ADR 0035).
+   */
+  readonly catalog?: Catalog;
   /**
    * The context and skill files the harness loads into the agent's context by itself when it starts or resumes a
    * session in `cwd`, as absolute paths. Verdandi scans them before each turn and, when the scan flags one the user

@@ -6,7 +6,7 @@ import type { CompressionExam, ExamQuestion, ThreadId, TurnId } from "@verdandi/
 import { Effect, Stream } from "effect";
 import { makeNativeAdapter, maxTokens } from "./adapter.ts";
 import { type Compressed, compress, estimateTokens, type Summarize, tailBudget } from "./compress.ts";
-import { type Compression, createTranscript, type Entry, type Prefix, requestMessages } from "./transcript.ts";
+import { type Block, type Compression, createTranscript, type Entry, type Prefix, requestMessages } from "./transcript.ts";
 
 /**
  * The compression recall exam (#207, ADR 0033): long native transcripts, each with questions that have exact answers,
@@ -45,7 +45,7 @@ export const keepNewest = (entries: readonly Entry[], budget: number): Entry[] =
   }
   const first = start === undefined ? undefined : entries[start];
   if (start === undefined || !first) return [];
-  const content: Anthropic.ContentBlockParam[] =
+  const content: Block[] =
     first.message.role === "assistant" ? [{ type: "text", text: leftOut }] : first.message.content.filter((b) => b.type !== "tool_result");
   const opening: Entry = { turnId: first.turnId, message: { role: "user", content } };
   return [opening, ...entries.slice(first.message.role === "assistant" ? start : start + 1)];

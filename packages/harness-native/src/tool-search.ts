@@ -106,7 +106,7 @@ export const searchDeferred = (deferred: readonly Anthropic.Tool[], query: strin
  * A `tool_call` as the real tool it runs, with the arguments it was given, so approvals, items and trajectories see
  * the real name. Anything else, or a call naming a tool that isn't deferred, comes back as it was.
  */
-export const unwrapCall = (use: Anthropic.ToolUseBlock, deferred: readonly Anthropic.Tool[] | undefined): Anthropic.ToolUseBlock => {
+export const unwrapCall = <T extends Anthropic.ToolUseBlockParam>(use: T, deferred: readonly Anthropic.Tool[] | undefined): T => {
   if (use.name !== callTool || !deferred) return use;
   const args = (typeof use.input === "object" && use.input !== null ? use.input : {}) as Record<string, unknown>;
   if (typeof args.name !== "string" || !deferred.some((t) => t.name === args.name)) return use;

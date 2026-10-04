@@ -1,6 +1,6 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { HarnessRunInput, TurnId } from "@verdandi/contracts";
-import { type Compression, type Entry, requestMessages } from "./transcript.ts";
+import { type Block, type Compression, type Entry, requestMessages } from "./transcript.ts";
 
 /**
  * Context compression for a native session (DESIGN §16, ADR 0033). Past its trigger, a session first prunes: tool
@@ -38,7 +38,8 @@ export type Prune = (toolUseId: string, text: string) => string;
 /** Writes a compression's summary sections: Verdandi's `aux.compress` task (`HarnessRunInput.summarize`), or a scripted one. */
 export type Summarize = NonNullable<HarnessRunInput["summarize"]>;
 
-type Content = Anthropic.ContentBlockParam;
+/** A transcript block: what compression reads, carried blocks included, which say nothing to a summary. */
+type Content = Block;
 
 const textOf = (content: Anthropic.ToolResultBlockParam["content"]) =>
   typeof content === "string" ? content : (content ?? []).map((b) => (b.type === "text" ? b.text : `[${b.type}]`)).join("\n");

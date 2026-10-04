@@ -1,10 +1,23 @@
 import { expect, test } from "bun:test";
-import type { Route, RouteDecision } from "@verdandi/contracts";
+import type { CatalogEntry, Route, RouteDecision } from "@verdandi/contracts";
+import { nativeCatalog } from "@verdandi/harness-native";
 import { loadPolicy } from "@verdandi/router";
 import { Result } from "effect";
 import { catalogFor, decideTurnEffort } from "./routing.ts";
 
-const catalog = catalogFor({ native: true, fake: true });
+/** A model on an OpenAI-compatible endpoint, which takes effort only per request (ADR 0035). */
+const coder: CatalogEntry = {
+  harness: "native",
+  provider: "openrouter",
+  model: "qwen/qwen3-coder",
+  access: "metered",
+  tier: "M",
+  context: 262_144,
+  vision: false,
+  efforts: ["low", "medium", "high"],
+  price: { input: 0.2, output: 0.8, cacheRead: 0.2, cacheWrite: 0.2 },
+};
+const catalog = catalogFor({ native: { catalog: [...nativeCatalog, coder] }, fake: {} });
 const routing = (data: unknown = {}) => ({
   policy: Result.succeed(loadPolicy([{ source: "routing.yaml", data }], catalog)),
   builtIn: loadPolicy([], catalog),
@@ -37,6 +50,8 @@ test("a light turn on the native harness runs at its own effort; on Claude Code,
   ).toBeUndefined();
   expect(decideTurnEffort(thread(native, { pinned: true }), routing(), "go ahead", undefined)).toBeUndefined();
   expect(decideTurnEffort(thread(native, { source: "pin" }), routing(), "go ahead", undefined)).toBeUndefined();
+  // An endpoint's model would break its cache changing effort mid-session, so it keeps the task's.
+  expect(decideTurnEffort(thread({ ...native, model: coder.model }), routing(), "go ahead", undefined)).toBeUndefined();
 });
 
 test("the class's effortBand sets the band, the fallback's applies to classes that set none, and 0 turns it off", () => {

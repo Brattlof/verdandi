@@ -59,8 +59,8 @@ export type Replay = {
   readonly assumed: string | undefined;
 };
 
-/** Every model a recorded task could have run on: the built-in ones, and the native and fake harnesses'. */
-const catalog: Catalog = [...builtInCatalog, ...nativeCatalog, ...fakeCatalog];
+/** The models a recorded task could have run on besides the profile's endpoints': the built-in ones, and the native and fake harnesses'. */
+const baseCatalog: Catalog = [...builtInCatalog, ...nativeCatalog, ...fakeCatalog];
 
 /** What the router is assumed to have read for a task from before its inputs were recorded. */
 const assumedHarnesses: readonly HarnessId[] = ["claude-code"];
@@ -75,7 +75,7 @@ export const assumedInputs = (task: Pick<SavedTask, "route" | "pinnedBefore">): 
 const assumption =
   "no warm session, the policy's budget mode, no routing memory, and verdandid running claude-code and the task's own harness";
 
-const priced = (route: Route, usage: readonly Usage[]) => {
+const priced = (catalog: Catalog, route: Route, usage: readonly Usage[]) => {
   const entry = catalog.find((e) => e.harness === route.harness && e.model === route.model);
   return entry ? usage.reduce((sum, u) => sum + listCost(entry.price, u), 0) : null;
 };
@@ -86,7 +86,11 @@ export const sameRoute = (a: Route, b: Route) => a.harness === b.harness && a.mo
  * Pure: `task` routed again under `policy`, classified by the decision layer as it is now, with the inputs
  * the router read when the task started (DESIGN §8.8 level 2). Fails with the router's message.
  */
-export const replayTask = (task: SavedTask, policy: Pick<RoutingContext, "policy" | "builtIn">): Result.Result<ReplayedTask, string> => {
+export const replayTask = (
+  task: SavedTask,
+  policy: Pick<RoutingContext, "policy" | "builtIn">,
+  catalog: Catalog = baseCatalog,
+): Result.Result<ReplayedTask, string> => {
   const { thread, routing } = replayed(task.inputs ?? assumedInputs(task), policy);
   const { answers } = Effect.runSync(rulesDecide.decide({ state: task.text, questions: taskQuestions(routing) }));
   const decided = decideRoute(thread, routing, task.text, task.mode, answers, task.images, task.inputs?.at);
@@ -97,8 +101,8 @@ export const replayTask = (task: SavedTask, policy: Pick<RoutingContext, "policy
     to,
     taskClass: decided.success.taskClass,
     reason: decided.success.reason,
-    costFrom: priced(task.route, task.usage),
-    costTo: priced(to, task.usage),
+    costFrom: priced(catalog, task.route, task.usage),
+    costTo: priced(catalog, to, task.usage),
   });
 };
 
@@ -162,12 +166,14 @@ export const loadSavedTasks = (home: string, projectId?: ProjectId): SavedTask[]
 
 /**
  * Replays `tasks` under the policy in `policyFile`, layered over the built-in one as a project's would be,
- * or under each task's project's own `.verdandi/routing.yaml` as it is now. A broken policy file throws,
- * naming the file and the key.
+ * or under each task's project's own `.verdandi/routing.yaml` as it is now. `endpointModels` are the profile's
+ * `providers.yaml` models (ADR 0035), which a task or a policy may name. A broken policy file throws, naming the file
+ * and the key.
  */
-export const replay = (tasks: readonly SavedTask[], policyFile?: string): Replay => {
+export const replay = (tasks: readonly SavedTask[], policyFile?: string, endpointModels: Catalog = []): Replay => {
+  const catalog = [...baseCatalog, ...endpointModels];
   const builtIn = loadPolicy([], catalog);
-  const proposed = policyFile === undefined ? undefined : loadProposed(policyFile);
+  const proposed = policyFile === undefined ? undefined : loadProposed(policyFile, catalog);
   const projectPolicies = new Map<string, Pick<RoutingContext, "policy" | "builtIn">>();
   const policyFor = (projectPath: string) => {
     if (proposed) return { policy: Result.succeed(proposed), builtIn };
@@ -181,7 +187,7 @@ export const replay = (tasks: readonly SavedTask[], policyFile?: string): Replay
   const replayedTasks: ReplayedTask[] = [];
   const failed: { task: SavedTask; message: string }[] = [];
   for (const task of tasks) {
-    const result = replayTask(task, policyFor(task.projectPath));
+    const result = replayTask(task, policyFor(task.projectPath), catalog);
     if (Result.isSuccess(result)) replayedTasks.push(result.success);
     else failed.push({ task, message: result.failure });
   }
@@ -193,7 +199,7 @@ export const replay = (tasks: readonly SavedTask[], policyFile?: string): Replay
   };
 };
 
-const loadProposed = (file: string) => {
+const loadProposed = (file: string, catalog: Catalog) => {
   if (!existsSync(file)) throw new Error(`Policy file not found: ${file}. Check the path.`);
   try {
     return loadPolicy([{ source: file, data: Bun.YAML.parse(readFileSync(file, "utf8")) }], catalog);
