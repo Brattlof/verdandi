@@ -827,7 +827,7 @@ test("a session resumed after a restart reconnects to its servers and keeps its 
 
 /** The names of the tools a request loads, leaving out deferred ones. */
 const loaded = (body: Record<string, unknown> | undefined) =>
-  (body?.tools as { name: string; defer_loading?: boolean }[]).flatMap((t) => (t.defer_loading ? [] : [t.name]));
+  ((body?.tools ?? []) as { name: string; defer_loading?: boolean }[]).flatMap((t) => (t.defer_loading ? [] : [t.name]));
 const core = (body: Record<string, unknown> | undefined) => loaded(body).filter((n) => !n.startsWith("tool_") && !n.startsWith("mcp__"));
 
 test("with many MCP tools the API's tool search loads them: deferred in an unchanging tool list, a found one runs by its name through its approval", async () => {
