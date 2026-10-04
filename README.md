@@ -19,7 +19,7 @@ Everything lives on your machine. Nothing leaves it except calls to the provider
 
 <table>
 <tr><td><b>Routes every task</b></td><td>Weighs subscription quota, API credits and local compute, switches only at task boundaries so prompt caches survive, and steps up when a verifier fails. Policy is a plain <code>.verdandi/routing.yaml</code> you can diff. Overriding it takes one click.</td></tr>
-<tr><td><b>Built on the harnesses you use</b></td><td>Runs your installed, logged-in Claude Code on your subscription, with its skills, hooks, MCP and plan mode intact. Verdandi's own agent loop runs on the Anthropic API with your key, and a thread can switch between the two mid-conversation.</td></tr>
+<tr><td><b>Built on the harnesses you use</b></td><td>Drives the Claude Code you installed and signed in to, unmodified, with its skills, hooks, MCP and plan mode intact. Verdandi never touches its credentials, and usage counts against your own plan. <a href="docs/DESIGN.md#17-security-and-privacy">DESIGN §17</a> quotes what Anthropic's terms say about that. Verdandi's own agent loop runs on the Anthropic API with your key, and a thread can switch between the two mid-conversation.</td></tr>
 <tr><td><b>Terminal first</b></td><td>Type <code>verdandi</code> in any project. A web UI adds threads side by side, diffs, approvals, worktrees, checkpoints you can revert to, and a real terminal.</td></tr>
 <tr><td><b>Remembers and learns</b></td><td>Memory and session search across threads, skills it proposes and you approve, and a record of every task's route, outcome and cost.</td></tr>
 </table>

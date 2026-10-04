@@ -957,10 +957,13 @@ The ADR also lists what isn't a vulnerability, who the principals are once the g
   - `verdandi web --host` opts in to the local network or tailnet through a gate in front of the web server. The gate refuses every request from outside private, tailnet and loopback ranges, every WebSocket from a page it didn't serve, and the page token, so other devices pair. A public `--host` address is refused.
   - On the local network a device's token travels over plain HTTP. Remote access beyond a network you trust is opt-in, through Tailscale.
 - **No default outbound calls.** verdandid calls only your harness and the providers you configured, with no telemetry. Fonts are bundled and remote images aren't loaded. Anything more is named in config and off until turned on.
-- **Claude Code credentials are never touched.** The harness drives your own logged-in CLI.
-  - Anthropic's Agent SDK docs say third-party developers may not offer claude.ai login or rate limits in their products without approval.
-  - For personal use, this is you using your own CLI.
-  - **If Verdandi is ever distributed**, check this policy again. The native harness with API keys would be the supported path.
+- **Claude Code credentials are never touched.** The Claude Code harness drives the CLI you installed, unmodified, through the Agent SDK. You sign in through Claude Code's own login, Verdandi never reads, stores or relays the credentials, and the usage counts against your own plan. Anthropic's terms on this, as of 2026-10-04:
+  - Claude Code's [legal page](https://code.claude.com/docs/en/legal-and-compliance) says subscription sign-in "is designed to support ordinary use of Claude Code and other native Anthropic applications", and that developers building products on the Agent SDK "should use API key authentication". Third-party developers may not offer Claude.ai login, route requests through Free, Pro or Max credentials on behalf of their users, or "collect, store, or intermediate Claude.ai credentials". None of this prevents "an end user from signing in to the unmodified Claude Code binary with their own Claude subscription", and Pro and Max limits "assume ordinary, individual usage of Claude Code and the Agent SDK".
+  - The [Agent SDK docs](https://code.claude.com/docs/en/agent-sdk/overview) say: "Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK."
+  - Anthropic's [help centre](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan) says Agent SDK, `claude -p` and third-party app usage "still draw from your subscription's usage limits" (a separate monthly credit announced for June 2026 is paused).
+  - [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) §3 bars automated access "Except when you are accessing our Services via an Anthropic API Key or where we otherwise explicitly permit it".
+  - For personal use, this is you using your own CLI under the terms above. **Before Verdandi is published**, whether driving a subscription counts as offering "rate limits for their products" is unsettled: ask Anthropic, or ship with the native harness on API keys as the supported path. Unattended work on a subscription (scheduled jobs, batches, background review) is what's likeliest to stretch "ordinary, individual usage".
+  - These terms changed three times in 2026: from February to April the legal page called subscription tokens in any other tool, "including the Agent SDK", a violation; April softened it; September added the unmodified-binary sentence. Check them again right before publishing.
 - **Provider API keys** (native harness) come from the OS keychain or Verdandi's own environment variable (`.env` included), and later a `keyCommand`, never from a config file. verdandid keeps them in memory and out of every process it starts, harnesses included. They're masked in trajectories and exports.
 - **Permissions:**
 
@@ -1150,7 +1153,7 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 | Risk | Mitigation |
 |---|---|
 | **Scope:** the plan is Hermes-sized, and nothing ships | Strict milestone order. Each milestone is useful on its own. Footprint Ladder. |
-| Subscription and third-party policy | Personal use of your own CLI. The native harness with API keys is the path for distribution. |
+| Subscription and third-party policy | Verdandi drives the user's own signed-in, unmodified CLI and never handles its credentials. Whether a published Verdandi may drive a subscription is unsettled (§17); the native harness with API keys is the unambiguous path. |
 | Anthropic terms on training | Record provenance for every turn; the terms check in §14.8 |
 | Harness and provider APIs change fast | Pinned versions, contract tests, capability detection, fallbacks |
 | Cache effects cancel out the routing savings | Switch-cost gate. Prefer effort and subagents. Measure baseline (c) early. |
