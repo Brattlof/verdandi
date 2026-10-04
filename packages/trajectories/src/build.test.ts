@@ -5,7 +5,7 @@ import { buildTrajectory } from "./build.ts";
 const threadId = "t1" as ThreadId;
 const turnId = "u1" as TurnId;
 const sonnet = { harness: "claude-code", model: "claude-sonnet-5-5", effort: "high" } as const;
-const usage = (accessMode: "subscription" | "metered") =>
+const usage = (accessMode: "subscription" | "metered" | "local") =>
   ({
     type: "turn.usage.recorded",
     v: 1,
@@ -38,6 +38,21 @@ test("keeps the route the turn started on, and counts a partly metered turn as m
   expect(trajectory?.provenance).toEqual({ provider: "anthropic", harnessVersion: "2.1.284", accessMode: "metered" });
   expect(trajectory?.transcript).toEqual({ sessionId: "s1", path: "/t/s1.jsonl" });
   expect(buildTrajectory(events.slice(0, -1), turnId)).toBeUndefined();
+});
+
+test("a turn that ran only on a local model counts as local, and one partly on a subscription as subscription", () => {
+  const turn = (...modes: ("subscription" | "local")[]) =>
+    buildTrajectory(
+      stored([
+        { type: "thread.created", v: 1, threadId, projectId: "p" as ProjectId, projectPath: "/repo", route: sonnet },
+        { type: "turn.started", v: 2, threadId, turnId, text: "go" },
+        ...modes.map(usage),
+        { type: "turn.completed", v: 1, threadId, turnId, status: "success" },
+      ]),
+      turnId,
+    )?.provenance.accessMode;
+  expect(turn("local", "local")).toBe("local");
+  expect(turn("local", "subscription")).toBe("subscription");
 });
 
 test("a plan approved with the user's edit keeps both versions on its item", () => {

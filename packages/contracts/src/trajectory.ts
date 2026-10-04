@@ -27,7 +27,7 @@ export const Trajectory = Schema.Struct({
   provenance: Schema.Struct({
     provider: Provider,
     harnessVersion: Schema.optionalKey(Schema.String),
-    /** `metered` if any of the turn's usage was paid for as metered; absent when the turn reported no usage. */
+    /** `metered` if any of the turn's usage was paid for as metered, else `subscription` if any was, else `local`; absent when the turn reported no usage. */
     accessMode: Schema.optionalKey(AccessMode),
   }),
   /** Points at the harness's own transcript, which stays where the harness keeps it. */

@@ -165,7 +165,8 @@ export const Item = Schema.Union([
 ]);
 export type Item = typeof Item.Type;
 
-export const AccessMode = Schema.Literals(["subscription", "metered"]);
+/** How a turn's usage was paid for. `local` (a model on the user's own hardware, ADR 0035) costs no dollars. */
+export const AccessMode = Schema.Literals(["subscription", "metered", "local"]);
 export type AccessMode = typeof AccessMode.Type;
 
 /** One model's usage for one turn: per-turn numbers, never cumulative. */

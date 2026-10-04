@@ -40,6 +40,25 @@ test("a malformed key is refused and nothing is stored; a set variable that shad
   expect(lines.at(-1)).toContain("VERDANDI_ANTHROPIC_API_KEY is set too");
 });
 
+test("an endpoint in providers.yaml gets its key stored and removed the same way, under its own name", async () => {
+  const { store, entries } = memoryStore();
+  const lines: string[] = [];
+  const io = {
+    secrets: store,
+    readKey: async () => "or-key-1",
+    out: (l: string) => void lines.push(l),
+    env: {},
+    endpoints: ["openrouter"],
+  };
+  await runKey(["set", "openrouter"], io);
+  expect(entries.get("verdandi/openrouter-api-key")).toBe("or-key-1");
+  await expect(runKey(["set", "groq"], io)).rejects.toThrow("anthropic or openrouter");
+  await expect(runKey(["set", "openrouter"], { ...io, readKey: async () => "or key" })).rejects.toThrow("Nothing was stored");
+  await runKey(["delete", "openrouter"], io);
+  expect(entries.size).toBe(0);
+  expect(lines.join("\n")).not.toContain("or-key-1");
+});
+
 test("the key is read up to Enter or the end of piped input, with Backspace applied", async () => {
   const prompts: string[] = [];
   expect(await readHidden(Readable.from(["sk-ant-ab", "x\u007fc\rleftover"]), (t) => void prompts.push(t))).toBe("sk-ant-abc");

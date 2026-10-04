@@ -1,5 +1,6 @@
 export { makeNativeAdapter } from "./adapter.ts";
 export { nativeCatalog } from "./catalog.ts";
+export type { Endpoint } from "./chat-completions.ts";
 export { compressAt, estimateTokens, type Summarize, tailBudget } from "./compress.ts";
 export {
   answersExactly,
@@ -14,5 +15,14 @@ export {
   requestText,
   scriptedSummary,
 } from "./exam.ts";
-export { findAnthropicKey, keychainEntry, keyProblem, keyVariable, type SecretStore, secretVariables } from "./key.ts";
+export {
+  endpointKeyProblem,
+  findAnthropicKey,
+  findEndpointKey,
+  isSecretVariable,
+  keyPlaces,
+  keyProblem,
+  keyVariable,
+  type SecretStore,
+} from "./key.ts";
 export { createTranscript, type Entry, loadTranscript, type Prefix } from "./transcript.ts";

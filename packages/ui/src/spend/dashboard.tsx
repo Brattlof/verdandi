@@ -302,6 +302,13 @@ const ClassTable = ({ rows }: { rows: UsageReport["byClass"] }) => (
 
 const tokensOf = (t: UsageReport["byTarget"][number]) => t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens;
 
+/** Each access mode's label and bar colour: local models (ADR 0031) cost no dollars, so their bars stay neutral. */
+const accessLook: Record<UsageReport["byTarget"][number]["accessMode"], { readonly label: string; readonly bar: string }> = {
+  metered: { label: "paid", bar: "bg-paid" },
+  subscription: { label: "on plan", bar: "bg-plan" },
+  local: { label: "local", bar: "bg-muted" },
+};
+
 /** How usage splits across models: tokens as bars, coloured by access mode, with each one's cost as text. */
 const TargetBars = ({ rows }: { rows: UsageReport["byTarget"] }) => {
   const max = Math.max(1, ...rows.map(tokensOf));
@@ -317,11 +324,11 @@ const TargetBars = ({ rows }: { rows: UsageReport["byTarget"] }) => {
               className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 py-1 sm:grid-cols-[180px_1fr_220px]"
             >
               <span className="truncate font-mono">
-                {t.model} · {t.accessMode === "metered" ? "paid" : "on plan"}
+                {t.model} · {accessLook[t.accessMode].label}
               </span>
               <span className="col-span-2 row-start-2 h-2.5 sm:col-span-1 sm:col-start-2 sm:row-start-1">
                 <span
-                  className={`block h-full rounded-r ${t.accessMode === "metered" ? "bg-paid" : "bg-plan"}`}
+                  className={`block h-full rounded-r ${accessLook[t.accessMode].bar}`}
                   style={{ width: `max(2px, ${(tokensOf(t) / max) * 100}%)` }}
                 />
               </span>

@@ -92,7 +92,7 @@ export const loadUsageReport = (filter: UsageFilter, now: Date) =>
       group by 1 order by 1`;
     const byTarget = yield* sql<{
       model: string;
-      access_mode: "metered" | "subscription";
+      access_mode: Usage["accessMode"];
       input_tokens: number;
       output_tokens: number;
       cache_read_tokens: number;

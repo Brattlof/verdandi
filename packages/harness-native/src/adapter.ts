@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import Anthropic from "@anthropic-ai/sdk";
-import { VERSION } from "@anthropic-ai/sdk/version";
+import type Anthropic from "@anthropic-ai/sdk";
 import {
+  type Catalog,
   describeFailure,
   type HarnessAdapter,
   HarnessError,
@@ -16,15 +16,17 @@ import {
   type ThreadId,
 } from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
-import { type CacheBreaks, cacheBreak, fingerprint, type Sent } from "./cache-check.ts";
+import { anthropicProvider } from "./anthropic.ts";
+import { type CacheBreaks, cacheBreak, type Sent } from "./cache-check.ts";
 import { nativeCatalog } from "./catalog.ts";
+import { chatCompletionsProvider, type Endpoint } from "./chat-completions.ts";
 import { compress, compressAt, estimateTokens, retryAt, tailBudget } from "./compress.ts";
 import { indexSkills, readContext, type SkillEntry } from "./context.ts";
 import { concurrently, delegateArgs, delegateTool, summaryOf } from "./delegate.ts";
 import { access, fileTools, type Reach, runFileTool } from "./file-tools.ts";
 import { closeMcp, type McpTools, openMcp } from "./mcp.ts";
 import { childContent, modeNotes, opensFiles, planTool, sessionPrefix, turnContent } from "./prompt.ts";
-import { classify } from "./provider-failure.ts";
+import type { Provider, ProviderReply } from "./provider.ts";
 import { runTerminal, stopTrying, type Terminal, terminalTool } from "./terminal.ts";
 import { callTool, describeTool, searchDeferred, searchTool, type ToolSearch, unwrapCall } from "./tool-search.ts";
 import {
@@ -75,34 +77,16 @@ type Session = {
 export const maxTokens = 64_000;
 /** How long the API keeps a prompt cached (the 5-minute TTL): a session idle longer has a cold cache, so pruning it is free. */
 const cacheTtlMs = 5 * 60_000;
-/** The beta that takes an effort-only system message within a conversation (ADR 0022). */
-const perMessageEffort = "mid-conversation-output-config-2026-07-01";
-const setKey = "Replace it with `verdandi key set anthropic` (or VERDANDI_ANTHROPIC_API_KEY), then restart verdandid.";
 
-/** What each HTTP status that isn't a provider failure (`classify`) means for the user, and the fix. */
-const statusFailures: Record<number, string> = {
-  400: "The Anthropic API refused the request.",
-  403: "The API key isn't allowed to do this, e.g. use this model. Check its workspace's permissions in the Anthropic Console, or pick another route.",
-};
-
-/** A failure of the turn, as the user reads it: the cause and the fix. Never holds the key. */
-const failure = (error: unknown) => {
+/** A failure of the turn, as the user reads it: the cause and the fix. Never holds a key. */
+const failure = (providers: readonly Provider[]) => (error: unknown) => {
   if (error instanceof HarnessError) return error;
-  if (error instanceof Anthropic.APIConnectionError)
-    return new HarnessError({ message: `Couldn't reach the Anthropic API (${error.message}). Check the network, then try again.` });
-  if (error instanceof Anthropic.APIError && error.status !== undefined) {
-    const known =
-      statusFailures[error.status] ??
-      (error.status >= 500
-        ? "The Anthropic API failed. Try again shortly, or pick a Claude Code route."
-        : "The Anthropic API refused the request.");
-    return new HarnessError({ message: `${known} (${error.message})` });
+  for (const provider of providers) {
+    const known = provider.failure(error);
+    if (known) return known;
   }
   return new HarnessError({ message: `The native harness failed: ${error instanceof Error ? error.message : String(error)}` });
 };
-
-const unknownModel = (model: string) =>
-  `The native harness doesn't run ${model}. Pick one of ${nativeCatalog.map((e) => e.model).join(", ")}.`;
 
 /** Raises a request and waits for `respond`. Registered before it's reported, so an answer can never arrive first. */
 async function* request(turn: Turn, event: (requestId: string) => HarnessEvent): AsyncGenerator<HarnessEvent, Resolution> {
@@ -133,7 +117,7 @@ const heldBack = (turn: Turn, mode: InteractionMode) =>
  * whose tool list has it.
  */
 async function* runTool(
-  use: Anthropic.ToolUseBlock,
+  use: Anthropic.ToolUseBlockParam,
   input: HarnessRunInput,
   session: Session,
   turn: Turn,
@@ -142,7 +126,7 @@ async function* runTool(
     readonly terminal: Terminal;
     readonly signal: AbortSignal;
     /** Runs a `delegate_task` call in a child session. */
-    readonly delegate: (use: Anthropic.ToolUseBlock) => AsyncGenerator<HarnessEvent, ToolResult>;
+    readonly delegate: (use: Anthropic.ToolUseBlockParam) => AsyncGenerator<HarnessEvent, ToolResult>;
   },
 ): AsyncGenerator<HarnessEvent, ToolResult> {
   const args = (typeof use.input === "object" && use.input !== null ? use.input : {}) as Record<string, unknown>;
@@ -264,16 +248,20 @@ async function* runTool(
 }
 
 /**
- * Verdandi's own agent loop on the Anthropic Messages API (DESIGN §9.4, ADR 0022), metered at list price. Each
+ * Verdandi's own agent loop (DESIGN §9.4, ADR 0022) on its providers (ADR 0035): the Anthropic Messages API with
+ * `apiKey`, metered at list price, and each of `endpoints`, an OpenAI-compatible Chat Completions endpoint priced from
+ * its models' catalog entries. Its `catalog` holds their models, and a route's model picks the provider. Each
  * thread keeps one session, whose system prompt and tool list are fixed when it opens and whose transcript is kept
  * in `sessionsDir`, so a thread resumes after a restart. A new session's prompt holds the folder's context file and an
- * index of `skills`, each scanned through the turn's `scan`, which leaves a flagged one out. Its file tools work in the thread's folder and `reach`, and its
- * terminal runs commands through `terminal`, whose outputs folder `read_file` may read. Each request is checked against the session's last one, and a
- * break of the prompt cache is logged as a warning, or thrown with `cacheBreaks: "throw"`, as every test sets. Tests
- * pass the fake provider's `fetch`.
+ * index of `skills`, each scanned through the turn's `scan`, which leaves a flagged one out. Its file tools work in the
+ * thread's folder and `reach`, and its terminal runs commands through `terminal`, whose outputs folder `read_file` may
+ * read. Each request is checked against the session's last one to the same provider, and a break of the prompt cache is
+ * logged as a warning, or thrown with `cacheBreaks: "throw"`, as every test sets. A request that fails on the provider's
+ * side raises `provider.failed` (DESIGN §9.5), whichever provider it went to. Tests pass a fake provider's `fetch`.
  */
 export const makeNativeAdapter = (options: {
-  readonly apiKey: string;
+  readonly apiKey?: string;
+  readonly endpoints?: readonly Endpoint[];
   readonly sessionsDir: string;
   readonly reach: Reach;
   readonly terminal: Terminal;
@@ -282,28 +270,35 @@ export const makeNativeAdapter = (options: {
   /** The skills a new session's index lists (DESIGN §14.4), read when it opens. */
   readonly skills?: () => readonly SkillEntry[];
   /**
-   * How a new session finds the MCP tools it defers once they're many (DESIGN §9.4): the API's own search (`server`,
-   * the default), or Verdandi's bridge (`bridge`), for a provider without one.
+   * How a session that opens on the Anthropic API finds the MCP tools it defers once they're many (DESIGN §9.4): the
+   * API's own search (`server`, the default), or Verdandi's bridge (`bridge`). One that opens on an endpoint always
+   * takes the bridge, since an endpoint has no server-side search (ADR 0035).
    */
   readonly toolSearch?: ToolSearch;
   /** False leaves sessions uncompressed (DESIGN §16): the recall exam, whose policies decide what a request keeps. */
   readonly compress?: boolean;
 }): HarnessAdapter => {
-  // Everything explicit, so nothing in the environment meant for Claude Code (a base URL, a token, debug logging) applies here.
-  const client = new Anthropic({
-    apiKey: options.apiKey,
-    authToken: null,
-    baseURL: "https://api.anthropic.com",
-    logLevel: "warn",
-    ...(options.fetch && { fetch: options.fetch }),
-  });
+  const endpoints = options.endpoints ?? [];
+  const providers = [
+    ...(options.apiKey === undefined ? [] : [anthropicProvider(options.apiKey, options.fetch, options.toolSearch)]),
+    ...endpoints.map((e) => chatCompletionsProvider(e, options.fetch)),
+  ];
+  const catalog: Catalog = [...(options.apiKey === undefined ? [] : nativeCatalog), ...endpoints.flatMap((e) => e.models)];
+  const unknownModel = (model: string) => `The native harness doesn't run ${model}. Pick one of ${catalog.map((e) => e.model).join(", ")}.`;
+  /** The catalog entry and provider for a model. */
+  const served = (model: string) => {
+    const entry = catalog.find((e) => e.model === model);
+    const provider = entry && providers.find((p) => p.id === entry.provider);
+    return entry && provider ? { entry, provider } : undefined;
+  };
   const sessions = new Map<ThreadId, Session>();
-  const harnessVersion = `native (@anthropic-ai/sdk ${VERSION})`;
+  const harnessVersion = `native (${providers.map((p) => p.version).join(", ")})`;
   // Tool results a compression moved to disk, which read_file may open (DESIGN §16).
   const prunedDir = join(options.sessionsDir, "pruned");
   const reach = { ...options.reach, readable: [...options.reach.readable, options.terminal.outputs, prunedDir] };
-  // Per transcript, so a fork (a new transcript) starts fresh; a diagnostic, kept in memory only.
-  const lastSent = new WeakMap<Transcript, Sent>();
+  // Per transcript, so a fork (a new transcript) starts fresh, and per provider, since each keeps its own cache; a
+  // diagnostic, kept in memory only.
+  const lastSent = new WeakMap<Transcript, Map<string, Sent>>();
   /** Per transcript, the last request's prompt tokens and when it was sent: what compression triggers on (DESIGN §16). */
   const lastPrompt = new WeakMap<Transcript, { readonly tokens: number; readonly at: number }>();
   /** Transcripts whose last compression failed: tried again only past `retryAt` of the window. */
@@ -315,11 +310,12 @@ export const makeNativeAdapter = (options: {
    */
   const failing = new Set<string>();
 
-  /** Fingerprints a request and names what broke the cache since the session's last one (DESIGN §9.4). */
-  const checkCache = (session: Session, body: Anthropic.MessageCreateParams) => {
-    const sent = fingerprint(session.route, body, session.transcript.compressions.length);
-    const previous = lastSent.get(session.transcript);
-    lastSent.set(session.transcript, sent);
+  /** Names what broke the cache since the session's last request to `provider` (DESIGN §9.4). */
+  const checkCache = (session: Session, provider: string, sent: Sent) => {
+    const sentBy = lastSent.get(session.transcript) ?? new Map<string, Sent>();
+    lastSent.set(session.transcript, sentBy);
+    const previous = sentBy.get(provider);
+    sentBy.set(provider, sent);
     const what = previous && cacheBreak(previous, sent);
     if (!what) return;
     const message = `Native session ${session.transcript.id} broke the prompt cache: ${what}. Within a session the system prompt and tools never change, earlier messages only at a compression, and the model, thinking and effort only with the route (ADR 0022).`;
@@ -378,7 +374,9 @@ export const makeNativeAdapter = (options: {
         options.reach.folders,
         { context, skills, delegates },
         mcp?.definitions,
-        options.toolSearch,
+        // The provider it opens on decides, and the header keeps it (DESIGN §9.4); a bridge's tools are ordinary ones,
+        // so any provider takes them later.
+        served(input.route.model)?.provider.toolSearch,
       );
       const transcript = createTranscript(dir, randomUUID(), prefix);
       const flagged = skills.filter((s) => s.flagged).map((s) => s.name);
@@ -458,7 +456,7 @@ export const makeNativeAdapter = (options: {
     // A turn's own effort (DESIGN §8.7 auto effort) goes in as an effort message before it, which keeps the cache; the
     // next turn without one goes back to the route's the same way. A model without effort levels takes neither.
     const wanted = input.effort ?? session.route.effort;
-    const levels = nativeCatalog.find((e) => e.model === session.route.model)?.efforts ?? [];
+    const levels = served(session.route.model)?.entry.efforts ?? [];
     if (levels.length > 0 && wanted !== (saidEffort(session.transcript.entries) ?? session.route.effort))
       append({ role: "system", content: [], output_config: { effort: wanted } });
     append({ role: "user", content });
@@ -477,32 +475,29 @@ export const makeNativeAdapter = (options: {
         }
         yield { type: "model.called" };
       }
-      const { model, effort } = session.route;
-      const entry = nativeCatalog.find((e) => e.model === model);
-      if (!entry) throw new HarnessError({ message: unknownModel(model) });
+      const route = session.route;
+      const { model } = route;
+      const use = served(model);
+      if (!use) throw new HarnessError({ message: unknownModel(model) });
+      const { entry, provider } = use;
       if (turn.depth === 0 && options.compress !== false) yield* compressIfDue(session, input, entry.context, signal);
-      const body: Anthropic.MessageCreateParamsNonStreaming = {
-        model,
-        max_tokens: maxTokens,
-        system: session.transcript.prefix.system,
-        tools: session.transcript.prefix.tools,
-        // The second breakpoint moves along with the conversation; the first ends the fixed prefix.
-        cache_control: { type: "ephemeral" },
-        messages: requestMessages(session.transcript.entries, entry.efforts.length > 0, session.transcript.compressions.at(-1)),
-        // A model without effort levels (Haiku 4.5) takes neither effort nor adaptive thinking.
-        ...(entry.efforts.length === 0 ? {} : { thinking: { type: "adaptive" as const }, output_config: { effort } }),
-      };
-      checkCache(session, body);
-      let reply: Anthropic.Message;
+      let reply: ProviderReply;
       try {
-        const perTurn = body.messages.some((m) => m.role === "system");
-        const stream = client.messages.stream(body, { signal, ...(perTurn && { headers: { "anthropic-beta": perMessageEffort } }) });
-        for await (const event of stream)
-          if (event.type === "content_block_delta" && event.delta.type === "text_delta")
-            yield { type: "text.delta", text: event.delta.text };
-        reply = await stream.finalMessage();
+        const sending = provider.send({
+          route,
+          entry,
+          prefix: session.transcript.prefix,
+          entries: session.transcript.entries,
+          compressions: session.transcript.compressions,
+          maxTokens,
+          signal,
+          check: (sent) => checkCache(session, provider.id, sent),
+        });
+        let next = await sending.next();
+        for (; !next.done; next = await sending.next()) yield { type: "text.delta", text: next.value };
+        reply = next.value;
       } catch (e) {
-        const failed = signal.aborted ? undefined : classify(e, model);
+        const failed = signal.aborted ? undefined : provider.classify(e, model);
         // A child's failure goes back to the agent that delegated to it, which decides what's next.
         if (!failed || turn.depth > 0) throw e;
         failing.add(`${entry.provider} ${failed.model ?? ""}`);
@@ -513,38 +508,29 @@ export const makeNativeAdapter = (options: {
           r.decision === "deny" && r.feedback
             ? r.feedback
             : `${describeFailure({ provider: entry.provider, ...failed })}. Try again then, or pick another route.`;
-        throw new HarnessError({ message: `${why} The API said: ${failed.error}${failed.reason === "auth" ? ` ${setKey}` : ""}` });
+        const fix = provider.fix(failed.reason);
+        throw new HarnessError({ message: `${why} The API said: ${failed.error}${fix ? ` ${fix}` : ""}` });
       }
       const recovered = [`${entry.provider} ${model}`, `${entry.provider} `].filter((key) => failing.delete(key));
       if (recovered.length > 0) yield { type: "provider.succeeded", provider: entry.provider, model };
-      // Whole and unchanged, thinking blocks included: they go back to the model exactly as it sent them.
-      append({ role: "assistant", content: reply.content as Anthropic.ContentBlockParam[] });
-      const tokens = {
-        inputTokens: reply.usage.input_tokens,
-        outputTokens: reply.usage.output_tokens,
-        cacheReadTokens: reply.usage.cache_read_input_tokens ?? 0,
-        cacheWriteTokens: reply.usage.cache_creation_input_tokens ?? 0,
-      };
+      // Whole and unchanged, thinking and carried blocks included: they go back to the provider exactly as it sent them.
+      append({ role: "assistant", content: reply.content });
+      const { tokens } = reply;
       lastPrompt.set(session.transcript, { tokens: tokens.inputTokens + tokens.cacheReadTokens + tokens.cacheWriteTokens, at: Date.now() });
       const costUsd = listCost(entry.price, tokens);
       turn.spent.usd += costUsd;
-      yield { type: "usage", model, accessMode: "metered", ...tokens, costUsd };
+      yield { type: "usage", model, accessMode: entry.access, ...reply.tokens, costUsd };
       for (const block of reply.content)
         if (block.type === "text" && block.text !== "") yield { type: "item", item: { kind: "assistant.message", text: block.text } };
-      if (reply.stop_reason === "refusal") {
-        const why = reply.stop_details?.category ? ` (${reply.stop_details.category})` : "";
+      if (reply.stop === "refusal") {
+        const why = reply.refusal ? ` (${reply.refusal})` : "";
         yield finished("error", `The model declined this request${why}. Rephrase it, or pick another route.`);
         return;
       }
       // A bridge's tool_call runs as the tool it names, under that name (DESIGN §9.4).
-      const uses = reply.content
-        .filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
-        .map((use) => unwrapCall(use, session.transcript.prefix.deferred));
-      if (reply.stop_reason === "max_tokens") {
-        yield finished(
-          "error",
-          `The reply hit the ${maxTokens.toLocaleString("en-US")}-token output limit before it finished. Ask for less at once.`,
-        );
+      const uses = reply.content.filter((b) => b.type === "tool_use").map((use) => unwrapCall(use, session.transcript.prefix.deferred));
+      if (reply.stop === "max_tokens") {
+        yield finished("error", "The reply hit the model's output limit before it finished. Ask for less at once.");
         return;
       }
       if (limits?.maxCost !== undefined && limits.spentUsd + turn.spent.usd > limits.maxCost) {
@@ -552,7 +538,7 @@ export const makeNativeAdapter = (options: {
         return;
       }
       // The API paused a long run of its own tools (tool search): sending the conversation again lets it go on.
-      if (reply.stop_reason === "pause_turn") continue;
+      if (reply.stop === "pause_turn") continue;
       if (uses.length === 0) {
         // Steers that came after the agent's last tool call: hand them over, and the turn goes on until it answers them.
         const steers = turn.steers.splice(0);
@@ -570,7 +556,7 @@ export const makeNativeAdapter = (options: {
         reach,
         terminal: options.terminal,
         signal,
-        delegate: (use: Anthropic.ToolUseBlock) => child(use, session, input, turn, signal),
+        delegate: (use: Anthropic.ToolUseBlockParam) => child(use, session, input, turn, signal),
       };
       for (let i = 0; i < uses.length; ) {
         const together = uses[i]?.name === delegateTool ? uses.slice(i).findIndex((u) => u.name !== delegateTool) : 1;
@@ -665,7 +651,7 @@ export const makeNativeAdapter = (options: {
    * result; a failure goes back to the parent as an error result, but an interrupt stops it with the parent.
    */
   async function* child(
-    use: Anthropic.ToolUseBlock,
+    use: Anthropic.ToolUseBlockParam,
     parent: Session,
     input: HarnessRunInput,
     turn: Turn,
@@ -731,7 +717,7 @@ export const makeNativeAdapter = (options: {
       }
     } catch (e) {
       if (signal.aborted) throw e;
-      return { text: `The subagent failed: ${failure(e).message}`, isError: true };
+      return { text: `The subagent failed: ${failure(providers)(e).message}`, isError: true };
     }
     if (end?.status !== "success") return { text: `The subagent stopped: ${end?.error ?? "it ended without finishing"}`, isError: true };
     return { text: summaryOf(transcript.entries) };
@@ -739,11 +725,11 @@ export const makeNativeAdapter = (options: {
 
   return {
     id: "native",
+    catalog,
     run: (input) =>
       Stream.unwrap(
         Effect.gen(function* () {
-          if (!nativeCatalog.some((e) => e.model === input.route.model))
-            return yield* new HarnessError({ message: unknownModel(input.route.model) });
+          if (!served(input.route.model)) return yield* new HarnessError({ message: unknownModel(input.route.model) });
           const { session, events } = yield* Effect.tryPromise({
             try: () => open(input),
             catch: (e) =>
@@ -786,7 +772,7 @@ export const makeNativeAdapter = (options: {
           const generator = loop(session, input, content, turn, controller.signal);
           // Without `return`: Effect would await it on interrupt, and a generator parked on an approval never settles it.
           const reader = { [Symbol.asyncIterator]: () => ({ next: () => generator.next() }) };
-          return Stream.fromAsyncIterable(reader, failure).pipe(
+          return Stream.fromAsyncIterable(reader, failure(providers)).pipe(
             (s) => (events.length > 0 ? Stream.concat(Stream.fromIterable(events), s) : s),
             Stream.drainFork(input.steers.pipe(Stream.tap((steer) => Effect.sync(() => void turn.steers.push(steer))))),
             // An interrupt aborts the request in flight, so a half-streamed reply is never committed, and kills a

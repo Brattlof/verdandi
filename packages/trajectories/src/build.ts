@@ -123,7 +123,8 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
       }
       case "turn.completed": {
         if (!thread || !turn) return undefined;
-        const accessMode = usage.length === 0 ? undefined : usage.some((u) => u.accessMode === "metered") ? "metered" : "subscription";
+        // Metered if any of it was, else subscription if any of it was, else local.
+        const accessMode = (["metered", "subscription", "local"] as const).find((mode) => usage.some((u) => u.accessMode === mode));
         return {
           v: 1,
           ...thread,

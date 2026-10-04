@@ -14,6 +14,22 @@ export type Prefix = {
 };
 
 /**
+/**
+ * What a provider sent that only it reads back, carried unchanged in the transcript and sent back only to the
+ * `provider` it came from (catalog `provider` id), e.g. a Chat Completions endpoint's `reasoning_details`.
+ */
+export type CarriedBlock = { readonly type: "carried"; readonly provider: string; readonly value: Record<string, unknown> };
+
+/**
+ * A session's normalized content blocks (DESIGN §9.5): text, image, tool use, tool result and thinking in the Messages
+ * API's shapes, which v1 transcripts hold, plus carried ones. Each provider sends the blocks it can and drops the rest
+ * (ADR 0035).
+ */
+export type Block = Anthropic.ContentBlockParam | CarriedBlock;
+
+export type Message = { readonly role: "user" | "assistant"; readonly content: Block[] };
+
+/**
  * An effort-only system message (beta `mid-conversation-output-config-2026-07-01`, ADR 0022): the effort from the next
  * user message on, until another one changes it, without the cache miss a top-level effort change costs (DESIGN §8.7).
  */
@@ -24,10 +40,7 @@ export type EffortMessage = {
 };
 
 /** One message of a session, tagged with the Verdandi turn it belongs to, so a revert can fork after any turn. */
-export type Entry = {
-  readonly turnId: string;
-  readonly message: { readonly role: "user" | "assistant"; readonly content: Anthropic.ContentBlockParam[] } | EffortMessage;
-};
+export type Entry = { readonly turnId: string; readonly message: Message | EffortMessage };
 
 /** The effort the transcript's last effort message set, which holds from there on; undefined when there's none. */
 export const saidEffort = (entries: readonly Entry[]) => {
@@ -133,20 +146,28 @@ const interrupted = (id: string): Anthropic.ToolResultBlockParam => ({
 });
 
 /**
- * The messages a request sends, built from the transcript without changing it. A tool call an interrupt left without
- * a result gets one saying so, and user messages in a row (an interrupt before the reply) are joined, so user and
- * assistant turns alternate (DESIGN §9.4). The same transcript always builds the same messages, so the cache holds.
- * Effort messages are left out for a model without effort levels (`efforts` false), which refuses them.
+/**
+ * The messages a request sends, built from the transcript without changing it, with only the blocks `sends` keeps (a
+ * provider's own, ADR 0035); a message left with none is skipped. A tool call an interrupt left without a result gets
+ * one saying so, and user messages in a row (an interrupt before the reply) are joined, so user and assistant turns
+ * alternate (DESIGN §9.4). The same transcript always builds the same messages, so the cache holds. Effort messages are
+ * left out when `efforts` is false: a model without effort levels refuses them, and a Chat Completions endpoint takes
+ * none.
  *
  * With a `compression` (the session's latest, DESIGN §16), each tool result it pruned is sent as its stand-in, and
  * with a summary the entries before its `keepFrom` go: the summary's message leads, then the latest effort message
  * before the cut, then the rest, less results of calls that were cut.
  */
-export const requestMessages = (entries: readonly Entry[], efforts = true, compression?: Compression): Anthropic.MessageParam[] => {
-  const out: ({ role: "user" | "assistant"; content: Anthropic.ContentBlockParam[] } | EffortMessage)[] = [];
+export const requestMessages = (
+  entries: readonly Entry[],
+  efforts = true,
+  compression?: Compression,
+  sends: (block: Block) => boolean = () => true,
+): (Message | EffortMessage)[] => {
+  const out: ({ role: "user" | "assistant"; content: Block[] } | EffortMessage)[] = [];
   let open: string[] = [];
   const called = new Set<string>();
-  const answer = (content: readonly Anthropic.ContentBlockParam[]) => {
+  const answer = (content: readonly Block[]) => {
     const answered = new Set(content.flatMap((b) => (b.type === "tool_result" ? [b.tool_use_id] : [])));
     const missing = open.filter((id) => !answered.has(id)).map(interrupted);
     open = [];
@@ -164,11 +185,11 @@ export const requestMessages = (entries: readonly Entry[], efforts = true, compr
       ]
     : [...entries];
   for (const entry of kept) {
-    const message =
+    const compressed =
       entry.message.role === "user" && compression
         ? {
             role: "user" as const,
-            content: entry.message.content.flatMap((b): Anthropic.ContentBlockParam[] => {
+            content: entry.message.content.flatMap((b): Block[] => {
               if (b.type !== "tool_result") return [b];
               if (!called.has(b.tool_use_id)) return [];
               const stand = pruned[b.tool_use_id];
@@ -176,15 +197,16 @@ export const requestMessages = (entries: readonly Entry[], efforts = true, compr
             }),
           }
         : entry.message;
-    if (message.role === "assistant") for (const b of message.content) if (b.type === "tool_use") called.add(b.id);
-    if (message.role === "user" && message.content.length === 0) continue;
-    if (message.role === "system") {
+    if (compressed.role === "assistant") for (const b of compressed.content) if (b.type === "tool_use") called.add(b.id);
+    if (compressed.role === "system") {
       if (!efforts) continue;
       // A tool call left open gets its result before it, where the next user message would have put it.
       if (open.length > 0) out.push({ role: "user", content: answer([]) });
-      out.push(message);
+      out.push(compressed);
       continue;
     }
+    const message = { role: compressed.role, content: compressed.content.filter(sends) };
+    if (message.content.length === 0) continue;
     if (message.role === "user") {
       const content = answer(message.content);
       const last = out.at(-1);

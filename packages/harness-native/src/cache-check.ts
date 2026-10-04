@@ -25,7 +25,7 @@ export type Sent = {
   readonly blocks: readonly { readonly hash: string; readonly message: number; readonly block: number; readonly effort?: true }[];
 };
 
-const hash = (value: unknown) => Bun.hash(JSON.stringify(value)).toString(36);
+export const hash = (value: unknown) => Bun.hash(JSON.stringify(value)).toString(36);
 
 export const fingerprint = (route: Route, body: Anthropic.MessageCreateParams, compressions = 0): Sent => ({
   route,

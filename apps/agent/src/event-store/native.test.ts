@@ -117,10 +117,10 @@ test("verdandid runs a native turn end to end: streamed text, a Verdandi tool th
   );
 });
 
-test("the native harness's models join the catalog only while it runs", () => {
+test("the native harness's Anthropic models join the catalog only while it runs with a key", () => {
   const native = (c: ReturnType<typeof catalogFor>) => c.filter((e) => e.harness === "native").map((e) => e.model);
   expect(native(catalogFor({ "claude-code": {} }))).toEqual([]);
-  expect(native(catalogFor({ "claude-code": {}, native: {} }))).toEqual(nativeCatalog.map((e) => e.model));
+  expect(native(catalogFor({ "claude-code": {}, native: nativeFor(makeTempHome(), fetch) }))).toEqual(nativeCatalog.map((e) => e.model));
 });
 
 test("a native turn reads and edits a file, and the turn's diff shows it; in plan mode the same edit is refused", async () => {
