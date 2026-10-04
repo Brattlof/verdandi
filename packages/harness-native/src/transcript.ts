@@ -3,8 +3,15 @@ import { join } from "node:path";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Effort } from "@verdandi/contracts";
 
-/** What a session sends ahead of its conversation, fixed for its life: the cache rule (ADR 0022). */
-export type Prefix = { readonly system: Anthropic.TextBlockParam[]; readonly tools: Anthropic.Tool[] };
+/**
+ * What a session sends ahead of its conversation, fixed for its life: the cache rule (ADR 0022). `deferred`: the MCP
+ * tools the bridge's `tool_search` finds, which the request leaves out (DESIGN §9.4).
+ */
+export type Prefix = {
+  readonly system: Anthropic.TextBlockParam[];
+  readonly tools: (Anthropic.Tool | Anthropic.ToolSearchToolBm25_20251119)[];
+  readonly deferred?: Anthropic.Tool[];
+};
 
 /**
  * An effort-only system message (beta `mid-conversation-output-config-2026-07-01`, ADR 0022): the effort from the next
@@ -61,7 +68,12 @@ export const loadTranscript = (dir: string, id: string): Transcript | undefined 
   });
   const [header, ...entries] = parsed as [Prefix & { v: number }, ...Entry[]];
   if (header?.v !== 1) throw new Error(`${file} doesn't start with a native session header.`);
-  return { id, file, prefix: { system: header.system, tools: header.tools }, entries };
+  return {
+    id,
+    file,
+    prefix: { system: header.system, tools: header.tools, ...(header.deferred && { deferred: header.deferred }) },
+    entries,
+  };
 };
 
 export const appendEntry = (transcript: Transcript, entry: Entry) => {

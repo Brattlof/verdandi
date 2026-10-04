@@ -23,6 +23,7 @@ import { closeMcp, type McpTools, openMcp } from "./mcp.ts";
 import { childContent, modeNotes, opensFiles, planTool, sessionPrefix, turnContent } from "./prompt.ts";
 import { classify } from "./provider-failure.ts";
 import { runTerminal, type Terminal, terminalTool } from "./terminal.ts";
+import { callTool, describeTool, searchDeferred, searchTool, type ToolSearch, unwrapCall } from "./tool-search.ts";
 import {
   appendEntry,
   createTranscript,
@@ -160,7 +161,19 @@ async function* runTool(
     };
   }
   // A session from before the file tools, the terminal or delegation keeps the tool list it started with.
-  const has = session.transcript.prefix.tools.some((t) => t.name === use.name);
+  const { tools, deferred } = session.transcript.prefix;
+  const has = tools.some((t) => t.name === use.name) || (deferred?.some((t) => t.name === use.name) ?? false);
+  // The bridge (DESIGN §9.4): what it finds is the servers' own text, so it's screened like their results.
+  const screened = async (text: string) => (input.screen ? await input.screen(text) : text);
+  if (deferred && has && use.name === searchTool) return { text: await screened(searchDeferred(deferred, String(args.query ?? ""))) };
+  if (deferred && has && use.name === describeTool) {
+    const found = deferred.find((t) => t.name === args.name);
+    if (!found) return { text: `There's no tool named ${String(args.name)} to describe. Find one with ${searchTool}.`, isError: true };
+    return { text: await screened(JSON.stringify(found.input_schema)) };
+  }
+  // A `tool_call` naming a deferred tool already runs as that tool (`unwrapCall`); this one names none.
+  if (deferred && has && use.name === callTool)
+    return { text: `There's no tool named ${String(args.name)} to call. Find one with ${searchTool}.`, isError: true };
   if (use.name === delegateTool && has) return yield* local.delegate(use);
   if (use.name === terminalTool && has) {
     const held = heldBack(turn, input.mode);
@@ -246,6 +259,11 @@ export const makeNativeAdapter = (options: {
   readonly cacheBreaks?: CacheBreaks;
   /** The skills a new session's index lists (DESIGN §14.4), read when it opens. */
   readonly skills?: () => readonly SkillEntry[];
+  /**
+   * How a new session finds the MCP tools it defers once they're many (DESIGN §9.4): the API's own search (`server`,
+   * the default), or Verdandi's bridge (`bridge`), for a provider without one.
+   */
+  readonly toolSearch?: ToolSearch;
 }): HarnessAdapter => {
   // Everything explicit, so nothing in the environment meant for Claude Code (a base URL, a token, debug logging) applies here.
   const client = new Anthropic({
@@ -295,7 +313,7 @@ export const makeNativeAdapter = (options: {
     };
     /** Connects a resumed session again to the MCP servers its tool list has tools of (DESIGN §9.4). */
     const reconnect = async (prefix: Transcript["prefix"], events: HarnessEvent[]) => {
-      const names = new Set(prefix.tools.flatMap((t) => (t.name.startsWith("mcp__") ? [t.name] : [])));
+      const names = new Set([...prefix.tools, ...(prefix.deferred ?? [])].flatMap((t) => (t.name.startsWith("mcp__") ? [t.name] : [])));
       if (names.size === 0 || !input.mcp) return undefined;
       const config = await mcpConfig(input.mcp);
       const opened = await openMcp(config.servers, input.cwd, names);
@@ -324,7 +342,14 @@ export const makeNativeAdapter = (options: {
       // Its MCP servers' tools are fixed in its tool list now; tools a server adds later reach the next session.
       const config = input.mcp && (await mcpConfig(input.mcp));
       const mcp = config && (await openMcp(config.servers, input.cwd));
-      const prefix = sessionPrefix(input.cwd, input.tools ?? [], options.reach.folders, { context, skills, delegates }, mcp?.definitions);
+      const prefix = sessionPrefix(
+        input.cwd,
+        input.tools ?? [],
+        options.reach.folders,
+        { context, skills, delegates },
+        mcp?.definitions,
+        options.toolSearch,
+      );
       const transcript = createTranscript(dir, randomUUID(), prefix);
       const flagged = skills.filter((s) => s.flagged).map((s) => s.name);
       return bind(
@@ -479,7 +504,10 @@ export const makeNativeAdapter = (options: {
         yield finished("error", `The model declined this request${why}. Rephrase it, or pick another route.`);
         return;
       }
-      const uses = reply.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+      // A bridge's tool_call runs as the tool it names, under that name (DESIGN §9.4).
+      const uses = reply.content
+        .filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use")
+        .map((use) => unwrapCall(use, session.transcript.prefix.deferred));
       if (reply.stop_reason === "max_tokens") {
         yield finished(
           "error",
@@ -491,6 +519,8 @@ export const makeNativeAdapter = (options: {
         yield finished("limit", `Stopped at the task's $${limits.maxCost} cost limit.`);
         return;
       }
+      // The API paused a long run of its own tools (tool search): sending the conversation again lets it go on.
+      if (reply.stop_reason === "pause_turn") continue;
       if (uses.length === 0) {
         // Steers that came after the agent's last tool call: hand them over, and the turn goes on until it answers them.
         const steers = turn.steers.splice(0);
@@ -559,8 +589,12 @@ export const makeNativeAdapter = (options: {
     if ("error" in routed) return { text: `Verdandi didn't delegate the subtask: ${routed.error}`, isError: true };
     const mode = call.profile || heldBack(turn, input.mode) ? "ask" : "build";
     const leftOut = new Set(["report_blocked", ...(depth < delegation.maxDepth ? [] : [delegateTool])]);
-    const { system, tools } = parent.transcript.prefix;
-    const transcript = createTranscript(options.sessionsDir, randomUUID(), { system, tools: tools.filter((t) => !leftOut.has(t.name)) });
+    const { system, tools, deferred } = parent.transcript.prefix;
+    const transcript = createTranscript(options.sessionsDir, randomUUID(), {
+      system,
+      tools: tools.filter((t) => !leftOut.has(t.name)),
+      ...(deferred && { deferred }),
+    });
     // It shares its parent's MCP servers, which stop with the parent.
     const session: Session = { transcript, route: routed.route, mode, turn: undefined, mcp: parent.mcp };
     const own: Turn = { waiting: turn.waiting, steers: [], planning: false, running: turn.running, spent: turn.spent, depth };

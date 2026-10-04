@@ -721,11 +721,17 @@ test("a new session's prompt indexes the skills by name, leaving out a flagged d
 });
 
 /** An MCP server for a test: the fake one, or `down`, one that exits at once. Its tools ask unless `quiet` lists them. */
-const mcpServer = (name: string, more: { readonly down?: boolean; readonly quiet?: readonly string[] } = {}): McpServer => ({
+const mcpServer = (
+  name: string,
+  more: { readonly down?: boolean; readonly quiet?: readonly string[]; readonly extra?: number } = {},
+): McpServer => ({
   name,
   command: process.execPath,
   args: more.down ? ["-e", "process.exit(3)"] : [fakeMcpServer],
-  env: Object.fromEntries(Object.entries(process.env).flatMap(([k, v]) => (v === undefined ? [] : [[k, v]]))),
+  env: {
+    ...Object.fromEntries(Object.entries(process.env).flatMap(([k, v]) => (v === undefined ? [] : [[k, v]]))),
+    FAKE_MCP_TOOLS: String(more.extra ?? 0),
+  },
   ask: true,
   tools: Object.fromEntries((more.quiet ?? []).map((tool) => [tool, { ask: false }])),
 });
@@ -817,4 +823,109 @@ test("a session resumed after a restart reconnects to its servers and keeps its 
     ),
   );
   expect(JSON.stringify(broken)).toContain("mcp.yaml: servers.github.command must be a string.");
+});
+
+/** The names of the tools a request loads, leaving out deferred ones. */
+const loaded = (body: Record<string, unknown> | undefined) =>
+  ((body?.tools ?? []) as { name: string; defer_loading?: boolean }[]).flatMap((t) => (t.defer_loading ? [] : [t.name]));
+const core = (body: Record<string, unknown> | undefined) => loaded(body).filter((n) => !n.startsWith("tool_") && !n.startsWith("mcp__"));
+
+test("with many MCP tools the API's tool search loads them: deferred in an unchanging tool list, a found one runs by its name through its approval", async () => {
+  const { home, fake, adapter } = setup([
+    {
+      blocks: [
+        {
+          type: "server",
+          block: { type: "server_tool_use", id: "srvtoolu_1", name: "tool_search_tool_bm25", input: { query: "number 42" } },
+        },
+        {
+          type: "server",
+          block: {
+            type: "tool_search_tool_result",
+            tool_use_id: "srvtoolu_1",
+            content: {
+              type: "tool_search_tool_search_result",
+              tool_references: [{ type: "tool_reference", tool_name: "mcp__fake__tool_42" }],
+            },
+          },
+        },
+        { type: "tool_use", id: "toolu_1", name: "mcp__fake__tool_42", input: { text: "hi" } },
+      ],
+    },
+    { blocks: [{ type: "text", text: "Done." }] },
+  ]);
+  const servers = [mcpServer("fake", { extra: 60 })];
+  const events = await run(
+    adapter,
+    input("t1", "Use tool 42", { cwd: home, mcp: async () => ({ servers, notices: [] }), screen: screened }),
+    (e) => {
+      if (e.type === "approval.requested") void Effect.runPromise(adapter.respond(threadId, e.requestId, { decision: "allow" }));
+    },
+  );
+
+  const [first, second] = fake.requests.map((r) => r.body);
+  const tools = first?.tools as { name: string; defer_loading?: boolean }[];
+  expect(loaded(first)).toEqual([...core(first), "tool_search_tool_bm25"]);
+  expect(tools.filter((t) => t.name.startsWith("mcp__fake__"))).toHaveLength(63);
+  expect(tools.filter((t) => t.name.startsWith("mcp__")).every((t) => t.defer_loading)).toBe(true);
+  expect(events.filter((e) => e.type === "approval.requested")).toEqual([
+    { type: "approval.requested", requestId: expect.any(String), toolName: "mcp__fake__tool_42", input: { text: "hi" } },
+  ]);
+  expect(events).toContainEqual({
+    type: "item",
+    item: { kind: "tool.result", toolUseId: "toolu_1", isError: false, content: "[screened] tool_42" },
+  });
+  // The search's blocks go back as the API sent them, and the prefix never changes.
+  expect(JSON.stringify(messagesOf(second ?? {})[1])).toContain("tool_search_tool_result");
+  expect(JSON.stringify([second?.system, second?.tools])).toBe(JSON.stringify([first?.system, first?.tools]));
+  await Effect.runPromise(adapter.close());
+});
+
+test("on the bridge, deferred MCP tools stay out of the request: tool_search finds one and tool_call runs it by its real name, after a restart too", async () => {
+  const { home, fake } = setup([
+    { blocks: [{ type: "tool_use", id: "toolu_1", name: "tool_search", input: { query: "number 42" } }] },
+    { blocks: [{ type: "tool_use", id: "toolu_2", name: "tool_call", input: { name: "mcp__fake__tool_42", arguments: { text: "hi" } } }] },
+    { blocks: [{ type: "text", text: "Done." }] },
+    {
+      blocks: [{ type: "tool_use", id: "toolu_3", name: "tool_call", input: { name: "mcp__fake__tool_7", arguments: { text: "again" } } }],
+    },
+    { blocks: [{ type: "text", text: "Done again." }] },
+  ]);
+  const mcp = async () => ({ servers: [mcpServer("fake", { extra: 60 })], notices: [] });
+  const approve = (adapter: ReturnType<typeof makeNativeAdapter>) => (e: HarnessEvent) => {
+    if (e.type === "approval.requested") void Effect.runPromise(adapter.respond(threadId, e.requestId, { decision: "allow" }));
+  };
+  const before = makeNativeAdapter({ ...options(home, fake.fetch), toolSearch: "bridge" });
+  const events = await run(before, input("t1", "Use tool 42", { cwd: home, mcp, screen: screened }), approve(before));
+
+  const [first] = fake.requests.map((r) => r.body);
+  expect(loaded(first)).toEqual([...core(first), "tool_search", "tool_describe", "tool_call"]);
+  expect(JSON.stringify(first)).not.toContain("Fake tool number");
+  const results = events.flatMap((e) => (e.type === "item" && e.item.kind === "tool.result" ? [e.item.content] : []));
+  expect(results[0]).toContain("[screened] - mcp__fake__tool_42: Fake tool number 42");
+  expect(events).toContainEqual({
+    type: "item",
+    item: { kind: "tool.call", toolUseId: "toolu_2", name: "mcp__fake__tool_42", input: { text: "hi" } },
+  });
+  expect(events.filter((e) => e.type === "approval.requested").map((e) => e.type === "approval.requested" && e.toolName)).toEqual([
+    "mcp__fake__tool_42",
+  ]);
+  expect(results[1]).toBe("[screened] tool_42");
+  const sessionId = events[0]?.type === "session.started" ? events[0].sessionId : "";
+  await Effect.runPromise(before.close());
+
+  // After a restart the transcript's header still holds the deferred tools, and the servers reconnect.
+  const after = makeNativeAdapter({ ...options(home, fake.fetch), toolSearch: "bridge" });
+  const resumed = await run(
+    after,
+    input("t2", "Use tool 7", { cwd: home, resumeSessionId: sessionId, mcp, screen: screened }),
+    approve(after),
+  );
+  expect(resumed).toContainEqual({
+    type: "item",
+    item: { kind: "tool.result", toolUseId: "toolu_3", isError: false, content: "[screened] tool_7" },
+  });
+  for (const body of fake.requests.map((r) => r.body))
+    expect(JSON.stringify([body.system, body.tools])).toBe(JSON.stringify([first?.system, first?.tools]));
+  await Effect.runPromise(after.close());
 });

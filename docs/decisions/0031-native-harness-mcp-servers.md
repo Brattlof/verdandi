@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (issue #208, 2026-10-04).
+Accepted (issue #208, 2026-10-04). Decision 9 added with tool search (#206).
 
 ## Context
 
@@ -18,10 +18,11 @@ DESIGN §9.4 gives the native harness "the full Verdandi tool set, plus MCP serv
 6. **Processes.** Each server starts in the thread's folder with verdandid's environment without its secrets (`childEnv`), plus its own variables, in its own process group on POSIX. It stops with its session (`close`, and verdandid stopping): its input closes, then after a second its process tree is killed by the PID captured at spawn.
 7. **Results.** A result's text goes through the reactor's `screen`, as `session_search`'s does: a flagged one reaches the agent under the warning and is recorded as `injection.flagged` with source `mcp`. Other content (images, binary resources) is named and left out; a result is capped at 100,000 characters.
 8. **Other harnesses.** Claude Code reads its own MCP config and is given none of Verdandi's servers. The fake harness connects to none.
+9. **Many tools.** A session with 10 or more MCP tools, or 40,000 characters of their definitions, defers them all, decided when it opens and kept in the transcript's header (`packages/harness-native/src/tool-search.ts`). On the Anthropic API they're sent with `defer_loading` after its `tool_search_tool_bm25`, so a found tool's schema is appended and the cached prefix holds. The adapter's `toolSearch: "bridge"`, for providers without server-side search (#182), keeps them out of the request behind `tool_search` (ranked by the query's words, results screened), `tool_describe` and `tool_call`, whose description lists only the configured server names. `tool_call` runs as the tool it names, so its approval, `tool.call` item and errors carry the real name. Verdandi's own tools are never deferred.
 
 ## Consequences
 
 - The client is a small stdio client of Verdandi's own instead of `@modelcontextprotocol/sdk` (installed with the Agent SDK, but not a direct dependency). Remote servers, sampling, roots and elicitation need that SDK; it's the upgrade path.
 - An idle session keeps its servers running until verdandid stops or the session is replaced.
 - A user who wants one list for both harnesses keeps it in Claude Code's files and sets `importClaudeCode: true`; servers only in Verdandi's files reach native only.
-- Tool search (#206) can defer these tools, since they're fixed per session like the rest of the prefix.
+- A session keeps the search it opened with: one rerouted to a provider without server-side search still sends the API's search tool.
