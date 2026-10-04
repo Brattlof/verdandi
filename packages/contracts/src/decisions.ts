@@ -67,6 +67,8 @@ export const decisionKinds = {
   injection: "untrusted.injection",
   /** noul: does this finished task hold something worth remembering or turning into a skill? Gates background review (§14.5). */
   reviewWorth: "task.review-worth",
+  /** choice: should a terminal command run without asking (`allow`), be refused (`deny`), or go to the user (`ask`)? (§17) */
+  commandGuard: "terminal.guard",
 } as const;
 
 /**

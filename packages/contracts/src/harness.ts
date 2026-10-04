@@ -185,6 +185,15 @@ export type HarnessRunInput = {
    * a fresh session on the turn's harness, whose requests and usage are the turn's (Claude Code routes its own Task
    * subagents through `route.subagents`, ADR 0014; fake: none). Absent when Verdandi doesn't delegate, e.g. a background review.
    */
+  /**
+   * Smart approvals (DESIGN §17): rates terminal command `command` before the harness asks the user about it. `allow`
+   * runs it unasked, `deny` refuses it with `reason` for the agent, `ask` asks the user as without it, with `reason` as the
+   * request's `note`, which tells an unattended run to deny it.
+   * Hard rules, errors and timeouts all come back as `ask`; undefined while the user has turned smart approvals off, so the
+   * command asks as without them. Native only, for its `terminal`; Claude Code keeps its own permission settings (fake:
+   * none). Absent unless the profile's `approvals.yaml` turns smart approvals on.
+   */
+  readonly guard?: (command: string) => Promise<{ readonly verdict: "allow" | "deny" | "ask"; readonly reason: string } | undefined>;
   readonly delegate?: {
     readonly route: (call: {
       readonly toolUseId: string;

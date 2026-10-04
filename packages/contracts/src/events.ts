@@ -239,6 +239,13 @@ export const TaskDelegated = Schema.Struct({
   to: Route,
   decision: RouteDecision,
 });
+/** On `profileStream`: the user turned smart approvals on or off (DESIGN §17); the latest holds while `approvals.yaml` enables them. */
+export const ApprovalsSmartChanged = Schema.Struct({
+  type: Schema.Literal("approvals.smart.changed"),
+  v: v1,
+  threadId: ThreadId,
+  on: Schema.Boolean,
+});
 /** The harness waits for the user to allow or deny a tool call. */
 export const ApprovalRequested = Schema.Struct({
   type: Schema.Literal("approval.requested"),
@@ -815,6 +822,7 @@ export const Event = Schema.Union([
   ProviderRecovered,
   TurnRerouted,
   TurnEffortSet,
+  ApprovalsSmartChanged,
   TaskDelegated,
   ApprovalRequested,
   UserInputRequested,
@@ -925,6 +933,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "provider.recovered@1": ProviderRecovered,
   "turn.rerouted@1": TurnRerouted,
   "turn.effort.set@1": TurnEffortSet,
+  "approvals.smart.changed@1": ApprovalsSmartChanged,
   "task.delegated@1": TaskDelegated,
   "approval.requested@1": ApprovalRequested,
   "user-input.requested@1": UserInputRequested,

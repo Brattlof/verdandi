@@ -108,6 +108,18 @@ const parse = (argv: readonly string[]): Options => {
   };
 };
 
+/**
+ * A native terminal command smart approvals sent to the user, which carries their reason as its `note` (DESIGN §17):
+ * with nobody to ask, it counts as a denial and the agent goes on, instead of the run stopping.
+ */
+const smartAsk = (r: PendingRequest) =>
+  r.type === "approval.requested" &&
+  r.toolName === "terminal" &&
+  typeof r.input === "object" &&
+  r.input !== null &&
+  "note" in r.input &&
+  typeof r.input.note === "string";
+
 /** What the turn stopped for, in a line, or with a plan the plan itself. */
 const describeRequest = (r: PendingRequest) =>
   r.type === "commands.trust.requested"
@@ -317,8 +329,8 @@ const runTurn = (server: ServerFile, o: Options) =>
         e.type === "skill.proposed" ||
         e.type === "commands.trust.requested"
       ) {
-        if (o.deny) {
-          process.stderr.write(`[denied ${describeRequest(e)}]\n`);
+        if (o.deny || smartAsk(e)) {
+          process.stderr.write(`[denied ${describeRequest(e)}${o.deny ? "" : ": nobody is here to approve it"}]\n`);
           const resolution = { decision: "deny" } as const;
           yield* dispatch({ type: "approval.respond", commandId: uuid<CommandId>(), threadId, requestId: e.requestId, resolution }).pipe(
             Effect.catchTag("CommandRejected", () => Effect.void), // the turn ended first

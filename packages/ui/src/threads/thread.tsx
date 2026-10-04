@@ -615,6 +615,12 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
       {item.why}
     </p>
   ),
+  // Smart approvals ran or refused a command without asking (DESIGN §17).
+  "approval.auto": ({ item }) => (
+    <p role="note" className={`my-1 text-xs ${item.decision === "deny" ? "text-warn" : "text-muted"}`}>
+      {item.decision === "allow" ? "Auto-approved by smart approvals" : "Refused by smart approvals"}: {item.reason}
+    </p>
+  ),
   notice: ({ item }) => (
     <p role="note" className="my-2 border border-line bg-card px-3 py-1.5 text-xs text-warn">
       {item.text}

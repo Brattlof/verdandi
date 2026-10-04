@@ -39,7 +39,7 @@ import {
   type UntrustedInput,
   type WorktreeView,
 } from "@verdandi/contracts";
-import { flagged, injectionQuestion } from "@verdandi/decisions";
+import { flagged, guardQuestion, injectionQuestion } from "@verdandi/decisions";
 import { Result } from "effect";
 import { worktreeBranch } from "../checkpoints/refs.ts";
 import { memorySnapshot, overCap, sameAs, scanMemory } from "../memory/memory.ts";
@@ -799,6 +799,21 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       decision,
     });
   },
+  // Smart approvals' guard rated a terminal command of the running turn (DESIGN §17): logged for the lab (§9.8).
+  "approval.guard": (state, c) =>
+    state.thread?.runningTurnId === c.turnId
+      ? accept({
+          type: "decision.recorded",
+          v: 2,
+          threadId: c.threadId,
+          turnId: c.turnId,
+          questions: [guardQuestion],
+          answers: [c.answer],
+          state: c.state,
+        })
+      : accept(),
+  // The user's switch for the profile's smart approvals, which only `approvals.yaml` enables (DESIGN §17).
+  "approvals.smart.set": (_state, c) => accept({ type: "approvals.smart.changed", v: 1, threadId: profileStream, on: c.on }),
   "task.error.repeat": (state, c) => {
     if (state.thread?.runningTurnId !== c.turnId || !state.thread.taskId) {
       return reject("TurnNotRunning", `Turn ${c.turnId} isn't running, so there's no task whose tool error repeated.`);

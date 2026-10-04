@@ -232,6 +232,25 @@ export const TaskDelegate = Schema.Struct({
 });
 
 /**
+ * Internal: smart approvals' guard answered about a terminal command of running turn `turnId` (DESIGN §17): `state` is
+ * what it was asked about, the command with its comments stripped, fenced as data. Recorded for the lab. Clients cannot send it.
+ */
+export const ApprovalGuard = Schema.Struct({
+  type: Schema.Literal("approval.guard"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  state: Schema.String,
+  answer: DecisionAnswer,
+});
+
+/**
+ * Turns smart approvals (DESIGN §17) on or off for the profile, where `approvals.yaml` enables them: the composer's one
+ * click, and `/smart` in `verdandi chat`. Without `smart: true` in that file it changes nothing.
+ */
+export const ApprovalsSmartSet = Schema.Struct({ type: Schema.Literal("approvals.smart.set"), commandId: CommandId, on: Schema.Boolean });
+
+/**
  * Internal: tool `tool` failed with the same error `count` times in the task of running turn `turnId` since it last
  * escalated (`escalation.repeatedErrors`), recorded before the turn completes. Clients cannot send it.
  */
@@ -509,6 +528,7 @@ export const ClientCommand = Schema.Union([
   ApprovalRespond,
   CommandsTrustRevoke,
   DeviceRevoke,
+  ApprovalsSmartSet,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
 
@@ -543,6 +563,8 @@ export const Command = Schema.Union([
   CheckpointsReport,
   TaskBlock,
   TaskErrorRepeat,
+  ApprovalGuard,
+  ApprovalsSmartSet,
   TaskDelegate,
   WorktreeReported,
   VerifiersStart,

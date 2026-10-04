@@ -11,6 +11,7 @@ import { Engine, EngineLive } from "./engine.ts";
 import { migrations } from "./migrations.ts";
 import { loadThreadView, project } from "./projector.ts";
 import {
+  ApprovalSettings,
   AttachmentsDir,
   HarnessRegistry,
   McpConfig,
@@ -512,6 +513,7 @@ describe("engine", () => {
       Layer.provideMerge(Layer.succeed(Decide, rulesDecide)),
       Layer.provideMerge(Layer.succeed(ProfileSkills, { profile: "unused", archive: "unused", extra: [] })),
       Layer.provideMerge(Layer.succeed(ReviewSettings, { enabled: false, allowMetered: false })),
+      Layer.provideMerge(Layer.succeed(ApprovalSettings, { smart: false })),
       Layer.provideMerge(SqlLive(newHome())),
     );
     const runtime = ManagedRuntime.make(layer);
