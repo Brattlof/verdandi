@@ -225,6 +225,14 @@ export const connect = (endpoint: Endpoint) => {
     return undefined;
   };
 
+  /** Whether the profile's smart approvals are enabled and on (DESIGN §17); undefined when the connection is lost. */
+  const approvals = async () => {
+    const exit = await run((rpc) => rpc.ApprovalsGet());
+    if (Exit.isSuccess(exit)) return exit.value;
+    lost.set(true); // it has no errors of its own
+    return undefined;
+  };
+
   /** The profile's skills and those in its extra folders; undefined when the connection is lost. */
   const skills = async (): Promise<SkillsView | undefined> => {
     const exit = await run((rpc) => rpc.SkillsList());
@@ -329,6 +337,7 @@ export const connect = (endpoint: Endpoint) => {
     simulate,
     attachmentUrl,
     spendCaps,
+    approvals,
     usage,
     search,
     memory,

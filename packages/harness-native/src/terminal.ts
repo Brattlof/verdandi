@@ -17,6 +17,10 @@ export type RunCommand = (
 export type Terminal = { readonly run: RunCommand; readonly outputs: string };
 
 export const terminalTool = "terminal";
+
+/** What the third terminal command denied in a row in a turn tells the agent, after the denial (DESIGN §17): tool-result text only. */
+export const stopTrying =
+  " That's the third command in a row that didn't run: stop trying variations of it. Tell the user what you wanted to run and why, and go on without it.";
 const defaultSeconds = 120;
 const maxSeconds = 600;
 /** How many whole outputs the folder keeps; older ones go as new ones come. */

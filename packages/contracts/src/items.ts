@@ -135,6 +135,16 @@ export const Item = Schema.Union([
    * `aux.handoff` task over the thread so far (DESIGN §8.2 lever 5): what was carried over, shown to the user.
    */
   Schema.Struct({ kind: Schema.Literal("handoff"), from: HarnessId, to: HarnessId, summary: Schema.String }),
+  /**
+   * Smart approvals (DESIGN §17) decided tool call `toolUseId` without asking the user: `allow` ran it, `deny` refused
+   * it and told the agent `reason`.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("approval.auto"),
+    toolUseId: Schema.String,
+    decision: Schema.Literals(["allow", "deny"]),
+    reason: Schema.String,
+  }),
   /** Something the harness or Verdandi tells the user about the turn, e.g. why a revert couldn't fork the conversation. */
   Schema.Struct({ kind: Schema.Literal("notice"), text: Schema.String }),
 ]);

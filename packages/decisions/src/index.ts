@@ -1,4 +1,5 @@
 export { type Answered, type Backend, Decide, makeDecide } from "./decide.ts";
+export { guardQuestion, guardRules, guardState, guardVerdict } from "./guard.ts";
 export {
   classificationOf,
   correctingQuestion,

@@ -19,6 +19,7 @@ import {
   trustFiles,
 } from "@verdandi/contracts";
 import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
+import { SmartApprovals } from "../approvals/smart-approvals.tsx";
 import { type Connection, type Routed, uuid } from "../client.ts";
 import { TextDiff } from "../diffs/diff.tsx";
 import { RouteChip } from "../routing/route.tsx";
@@ -185,6 +186,7 @@ export const Composer = ({
     <div className="mx-auto w-full max-w-[860px] px-3 pt-2 pb-3 sm:px-4">
       <div className="mb-1.5 flex flex-col gap-1">
         <SpendCaps connection={connection} thread={thread} rejected={capRejections} />
+        <SmartApprovals connection={connection} />
         <RouteChip connection={connection} thread={thread} />
       </div>
       <form

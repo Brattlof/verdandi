@@ -297,6 +297,8 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     withSql((sql) => sql`delete from provider_health where provider = ${e.provider} and model in ('', ${e.model})`),
   // The turn goes on at `to`; the thread keeps its route, which the next turn starts on.
   "turn.rerouted": (e) => addItem(e.turnId, { kind: "route.switch", from: e.from, to: e.to, reason: e.reason }),
+  // Read from the log when it's needed (`loadSmartApprovals`).
+  "approvals.smart.changed": () => Effect.void,
   "turn.effort.set": (e) => addItem(e.turnId, { kind: "effort", from: e.from, to: e.to, reason: e.reason }),
   "task.delegated": (e) => addItem(e.turnId, { kind: "delegation", route: e.to, reason: e.decision.reason, parentToolUseId: e.toolUseId }),
   "approval.requested": insertRequest,

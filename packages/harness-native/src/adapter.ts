@@ -22,7 +22,7 @@ import { access, fileTools, type Reach, runFileTool } from "./file-tools.ts";
 import { closeMcp, type McpTools, openMcp } from "./mcp.ts";
 import { childContent, modeNotes, opensFiles, planTool, sessionPrefix, turnContent } from "./prompt.ts";
 import { classify } from "./provider-failure.ts";
-import { runTerminal, type Terminal, terminalTool } from "./terminal.ts";
+import { runTerminal, stopTrying, type Terminal, terminalTool } from "./terminal.ts";
 import { callTool, describeTool, searchDeferred, searchTool, type ToolSearch, unwrapCall } from "./tool-search.ts";
 import {
   appendEntry,
@@ -50,6 +50,8 @@ type Turn = {
   readonly spent: { usd: number };
   /** 0 for the thread's own session, 1 for a child it delegated to, and so on. */
   readonly depth: number;
+  /** Terminal commands denied in a row, by the user or smart approvals: the third tells the agent to stop trying. */
+  denials: number;
 };
 
 /** One native session per thread, kept between turns. */
@@ -179,14 +181,27 @@ async function* runTool(
     const held = heldBack(turn, input.mode);
     if (held) return { text: held, isError: true };
     if (typeof args.command !== "string" || args.command.trim() === "") return { text: "`command` is required.", isError: true };
-    // ponytail: every command asks; smart approvals (DESIGN §17) rate a command's risk later, never auto-approving a destructive one.
-    const r = yield* request(turn, (requestId) => ({
-      type: "approval.requested",
-      requestId,
-      toolName: use.name,
-      input: { ...args, folder: input.cwd },
-    }));
-    if (r.decision !== "allow") return { text: `The user denied this.${feedback(r)}`, isError: true };
+    // Smart approvals, when on, rate it first (DESIGN §17): an allowed command runs unasked, a denied one never runs, and
+    // anything else asks the user, as every command does while they're off.
+    const rated = input.guard ? await input.guard(args.command) : undefined;
+    if (rated && rated.verdict !== "ask")
+      yield { type: "item", item: { kind: "approval.auto", toolUseId: use.id, decision: rated.verdict, reason: rated.reason } };
+    const denied = (why: string) => {
+      turn.denials++;
+      return { text: `${why}${turn.denials >= 3 ? stopTrying : ""}`, isError: true };
+    };
+    if (rated?.verdict === "deny") return denied(`Smart approvals refused this command: ${rated.reason}.`);
+    if (rated?.verdict !== "allow") {
+      const note = rated && { note: `Smart approvals sent this to you: ${rated.reason}.` };
+      const r = yield* request(turn, (requestId) => ({
+        type: "approval.requested",
+        requestId,
+        toolName: use.name,
+        input: { ...args, folder: input.cwd, ...note },
+      }));
+      if (r.decision !== "allow") return denied(`The user denied this.${feedback(r)}`);
+    }
+    turn.denials = 0;
     const running = runTerminal(args, input.cwd, local.terminal, use.id, local.signal);
     turn.running.add(running);
     try {
@@ -597,7 +612,15 @@ export const makeNativeAdapter = (options: {
     });
     // It shares its parent's MCP servers, which stop with the parent.
     const session: Session = { transcript, route: routed.route, mode, turn: undefined, mcp: parent.mcp };
-    const own: Turn = { waiting: turn.waiting, steers: [], planning: false, running: turn.running, spent: turn.spent, depth };
+    const own: Turn = {
+      waiting: turn.waiting,
+      steers: [],
+      planning: false,
+      running: turn.running,
+      spent: turn.spent,
+      depth,
+      denials: 0,
+    };
     // Its own route and mode, and the task's cost limit, but not its turn count, which counts the main agent's model calls.
     const { effort: _effort, limits, ...rest } = input;
     const childInput: HarnessRunInput = {
@@ -676,6 +699,7 @@ export const makeNativeAdapter = (options: {
             running: new Set(),
             spent: { usd: 0 },
             depth: 0,
+            denials: 0,
           };
           session.turn = turn;
           const controller = new AbortController();

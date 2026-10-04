@@ -356,6 +356,11 @@ export class Api extends RpcGroup.make(
   Rpc.make("UsageQuery", { payload: UsageFilter, success: UsageReport }),
   /** The spend caps over the thread's project and profile, with what they've spent this period; empty when none are set. */
   Rpc.make("SpendCapsGet", { payload: { threadId: ThreadId }, success: Schema.Array(SpendCap), error: SpendCapsUnavailable }),
+  /**
+   * Smart approvals of native terminal commands (DESIGN §17): `enabled` when the profile's `approvals.yaml` turns them
+   * on, and `on` while the user hasn't turned them off since (`approvals.smart.set`). Only both together rate commands.
+   */
+  Rpc.make("ApprovalsGet", { success: Schema.Struct({ enabled: Schema.Boolean, on: Schema.Boolean }) }),
   /** A task's routing decision: its reason, trace and the classification behind it. */
   Rpc.make("RoutingExplain", { payload: { taskId: TaskId }, success: RouteDecision, error: RoutingUnavailable }),
   /**

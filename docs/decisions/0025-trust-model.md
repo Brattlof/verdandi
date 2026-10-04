@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks), #242 (trusted project commands) and #177 (scanned context files). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local. Amended by ADR 0028: each device other than a page `verdandi web` opens pairs and gets its own revocable token. Amended by ADR 0031: a project's own MCP servers are among its trusted commands, and native MCP tools ask.
+Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks), #242 (trusted project commands) and #177 (scanned context files). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local. Amended by ADR 0028: each device other than a page `verdandi web` opens pairs and gets its own revocable token. Amended by ADR 0031: a project's own MCP servers are among its trusted commands, and native MCP tools ask. Amended by #216: opt-in smart approvals, a heuristic, decide some native terminal commands without asking.
 
 ## Context
 
@@ -36,7 +36,7 @@ A bypass of one of these is a vulnerability.
 5. **The asks Verdandi itself enforces.** Nothing runs or is written past one of these without the user's answer:
    - a project's own commands (its verifiers in `.verdandi/routing.yaml`, its worktree setup in `.verdandi/worktree.yaml`, the MCP servers its `.verdandi/mcp.yaml` and imported `.mcp.json` configure, ADR 0031) run only once the user trusts that exact list in the project, by its hash (`apps/agent/src/trust/trust.ts`), and a changed list asks again. Unattended runs only run trusted lists;
    - a Verdandi tool marked `ask` (`packages/tools`) runs only once allowed;
-   - a native `terminal` command runs only once allowed, every one (`runTool` in `packages/harness-native/src/adapter.ts`);
+   - a native `terminal` command runs only once allowed, every one (`runTool` in `packages/harness-native/src/adapter.ts`), unless the user turned on smart approvals (below), which then decide some without asking;
    - a native MCP tool runs only once allowed, unless the user's own config marks it as not asking, and every one in ask and plan mode (`runTool`; imported Claude Code servers always ask);
    - a skill change, or a memory save or proposal that asks, writes nothing until allowed.
 
@@ -53,6 +53,7 @@ These lower risk, and they can be bypassed by design. A bypass is a bug worth fi
 - The native harness's file tools' path rules (`access` in `packages/harness-native/src/file-tools.ts`): free in the thread's folder and the `workspace.yaml` folders, asking elsewhere, refusing the rest of the Verdandi home. They steer the agent's own tools, but anything run as the user, Claude Code's tools included, reaches the same files.
 - Spend caps (`spend-caps.yaml`) and task limits, which are a budget, not a security control.
 - The context-file scan (#177, #180). Before each turn, the files a harness loads by itself (`loads`: Claude Code's instruction files and imports, rules, skills, commands and agents, `packages/harness-claude-code/src/context-files.ts`) go through the injection question. A flagged one the user hasn't trusted holds the turn on a `context` trust request, keyed by each file's path and content hash (`apps/agent/src/trust/context.ts`). The native harness leaves a flagged context file or skill description out of its prompt instead. The hold is an ask, but only the scan decides when it fires, so the whole is a heuristic: a reworded injection loads unasked, as do the user's own `~/.claude` files and files Claude Code loads later in a session.
+- Smart approvals (#216, DESIGN §17), opt-in in `approvals.yaml` and switched off from the composer or `/smart`. Hard rules (`hardRule` in `apps/agent/src/approvals/smart-approvals.ts`: destructive patterns, shell and interpreter wrappers, syntax the guard can't be shown) send a command to the user, and the guard (`guardRules` in `packages/decisions/src/guard.ts` on `rules`: a closed list of read-only commands) lets the rest run unasked or refuses it. Both are patterns over text: a destructive command they don't know, or a known one a shell reads differently than they do, gets past them. With smart approvals on, the terminal's ask (boundary 5) is only as strong as they are; off, every command asks.
 - Skill pins (`skill_pins`). The decider refuses a pinned skill's change on Verdandi's own path (`skill_manage`, a background review's proposal) and curation leaves it alone, but a harness's own file tools that the user allows can still write the skills folder.
 
 ### Out of scope as vulnerabilities

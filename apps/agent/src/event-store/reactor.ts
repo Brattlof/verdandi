@@ -29,6 +29,7 @@ import { Decide, flagged, injectionQuestion, injectionWarning } from "@verdandi/
 import { type Screen, ToolFailed, verdandiTools } from "@verdandi/tools";
 import { Cause, Context, Deferred, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
+import { loadSmartApprovals, platformShell, rateCommand } from "../approvals/smart-approvals.ts";
 import { changedByTurns, changedSince, checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
 import { editedFiles } from "../diffs/diff.ts";
 import { handoffBlock, handoffPrompt, handoffSummary, loadThreadDigest, touchedFiles } from "../handoff/handoff.ts";
@@ -74,6 +75,9 @@ export class ToolSettings extends Context.Service<
 export class ReviewSettings extends Context.Service<ReviewSettings, { readonly enabled: boolean; readonly allowMetered: boolean }>()(
   "verdandi/ReviewSettings",
 ) {}
+
+/** Smart approvals in this profile (`approvals.yaml`, DESIGN §17): whether they're enabled, which the user can then turn off. */
+export class ApprovalSettings extends Context.Service<ApprovalSettings, { readonly smart: boolean }>()("verdandi/ApprovalSettings") {}
 
 /** The profile's skills folder, which approved skill proposals are written to, and the read-only extra folders (DESIGN §14.4). */
 export class ProfileSkills extends Context.Service<ProfileSkills, SkillFolders>()("verdandi/ProfileSkills") {}
@@ -147,6 +151,7 @@ export const ReactorLive = Layer.effect(
     const skillFolders = yield* ProfileSkills;
     const reviews = yield* ReviewSettings;
     const mcpConfig = yield* McpConfig;
+    const approvals = yield* ApprovalSettings;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
     /** The adapter running each thread's current turn: where answers to its requests go. */
@@ -294,6 +299,32 @@ export const ReactorLive = Layer.effect(
           return true;
         }),
       );
+
+    /**
+     * Smart approvals for turn `turnId` (DESIGN §17): rates each terminal command its agent wants to run, recording the
+     * guard's answer, or answers undefined while the user has them turned off, read at each command so a click applies at once.
+     */
+    const guardFor =
+      (threadId: ThreadId, turnId: TurnId): NonNullable<HarnessRunInput["guard"]> =>
+      (command) =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            if (!(yield* loadSmartApprovals(approvals.smart)).on) return undefined;
+            return yield* rateCommand(command, platformShell, decide, (state, answer) =>
+              engine
+                .dispatch({ type: "approval.guard", commandId: randomUUID() as CommandId, threadId, turnId, state, answer })
+                .pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record the guard's verdict on turn ${turnId}.`, cause))),
+            );
+          }).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.catchCause((cause) =>
+              Effect.as(Effect.logWarning(`Smart approvals failed on turn ${turnId}.`, cause), {
+                verdict: "ask" as const,
+                reason: "smart approvals failed",
+              }),
+            ),
+          ),
+        );
 
     /**
      * Delegation for the native agent of turn `turnId` (DESIGN §9.4): `task.delegate` routes each subtask as a task of its
@@ -767,6 +798,7 @@ export const ReactorLive = Layer.effect(
                   ...(delegate && { delegate }),
                   mcp: mcpFor(threadId, turnId, cwd),
                   screen: (text: string) => Effect.runPromise(screen("mcp", text, { threadId, turnId })),
+                  ...(approvals.smart && { guard: guardFor(threadId, turnId) }),
                 }),
             // The snapshot a new session starts with goes to its first turn only (DESIGN §14.2), and so does a handoff's summary.
             ...memoryFor(thread.memory_snapshot, turnId),

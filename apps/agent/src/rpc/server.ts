@@ -19,6 +19,7 @@ import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "e
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { Socket } from "effect/unstable/socket";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
+import { loadSmartApprovals } from "../approvals/smart-approvals.ts";
 import { AttachmentSweepLive, attachmentPath, attachmentsDir, storeAttachments } from "../attachments/attachments.ts";
 import { Devices, DevicesLive } from "../devices/devices.ts";
 import { threadDiff } from "../diffs/diff.ts";
@@ -26,7 +27,7 @@ import { AppLayer } from "../event-store/app.ts";
 import { reachedCap } from "../event-store/decider.ts";
 import { Engine } from "../event-store/engine.ts";
 import { loadDeciderState, loadMemory } from "../event-store/projector.ts";
-import { HarnessRegistry, ProfileSkills } from "../event-store/reactor.ts";
+import { ApprovalSettings, HarnessRegistry, ProfileSkills } from "../event-store/reactor.ts";
 import { Gc, GcLive, GcScheduleLive } from "../gc/gc.ts";
 import { workspaceDir } from "../home/workspace.ts";
 import { pickFolder } from "../projects/folder-picker.ts";
@@ -56,6 +57,7 @@ const Handlers = (home: string) =>
       const terminals = yield* Terminals;
       const gc = yield* Gc;
       const skillFolders = yield* ProfileSkills;
+      const approvals = yield* ApprovalSettings;
       const devices = yield* Devices;
       const harnesses = Object.keys(registry) as HarnessId[];
       const routing = routingFor(registry);
@@ -114,6 +116,11 @@ const Handlers = (home: string) =>
         FolderPick: () => pickFolder,
         DiffGet: ({ threadId, turnId }) =>
           threadDiff(threadId, turnId).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
+        ApprovalsGet: () =>
+          loadSmartApprovals(approvals.smart).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.catchTag("SqlError", Effect.die),
+          ),
         SpendCapsGet: ({ threadId }) =>
           Effect.gen(function* () {
             const { thread } = yield* loadDeciderState(threadId);

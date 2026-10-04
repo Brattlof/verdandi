@@ -238,6 +238,8 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
           )
             addRequest(e);
           if (e.type === "turn.item.added" && e.item.kind === "notice") io.write(`\n[${e.item.text}]\n`);
+          if (e.type === "turn.item.added" && e.item.kind === "approval.auto")
+            io.write(`\n[${e.item.decision === "allow" ? "auto-approved" : "refused"} by smart approvals: ${e.item.reason}]\n`);
           if (e.type === "turn.item.added" && e.item.kind === "handoff")
             io.write(
               `\n[handed over from ${e.item.from} to a new ${e.item.to} session, with this summary of the thread so far:]\n${e.item.summary}\n`,
@@ -353,6 +355,17 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
     }
   };
 
+  /** Whether smart approvals rate the native agent's commands (DESIGN §17), when `approvals.yaml` enables them, and how to switch. */
+  const showSmartApprovals = async () => {
+    const smart = await runtime.runPromise(client.ApprovalsGet());
+    if (smart.enabled)
+      io.write(
+        smart.on
+          ? "Smart approvals: on, so commands they rate safe run without asking (/smart off turns them off).\n"
+          : "Smart approvals: off, so every command asks (/smart on turns them back on).\n",
+      );
+  };
+
   // A device asking to pair gets a notice once, with the code it shows and how to answer (ADR 0028).
   const devicesSubscription = crypto.randomUUID();
   const noticed = new Set<string>();
@@ -415,6 +428,7 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
     );
   }
   await showSpendCaps(argv.includes("--raise-cap"));
+  await showSmartApprovals();
   if (running) io.write("A turn is running; lines you type steer it.\n");
   else prompt();
   showRequest();
@@ -492,6 +506,11 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
     },
     revert,
     "undo-revert": () => dispatch({ type: "thread.revert.undo", commandId: uuid<CommandId>(), threadId }),
+    smart: async (args) => {
+      const on = args[0] === "on" ? true : args[0] === "off" ? false : undefined;
+      if (on === undefined) io.write("[usage: /smart on|off]\n");
+      else if (await dispatch({ type: "approvals.smart.set", commandId: uuid<CommandId>(), on })) await showSmartApprovals();
+    },
     trusted: () => trusted(undefined),
     untrust: (args) => trusted(args[0] ?? ""),
     // The Skills panel's controls: list with pins, a skill's history, revert, pin, unpin and restore.

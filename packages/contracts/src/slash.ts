@@ -119,6 +119,14 @@ export const slashCommands = {
     dispatches: ["thread.revert.undo"],
     whileBusy: { refuse: "A turn has started since the latest revert, so there's no revert to undo." },
   },
+  smart: {
+    args: [{ name: "on|off", choices: ["on", "off"] }],
+    help: "turns smart approvals of native terminal commands off, or back on, where approvals.yaml enables them",
+    surfaces: ["chat"],
+    ownerOnly: true,
+    dispatches: ["approvals.smart.set"],
+    whileBusy: "run",
+  },
   trusted: {
     args: [],
     help: "lists the project commands you let Verdandi run",

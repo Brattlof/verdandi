@@ -24,6 +24,7 @@ import {
 import {
   classificationOf,
   followUpRules,
+  guardRules,
   injectionRules,
   makeDecide,
   reviewRules,
@@ -53,8 +54,8 @@ import { fakeCatalog } from "@verdandi/testkit";
 import { Effect, Result } from "effect";
 
 /**
- * The decision layer verdandid runs: `rules` for every kind of question (ADR 0009), injection scanning and whether a
- * finished task is worth a background review included. Routing classification
+ * The decision layer verdandid runs: `rules` for every kind of question (ADR 0009), injection scanning, whether a
+ * finished task is worth a background review and smart approvals' guard included. Routing classification
  * uses the router's keyword rules, which read only the text: the mode picks a class's plan route, not its class.
  */
 export const verdandiRules = rulesBackend({
@@ -62,6 +63,7 @@ export const verdandiRules = rulesBackend({
   ...followUpRules,
   ...injectionRules,
   ...reviewRules,
+  ...guardRules,
 });
 export const rulesDecide = makeDecide([verdandiRules]);
 
