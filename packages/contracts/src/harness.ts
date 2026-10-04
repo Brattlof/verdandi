@@ -194,6 +194,34 @@ export type HarnessRunInput = {
     readonly maxConcurrent: number;
     readonly maxDepth: number;
   };
+  /**
+   * The MCP servers a new session connects to (DESIGN §9.4), and notices about the ones left out, for the turn. Called
+   * when a session opens, and when a resumed one reconnects its servers; it reads the config then, asking the user to
+   * trust a project's own servers, and rejects naming the file and key of a broken config (native: connects them and
+   * fixes their tools in the session's tool list; Claude Code reads its own MCP config; fake: none). Absent when the
+   * turn gets none, e.g. a background review.
+   */
+  readonly mcp?: () => Promise<{ readonly servers: readonly McpServer[]; readonly notices: readonly string[] }>;
+  /**
+   * Scans an MCP tool's result before the agent sees it (DESIGN §17), and returns the text to hand over: under a
+   * warning when the scan flags it, which Verdandi records on the turn. Given with `mcp`.
+   */
+  readonly screen?: (text: string) => Promise<string>;
+};
+
+/**
+ * One MCP server a session connects to: a child process speaking MCP over stdio, started in the thread's folder. Its
+ * tools show as `mcp__<name>__<tool>`, as Claude Code names them. Each asks the user before every call unless
+ * `tools[tool].ask` (else `ask`) is false. Holds the server's whole environment, which may hold its tokens: never log it.
+ */
+export type McpServer = {
+  readonly name: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  /** Verdandi's own environment without its secrets, plus the server's own variables. */
+  readonly env: Readonly<Record<string, string>>;
+  readonly ask: boolean;
+  readonly tools: Readonly<Record<string, { readonly ask?: boolean }>>;
 };
 
 /**

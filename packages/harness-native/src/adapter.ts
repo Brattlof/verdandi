@@ -19,6 +19,7 @@ import { nativeCatalog } from "./catalog.ts";
 import { indexSkills, readContext, type SkillEntry } from "./context.ts";
 import { concurrently, delegateArgs, delegateTool, summaryOf } from "./delegate.ts";
 import { access, fileTools, type Reach, runFileTool } from "./file-tools.ts";
+import { closeMcp, type McpTools, openMcp } from "./mcp.ts";
 import { childContent, modeNotes, opensFiles, planTool, sessionPrefix, turnContent } from "./prompt.ts";
 import { classify } from "./provider-failure.ts";
 import { runTerminal, type Terminal, terminalTool } from "./terminal.ts";
@@ -58,6 +59,8 @@ type Session = {
   /** The mode the agent last heard of; undefined after a resume, so the next turn says it again. */
   mode: InteractionMode | undefined;
   turn: Turn | undefined;
+  /** The MCP servers it's connected to, which stop with it. */
+  readonly mcp: McpTools | undefined;
 };
 
 const maxTokens = 64_000;
@@ -198,8 +201,25 @@ async function* runTool(
     }
     return await runFileTool(file, args, input.cwd, local.reach);
   }
+  const mcp = has ? session.mcp?.byName.get(use.name) : undefined;
+  if (mcp) {
+    // In ask and plan mode every MCP tool asks, since Verdandi can't tell which ones change things.
+    if (mcp.ask || heldBack(turn, input.mode)) {
+      const r = yield* request(turn, (requestId) => ({ type: "approval.requested", requestId, toolName: use.name, input: args }));
+      if (r.decision !== "allow") return { text: `The user denied this.${feedback(r)}`, isError: true };
+    }
+    const result = await mcp.connection.call(mcp.tool, args, local.signal);
+    // Untrusted data: screened like Verdandi's search tools' results (DESIGN §17).
+    return { ...result, text: input.screen ? await input.screen(result.text) : result.text };
+  }
   const tool = input.tools?.find((t) => t.name === use.name);
-  if (!tool) return { text: `There's no tool named ${use.name}.`, isError: true };
+  if (!tool)
+    return {
+      text: use.name.startsWith("mcp__")
+        ? `The MCP server behind ${use.name} isn't connected in this session. Carry on without it.`
+        : `There's no tool named ${use.name}.`,
+      isError: true,
+    };
   if (tool.ask) {
     const r = yield* request(turn, (requestId) => ({ type: "approval.requested", requestId, toolName: use.name, input: args }));
     if (r.decision !== "allow") return { text: `The user denied this.${feedback(r)}`, isError: true };
@@ -262,13 +282,37 @@ export const makeNativeAdapter = (options: {
   const open = async (input: HarnessRunInput): Promise<{ readonly session: Session; readonly events: HarnessEvent[] }> => {
     const dir = options.sessionsDir;
     const live = sessions.get(input.threadId);
-    const bind = (transcript: Transcript, mode: InteractionMode | undefined, events: HarnessEvent[]) => {
-      const session: Session = { transcript, route: input.route, mode, turn: undefined };
+    const started = (transcript: Transcript): HarnessEvent => ({ type: "session.started", sessionId: transcript.id, harnessVersion });
+    const notice = (text: string): HarnessEvent => ({ type: "item", item: { kind: "notice", text } });
+    /** The MCP config for this turn: a broken one fails the turn, naming the file and key. */
+    const mcpConfig = async (read: NonNullable<HarnessRunInput["mcp"]>) => {
+      try {
+        return await read();
+      } catch (e) {
+        throw new HarnessError({ message: e instanceof Error ? e.message : String(e) });
+      }
+    };
+    /** Connects a resumed session again to the MCP servers its tool list has tools of (DESIGN §9.4). */
+    const reconnect = async (prefix: Transcript["prefix"], events: HarnessEvent[]) => {
+      const names = new Set(prefix.tools.flatMap((t) => (t.name.startsWith("mcp__") ? [t.name] : [])));
+      if (names.size === 0 || !input.mcp) return undefined;
+      const config = await mcpConfig(input.mcp);
+      const opened = await openMcp(config.servers, input.cwd, names);
+      events.push(...[...config.notices, ...opened.notices].map(notice));
+      return opened.tools;
+    };
+    /**
+     * Makes `transcript` the thread's session. It takes over the live session's MCP servers when it keeps the same tool
+     * list (a fork), else they stop, and it gets `opened` (a new session's) or connects again (a resumed one's).
+     */
+    const bind = async (transcript: Transcript, mode: InteractionMode | undefined, events: HarnessEvent[], opened?: McpTools) => {
+      const kept = live && live.transcript.prefix === transcript.prefix ? live.mcp : undefined;
+      if (live && live.mcp !== kept) await closeMcp(live.mcp);
+      const mcp = opened ?? kept ?? (await reconnect(transcript.prefix, events));
+      const session: Session = { transcript, route: input.route, mode, turn: undefined, mcp };
       sessions.set(input.threadId, session);
       return { session, events };
     };
-    const started = (transcript: Transcript): HarnessEvent => ({ type: "session.started", sessionId: transcript.id, harnessVersion });
-    const notice = (text: string): HarnessEvent => ({ type: "item", item: { kind: "notice", text } });
     // Read once, when the session opens: the transcript keeps them, so a resume builds the same prompt (DESIGN §9.4).
     // Without `scan` nothing unscanned goes in.
     const fresh = async (events: HarnessEvent[]) => {
@@ -276,27 +320,36 @@ export const makeNativeAdapter = (options: {
       const context = scan && (await readContext(input.cwd, scan));
       const skills = scan ? await indexSkills(options.skills?.() ?? [], scan) : [];
       const delegates = (input.delegate?.maxDepth ?? 0) > 0;
-      const prefix = sessionPrefix(input.cwd, input.tools ?? [], options.reach.folders, { context, skills, delegates });
+      // Its MCP servers' tools are fixed in its tool list now; tools a server adds later reach the next session.
+      const config = input.mcp && (await mcpConfig(input.mcp));
+      const mcp = config && (await openMcp(config.servers, input.cwd));
+      const prefix = sessionPrefix(input.cwd, input.tools ?? [], options.reach.folders, { context, skills, delegates }, mcp?.definitions);
       const transcript = createTranscript(dir, randomUUID(), prefix);
       const flagged = skills.filter((s) => s.flagged).map((s) => s.name);
-      return bind(transcript, "build", [
-        started(transcript),
-        ...events,
-        ...(context && "blocked" in context
-          ? [
-              notice(
-                `${context.file} was left out of this session's prompt: Verdandi's injection scan flagged it, so the agent works without the project's conventions. Fix it, then start a new thread to give them back.`,
-              ),
-            ]
-          : []),
-        ...(flagged.length > 0
-          ? [
-              notice(
-                `The skills index leaves out the description of ${flagged.join(", ")}: Verdandi's injection scan flagged ${flagged.length === 1 ? "it" : "them"}. skill_view still shows the skill, under a warning.`,
-              ),
-            ]
-          : []),
-      ]);
+      return bind(
+        transcript,
+        "build",
+        [
+          started(transcript),
+          ...events,
+          ...[...(config?.notices ?? []), ...(mcp?.notices ?? [])].map(notice),
+          ...(context && "blocked" in context
+            ? [
+                notice(
+                  `${context.file} was left out of this session's prompt: Verdandi's injection scan flagged it, so the agent works without the project's conventions. Fix it, then start a new thread to give them back.`,
+                ),
+              ]
+            : []),
+          ...(flagged.length > 0
+            ? [
+                notice(
+                  `The skills index leaves out the description of ${flagged.join(", ")}: Verdandi's injection scan flagged ${flagged.length === 1 ? "it" : "them"}. skill_view still shows the skill, under a warning.`,
+                ),
+              ]
+            : []),
+        ],
+        mcp?.tools,
+      );
     };
     const resumed = input.resumeSessionId
       ? live?.transcript.id === input.resumeSessionId
@@ -507,7 +560,8 @@ export const makeNativeAdapter = (options: {
     const leftOut = new Set(["report_blocked", ...(depth < delegation.maxDepth ? [] : [delegateTool])]);
     const { system, tools } = parent.transcript.prefix;
     const transcript = createTranscript(options.sessionsDir, randomUUID(), { system, tools: tools.filter((t) => !leftOut.has(t.name)) });
-    const session: Session = { transcript, route: routed.route, mode, turn: undefined };
+    // It shares its parent's MCP servers, which stop with the parent.
+    const session: Session = { transcript, route: routed.route, mode, turn: undefined, mcp: parent.mcp };
     const own: Turn = { waiting: turn.waiting, steers: [], planning: false, running: turn.running, spent: turn.spent, depth };
     // Its own route and mode, and the task's cost limit, but not its turn count, which counts the main agent's model calls.
     const { effort: _effort, limits, ...rest } = input;
@@ -555,9 +609,11 @@ export const makeNativeAdapter = (options: {
           const { session, events } = yield* Effect.tryPromise({
             try: () => open(input),
             catch: (e) =>
-              new HarnessError({
-                message: `The native session's transcript can't be opened (${e instanceof Error ? e.message : String(e)}). Check that ${options.sessionsDir} is writable.`,
-              }),
+              e instanceof HarnessError
+                ? e
+                : new HarnessError({
+                    message: `The native session's transcript can't be opened (${e instanceof Error ? e.message : String(e)}). Check that ${options.sessionsDir} is writable.`,
+                  }),
           });
           // Read before the turn starts: a missing attachment fails the turn with its name.
           const canOpenFiles = opensFiles(session.transcript.prefix);
@@ -615,10 +671,14 @@ export const makeNativeAdapter = (options: {
         // The model is a per-request parameter: the turn's next request runs on `route` (ADR 0022).
         if (session?.turn) session.route = route;
       }),
+    // A session's MCP servers stop with it, by the PID captured at spawn.
+    // ponytail: an idle session keeps its servers until verdandid stops; upgrade: stop them after a quiet spell and reconnect on the next turn.
     close: (threadId) =>
-      Effect.sync(() => {
+      Effect.promise(() => {
+        const closing = threadId === undefined ? [...sessions.values()] : [sessions.get(threadId)];
         if (threadId === undefined) sessions.clear();
         else sessions.delete(threadId);
+        return Promise.all(closing.map((s) => closeMcp(s?.mcp))).then(() => undefined);
       }),
   };
 };

@@ -4,6 +4,7 @@ import { Decide } from "@verdandi/decisions";
 import { Effect, Layer, Result } from "effect";
 import { attachmentsDir } from "../attachments/attachments.ts";
 import { loadMemorySettings } from "../memory/memory-config.ts";
+import { loadMcp } from "../native/mcp-config.ts";
 import { loadReviewSettings } from "../review/review-config.ts";
 import { catalogFor, routingFor, rulesDecide } from "../routing/routing.ts";
 import { loadSkillFolders } from "../skills/skills-config.ts";
@@ -13,6 +14,7 @@ import { EngineLive, type Projector } from "./engine.ts";
 import {
   AttachmentsDir,
   HarnessRegistry,
+  McpConfig,
   ProfileSkills,
   ProjectEscalation,
   ReactorLive,
@@ -80,6 +82,7 @@ export const AppLayer = (
       ),
     ),
     Layer.provideMerge(Layer.succeed(AttachmentsDir, attachmentsDir(home))),
+    Layer.provideMerge(Layer.succeed(McpConfig, (folder: string) => loadMcp(home, folder))),
     Layer.provideMerge(Layer.succeed(WorktreesDir, join(home, "worktrees"))),
     Layer.provideMerge(Layer.sync(ProfileSkills, () => loadSkillFolders(home))),
     Layer.provideMerge(Layer.sync(ReviewSettings, () => loadReviewSettings(home))),

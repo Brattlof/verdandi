@@ -22,8 +22,9 @@ export type VerifierRun = typeof VerifierRun.Type;
 /**
  * Untrusted text Verdandi puts in front of the agent (DESIGN §17): what an escalation's trigger hands its turn (a
  * verifier's output, the agent's own blocked reason, a repeated tool error), a Verdandi tool's result, the summary a
- * harness handoff seeds a new session with, or a `context` file (a context or skill file a harness loads by itself, or
- * one the native harness puts in its prompt). A `correction` escalation hands nothing: the user's own message is the turn.
+ * harness handoff seeds a new session with, an `mcp` tool's result (from an MCP server the native harness connects to,
+ * DESIGN §9.4), or a `context` file (a context or skill file a harness loads by itself, or one the native harness puts
+ * in its prompt). A `correction` escalation hands nothing: the user's own message is the turn.
  */
 export const HandedSource = Schema.Literals([
   "verifier",
@@ -35,6 +36,7 @@ export const HandedSource = Schema.Literals([
   "skills_list",
   "skill_view",
   "context",
+  "mcp",
 ]);
 export type HandedSource = typeof HandedSource.Type;
 /** What each source is, for the user. */
@@ -48,6 +50,7 @@ export const handedSourceLabel: Record<HandedSource, string> = {
   skills_list: "a skills_list result",
   skill_view: "a skill_view result",
   context: "a context file",
+  mcp: "an MCP tool's result",
 };
 
 /** How a flagged injection is introduced to the user, before its `why`: the same in the web UI and the terminal. */

@@ -1,0 +1,27 @@
+# 0031 · The native harness connects to MCP servers from Verdandi's own config
+
+## Status
+
+Accepted (issue #208, 2026-10-04).
+
+## Context
+
+DESIGN §9.4 gives the native harness "the full Verdandi tool set, plus MCP servers you configure", but a native session had only Verdandi's tools, its file tools, the terminal and `propose_plan` (ADR 0022). A tool the user reaches through MCP in Claude Code was missing on native, and tool search (#206) needs MCP tools to defer. Claude Code keeps its MCP config in its own files: a project's `.mcp.json`, and `mcpServers` in `~/.claude.json`, a file that also holds account data. Which file Verdandi reads was the owner's call.
+
+## Decision
+
+1. **Verdandi's own files.** The home's `mcp.yaml` and a project's `.verdandi/mcp.yaml` list `servers` by name: `command`, `args`, `env`, `ask`, and `tools: { <tool>: { ask } }`. `ask: false` on a server or a tool lets it run without asking; everything else asks before each call. In ask and plan mode every MCP tool asks. `${VAR}` and `${VAR:-default}` in a command, its arguments or its variables are filled in from verdandid's environment without Verdandi's secrets, as Claude Code does; a server naming a variable that isn't set is left out with a notice.
+2. **Claude Code's config, on request.** `importClaudeCode: true` in the home's `mcp.yaml` also reads the folder's `.mcp.json` and the `mcpServers` key of Claude Code's user config (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`), and nothing else in that file. Its servers always ask. On a name clash the project's `.verdandi/mcp.yaml` beats the home's, and Verdandi's files beat Claude Code's. Remote servers (`url`, or a `type` other than `stdio`) are left out with a notice.
+3. **When.** The files are read when a session opens (`loadMcp` in `apps/agent/src/native/mcp-config.ts`, through `HarnessRunInput.mcp`), and when a session resumed after a restart reconnects. A broken file fails the turn, naming the file and key and never a value, since `env` holds tokens; a broken `~/.claude.json` is reported without the JSON parser's message, which quotes the file.
+4. **A project's servers are a project's commands.** Servers from `.verdandi/mcp.yaml` or `.mcp.json` start only once the user trusts that exact list in the project (trust purpose `mcp`, DESIGN §17): each entry names the server, its command line, the names of its variables with a hash of their values, the tools it runs without asking, and its file. Denying leaves them out of the session with a notice; a new thread asks again. The home's servers and Claude Code's user-scope ones are the user's own and need no trust.
+5. **The session.** A new session connects to every server at once (`packages/harness-native/src/mcp.ts`, MCP over stdio, newline-delimited JSON-RPC: `initialize`, every page of `tools/list`, `tools/call`), and fixes their tools in its tool list, after the harness's own, as `mcp__<server>__<tool>` (names cleaned as Claude Code cleans them, at most 64 characters), so trajectories, the repeated-error trigger and routing memory see one name on both harnesses. The transcript's header keeps the list (ADR 0022); tools a server adds later reach the next session. A server that doesn't start within 30 seconds leaves a notice and none of its tools. Names and descriptions are the servers': untrusted, they go only in `tools`, never the system prompt.
+6. **Processes.** Each server starts in the thread's folder with verdandid's environment without its secrets (`childEnv`), plus its own variables, in its own process group on POSIX. It stops with its session (`close`, and verdandid stopping): its input closes, then after a second its process tree is killed by the PID captured at spawn.
+7. **Results.** A result's text goes through the reactor's `screen`, as `session_search`'s does: a flagged one reaches the agent under the warning and is recorded as `injection.flagged` with source `mcp`. Other content (images, binary resources) is named and left out; a result is capped at 100,000 characters.
+8. **Other harnesses.** Claude Code reads its own MCP config and is given none of Verdandi's servers. The fake harness connects to none.
+
+## Consequences
+
+- The client is about 200 lines of Verdandi's own instead of `@modelcontextprotocol/sdk` (installed with the Agent SDK, but not a direct dependency). Remote servers, sampling, roots and elicitation need that SDK; it's the upgrade path.
+- An idle session keeps its servers running until verdandid stops or the session is replaced.
+- A user who wants one list for both harnesses keeps it in Claude Code's files and sets `importClaudeCode: true`; servers only in Verdandi's files reach native only.
+- Tool search (#206) can defer these tools, since they're fixed per session like the rest of the prefix.

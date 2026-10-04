@@ -13,6 +13,7 @@ import { loadThreadView, project } from "./projector.ts";
 import {
   AttachmentsDir,
   HarnessRegistry,
+  McpConfig,
   ProfileSkills,
   ProjectEscalation,
   Reactor,
@@ -500,6 +501,7 @@ describe("engine", () => {
       Layer.provideMerge(pause.pipe(Layer.provideMerge(EngineLive()))),
       Layer.provideMerge(Layer.succeed(HarnessRegistry, { fake: makeFakeHarness() })),
       Layer.provideMerge(Layer.succeed(AttachmentsDir, "unused")),
+      Layer.provideMerge(Layer.succeed(McpConfig, () => ({ servers: [], notices: [], trust: [], project: [] }))),
       Layer.provideMerge(Layer.succeed(WorktreesDir, "unused")),
       Layer.provideMerge(Layer.succeed(ToolSettings, { approveMemorySaves: false, memoryNudgeEvery: 0 })),
       Layer.provideMerge(

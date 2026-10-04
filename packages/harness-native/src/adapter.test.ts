@@ -8,11 +8,12 @@ import {
   type HarnessTool,
   type InteractionMode,
   listCost,
+  type McpServer,
   type Route,
   type ThreadId,
   type TurnId,
 } from "@verdandi/contracts";
-import { type FakeReply, makeFakeAnthropic, makeTempHome, removeTempHome } from "@verdandi/testkit";
+import { type FakeReply, fakeMcpServer, makeFakeAnthropic, makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Fiber, Stream } from "effect";
 import { makeNativeAdapter } from "./adapter.ts";
 import { cacheBreak, fingerprint } from "./cache-check.ts";
@@ -717,4 +718,103 @@ test("a new session's prompt indexes the skills by name, leaving out a flagged d
   const unscanned = systemText(fake.requests[1]?.body);
   expect(unscanned).not.toContain("Indent with tabs.");
   expect(unscanned).not.toContain("The user's skills");
+});
+
+/** An MCP server for a test: the fake one, or `down`, one that exits at once. Its tools ask unless `quiet` lists them. */
+const mcpServer = (name: string, more: { readonly down?: boolean; readonly quiet?: readonly string[] } = {}): McpServer => ({
+  name,
+  command: process.execPath,
+  args: more.down ? ["-e", "process.exit(3)"] : [fakeMcpServer],
+  env: Object.fromEntries(Object.entries(process.env).flatMap(([k, v]) => (v === undefined ? [] : [[k, v]]))),
+  ask: true,
+  tools: Object.fromEntries((more.quiet ?? []).map((tool) => [tool, { ask: false }])),
+});
+const screened = async (text: string) => `[screened] ${text}`;
+const gone = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+};
+
+test("a session connects to its MCP servers when it opens: a tool runs by its real name through its approval, screened, and a server that's down leaves a notice", async () => {
+  const { home, fake, adapter } = setup([
+    { blocks: [{ type: "tool_use", id: "toolu_1", name: "mcp__fake__echo", input: { text: "hi" } }] },
+    { blocks: [{ type: "tool_use", id: "toolu_2", name: "mcp__fake__pid", input: {} }] },
+    { blocks: [{ type: "text", text: "Done." }] },
+  ]);
+  const servers = [mcpServer("fake", { quiet: ["pid"] }), mcpServer("down", { down: true })];
+  const events = await run(
+    adapter,
+    input("t1", "Use the fake server", { cwd: home, mcp: async () => ({ servers, notices: [] }), screen: screened }),
+    (e) => {
+      if (e.type === "approval.requested") void Effect.runPromise(adapter.respond(threadId, e.requestId, { decision: "allow" }));
+    },
+  );
+
+  expect(events.filter((e) => e.type === "approval.requested")).toEqual([
+    { type: "approval.requested", requestId: expect.any(String), toolName: "mcp__fake__echo", input: { text: "hi" } },
+  ]);
+  const results = events.flatMap((e) => (e.type === "item" && e.item.kind === "tool.result" ? [e.item] : []));
+  expect(results[0]).toEqual({ kind: "tool.result", toolUseId: "toolu_1", isError: false, content: "[screened] echo: hi" });
+  const pid = Number(String(results[1]?.content).replace("[screened] ", ""));
+  expect(pid).toBeGreaterThan(0);
+  expect(events).toContainEqual({
+    type: "item",
+    item: { kind: "notice", text: expect.stringContaining("The MCP server down didn't start (it exited with code 3)") },
+  });
+
+  const [first, ...rest] = fake.requests.map((r) => r.body);
+  const tools = first?.tools as Anthropic.Tool[];
+  expect(tools.find((t) => t.name === "mcp__fake__echo")?.description).toBe("Answers with the text it gets.");
+  expect(tools.some((t) => t.name.startsWith("mcp__down__"))).toBe(false);
+  for (const body of rest) expect(JSON.stringify([body.system, body.tools])).toBe(JSON.stringify([first?.system, first?.tools]));
+  // Untrusted names and descriptions stay out of the system prompt.
+  expect(JSON.stringify(first?.system)).not.toContain("Answers with the text");
+
+  // Its servers stop with the session.
+  expect(gone(pid)).toBe(false);
+  await Effect.runPromise(adapter.close(threadId));
+  expect(gone(pid)).toBe(true);
+});
+
+test("a session resumed after a restart reconnects to its servers and keeps its tool list; a broken MCP config fails the turn naming it", async () => {
+  const { home, fake } = setup([
+    { blocks: [{ type: "text", text: "Hello." }] },
+    { blocks: [{ type: "tool_use", id: "toolu_1", name: "mcp__fake__echo", input: { text: "again" } }] },
+    { blocks: [{ type: "text", text: "Done." }] },
+  ]);
+  const mcp = async () => ({ servers: [mcpServer("fake", { quiet: ["echo"] })], notices: ["Left out: a remote server."] });
+  const before = makeNativeAdapter(options(home, fake.fetch));
+  const opened = await run(before, input("t1", "hi", { cwd: home, mcp, screen: screened }));
+  expect(opened).toContainEqual({ type: "item", item: { kind: "notice", text: "Left out: a remote server." } });
+  const sessionId = opened[0]?.type === "session.started" ? opened[0].sessionId : "";
+  await Effect.runPromise(before.close());
+
+  const after = makeNativeAdapter(options(home, fake.fetch));
+  const resumed = await run(after, input("t2", "echo again", { cwd: home, resumeSessionId: sessionId, mcp, screen: screened }));
+  expect(resumed).toContainEqual({
+    type: "item",
+    item: { kind: "tool.result", toolUseId: "toolu_1", isError: false, content: "[screened] echo: again" },
+  });
+  const [r1, r2] = fake.requests.map((r) => r.body);
+  expect(JSON.stringify(r2?.tools)).toBe(JSON.stringify(r1?.tools));
+  await Effect.runPromise(after.close());
+
+  const broken = await Effect.runPromise(
+    Effect.exit(
+      Stream.runCollect(
+        after.run(
+          input("t3", "hi", {
+            threadId: "thread-2" as ThreadId,
+            cwd: home,
+            mcp: () => Promise.reject(new Error("mcp.yaml: servers.github.command must be a string.")),
+          }),
+        ),
+      ),
+    ),
+  );
+  expect(JSON.stringify(broken)).toContain("mcp.yaml: servers.github.command must be a string.");
 });

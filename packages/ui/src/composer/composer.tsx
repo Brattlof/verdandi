@@ -698,7 +698,9 @@ const TrustApproval = ({ request, sending, respond }: CardProps<"commands.trust.
       <h3 className="font-serif text-lg font-semibold">
         {context
           ? "Start the agent with these flagged files?"
-          : `Run this project's ${request.purpose === "verifiers" ? "verifiers" : "worktree setup"}?`}
+          : request.purpose === "mcp"
+            ? "Start this project's MCP servers?"
+            : `Run this project's ${request.purpose === "verifiers" ? "verifiers" : "worktree setup"}?`}
       </h3>
       {context ? (
         <p className="text-xs text-muted">

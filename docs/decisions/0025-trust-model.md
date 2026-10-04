@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks), #242 (trusted project commands) and #177 (scanned context files). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local. Amended by ADR 0028: each device other than a page `verdandi web` opens pairs and gets its own revocable token.
+Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks), #242 (trusted project commands) and #177 (scanned context files). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local. Amended by ADR 0028: each device other than a page `verdandi web` opens pairs and gets its own revocable token. Amended by ADR 0031: a project's own MCP servers are among its trusted commands, and native MCP tools ask.
 
 ## Context
 
@@ -34,9 +34,10 @@ A bypass of one of these is a vulnerability.
    - Attachments are counted and sized, and an image's bytes must match its type, before anything is stored (`storeAttachments` in `apps/agent/src/attachments/attachments.ts`).
    - A skill change must stay inside one kebab-case skill in the profile's folder, with no link on the way and no overlap with an extra folder (`prepareChange` in `apps/agent/src/skills/skill-files.ts`).
 5. **The asks Verdandi itself enforces.** Nothing runs or is written past one of these without the user's answer:
-   - a project's own commands (its verifiers in `.verdandi/routing.yaml`, its worktree setup in `.verdandi/worktree.yaml`) run only once the user trusts that exact list in the project, by its hash (`apps/agent/src/trust/trust.ts`), and a changed list asks again. Unattended runs only run trusted lists;
+   - a project's own commands (its verifiers in `.verdandi/routing.yaml`, its worktree setup in `.verdandi/worktree.yaml`, the MCP servers its `.verdandi/mcp.yaml` and imported `.mcp.json` configure, ADR 0031) run only once the user trusts that exact list in the project, by its hash (`apps/agent/src/trust/trust.ts`), and a changed list asks again. Unattended runs only run trusted lists;
    - a Verdandi tool marked `ask` (`packages/tools`) runs only once allowed;
    - a native `terminal` command runs only once allowed, every one (`runTool` in `packages/harness-native/src/adapter.ts`);
+   - a native MCP tool runs only once allowed, unless the user's own config marks it as not asking, and every one in ask and plan mode (`runTool`; imported Claude Code servers always ask);
    - a skill change, or a memory save or proposal that asks, writes nothing until allowed.
 
    Getting one of these past its ask is a vulnerability. What the approved step then does is not: an approval is consent, not containment.
@@ -46,7 +47,7 @@ A bypass of one of these is a vulnerability.
 These lower risk, and they can be bypassed by design. A bypass is a bug worth fixing, not a vulnerability.
 
 - The injection question (`untrusted.injection`, `injectionRules` in `packages/decisions/src/rules.ts`), the secret scans on memory (`scanMemory`) and skills (`scanSkill`), and trajectory redaction (`packages/trajectories/src/redact.ts`).
-- "Marked as data" fences around untrusted text handed to the agent (escalation hand-offs, the review digest, the memory snapshot's entries: `asData` in `apps/agent/src/trust/fence.ts`, a fence longer than any run of backticks in the text, so the text can't close it), attachments handed over as paths marked as data, and the warning over a flagged search result. A model can still follow what's inside one.
+- "Marked as data" fences around untrusted text handed to the agent (escalation hand-offs, the review digest, the memory snapshot's entries: `asData` in `apps/agent/src/trust/fence.ts`, a fence longer than any run of backticks in the text, so the text can't close it), attachments handed over as paths marked as data, and the warning over a flagged search or MCP tool result. A model can still follow what's inside one.
 - Background review's prompt rules on what never to capture, and its gate that offers skills only from a task whose last verifier run passed or that the user rated up (`skillsRefused` in `apps/agent/src/review/review.ts`). A passing verifier doesn't make a lesson true.
 - What an approval or plan mode limits. They're consent, not containment: they ask before a step, and don't limit what an approved step does or what the user's own harness settings already allow. The harness's own permission prompts and plan mode (Claude Code's read-only mode) are enforced by the harness.
 - The native harness's file tools' path rules (`access` in `packages/harness-native/src/file-tools.ts`): free in the thread's folder and the `workspace.yaml` folders, asking elsewhere, refusing the rest of the Verdandi home. They steer the agent's own tools, but anything run as the user, Claude Code's tools included, reaches the same files.
