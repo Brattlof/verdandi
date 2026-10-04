@@ -178,6 +178,19 @@ export type HarnessRunInput = {
    */
   readonly scan?: (file: string, text: string) => Promise<boolean>;
   /**
+   * Writes the summary a compression (DESIGN §16) puts in place of the conversation before a recent tail: from `digest`
+   * (that conversation, as the harness renders it), updating `previous` (the last compression's sections), for turns
+   * `turnIds`. Verdandi runs it as an `aux.compress` task and checks it: it resolves to the sections as written, the
+   * same fenced as data for the summary message, and its cost, or why it couldn't be written, and then the harness
+   * writes nothing. Native only: Claude Code compacts its own context (fake: none). Absent when Verdandi doesn't
+   * summarize, e.g. for a background review's turn; the harness then only prunes.
+   */
+  readonly summarize?: (input: {
+    readonly digest: string;
+    readonly previous?: string;
+    readonly turnIds: readonly TurnId[];
+  }) => Promise<{ readonly sections: string; readonly block: string; readonly costUsd: number } | { readonly error: string }>;
+  /**
    * Delegation (DESIGN §9.4): `route` routes subtask `task`, which the agent delegated with tool call `toolUseId`
    * (naming `profile` for the route's explorer or reviewer), as a task of its own, recorded on the turn, and resolves
    * to the route its child session runs on, or why it can't run. At most `maxConcurrent` children of the turn run at

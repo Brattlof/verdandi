@@ -5,8 +5,11 @@
 // the native harness's Anthropic key: a model answers each question closed-book from each policy's request, exact
 // answers matched as strings and the rest graded by a cheap model. It stops before --max-usd, or the profile's spend
 // caps' headroom, whichever is less; its spend isn't recorded in Verdandi's ledger.
-//   bun apps/agent/src/compression/exam-run.ts [--dir <dir>] [--policies full,truncate,recency] [--window 200000]
-//   bun apps/agent/src/compression/exam-run.ts --live --max-usd <n> [--answerer <model>] [--grader <model>] [--home <dir>]
+// Policies are full, truncate, recency and lean (#186's compressor), each optionally @<tail tokens>; lean compresses once
+// at the session's end, or, with --trigger <share>, each time the session's request passed that share of the window as
+// it grew. Offline a summary is scripted (every section "None."), so the score is the mechanical parts'.
+//   bun apps/agent/src/compression/exam-run.ts [--dir <dir>] [--policies full,truncate,recency,lean] [--window 200000] [--trigger <share>]
+//   bun apps/agent/src/compression/exam-run.ts --live --max-usd <n> [--answerer <model>] [--grader <model>] [--summarizer <model>] [--home <dir>]
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
@@ -14,18 +17,24 @@ import { CompressionExam, type ExamQuestion, listCost } from "@verdandi/contract
 import {
   answersExactly,
   type ExamSession,
-  examPolicies,
+  estimateTokens,
+  examPolicy,
   findAnthropicKey,
   loadTranscript,
   nativeCatalog,
   nextRequest,
   offlineScore,
+  replay,
+  type Summarize,
+  scriptedSummary,
+  tailBudget,
 } from "@verdandi/harness-native";
 import { makeFakeAnthropic } from "@verdandi/testkit";
 import { Effect, Result, Schema } from "effect";
 import { flag, resolveHome } from "../home/home.ts";
 import { loadSpendCaps as spendAgainstCaps } from "../spend/spend.ts";
 import { loadSpendCaps } from "../spend/spend-caps.ts";
+import { compressionBlock, compressionPrompt, compressionSummary } from "./compression.ts";
 
 type Body = Awaited<ReturnType<typeof nextRequest>>;
 type Usage = {
@@ -136,43 +145,101 @@ const usageOf = (reply: Record<string, unknown>): Usage => {
 const replyText = (reply: Record<string, unknown>) =>
   ((reply.content ?? []) as { type: string; text?: string }[]).flatMap((b) => (b.type === "text" ? [b.text ?? ""] : [])).join("");
 
+/** A live `aux.compress` summary: the prompt verdandid sends, on `model`, checked the same way. */
+const liveSummarize =
+  (key: string, model: string, spend: (usd: number) => void): Summarize =>
+  async ({ digest, previous }) => {
+    const reply = await call(key, "", {
+      model,
+      max_tokens: 8_000,
+      messages: [{ role: "user", content: compressionPrompt(digest, previous) }],
+    });
+    const costUsd = listCost(price(model).price, usageOf(reply));
+    spend(costUsd);
+    const summary = compressionSummary(replyText(reply), undefined);
+    return "error" in summary ? summary : { sections: summary.sections, block: compressionBlock(summary.sections, undefined), costUsd };
+  };
+
 export const main = async (argv: readonly string[]) => {
   const dir = flag(argv, "--dir") ?? join(import.meta.dir, "../../../../evals/compression/private");
   const window = Number(flag(argv, "--window") ?? 200_000);
-  const names = (flag(argv, "--policies") ?? "full,truncate,recency").split(",");
+  const names = (flag(argv, "--policies") ?? "full,truncate,recency,lean").split(",");
+  const trigger = flag(argv, "--trigger");
   const answerer = flag(argv, "--answerer") ?? "claude-sonnet-5-5";
   const grader = flag(argv, "--grader") ?? "claude-haiku-4-5";
+  const summarizer = flag(argv, "--summarizer") ?? "claude-haiku-4-5";
   const live = argv.includes("--live");
-  for (const n of names)
-    if (!examPolicies[n]) throw new Error(`There's no policy ${n}. Pick from ${Object.keys(examPolicies).join(", ")}.`);
+  const policies = names.map((n) => {
+    const policy = examPolicy(n);
+    if (!policy) throw new Error(`There's no policy ${n}. Pick from full, truncate, recency and lean, each optionally @<tail tokens>.`);
+    return { name: n, policy };
+  });
   if (!Number.isInteger(window) || window <= 0) throw new Error("--window takes a number of tokens, e.g. --window 200000.");
+  const at = trigger === undefined ? undefined : Number(trigger);
+  if (at !== undefined && !(at > 0 && at < 1)) throw new Error("--trigger takes a share of the window, e.g. --trigger 0.5.");
   const room = price(answerer).context - 400;
+
+  /**
+   * What `policy` leaves of `session`, summarized by `summarize`, and how many times it compressed: `lean` arms replay the
+   * session's growth when `--trigger` names a share of the window, else compress once at its end.
+   */
+  const keep = async (policy: (typeof policies)[number], session: ExamSession, summarize: Summarize) => {
+    if (at === undefined || !policy.name.startsWith("lean")) {
+      const kept = await policy.policy(session, window, summarize);
+      return { kept, times: kept.compressions?.length ?? 0 };
+    }
+    const tail = Number(policy.name.split("@")[1] ?? tailBudget(window));
+    return replay(session, window, at, tail, summarize);
+  };
 
   const exams = loadExams(dir);
   if (exams.length === 0) throw new Error(`${dir} has no *.exam.json. Convert sessions with exam-convert.ts, then write their questions.`);
   const runs = [];
   let malformed = false;
-  console.log(`Offline, in a ${window.toLocaleString("en-US")}-token window (tokens estimated; live cost at catalog list prices):`);
+  const compressing = at === undefined ? "" : `, compressing at ${at * 100}% of it`;
+  console.log(
+    `Offline, in a ${window.toLocaleString("en-US")}-token window${compressing} (tokens estimated; summaries scripted; live cost at catalog list prices):`,
+  );
   for (const { name, exam, session } of exams) {
-    for (const policy of names) {
-      const fake = makeFakeAnthropic([{ blocks: [{ type: "text", text: "ok" }] }]);
-      const body = await nextRequest(session, examPolicies[policy]?.(session, window) ?? [], fake, instruction);
+    for (const policy of policies) {
+      let summaryInput = 0;
+      const counting: Summarize = async (input) => {
+        summaryInput += estimateTokens(input.digest) + estimateTokens(input.previous ?? "");
+        return scriptedSummary(input);
+      };
+      const { kept, times } = await keep(policy, session, counting);
+      const body = await nextRequest(session, kept, makeFakeAnthropic([{ blocks: [{ type: "text", text: "ok" }] }]), instruction);
       const score = offlineScore(body, exam);
       const fits = score.tokens <= room;
-      const cost = fits ? estimate(score.tokens, exam, answerer, grader) : 0;
-      runs.push({ name, exam, policy, body, score, fits, cost });
+      const summaries = listCost(price(summarizer).price, {
+        inputTokens: summaryInput,
+        outputTokens: times * 4_000,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      });
+      const cost = fits ? estimate(score.tokens, exam, answerer, grader) + summaries : 0;
+      runs.push({ name, exam, session, policy, score, fits, cost });
       const share = `${((score.held / score.questions) * 100).toFixed(1)}%`;
+      const times_ = times > 0 ? `  ${times} compression${times === 1 ? "" : "s"}` : "";
       console.log(
-        `  ${name.slice(0, 8)}  ${policy.padEnd(9)} ~${Math.round(score.tokens / 1000)}K tokens  ${share.padStart(6)} of answers held  ${fits ? `live ~${usd(cost)}` : `too big for ${answerer}, skipped live`}`,
+        `  ${name.slice(0, 8)}  ${policy.name.padEnd(12)} ~${Math.round(score.tokens / 1000)}K tokens  ${share.padStart(6)} of answers held${times_}  ${fits ? `live ~${usd(cost)}` : `too big for ${answerer}, skipped live`}`,
       );
-      if (policy === "full" && score.missing.length > 0) {
+      if (policy.name === "full" && score.missing.length > 0) {
         malformed = true;
         console.log(`    Not in the whole transcript, so the exam is wrong: ${score.missing.join(", ")}`);
       }
     }
   }
+  for (const policy of policies) {
+    const of = runs.filter((r) => r.policy === policy);
+    const avg = (f: (r: (typeof of)[number]) => number) => of.reduce((s, r) => s + f(r), 0) / of.length;
+    const held = (avg((r) => r.score.held / r.score.questions) * 100).toFixed(1);
+    console.log(
+      `  AVG       ${policy.name.padEnd(12)} ~${Math.round(avg((r) => r.score.tokens) / 1000)}K tokens  ${held.padStart(5)}% of answers held`,
+    );
+  }
   const total = runs.reduce((sum, r) => sum + r.cost, 0);
-  console.log(`Estimated live cost: ${usd(total)} (${answerer} answers, ${grader} grades).`);
+  console.log(`Estimated live cost: ${usd(total)} (${answerer} answers, ${grader} grades, ${summarizer} summarizes).`);
   if (malformed) process.exitCode = 1;
   if (!live || malformed) return;
 
@@ -189,19 +256,20 @@ export const main = async (argv: readonly string[]) => {
   const key = found.key;
 
   let spent = 0;
+  const summarize = liveSummarize(key, summarizer, (usd) => {
+    spent += usd;
+  });
   const results = [];
   for (const run of runs.filter((r) => r.fits)) {
-    const counted = await call(key, "/count_tokens", {
-      model: answerer,
-      system: run.body.system,
-      tools: run.body.tools,
-      messages: run.body.messages,
-    });
+    // A summarizing policy runs again with a real summary; the others leave what they did offline.
+    const { kept } = await keep(run.policy, run.session, summarize);
+    const body = await nextRequest(run.session, kept, makeFakeAnthropic([{ blocks: [{ type: "text", text: "ok" }] }]), instruction);
+    const counted = await call(key, "/count_tokens", { model: answerer, system: body.system, tools: body.tools, messages: body.messages });
     let correct = 0;
     const answers = [];
     for (const q of run.exam.questions) {
       if (spent >= budget) throw new Error(`Stopped at the budget of ${usd(budget)}, with ${usd(spent)} spent.`);
-      const reply = await call(key, "", asking(run.body, q, answerer));
+      const reply = await call(key, "", asking(body, q, answerer));
       spent += listCost(price(answerer).price, usageOf(reply));
       const answer = replyText(reply).trim();
       let right = false;
@@ -225,21 +293,21 @@ export const main = async (argv: readonly string[]) => {
     }
     const recall = correct / run.exam.questions.length;
     const tokens = Number(counted.input_tokens ?? 0);
-    results.push({ transcript: run.name, policy: run.policy, tokens, recall, held: run.score.held / run.score.questions, answers });
+    results.push({ transcript: run.name, policy: run.policy.name, tokens, recall, held: run.score.held / run.score.questions, answers });
     console.log(
-      `  ${run.name.slice(0, 8)}  ${run.policy.padEnd(9)} ${(recall * 100).toFixed(1).padStart(5)}% recall @ ${Math.round(tokens / 1000)}K tokens  (${usd(spent)} spent so far)`,
+      `  ${run.name.slice(0, 8)}  ${run.policy.name.padEnd(12)} ${(recall * 100).toFixed(1).padStart(5)}% recall @ ${Math.round(tokens / 1000)}K tokens  (${usd(spent)} spent so far)`,
     );
   }
-  for (const policy of names) {
-    const of = results.filter((r) => r.policy === policy);
+  for (const { name } of policies) {
+    const of = results.filter((r) => r.policy === name);
     if (of.length === 0) continue;
     const avg = (f: (r: (typeof of)[number]) => number) => of.reduce((s, r) => s + f(r), 0) / of.length;
     console.log(
-      `  AVG       ${policy.padEnd(9)} ${(avg((r) => r.recall) * 100).toFixed(1).padStart(5)}% recall @ ${Math.round(avg((r) => r.tokens) / 1000)}K tokens`,
+      `  AVG       ${name.padEnd(12)} ${(avg((r) => r.recall) * 100).toFixed(1).padStart(5)}% recall @ ${Math.round(avg((r) => r.tokens) / 1000)}K tokens`,
     );
   }
   const out = join(dir, `results-${new Date().toISOString().replaceAll(":", "-")}.json`);
-  writeFileSync(out, JSON.stringify({ window, answerer, grader, spentUsd: spent, results }, null, 2));
+  writeFileSync(out, JSON.stringify({ window, trigger: at, answerer, grader, summarizer, spentUsd: spent, results }, null, 2));
   console.log(`Spent ${usd(spent)}. Answers in ${out}.`);
 };
 

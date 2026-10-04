@@ -5,7 +5,8 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { CompressionExam, ExamQuestion, ThreadId, TurnId } from "@verdandi/contracts";
 import { Effect, Stream } from "effect";
 import { makeNativeAdapter, maxTokens } from "./adapter.ts";
-import { createTranscript, type Entry, type Prefix } from "./transcript.ts";
+import { type Compressed, compress, estimateTokens, type Summarize, tailBudget } from "./compress.ts";
+import { type Compression, createTranscript, type Entry, type Prefix, requestMessages } from "./transcript.ts";
 
 /**
  * The compression recall exam (#207, ADR 0033): long native transcripts, each with questions that have exact answers,
@@ -17,14 +18,14 @@ import { createTranscript, type Entry, type Prefix } from "./transcript.ts";
 /** A session at the point it's compressed: its fixed prefix and its transcript's entries. */
 export type ExamSession = { readonly prefix: Prefix; readonly entries: readonly Entry[] };
 
-/** A compression policy under exam: the entries the session's next request is built from, in a window of `window` tokens. */
-export type ExamPolicy = (session: ExamSession, window: number) => Entry[];
+/** What a policy leaves of a session: the transcript its next request is built from. */
+export type Kept = { readonly entries: readonly Entry[]; readonly compressions?: readonly Compression[] };
 
-/** A rough token count of what a request sends: a quarter of its JSON's length. The live run counts with the API. */
-export const estimateTokens = (value: unknown) => Math.ceil(JSON.stringify(value).length / 4);
-
-/** The tail #186's research proposes: 2.5% of the window, clamped to 10K–25K tokens (Hermes's lean policy). */
-export const tailBudget = (window: number) => Math.min(25_000, Math.max(10_000, Math.round(window * 0.025)));
+/**
+ * A compression policy under exam, in a window of `window` tokens. `summarize` writes a compression's sections: a
+ * scripted one offline, so the score measures the mechanical parts, and the `aux.compress` prompt on a model live.
+ */
+export type ExamPolicy = (session: ExamSession, window: number, summarize: Summarize) => Kept | Promise<Kept>;
 
 const leftOut = "[Verdandi left out the conversation before this point to fit the context window.]";
 
@@ -50,28 +51,80 @@ export const keepNewest = (entries: readonly Entry[], budget: number): Entry[] =
   return [opening, ...entries.slice(first.message.role === "assistant" ? start : start + 1)];
 };
 
-/** The policies the exam compares (#207's arms). #186's compressor joins them as `lean`. */
-export const examPolicies: Record<string, ExamPolicy> = {
-  /** No compression in a window that holds it all: the recall ceiling. */
-  full: ({ entries }) => [...entries],
-  /** No compression in a window too small for it: the newest entries that fit beside the prefix and the reply's room. */
-  truncate: ({ prefix, entries }, window) => keepNewest(entries, window - maxTokens - estimateTokens(prefix)),
-  /** A recency-only tail of #186's budget and nothing else: what a summary has to beat. */
-  recency: ({ entries }, window) => keepNewest(entries, tailBudget(window)),
+/** A pruned result's file, in the exam: nothing is written, since the score reads only the request. */
+const examPrune = (toolUseId: string) => `native-sessions/pruned/exam/${toolUseId}.txt`;
+
+/** Every section headed and empty: what the summary adds offline, so the score is the mechanical parts'. */
+export const scriptedSummary: Summarize = async () => {
+  const block = ["Goal", "Constraints", "Progress", "Decisions", "Files touched", "Open issues", "Next steps", "Pending user asks"]
+    .map((s) => `## ${s}\nNone.`)
+    .join("\n\n");
+  return { sections: block, block, costUsd: 0 };
+};
+
+/** The session compressed once, at its end, with a tail of `tail` tokens: #186's compressor, forced. */
+const leanOnce = async ({ entries }: ExamSession, tail: number, summarize: Summarize): Promise<Kept> => {
+  const done = await compress({ entries, compressions: [] }, { tail, summarizeOver: 0, prune: examPrune, summarize });
+  if (done && "error" in done) throw new Error(`The compression failed: ${done.error}`);
+  return { entries, compressions: done ? [done.compression] : [] };
+};
+
+/**
+ * The session replayed as it grew, compressed each time its request passed `at` of the window, as the native harness
+ * does (DESIGN §16): how often it breaks the cache, and what's left at the end.
+ */
+export const replay = async (session: ExamSession, window: number, at: number, tail: number, summarize: Summarize) => {
+  const compressions: Compression[] = [];
+  let times = 0;
+  for (let n = 1; n <= session.entries.length; n++) {
+    const entries = session.entries.slice(0, n);
+    if (estimateTokens(requestMessages(entries, true, compressions.at(-1))) < at * window) continue;
+    const done: Compressed | undefined = await compress(
+      { entries, compressions },
+      { tail, summarizeOver: (at * window) / 2, prune: examPrune, summarize },
+    );
+    if (!done) continue;
+    if ("error" in done) throw new Error(`The compression failed: ${done.error}`);
+    compressions.push(done.compression);
+    times++;
+  }
+  return { kept: { entries: session.entries, compressions } satisfies Kept, times };
+};
+
+/**
+ * The policy a name picks: an arm of the exam, `name@<tokens>` for a tail (or recency's budget) of that many tokens,
+ * or undefined. `lean` is #186's compressor, compressing once at the session's end.
+ */
+export const examPolicy = (name: string): ExamPolicy | undefined => {
+  const [arm, size] = name.split("@");
+  const sized = size === undefined ? undefined : Number(size);
+  if (sized !== undefined && !(Number.isInteger(sized) && sized > 0)) return undefined;
+  const tail = (window: number) => sized ?? tailBudget(window);
+  const arms: Record<string, ExamPolicy> = {
+    /** No compression in a window that holds it all: the recall ceiling. */
+    full: ({ entries }) => ({ entries }),
+    /** No compression in a window too small for it: the newest entries that fit beside the prefix and the reply's room. */
+    truncate: ({ prefix, entries }, window) => ({ entries: keepNewest(entries, window - maxTokens - estimateTokens(prefix)) }),
+    /** A recency-only tail and nothing else: what a summary has to beat. */
+    recency: ({ entries }, window) => ({ entries: keepNewest(entries, tail(window)) }),
+    /** #186's compressor: prune, then summary, identifiers and the user's messages before a recent tail. */
+    lean: (session, window, summarize) => leanOnce(session, tail(window), summarize),
+  };
+  return arms[arm ?? ""];
 };
 
 /** The fake provider as `nextRequest` uses it: `@verdandi/testkit`'s `makeFakeAnthropic`, scripted with one reply. */
 type Capture = { readonly fetch: typeof globalThis.fetch; readonly requests: readonly { readonly body: Record<string, unknown> }[] };
 
 /**
- * The request the session's next turn sends after a policy left `entries`: the native adapter resumes them from a
+ * The request the session's next turn sends after a policy left `kept`: the native adapter resumes it from a
  * throwaway folder and runs a turn of `text` against `fake`, with every cache break thrown. What `fake` received last.
  */
-export const nextRequest = async (session: ExamSession, entries: readonly Entry[], fake: Capture, text = "Go on.") => {
+export const nextRequest = async (session: ExamSession, kept: Kept, fake: Capture, text = "Go on.") => {
   const dir = mkdtempSync(join(tmpdir(), "verdandi exam "));
   try {
     const sessionsDir = join(dir, "native-sessions");
-    const transcript = createTranscript(sessionsDir, "exam", session.prefix, entries);
+    const transcript = createTranscript(sessionsDir, "exam", session.prefix, kept.entries, kept.compressions);
     const adapter = makeNativeAdapter({
       apiKey: "sk-ant-exam",
       sessionsDir,
@@ -79,6 +132,7 @@ export const nextRequest = async (session: ExamSession, entries: readonly Entry[
       terminal: { run: async () => ({ exitCode: 0, output: "", durationMs: 0 }), outputs: join(dir, "terminal-output") },
       fetch: fake.fetch,
       cacheBreaks: "throw",
+      compress: false,
     });
     await Effect.runPromise(
       Stream.runDrain(

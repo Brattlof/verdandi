@@ -455,6 +455,17 @@ export const HandoffStart = Schema.Struct({
   to: HarnessId,
 });
 /**
+ * Internal: creates compression thread `threadId` in `projectPath` (DESIGN §16): its one turn writes the summary a
+ * compression of turn `for.turnId`'s native session puts in place of the conversation before a recent tail.
+ */
+export const CompressionStart = Schema.Struct({
+  type: Schema.Literal("compression.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  projectPath: Schema.String,
+  for: Schema.Struct({ threadId: ThreadId, turnId: TurnId }),
+});
+/**
  * Internal: review thread `reviewThreadId` proposes a memory (a routing note is one, in project memory) or a skill
  * change, after turn `turnId` of the reviewed thread `threadId`. Untrusted: scanned like a save, then recorded as a
  * pending request for the user.
@@ -579,6 +590,7 @@ export const Command = Schema.Union([
   ReviewStart,
   ReviewPropose,
   HandoffStart,
+  CompressionStart,
   CommandsTrustRequest,
   DeviceRevoke,
   DevicePair,

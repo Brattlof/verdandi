@@ -116,9 +116,10 @@ const BASE_DIFFICULTY: Record<TaskClass, number> = {
   "debug.investigate": 0.7,
   "code.refactor.large": 0.8,
   "design.architecture": 0.8,
-  // Never classified from a user's text: Verdandi starts its own reviews and handoffs in these classes.
+  // Never classified from a user's text: Verdandi starts its own reviews, handoffs and compressions in these classes.
   "aux.review": 0.1,
   "aux.handoff": 0.1,
+  "aux.compress": 0.1,
 };
 
 const clamp = (n: number) => Math.min(1, Math.max(0, n));

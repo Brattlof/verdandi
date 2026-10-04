@@ -3,7 +3,8 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { CompressionExam } from "@verdandi/contracts";
 import { makeFakeAnthropic } from "@verdandi/testkit";
 import { maxTokens } from "./adapter.ts";
-import { type ExamSession, examPolicies, keepNewest, nextRequest, offlineScore, tailBudget } from "./exam.ts";
+import { tailBudget } from "./compress.ts";
+import { type ExamSession, examPolicy, keepNewest, nextRequest, offlineScore, scriptedSummary } from "./exam.ts";
 import type { Entry } from "./transcript.ts";
 
 /**
@@ -77,7 +78,9 @@ const window = 80_000;
 const score = async (policy: string) => {
   const session = syntheticSession();
   const fake = makeFakeAnthropic([{ blocks: [{ type: "text", text: "Going on." }] }]);
-  const body = await nextRequest(session, examPolicies[policy]?.(session, window) ?? [], fake);
+  const kept = await examPolicy(policy)?.(session, window, scriptedSummary);
+  if (!kept) throw new Error(`No policy ${policy}.`);
+  const body = await nextRequest(session, kept, fake);
   return { body, ...offlineScore(body, exam) };
 };
 
@@ -102,6 +105,17 @@ test("the offline exam scores truncation against a recency-only tail on a synthe
     expect(pairsHold(kept.body.messages)).toBe(true);
     expect(kept.body.messages[0]?.role).toBe("user");
   }
+});
+
+test("the compressor keeps what a recency tail of the same size loses: the user's words verbatim", async () => {
+  const recency = await score("recency");
+  const lean = await score("lean");
+
+  expect(lean.missing).not.toContain("steer");
+  expect(lean.held).toBeGreaterThan(recency.held);
+  // A summary costs tokens, but far fewer than truncation keeps.
+  expect(lean.tokens).toBeLessThan((await score("truncate")).tokens);
+  expect(pairsHold(lean.body.messages)).toBe(true);
 });
 
 test("a cut inside a turn opens with a note, and one at a steer drops the results of calls it left out", () => {

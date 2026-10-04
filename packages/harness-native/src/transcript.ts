@@ -36,18 +36,44 @@ export const saidEffort = (entries: readonly Entry[]) => {
 };
 
 /**
- * A native session's transcript on disk, `<dir>/<id>.jsonl`: a header line with the session's prefix, then one line
- * per message, appended and never rewritten, so thinking blocks go back exactly as the model sent them.
+ * A compression of a session (DESIGN §16), which requests are built from once it's written. `at` is how many entries
+ * the transcript had then. `pruned` maps each tool result moved to disk, by its call's id, to the text that stands in
+ * for it, every earlier compression's included. With `summary`, the entries before `keepFrom` go, and one user message
+ * of `text` stands in for them; `sections` is the model's part of it, which the next compression updates.
  */
-export type Transcript = { readonly id: string; readonly file: string; readonly prefix: Prefix; readonly entries: Entry[] };
+export type Compression = {
+  readonly at: number;
+  readonly pruned: Readonly<Record<string, string>>;
+  readonly summary?: { readonly keepFrom: number; readonly text: string; readonly sections: string };
+};
+
+/**
+ * A native session's transcript on disk, `<dir>/<id>.jsonl`: a header line with the session's prefix, then one line
+ * per message, and one per compression, appended and never rewritten, so thinking blocks go back exactly as the model
+ * sent them, and a resume, or a revert to before a compression, builds the same requests.
+ */
+export type Transcript = {
+  readonly id: string;
+  readonly file: string;
+  readonly prefix: Prefix;
+  readonly entries: Entry[];
+  readonly compressions: Compression[];
+};
 
 const fileOf = (dir: string, id: string) => join(dir, `${id}.jsonl`);
 
-export const createTranscript = (dir: string, id: string, prefix: Prefix, entries: readonly Entry[] = []): Transcript => {
+export const createTranscript = (
+  dir: string,
+  id: string,
+  prefix: Prefix,
+  entries: readonly Entry[] = [],
+  compressions: readonly Compression[] = [],
+): Transcript => {
   mkdirSync(dir, { recursive: true });
   const file = fileOf(dir, id);
-  writeFileSync(file, [{ v: 1, ...prefix }, ...entries].map((line) => `${JSON.stringify(line)}\n`).join(""));
-  return { id, file, prefix, entries: [...entries] };
+  const lines = [{ v: 1, ...prefix }, ...entries, ...compressions.map((compression) => ({ compression }))];
+  writeFileSync(file, lines.map((line) => `${JSON.stringify(line)}\n`).join(""));
+  return { id, file, prefix, entries: [...entries], compressions: [...compressions] };
 };
 
 /**
@@ -66,13 +92,16 @@ export const loadTranscript = (dir: string, id: string): Transcript | undefined 
       if (i < lines.length - 1) throw new Error(`${file} line ${i + 1} isn't JSON (${e instanceof Error ? e.message : String(e)}).`);
     }
   });
-  const [header, ...entries] = parsed as [Prefix & { v: number }, ...Entry[]];
+  const [header, ...rest] = parsed as [Prefix & { v: number }, ...(Entry | { readonly compression: Compression })[]];
   if (header?.v !== 1) throw new Error(`${file} doesn't start with a native session header.`);
+  const entries = rest.filter((line): line is Entry => !("compression" in line));
+  const compressions = rest.flatMap((line) => ("compression" in line ? [line.compression] : []));
   return {
     id,
     file,
     prefix: { system: header.system, tools: header.tools, ...(header.deferred && { deferred: header.deferred }) },
     entries,
+    compressions,
   };
 };
 
@@ -80,6 +109,15 @@ export const appendEntry = (transcript: Transcript, entry: Entry) => {
   appendFileSync(transcript.file, `${JSON.stringify(entry)}\n`);
   transcript.entries.push(entry);
 };
+
+/** Writes a compression: every later request of the session is built from it. */
+export const appendCompression = (transcript: Transcript, compression: Compression) => {
+  appendFileSync(transcript.file, `${JSON.stringify({ compression })}\n`);
+  transcript.compressions.push(compression);
+};
+
+/** The compressions a copy of the transcript through `entries.length` entries keeps: a revert drops later ones. */
+export const compressionsThrough = (transcript: Transcript, entries: number) => transcript.compressions.filter((c) => c.at <= entries);
 
 /** The entries up to the end of turn `turnId`, or undefined when the transcript doesn't have that turn. */
 export const entriesThrough = (transcript: Transcript, turnId: string) => {
@@ -99,17 +137,47 @@ const interrupted = (id: string): Anthropic.ToolResultBlockParam => ({
  * a result gets one saying so, and user messages in a row (an interrupt before the reply) are joined, so user and
  * assistant turns alternate (DESIGN §9.4). The same transcript always builds the same messages, so the cache holds.
  * Effort messages are left out for a model without effort levels (`efforts` false), which refuses them.
+ *
+ * With a `compression` (the session's latest, DESIGN §16), each tool result it pruned is sent as its stand-in, and
+ * with a summary the entries before its `keepFrom` go: the summary's message leads, then the latest effort message
+ * before the cut, then the rest, less results of calls that were cut.
  */
-export const requestMessages = (entries: readonly Entry[], efforts = true): Anthropic.MessageParam[] => {
+export const requestMessages = (entries: readonly Entry[], efforts = true, compression?: Compression): Anthropic.MessageParam[] => {
   const out: ({ role: "user" | "assistant"; content: Anthropic.ContentBlockParam[] } | EffortMessage)[] = [];
   let open: string[] = [];
+  const called = new Set<string>();
   const answer = (content: readonly Anthropic.ContentBlockParam[]) => {
     const answered = new Set(content.flatMap((b) => (b.type === "tool_result" ? [b.tool_use_id] : [])));
     const missing = open.filter((id) => !answered.has(id)).map(interrupted);
     open = [];
     return [...missing, ...content];
   };
-  for (const { message } of entries) {
+  const pruned = compression?.pruned ?? {};
+  const cut = compression?.summary;
+  const before = cut ? entries.slice(0, cut.keepFrom) : [];
+  const said = before.findLast((e) => e.message.role === "system");
+  const kept: Entry[] = cut
+    ? [
+        { turnId: "", message: { role: "user", content: [{ type: "text", text: cut.text }] } },
+        ...(said ? [said] : []),
+        ...entries.slice(cut.keepFrom),
+      ]
+    : [...entries];
+  for (const entry of kept) {
+    const message =
+      entry.message.role === "user" && compression
+        ? {
+            role: "user" as const,
+            content: entry.message.content.flatMap((b): Anthropic.ContentBlockParam[] => {
+              if (b.type !== "tool_result") return [b];
+              if (!called.has(b.tool_use_id)) return [];
+              const stand = pruned[b.tool_use_id];
+              return [stand === undefined ? b : { ...b, content: stand }];
+            }),
+          }
+        : entry.message;
+    if (message.role === "assistant") for (const b of message.content) if (b.type === "tool_use") called.add(b.id);
+    if (message.role === "user" && message.content.length === 0) continue;
     if (message.role === "system") {
       if (!efforts) continue;
       // A tool call left open gets its result before it, where the next user message would have put it.

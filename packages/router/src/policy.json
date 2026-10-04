@@ -88,7 +88,8 @@
     },
     "chat.general": { "prefer": ["cc-haiku"], "effort": "low", "max": { "prefer": ["cc-sonnet"] }, "tokens": 10000 },
     "aux.review": { "prefer": ["cc-haiku"], "effort": "low", "tokens": 30000, "maxCost": 0.25 },
-    "aux.handoff": { "prefer": ["cc-haiku"], "effort": "low", "tokens": 20000, "maxCost": 0.1 }
+    "aux.handoff": { "prefer": ["cc-haiku"], "effort": "low", "tokens": 20000, "maxCost": 0.1 },
+    "aux.compress": { "prefer": ["cc-haiku"], "effort": "low", "tokens": 40000, "maxCost": 0.25 }
   },
   "fallback": {
     "prefer": ["cc-sonnet"],

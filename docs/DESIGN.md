@@ -334,7 +334,7 @@ Stages 1–5 are pure and fast, so the composer shows a **live routing preview w
 | `review` | Code or security review | Opus · medium |
 | `design.architecture` | Designs, trade-offs | Opus · high (Fable in Max mode) |
 | `chat.general` | Gateway chit-chat, quick questions | Cheapest acceptable (local or Haiku) |
-| `aux.*` | Titles, commit messages, handoffs, compression, vision, background review, judging whether a command is safe, classification | Set per aux task (§9.7); `aux.review` and `aux.handoff`: Haiku · low |
+| `aux.*` | Titles, commit messages, handoffs, compression, vision, background review, judging whether a command is safe, classification | Set per aux task (§9.7); `aux.review`, `aux.handoff` and `aux.compress`: Haiku · low |
 
 **Budget modes:**
 - **Thrifty** moves routes one step down and makes local models acceptable more often.
@@ -626,7 +626,7 @@ interface HarnessAdapter {
 Some jobs are small, but a model still has to do them. They fall into two kinds:
 
 - **Judgments** have a fixed set of possible answers. Examples: routing classification, whether a command is safe, whether a task is worth reviewing. These go to the **decision layer** (§9.8), not to an LLM.
-- **Generation** means writing text. Examples: titles, commit messages, handoff summaries, vision descriptions, and the background review itself. These are **routed tasks** (`aux.*` classes) with their own policy entries, so they automatically use the cheapest acceptable target: usually a local model, then Haiku.
+- **Generation** means writing text. Examples: titles, commit messages, handoff and compression summaries, vision descriptions, and the background review itself. These are **routed tasks** (`aux.*` classes) with their own policy entries, so they automatically use the cheapest acceptable target: usually a local model, then Haiku.
 
 ### 9.8 Decision layer (System 1)
 
@@ -930,14 +930,16 @@ Trajectories from open or local models don't have this restriction. The exporter
 
 ## 16. Context management (native harness)
 
-Claude Code manages its own context. The native harness has a pluggable `ContextEngine`, whose default is a compressor:
+Claude Code manages its own context. The native harness compresses its sessions itself (`packages/harness-native/src/compress.ts`), with numbers chosen on the recall exam below (ADR 0033):
 
-1. **Trigger:** compression starts at a set fraction of the context window (about 50% by default, later for windows under 512K), and again as a safety measure at about 85%.
-2. **Save memory first** (a background review flush), so nothing worth keeping is lost.
-3. **Prune without an LLM call:** oversized tool results are written to disk, with a pointer left in their place. If this frees enough room, compression stops here.
-4. **Otherwise, summarize the middle.** Keep a head and a tail within a token budget, never splitting a tool call from its result. Summarize what's between them with the auxiliary compression target, using the handoff sections (§8.2). The summary is updated on each later compression.
+1. **Trigger:** before a request, once the last request's prompt reached 50% of the model's window (80% under 512K tokens, where 50% compressed two or three times as often for no better recall). A compression that failed is tried again only past 85%.
+2. **Save memory first:** when `review.yaml` turns background review on, the task's turns so far are reviewed before their conversation is summarized.
+3. **Prune without an LLM call:** tool results over 8,000 characters and older than the tail are written to disk under the profile's `native-sessions/pruned/`, each replaced by a stand-in naming the file, which `read_file` may open. If this brings the request under half the trigger, compression stops here. A session whose cache has gone cold (no request for the cache's 5-minute TTL, or none since verdandid started) is pruned before its next request even below the trigger, since that costs no cache it hasn't lost.
+4. **Otherwise, summarize everything before a tail:** the tail is 12.5% of the window, clamped to 10K–25K tokens (25K on every window the native harness runs today), starting at a reply or a user message, so no tool call is split from its result. One user message stands in for the rest: a summary in the handoff's sections (§8.2) plus *Pending user asks*, written by an `aux.compress` task over a lean digest of the conversation (Haiku · low, like `aux.handoff`, in a hidden thread, its cost on the turn's `compression` item) and updated on each later compression; *Files touched* from the checkpoints; then *Exact identifiers*, an index of the issue and PR numbers, commits, paths, error strings and URLs the conversation mentions, extracted by regex; then every message the user sent, verbatim; and a pointer to `session_search`. It fails closed: a summary missing a section, or an identifier of the index, writes nothing, and a `notice` says so.
 
-**Compression is the only allowed cache break.**
+A compression is a line appended to the session's transcript, which requests are built from, so a resume, or a revert to before it, builds the same bytes. It's recorded on the turn as a `compression` item (tokens before and after, results pruned, the summary's cost), shown in the web UI and `verdandi chat`.
+
+**Compression is the only allowed cache break,** and the native harness's cache check allows no other.
 
 **No keep-or-drop step.** Having a decision model choose, for each old tool call, whether to keep it word for word (the `fast-jev-compaction` approach) is out, and so is a plugin that does it for Claude Code. Hermes tested exactly this with Jev on real transcripts: lower recall at twice the tokens, no better than plain recency at a matched budget, and more cache breaks with each compaction (Appendix A). What would bring it back is Verdandi's recall exam (ADR 0033), in which keep-or-drop would have to beat prune-plus-summary, and plain recency, at the same token budget.
 
