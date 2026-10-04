@@ -1,20 +1,26 @@
-// Enforces the commit message rule in AGENTS.md: one line, after Google's CL descriptions, no body.
+// Enforces the commit message rule in AGENTS.md: one Conventional Commits header, no body.
 //   bun scripts/git-hooks.ts install           point git at scripts/git-hooks (`bun install` runs this)
 //   bun scripts/git-hooks.ts commit-msg <file> the commit-msg hook
 //   bun scripts/git-hooks.ts title <text>      check a PR title, which a squash merge makes the commit message
 import { readFileSync } from "node:fs";
 
-export const maxLength = 72;
+export const maxLength = 100;
 
-const fix = "Write one imperative sentence, like `Add decision layer` (AGENTS.md, Commits and pull requests).";
+const types = ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"];
+const header = new RegExp(`^(${types.join("|")})(\\([\\w./-]+\\))?!?: (.+)$`);
+
+const fix = "Write `type(scope): description`, like `feat(router): add decision layer` (AGENTS.md, Commits and pull requests).";
 
 export function titleProblem(title: string): string | undefined {
-  // Made by `git commit --fixup` and friends, and squashed away before merging.
-  if (/^(fixup|squash|amend)! /.test(title)) return undefined;
+  // Made by `git commit --fixup` and friends and squashed away, or by a `git pull` that merged.
+  if (/^((fixup|squash|amend)! |Merge )/.test(title)) return undefined;
   if (title.trim() === "") return `The message is empty. ${fix}`;
   if (title.length > maxLength) return `The title is ${title.length} characters; keep it to ${maxLength}. ${fix}`;
-  if (!/^([\w./-]+: )?\p{Lu}/u.test(title)) return `Start the title with a capital letter. ${fix}`;
-  if (title.endsWith(".")) return "Drop the title's trailing period.";
+  const description = header.exec(title)?.[3];
+  if (description === undefined) return `Start with a type, one of ${types.join(", ")}. ${fix}`;
+  // A capital followed by lowercase is sentence case; acronyms like `RPC` stay.
+  if (/^\p{Lu}\p{Ll}/u.test(description)) return `Start the description lowercase. ${fix}`;
+  if (description.endsWith(".")) return "Drop the title's trailing period.";
   return undefined;
 }
 

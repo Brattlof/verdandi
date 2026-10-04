@@ -126,7 +126,7 @@ Verdandi is built largely by coding agents, directed by people. [AGENTS.md](AGEN
 - Read the section of `docs/DESIGN.md` that covers your change before you make it.
 - Fight scope creep: extend existing code before adding a feature, and add a feature before adding a dependency.
 - Prove each change with the smallest check (`bun test <files>`, `bun run typecheck`). CI runs the full suite on Windows, macOS and Linux.
-- Commit messages are one imperative line after Google's CL description style, e.g. `Add decision layer`, with no body. A `commit-msg` hook checks them.
+- Commit messages are one [Conventional Commits](https://www.conventionalcommits.org/) header with no body, e.g. `feat(router): add decision layer`. A `commit-msg` hook checks them.
 
 ---
 
