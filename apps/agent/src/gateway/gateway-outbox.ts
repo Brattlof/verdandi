@@ -13,8 +13,8 @@ import type { SqlClient } from "effect/unstable/sql";
 import type { Engine } from "../event-store/engine.ts";
 import type { DeliveryState } from "./outbox.ts";
 
-/** What a resent delivery starts with: the chat may have it already. */
-export const possibleRepeat = "(Possibly a repeat: Verdandi restarted while sending this.)";
+/** What a resent delivery starts with: an earlier try may have reached the chat, in whole or in part. */
+export const possibleRepeat = "(Possibly a repeat: an earlier try to send this may have reached you.)";
 
 /** How long a failed delivery waits before its next attempt: 30 seconds, then a minute, doubling. */
 const backoff = (attempt: number) => Duration.seconds(30 * 2 ** (attempt - 1));
@@ -79,14 +79,21 @@ export const makeOutbox = (
       yield* deliver(deliveryId);
     });
 
+  // One sender per delivery at a time, so a delivery committed while `resume` reads the outbox isn't sent twice.
+  const sending = new Set<string>();
   /** Sends one delivery in the background; a failure that isn't the chat's is logged and retried by the next start. */
   const start = (deliveryId: string) =>
-    FiberSet.run(
-      fibers,
-      deliver(deliveryId).pipe(
-        Effect.ignoreCause({ log: "Warn", message: `The outbox couldn't deliver ${deliveryId}; the next start tries again.` }),
-      ),
-    ).pipe(Effect.asVoid);
+    Effect.suspend(() => {
+      if (sending.has(deliveryId)) return Effect.void;
+      sending.add(deliveryId);
+      return FiberSet.run(
+        fibers,
+        deliver(deliveryId).pipe(
+          Effect.ignoreCause({ log: "Warn", message: `The outbox couldn't deliver ${deliveryId}; the next start tries again.` }),
+          Effect.ensuring(Effect.sync(() => sending.delete(deliveryId))),
+        ),
+      ).pipe(Effect.asVoid);
+    });
 
   /** Picks up what a stopped verdandid left: deliveries never attempted, attempted but never reported, or failed. */
   const resume = Effect.gen(function* () {

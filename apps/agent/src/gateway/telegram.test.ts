@@ -83,6 +83,12 @@ test("a long reply splits at line ends and closes and reopens a code fence it br
   }
   expect(pieces.join("\n").replaceAll(/\n```\n```ts/g, "")).toBe(`Here:\n\`\`\`ts\n${code}\n\`\`\`\nDone.`);
   expect(splitMessage("short")).toEqual(["short"]);
+  // A line longer than Telegram's limit, inside a fence or opening one, and emoji counted as Telegram counts them.
+  for (const text of ["```typescript\n" + "a".repeat(5000) + "\n```", "```" + "x".repeat(5000) + "\nbody\n```", "😀".repeat(3000)]) {
+    const parts = splitMessage(text);
+    expect(parts.every((p) => p.length <= 4096 && p.trim() !== "```typescript\n```")).toBe(true);
+    expect(parts.every((p) => (p.match(/^```/gm) ?? []).length % 2 === 0)).toBe(true);
+  }
 });
 
 /** A Bot API that answers from `script` by method, recording each call; `getUpdates` hands out one batch, then waits. */

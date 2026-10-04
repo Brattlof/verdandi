@@ -20,7 +20,7 @@ const owner = { id: "1", name: "Owner" };
 const friend = { id: "2", name: "Friend" };
 const config = { fake: { ...defaultAccess, allowFrom: ["1", "2"] } };
 
-// Each turn checkpoints the workspace with git, which is slow on Windows.
+// A verdandid with the fake channel. Each turn checkpoints the workspace with git, slow on Windows: tests get gitHeavyTimeout.
 const start = async (home: string, channel: ReturnType<typeof makeFakeChannel>) => {
   // New conversations run in the workspace; its policy routes them to the fake harness.
   const policy = join(ensureWorkspace(home), ".verdandi");
@@ -117,6 +117,14 @@ test(
     channel.receive(friend, "hi");
     await channel.next((s) => s.chatId === "2" && s.text.includes("echo: hi"));
     expect(query<{ confined: number }>(home, "select confined from threads order by rowid")).toEqual([{ confined: 0 }, { confined: 1 }]);
+    // Nor does it get the tools that reach the owner's sessions and memory.
+    channel.receive(friend, 'tool session_search {"query":"approve","allProjects":true}');
+    await channel.next((s) => s.chatId === "2" && s.text.includes("called session_search"));
+    expect(
+      query<{ payload: string }>(home, "select payload from items where payload like '%tool.result%'").map(
+        (r) => (JSON.parse(r.payload) as { content: string }).content,
+      ),
+    ).toContain("There's no Verdandi tool session_search.");
 
     channel.receive(owner, "", { command: { name: "new", args: [] } });
     await channel.next((s) => s.text.startsWith("Your next message here starts a new conversation"));

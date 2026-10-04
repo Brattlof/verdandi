@@ -138,7 +138,7 @@ export const DeliveryRequested = Schema.Struct({
   text: Schema.String,
   buttons: Schema.Array(Button),
 });
-/** About to send; `duplicate`: an earlier attempt never reported back, so the chat may already have it. */
+/** About to send; `duplicate`: an earlier attempt never reported back, or failed partway, so the chat may already have it. */
 export const DeliveryAttempted = Schema.Struct({
   type: Schema.Literal("delivery.attempted"),
   v: Schema.Literal(1),

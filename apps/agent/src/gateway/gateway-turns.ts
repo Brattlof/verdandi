@@ -51,8 +51,12 @@ export const makeConversations = (home: string, engine: Engine["Service"], sql: 
   const threadFor = (m: InboundMessage, owner: boolean) =>
     Effect.gen(function* () {
       const { key, shared } = bindingKey({ ...m, senderId: m.sender.id });
-      const bound = yield* boundThread(key);
-      if (bound) return { threadId: bound, key, shared };
+      const [bound] = yield* sql<{ threadId: ThreadId; confined: number }>`
+        select b.thread_id as threadId, t.confined from channel_bindings b join threads t on t.id = b.thread_id where b.key = ${key}`;
+      if (bound && (owner || bound.confined === 1)) return { threadId: bound.threadId, key, shared };
+      // An unconfined thread whose sender is no longer the owner (the owner changed) is left behind for a confined one,
+      // since a session's folders and tools are fixed when it starts.
+      if (bound) yield* engine.dispatch({ type: "channel.unbind", commandId: randomUUID() as CommandId, threadId: bound.threadId });
       const threadId = randomUUID() as ThreadId;
       yield* engine.dispatch({
         type: "thread.create",

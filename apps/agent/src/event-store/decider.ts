@@ -1039,7 +1039,8 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       threadId: c.threadId,
       deliveryId: c.deliveryId,
       attempt: d.attempts + 1,
-      duplicate: d.state === "attempted",
+      // An attempt that never reported may have arrived, and so may the parts of a failed one sent before it failed.
+      duplicate: d.state === "attempted" || d.state === "failed",
     });
   },
   "delivery.report": (state, c) => {

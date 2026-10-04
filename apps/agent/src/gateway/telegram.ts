@@ -1,6 +1,7 @@
 import {
   ChannelError,
   type ContextText,
+  codePointStart,
   type InboundMessage,
   type OutboundMessage,
   type PlatformAdapter,
@@ -64,28 +65,35 @@ const maxLength = 4096;
  * end of one piece and opened again at the start of the next, so no piece leaves a fence open.
  */
 export const splitMessage = (text: string, limit = maxLength): string[] => {
+  const close = "```";
+  // A piece is at most: the reopened fence (at most 16 characters), a line, and the closing fence, with their line ends.
+  const room = limit - 16 - close.length - 2;
+  // Sizes count UTF-16 units, as Telegram does; a long line is cut in parts, never inside a surrogate pair.
+  const cut = (line: string): string[] => {
+    if (line.length <= room) return [line];
+    const at = codePointStart(line, room);
+    return [line.slice(0, at), ...cut(line.slice(at))];
+  };
   const pieces: string[] = [];
   let piece: string[] = [];
-  let size = 0;
+  let size = -1; // the piece's length joined, -1 while it's empty
   let fence: string | undefined;
-  const flush = () => {
-    if (piece.length === 0) return;
-    pieces.push([...piece, ...(fence === undefined ? [] : ["```"])].join("\n"));
-    piece = fence === undefined ? [] : [fence];
-    size = piece.join("\n").length;
+  const start = (lines: string[]) => {
+    piece = lines;
+    size = lines.join("\n").length - (lines.length === 0 ? 1 : 0);
   };
-  // A line longer than a piece goes in parts of its own.
-  const room = limit - 8;
-  const lines = text.split("\n").flatMap((line) => (line.length <= room ? [line] : (line.match(new RegExp(`.{1,${room}}`, "gsu")) ?? [])));
-  for (const line of lines) {
-    const opens = fence === undefined && line.startsWith("```");
-    const closes = fence !== undefined && line.trim() === "```";
-    const reserve = fence !== undefined || opens ? 4 : 0;
-    if (piece.length > 0 && size + 1 + line.length + reserve > limit) flush();
+  for (const line of text.split("\n").flatMap(cut)) {
+    // The piece with this line, and the fence closed after it if one is open by then.
+    const closing = fence !== undefined || line.startsWith(close) ? close.length + 1 : 0;
+    const reopenedOnly = fence !== undefined && piece.length === 1 && piece[0] === fence;
+    if (piece.length > 0 && !reopenedOnly && size + 1 + line.length + closing > limit) {
+      pieces.push([...piece, ...(fence === undefined ? [] : [close])].join("\n"));
+      start(fence === undefined ? [] : [fence]);
+    }
     piece.push(line);
-    size += (piece.length > 1 ? 1 : 0) + line.length;
-    if (opens) fence = line;
-    else if (closes) fence = undefined;
+    size += 1 + line.length;
+    if (fence === undefined && line.startsWith(close)) fence = (/^`{3,}\S{0,12}/.exec(line)?.[0] ?? close).slice(0, 16);
+    else if (fence !== undefined && line.trim() === close) fence = undefined;
   }
   if (piece.length > 0) pieces.push(piece.join("\n"));
   return pieces;
@@ -221,16 +229,18 @@ export const makeTelegramAdapter = (options: {
       ),
     );
 
+  // The next update to ask for: Telegram forgets the ones before it once a poll asks from here.
+  let offset = 0;
   const messages = Stream.unwrap(
     Effect.gen(function* () {
       const me = yield* call<{ id: number; username: string }>("getMe", {});
       yield* call("setMyCommands", { commands: telegramMenu() }).pipe(
         Effect.ignoreCause({ log: "Warn", message: "Couldn't set Telegram's command menu." }),
       );
-      return Stream.paginate(0, (offset: number) =>
+      return Stream.paginate(offset, (from: number) =>
         Effect.gen(function* () {
           const updates = yield* call<Update[]>("getUpdates", {
-            offset,
+            offset: from,
             timeout: options.pollSeconds ?? 30,
             allowed_updates: ["message", "callback_query"],
           });
@@ -240,7 +250,9 @@ export const makeTelegramAdapter = (options: {
             (id) => call("answerCallbackQuery", { callback_query_id: id }).pipe(Effect.ignore),
             { discard: true },
           );
-          const next = Math.max(offset, ...updates.map((u) => u.update_id + 1));
+          // Kept past a reconnect, so a batch already handed over isn't fetched again when the next poll fails.
+          offset = Math.max(from, ...updates.map((u) => u.update_id + 1));
+          const next = offset;
           return [updates.flatMap((u) => toInbound(u, me) ?? []), Option.some(next)] as const;
         }),
       );
