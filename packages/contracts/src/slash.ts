@@ -161,14 +161,18 @@ export const slashCommands = {
   },
   skills: {
     args: [
-      { name: "action", optional: true, choices: ["list", "history", "revert", "pin", "unpin", "restore"] },
+      {
+        name: "action",
+        optional: true,
+        choices: ["list", "history", "revert", "pin", "unpin", "restore", "install", "update", "uninstall"],
+      },
       { name: "skill", optional: true },
       { name: "n", optional: true },
     ],
-    help: "lists your skills; history, revert, pin, unpin and restore manage one",
+    help: "lists your skills; history, revert, pin, unpin and restore manage one; install, update and uninstall hub skills",
     surfaces: ["chat"],
     ownerOnly: true,
-    dispatches: ["skill.revert", "skill.pin", "skill.unpin", "skill.restore"],
+    dispatches: ["skill.revert", "skill.pin", "skill.unpin", "skill.restore", "skill.uninstall"],
     whileBusy: "run",
   },
   exit: {

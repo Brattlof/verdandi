@@ -34,6 +34,7 @@ import { readAttachment } from "./attach.ts";
 import {
   approvalPrompt,
   editPlan,
+  installPrompt,
   memoryPrompt,
   type PendingRequest,
   parseAnswer,
@@ -135,6 +136,7 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
     else if (r.type === "skill.proposed") io.write(skillPrompt(r));
     else if (r.type === "memory.proposed") io.write(memoryPrompt(r));
     else if (r.type === "commands.trust.requested") io.write(trustPrompt(r));
+    else if (r.type === "skill.install.proposed") io.write(installPrompt(r));
     else if (r.type === "plan.requested") {
       io.write(answered.length ? "Feedback for the agent to keep planning with (empty rejects without): " : planPrompt(r));
     } else {
@@ -236,7 +238,8 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
             e.type === "plan.requested" ||
             e.type === "skill.proposed" ||
             e.type === "memory.proposed" ||
-            e.type === "commands.trust.requested"
+            e.type === "commands.trust.requested" ||
+            e.type === "skill.install.proposed"
           )
             addRequest(e);
           if (e.type === "turn.item.added" && e.item.kind === "notice") io.write(`\n[${e.item.text}]\n`);
@@ -250,7 +253,11 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
           if (e.type === "thread.worktree.setup.held")
             io.write(`[worktree setup ${e.command} waits for you to trust it; the next turn asks]\n`);
           if (e.type === "skill.applied") io.write(e.error ? `[skill not written: ${e.error}]\n` : `[skill ${e.skill} saved]\n`);
-          if (e.type === "approval.resolved") removeRequest(e.requestId);
+          if (e.type === "approval.resolved" || e.type === "skill.install.resolved") removeRequest(e.requestId);
+          if (e.type === "skill.installed")
+            io.write(
+              e.error ? `[hub skill not installed: ${e.error}]\n` : `[hub skill ${e.skill} installed at ${e.pin.sha.slice(0, 12)}]\n`,
+            );
           if (e.type === "turn.usage.recorded") usage.push(e);
           if (e.type === "turn.completed") {
             io.write(summary(e.status, e.error, usage));
@@ -274,7 +281,8 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
       request.type === "approval.requested" ||
       request.type === "skill.proposed" ||
       request.type === "memory.proposed" ||
-      request.type === "commands.trust.requested"
+      request.type === "commands.trust.requested" ||
+      request.type === "skill.install.proposed"
     ) {
       const yes = /^y(es)?$/i.test(line);
       if (yes || /^no?$/i.test(line)) return resolve(request, { decision: yes ? "allow" : "deny" });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { type DecisionAnswer, type Item, type SkillChange, skillFileCap } from "@verdandi/contracts";
 import { flagged } from "@verdandi/decisions";
 import { containsSecret } from "@verdandi/trajectories";
@@ -85,6 +86,12 @@ export const invertChange = (change: SkillChange): SkillChange => ({
   before: change.after,
   after: change.before,
 });
+
+/**
+ * A skill file's SHA-256 in hex, or "" for a missing one: a hub install records its upstream files' (DESIGN §14.4), so an
+ * update can tell a file the user changed, or deleted, from one it may replace.
+ */
+export const digest = (text: string | null) => (text === null ? "" : createHash("sha256").update(text).digest("hex"));
 
 /** Why agents can't change skill `skill`: the user pinned it. Says how to go on. */
 export const pinnedProblem = (skill: string) =>

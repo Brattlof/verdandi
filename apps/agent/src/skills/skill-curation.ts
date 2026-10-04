@@ -5,6 +5,7 @@ import { SqlClient } from "effect/unstable/sql";
 import { Engine } from "../event-store/engine.ts";
 import { ProfileSkills } from "../event-store/reactor.ts";
 import { listSkills, placeSkill } from "./skill-files.ts";
+import { loadInstalls } from "./skill-hub.ts";
 
 const day = 24 * 60 * 60 * 1000;
 /** DESIGN §14.4: a skill Verdandi created goes stale after 14 days unused, and is archived after 30. */
@@ -18,7 +19,10 @@ const curated = Effect.flatMap(
     from skills`,
 );
 
-/** The Skills panel's view: the skill folders read from disk, each skill Verdandi created with its curation, and the pins. */
+/**
+ * The Skills panel's view: the skill folders read from disk, each skill Verdandi created with its curation, the pins,
+ * and each installed hub skill's pin.
+ */
 export const loadSkillsView = Effect.gen(function* () {
   const folders = yield* ProfileSkills;
   const sql = yield* SqlClient.SqlClient;
@@ -28,6 +32,7 @@ export const loadSkillsView = Effect.gen(function* () {
     folders,
     new Map(rows.map((r): [string, SkillCuration] => [r.name, { state: r.state, usedAt: r.usedAt, threadId: r.threadId }])),
     new Set(pins.map((p) => p.name)),
+    yield* loadInstalls,
   );
 });
 

@@ -38,6 +38,7 @@ import { loadRoutingMemory } from "../routing/routing-memory.ts";
 import { searchSessions } from "../search/search.ts";
 import { loadSkillsView, SkillCurationScheduleLive } from "../skills/skill-curation.ts";
 import { loadSkillHistory } from "../skills/skill-history.ts";
+import { proposeInstall } from "../skills/skill-hub.ts";
 import { loadSpendState } from "../spend/spend.ts";
 import { loadSpendCaps } from "../spend/spend-caps.ts";
 import { loadUsageReport } from "../spend/usage.ts";
@@ -151,6 +152,13 @@ const Handlers = (home: string) =>
         SkillsList: () =>
           loadSkillsView.pipe(
             Effect.provideService(ProfileSkills, skillFolders),
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.catchTag("SqlError", Effect.die),
+          ),
+        // A trust boundary like CommandDispatch's: verdandid fetches the skill itself, so the files the user approves are
+        // the ones at the SHA it records, never a client's.
+        SkillInstall: (request) =>
+          proposeInstall(home, skillFolders, engine.dispatch, request).pipe(
             Effect.provideService(SqlClient.SqlClient, sql),
             Effect.catchTag("SqlError", Effect.die),
           ),

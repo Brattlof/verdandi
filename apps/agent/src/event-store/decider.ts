@@ -67,8 +67,9 @@ import type { StoredRevert } from "./projector.ts";
 
 export type PendingRequest = {
   readonly requestId: string;
-  readonly turnId: TurnId;
-  readonly kind: "approval" | "user-input" | "plan" | "skill" | "memory" | "trust";
+  /** Null for a hub install's request, which has no turn and outlives any (DESIGN §14.4). */
+  readonly turnId: TurnId | null;
+  readonly kind: "approval" | "user-input" | "plan" | "skill" | "memory" | "trust" | "install";
   /** A plan's text as proposed, which an approval's edit is compared with. */
   readonly plan?: string;
   /** A plan's route for the build, when approving it moves the task (`plan.requested`'s `execute`). */
@@ -77,6 +78,8 @@ export type PendingRequest = {
   readonly memory?: { readonly scope: MemoryScope; readonly text: string; readonly replaces: readonly string[] };
   /** The project's own commands a trust request asks to run, which allowing it trusts. */
   readonly trust?: { readonly purpose: TrustPurpose; readonly commands: readonly string[]; readonly hash: string };
+  /** The hub skill an install request would install or update. */
+  readonly install?: { readonly skill: string };
 };
 
 /** What marks a thread as Verdandi's own auxiliary one: a background review's, a handoff's or a compression's, hidden and unattended. */
@@ -172,6 +175,13 @@ export type DeciderState = {
   readonly gatewaySender?: { readonly paired: boolean; readonly owner: boolean };
   /** Whether the user pinned the skill a proposal, `skill.curate`, `skill.pin` or `skill.unpin` names, loaded for those commands. */
   readonly pinned?: boolean;
+  /**
+   * The decision layer's answer to `injectionQuestion` about each new file of a `skill.install.propose`, in the order of
+   * its changes (undefined for a file it removes), asked by the engine.
+   */
+  readonly injections?: readonly (DecisionAnswer | undefined)[];
+  /** Whether the skill a `skill.uninstall` names was installed from the hub, loaded for it. */
+  readonly installed?: boolean;
   /** The written change a `skill.revert` names, from `skill_changes`, or null when there's none. */
   readonly reverting?: {
     readonly threadId: ThreadId;
@@ -223,6 +233,7 @@ const fits: Record<PendingRequest["kind"], readonly Resolution["decision"][]> = 
   skill: ["allow", "deny"],
   memory: ["allow", "deny"],
   trust: ["allow", "deny"],
+  install: ["allow", "deny"],
 };
 
 const configKey: Record<CapScope, Record<CapPeriod, string>> = {
@@ -1017,6 +1028,59 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
           "SkillNotPinned",
           `${c.skill} isn't pinned, so there's nothing to unpin. The Skills panel and verdandi skills list show the pins.`,
         ),
+  // A hub install or update (DESIGN §14.4): checked like a proposal, file by file. The scans' verdicts are advice for the
+  // diff, never a refusal: the user installs on purpose, from a source they named, and approves either way.
+  "skill.install.propose": (state, c) => {
+    for (const change of c.changes) {
+      const problem = change.skill === c.skill ? changeProblem(change) : `A hub install of ${c.skill} can't write ${change.skill}.`;
+      if (problem) return reject("InvalidSkill", `${c.skill} at ${c.pin.sha.slice(0, 12)} can't be installed: ${problem}`);
+    }
+    const advice = c.changes.flatMap((change, i) => {
+      const why = change.after === null ? undefined : scanSkill(change.after, state.injections?.[i]);
+      return why ? [{ path: change.path, why }] : [];
+    });
+    const created: Event[] = state.thread
+      ? []
+      : [
+          {
+            type: "thread.created",
+            v: 1,
+            threadId: c.threadId,
+            projectId: projectIdFor(c.projectPath),
+            projectPath: c.projectPath,
+            route: defaultRoute,
+            pinned: false,
+          },
+        ];
+    // One request per skill: a newer proposal, such as one taking over an edited file, replaces the one waiting.
+    const replaced = (state.thread?.pendingRequests ?? [])
+      .filter((r) => r.install?.skill === c.skill)
+      .map(
+        (r): Event => ({
+          type: "skill.install.resolved",
+          v: 1,
+          threadId: c.threadId,
+          requestId: r.requestId,
+          resolution: { decision: "deny" },
+          reason: "A newer proposal for this skill replaced it.",
+        }),
+      );
+    const { type: _, commandId, projectPath: _p, ...proposal } = c;
+    return accept(...created, ...replaced, { ...proposal, type: "skill.install.proposed", v: 1, requestId: commandId, advice });
+  },
+  "skill.install.report": (state, c) => {
+    if (!state.thread) return accept();
+    const { type: _, commandId: _c, ...report } = c;
+    return accept({ ...report, type: "skill.installed", v: 1 });
+  },
+  // The user's own: a profile matter, on its stream, like a pin. The reactor moves the folder to the archive.
+  "skill.uninstall": (state, c) =>
+    state.installed
+      ? accept({ type: "skill.uninstalled", v: 1, threadId: profileStream, skill: c.skill })
+      : reject(
+          "SkillNotInstalled",
+          `${c.skill} wasn't installed from the hub, so there's nothing to uninstall. The Skills panel and verdandi skills list mark hub skills.`,
+        ),
   // A no is logged and ends there, at no model cost; a yes asks the reactor to review the digest (DESIGN §14.5).
   "task.review": (state, c) => {
     if (!state.thread || state.thread.aux || !state.decisions) return accept();
@@ -1187,6 +1251,15 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       return reject("InvalidResolution", `Only a plan can be approved with an edit, not a ${request.kind} request. Allow it without one.`);
     if (edit?.trim() === "")
       return reject("InvalidResolution", "The edited plan is empty. Approve the plan as proposed, or keep planning with feedback.");
+    // A hub install has no turn: its answer is its own event, which the reactor writes on.
+    if (request.kind === "install" || request.turnId === null)
+      return accept({
+        type: "skill.install.resolved",
+        v: 1,
+        threadId: c.threadId,
+        requestId: c.requestId,
+        resolution: { decision: c.resolution.decision === "allow" ? "allow" : "deny" },
+      });
     const resolved: Event = {
       type: "approval.resolved",
       v: 1,

@@ -41,6 +41,7 @@ import { repeatedError } from "../routing/repeated-error.ts";
 import { searchSessions } from "../search/search.ts";
 import {
   applyChange,
+  applyChanges,
   placeSkill,
   prepareChange,
   readableSkills,
@@ -1119,6 +1120,33 @@ export const ReactorLive = Layer.effect(
             ...(error && { error }),
           })
           .pipe(Effect.ignoreCause({ log: "Warn", message: `Could not record how skill revert ${e.changeId} went.` }));
+      }
+      // An allowed hub install is written at once, inside its answer's dispatch, so the receipt means its outcome is recorded too.
+      if (e.type === "skill.install.resolved") {
+        if (e.resolution.decision !== "allow") return Effect.void;
+        return Effect.gen(function* () {
+          const [row] = yield* sql<{ payload: string }>`select payload from requests where id = ${e.requestId}`;
+          if (!row) return;
+          const { skill, pin, digests, changes } = JSON.parse(row.payload) as Extract<Event, { type: "skill.install.proposed" }>;
+          const error = applyChanges(skillFolders, changes);
+          yield* engine.dispatch({
+            type: "skill.install.report",
+            commandId: randomUUID() as CommandId,
+            threadId: e.threadId,
+            requestId: e.requestId,
+            skill,
+            pin,
+            digests,
+            ...(error && { error }),
+          });
+        }).pipe(Effect.ignoreCause({ log: "Warn", message: `Could not install hub skill request ${e.requestId}.` }));
+      }
+      // Uninstalling moves the folder out of what Claude Code loads, never deleting it.
+      if (e.type === "skill.uninstalled") {
+        const error = placeSkill(skillFolders, e.skill, true);
+        return error
+          ? Effect.logWarning(`${error} ${e.skill} is uninstalled, but its folder stays loaded until you move it.`)
+          : Effect.void;
       }
       // A skill proposal is Verdandi's own request: its answer writes the skill, in `turns` so `drain` waits for it. So is a
       // trust request, whose answer a turn waits on.

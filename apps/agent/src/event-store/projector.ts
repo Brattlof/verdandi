@@ -26,7 +26,7 @@ import type {
   Usage,
   WorktreeView,
 } from "@verdandi/contracts";
-import { clip, injectionItem, nextWorktree } from "@verdandi/contracts";
+import { clip, hubThread, injectionItem, nextWorktree } from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { sessionUntrusted, untrustedSource } from "../routing/untrusted.ts";
@@ -48,13 +48,15 @@ const requestKind = {
   "skill.proposed": "skill",
   "memory.proposed": "memory",
   "commands.trust.requested": "trust",
+  "skill.install.proposed": "install",
 } as const;
 
+/** Records a pending request; a hub install's has no turn. */
 const insertRequest = (e: Extract<Event, { type: keyof typeof requestKind }>, at: string) =>
   withSql(
     (sql) =>
       sql`insert into requests (id, thread_id, turn_id, kind, payload, requested_at)
-          values (${e.requestId}, ${e.threadId}, ${e.turnId}, ${requestKind[e.type]}, ${JSON.stringify(e)}, ${at})`,
+          values (${e.requestId}, ${e.threadId}, ${"turnId" in e ? e.turnId : null}, ${requestKind[e.type]}, ${JSON.stringify(e)}, ${at})`,
   );
 
 /** Adds a message to session search (DESIGN §14.3). A review thread's aren't: its digest repeats the reviewed thread's. */
@@ -316,6 +318,37 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
       (sql) => sql`insert into skill_changes (id, skill, thread_id, change, reverts)
         values (${e.changeId}, ${e.change.skill}, ${e.threadId}, ${JSON.stringify(e.change)}, ${e.reverts})`,
     ),
+  // Each file of a hub install is a change in the skill's history, `<request>:<path>`, so it can be seen and reverted.
+  "skill.install.proposed": (e, at) =>
+    Effect.andThen(
+      insertRequest(e, at),
+      withSql((sql) =>
+        Effect.forEach(
+          e.changes,
+          (change) => sql`insert into skill_changes (id, skill, thread_id, change)
+            values (${`${e.requestId}:${change.path}`}, ${e.skill}, ${e.threadId}, ${JSON.stringify(change)})`,
+        ),
+      ),
+    ),
+  "skill.install.resolved": (e, at) =>
+    withSql(
+      (sql) => sql`update requests set resolution = ${JSON.stringify(e.resolution)}, reason = ${e.reason ?? null}, resolved_at = ${at}
+        where id = ${e.requestId}`,
+    ),
+  // An installed hub skill has no row in `skills`, so the curator never touches it (DESIGN §14.4): it takes over the name
+  // from an archived skill Verdandi created, whose folder stays in the archive.
+  "skill.installed": (e, at) =>
+    withSql((sql) =>
+      Effect.gen(function* () {
+        yield* sql`update skill_changes set applied_at = ${at}, error = ${e.error ?? null}
+          where substr(id, 1, ${e.requestId.length + 1}) = ${`${e.requestId}:`}`;
+        if (e.error !== undefined) return;
+        yield* sql`insert or replace into skill_installs (name, pin, digests, thread_id, installed_at)
+          values (${e.skill}, ${JSON.stringify(e.pin)}, ${JSON.stringify(e.digests)}, ${e.threadId}, ${at})`;
+        yield* sql`delete from skills where name = ${e.skill}`;
+      }),
+    ),
+  "skill.uninstalled": (e) => withSql((sql) => sql`delete from skill_installs where name = ${e.skill}`),
   "skill.pinned": (e, at) => withSql((sql) => sql`insert or replace into skill_pins (name, pinned_at) values (${e.skill}, ${at})`),
   "skill.unpinned": (e) => withSql((sql) => sql`delete from skill_pins where name = ${e.skill}`),
   "device.paired": (e, at) =>
@@ -561,7 +594,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
       if (!row) return { thread: undefined };
       const pending = yield* sql<{
         id: string;
-        turn_id: string;
+        turn_id: string | null;
         kind: PendingRequest["kind"];
         plan: string | null;
         execute: string | null;
@@ -571,11 +604,12 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         commands: string | null;
         hash: string | null;
         replaces: string | null;
+        skill: string | null;
       }>`
         select id, turn_id, kind, json_extract(payload, '$.plan') as plan, json_extract(payload, '$.execute') as execute,
           json_extract(payload, '$.scope') as scope, json_extract(payload, '$.text') as text,
           json_extract(payload, '$.purpose') as purpose, json_extract(payload, '$.commands') as commands, json_extract(payload, '$.hash') as hash,
-          json_extract(payload, '$.replaces') as replaces
+          json_extract(payload, '$.replaces') as replaces, json_extract(payload, '$.skill') as skill
         from requests where thread_id = ${threadId} and resolution is null`;
       const trusted = yield* sql<{ hash: string }>`select hash from trusted_commands where project_id = ${row.project_id}`;
       const turnList = (yield* sql<{ id: TurnId; reverted: 0 | 1 | 2; untrusted: string | null }>`
@@ -617,7 +651,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           cachedTokens: row.cached_tokens,
           pendingRequests: pending.map((r) => ({
             requestId: r.id,
-            turnId: r.turn_id as TurnId,
+            turnId: r.turn_id as TurnId | null,
             kind: r.kind,
             ...(r.plan === null ? {} : { plan: r.plan }),
             ...(r.execute === null ? {} : { execute: JSON.parse(r.execute) as RouteDecision }),
@@ -627,6 +661,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
             ...(r.kind === "trust" && r.purpose !== null && r.commands !== null && r.hash !== null
               ? { trust: { purpose: r.purpose, commands: JSON.parse(r.commands) as string[], hash: r.hash } }
               : {}),
+            ...(r.kind === "install" && r.skill !== null ? { install: { skill: r.skill } } : {}),
           })),
           trustedCommands: trusted.map((t) => t.hash),
         },
@@ -799,7 +834,7 @@ export const loadThreadSummaries = (
         rows.map((r) => ({
           threadId: r.id as ThreadId,
           projectId: r.project_id as ProjectId,
-          title: titleFrom(r.first_text ?? ""),
+          title: titleFrom(r.first_text ?? (r.id === hubThread ? "Skills hub" : "")),
           busy: r.running_turn_id !== null,
           archived: r.archived === 1,
           lastActivityAt: r.last_activity_at,

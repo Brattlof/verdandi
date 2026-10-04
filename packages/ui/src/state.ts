@@ -115,6 +115,14 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "skill.reverted": (thread) => thread,
   "skill.pinned": (thread) => thread,
   "skill.unpinned": (thread) => thread,
+  // A hub install waits on the Skills hub thread like any request, with no turn; its outcome shows in the Skills tab.
+  "skill.install.proposed": addRequest,
+  "skill.install.resolved": (thread, e) => ({
+    ...thread,
+    pendingRequests: thread.pendingRequests.filter((r) => r.requestId !== e.requestId),
+  }),
+  "skill.installed": (thread) => thread,
+  "skill.uninstalled": (thread) => thread,
   "device.paired": (thread) => thread, // on the profile's stream, never a thread's
   "device.revoked": (thread) => thread,
   "pairing.requested": (thread) => thread,
