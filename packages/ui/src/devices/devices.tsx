@@ -1,6 +1,7 @@
-import type { CommandId, DeviceId, DevicesView, PairingRequest, PairMessage } from "@verdandi/contracts";
+import type { CommandId, DeviceId, DevicesView, GatewayView, PairingRequest, PairMessage } from "@verdandi/contracts";
 import { useEffect, useState } from "react";
 import { type Connection, uuid } from "../client.ts";
+import { ChatSenders, waitingPairings } from "../gateway/gateway.tsx";
 import { RuneMark, RuneText } from "../ui/runes.tsx";
 
 /** The code a device shows, split in two so it's read back without losing a digit. */
@@ -64,21 +65,37 @@ const RequestRow = ({ connection, request }: { connection: Connection; request: 
   );
 };
 
-/** Shown on every page but Devices while a device asks to pair, so the owner sees it wherever they are. */
-export const PairingBanner = ({ view }: { view: DevicesView | undefined }) => {
+/** Shown on every page but Devices while a device or a chat sender asks to pair, so the owner sees it wherever they are. */
+export const PairingBanner = ({ view, gateway }: { view: DevicesView | undefined; gateway: GatewayView | undefined }) => {
   const first = view?.pending[0];
-  if (!first) return null;
-  const more = (view?.pending.length ?? 1) - 1;
+  const senders = waitingPairings(gateway);
+  const sender = senders[0];
+  if (!first && !sender) return null;
+  const more = (view?.pending.length ?? 0) + senders.length - 1;
   return (
     <div role="status" className="flex flex-wrap items-center gap-x-2 border-b border-line bg-user px-4 py-2 text-sm">
-      {first.name} from {first.address} asks to pair, showing code <span className="font-mono">{spaced(first.code)}</span>
+      {first ? (
+        <>
+          {first.name} from {first.address} asks to pair, showing code <span className="font-mono">{spaced(first.code)}</span>
+        </>
+      ) : (
+        sender && `${sender.senderName} on ${sender.platform} asks to be let in`
+      )}
       {more > 0 && ` (and ${more} more)`}.<a href="#view=devices">Review it on Devices</a>
     </div>
   );
 };
 
 /** The Devices page: requests to approve or deny, and each paired device with when it was last seen and Revoke. */
-export const DevicesPage = ({ connection, view }: { connection: Connection; view: DevicesView | undefined }) => {
+export const DevicesPage = ({
+  connection,
+  view,
+  gateway,
+}: {
+  connection: Connection;
+  view: DevicesView | undefined;
+  gateway: GatewayView | undefined;
+}) => {
   const [error, setError] = useState<string>();
   const revoke = async (deviceId: DeviceId) => {
     const result = await connection.dispatch({ type: "device.revoke", commandId: uuid<CommandId>(), deviceId });
@@ -152,6 +169,7 @@ export const DevicesPage = ({ connection, view }: { connection: Connection; view
             </details>
           )}
         </section>
+        <ChatSenders connection={connection} view={gateway} />
       </div>
     </div>
   );

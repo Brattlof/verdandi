@@ -12,6 +12,7 @@ import {
 import { type FormEvent, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { type Connection, createStore, useStore, uuid } from "./client.ts";
 import { DevicesPage, PairingBanner, useDevices } from "./devices/devices.tsx";
+import { useGateway } from "./gateway/gateway.tsx";
 import { SearchPage } from "./search/search.tsx";
 import { Dashboard } from "./spend/dashboard.tsx";
 import { applyProjectsFeed, groupByRecency, type Sidebar as SidebarData } from "./state.ts";
@@ -64,6 +65,7 @@ export const App = ({ connection }: { connection: Connection }) => {
   const data = useStore(sidebar);
   const lost = useStore(connection.lost);
   const devices = useDevices(connection);
+  const gateway = useGateway(connection);
   // Showing archived threads asks verdandid for a feed that includes them; hiding them goes back to one that doesn't.
   const [archived, setArchived] = useState(false);
   // Below the md breakpoint the sidebar is a drawer over the page; it closes on navigation and on Escape.
@@ -146,9 +148,9 @@ export const App = ({ connection }: { connection: Connection }) => {
           </button>
           <Wordmark />
         </div>
-        {page !== "devices" && <PairingBanner view={devices} />}
+        {page !== "devices" && <PairingBanner view={devices} gateway={gateway} />}
         {page === "devices" ? (
-          <DevicesPage connection={connection} view={devices} />
+          <DevicesPage connection={connection} view={devices} gateway={gateway} />
         ) : page === "spend" ? (
           <Dashboard connection={connection} projects={data?.projects ?? []} />
         ) : page === "search" ? (

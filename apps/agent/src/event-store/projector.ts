@@ -321,6 +321,30 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "device.paired": (e, at) =>
     withSql((sql) => sql`insert into devices (id, name, token_hash, paired_at) values (${e.deviceId}, ${e.name}, ${e.tokenHash}, ${at})`),
   "device.revoked": (e, at) => withSql((sql) => sql`update devices set revoked_at = ${at} where id = ${e.deviceId}`),
+  "pairing.requested": (e, at) =>
+    withSql(
+      (sql) => sql`insert into gateway_pairings
+        (request_id, platform, chat_id, sender_id, sender_name, code_hash, salt, requested_at, expires_at)
+        values (${e.requestId}, ${e.platform}, ${e.chatId}, ${e.senderId}, ${e.senderName}, ${e.codeHash}, ${e.salt}, ${at}, ${e.expiresAt})`,
+    ),
+  "pairing.approved": (e, at) =>
+    withSql((sql) =>
+      Effect.andThen(
+        // Any other request the sender left waiting is answered too: they're in.
+        sql`update gateway_pairings set answer = 'approved'
+          where request_id = ${e.requestId} or (platform = ${e.platform} and sender_id = ${e.senderId} and answer is null)`,
+        sql`insert or replace into gateway_senders (platform, sender_id, name, paired_at) values (${e.platform}, ${e.senderId}, ${e.senderName}, ${at})`,
+      ),
+    ),
+  "pairing.denied": (e) => withSql((sql) => sql`update gateway_pairings set answer = 'denied' where request_id = ${e.requestId}`),
+  "sender.revoked": (e, at) =>
+    withSql((sql) => sql`update gateway_senders set revoked_at = ${at} where platform = ${e.platform} and sender_id = ${e.senderId}`),
+  "gateway.owner.changed": (e) =>
+    withSql((sql) =>
+      e.senderId === null
+        ? sql`delete from gateway_owners where platform = ${e.platform}`
+        : sql`insert or replace into gateway_owners (platform, sender_id) values (${e.platform}, ${e.senderId})`,
+    ),
   "memory.proposed": insertRequest,
   "commands.trust.requested": insertRequest,
   "commands.trusted": (e, at) =>

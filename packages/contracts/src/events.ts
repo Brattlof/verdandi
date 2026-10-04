@@ -2,6 +2,7 @@ import { Data, Effect, Schema } from "effect";
 import { AttachmentRef } from "./attachments.ts";
 import { DecisionAnswer, DecisionQuestion } from "./decisions.ts";
 import { DevicePaired, DeviceRevoked } from "./devices.ts";
+import { GatewayOwnerChanged, PairingApproved, PairingDenied, PairingRequested, SenderRevoked } from "./gateway.ts";
 import { ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { HandedSource, Item, Quota, UsageFields, VerifierRun } from "./items.ts";
 import { MemoryScope } from "./memory.ts";
@@ -881,6 +882,11 @@ export const Event = Schema.Union([
   CommandsTrustRevoked,
   DevicePaired,
   DeviceRevoked,
+  PairingRequested,
+  PairingApproved,
+  PairingDenied,
+  SenderRevoked,
+  GatewayOwnerChanged,
 ]);
 export type Event = typeof Event.Type;
 
@@ -993,6 +999,11 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "commands.trust.revoked@1": CommandsTrustRevoked,
   "device.paired@1": DevicePaired,
   "device.revoked@1": DeviceRevoked,
+  "pairing.requested@1": PairingRequested,
+  "pairing.approved@1": PairingApproved,
+  "pairing.denied@1": PairingDenied,
+  "sender.revoked@1": SenderRevoked,
+  "gateway.owner.changed@1": GatewayOwnerChanged,
 };
 
 /** The row shape an event is stored as. */

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks), #242 (trusted project commands) and #177 (scanned context files). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local. Amended by ADR 0028: each device other than a page `verdandi web` opens pairs and gets its own revocable token. Amended by ADR 0031: a project's own MCP servers are among its trusted commands, and native MCP tools ask. Amended by #216: opt-in smart approvals, a heuristic, decide some native terminal commands without asking.
+Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks), #242 (trusted project commands) and #177 (scanned context files). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local. Amended by ADR 0028: each device other than a page `verdandi web` opens pairs and gets its own revocable token. Amended by ADR 0031: a project's own MCP servers are among its trusted commands, and native MCP tools ask. Amended by #212: the gateway's access module is a boundary, and chat senders and each platform's owner are principals. Amended by #216: opt-in smart approvals, a heuristic, decide some native terminal commands without asking.
 
 ## Context
 
@@ -41,6 +41,14 @@ A bypass of one of these is a vulnerability.
    - a skill change, or a memory save or proposal that asks, writes nothing until allowed.
 
    Getting one of these past its ask is a vulnerability. What the approved step then does is not: an approval is consent, not containment.
+6. **The gateway's access decisions** (DESIGN §15). One pure function, `access` in `apps/agent/src/gateway/access.ts`, decides what an incoming chat message may do; adapters only report facts. A bypass is a vulnerability when it lets:
+   - a sender nobody let in (not paired, not on `gateway.yaml`'s `allowFrom`, not the owner) start a turn or run a command, or get their message read at all;
+   - anyone into a group that isn't on `groups`, or an unaddressed group message start a turn;
+   - anyone but the platform's owner run a command the slash-command registry marks owner-only (`ownerOnly` in `packages/contracts/src/slash.ts`), approving and denying requests among them;
+   - a chat set the owner. Only `gateway.owner.set` and `pairing.approve` with `owner` do, which come from the web UI or the CLI over the token;
+   - a pairing code reach anyone but the sender's own DM, or a chat approve one. The log keeps only its salted SHA-256 (`hashCode` in `apps/agent/src/gateway/gateway.ts`), compared in constant time, so a backup or an export doesn't show it; that's hygiene, not a boundary, since an 8-character code can be brute-forced from its hash, and whoever reads the database is already the OS user (boundary 1).
+
+   What context text the module lets through (only senders allowed in the same chat, and Verdandi's own) is a boundary of who speaks, not of what the text says: it reaches the agent as untrusted data, and an allowed sender can still quote an injection.
 
 ### Heuristics
 
@@ -67,10 +75,8 @@ These lower risk, and they can be bypassed by design. A bypass is a bug worth fi
 
 ### Principals
 
-Today the only principal is the owner: the OS user, who holds the profile's token, and the devices they paired. Once the gateway exists (DESIGN §15) there will be:
-
-- **The owner:** the OS user, holding the profile's token, and each device they paired (ADR 0028).
-- **Allowlisted channel senders:** they can start turns in their bound thread and never run owner commands (#212).
+- **The owner:** the OS user, holding the profile's token, and each device they paired (ADR 0028). On each chat platform, the sender the owner named as the owner from the web UI or the CLI, who alone runs owner-only commands there.
+- **Allowed channel senders:** paired, or on `gateway.yaml`'s `allowFrom`, or in an allowed group. They can start turns in their bound thread and never run owner-only commands; a turn one of them starts gets none of `workspace.yaml`'s folders (DESIGN §23, question 10).
 - **Scheduled jobs:** they run as the owner, under a restricted profile and a budget.
 - **The agent:** never a principal. It acts for one, inside that principal's approvals.
 
