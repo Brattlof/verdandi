@@ -22,6 +22,7 @@ import {
 import { correctingQuestion, type Decide, injectionQuestion, reviewQuestion } from "@verdandi/decisions";
 import { Context, Effect, Layer, PubSub, Result, Stream } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
+import { loadGatewayDeciderState } from "../gateway/gateway-store.ts";
 import { loadHealth, stickyFailure } from "../routing/provider-health.ts";
 import { type RoutingContext, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
@@ -275,6 +276,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
                     revoked: r.revoked === 1,
                   }))[0] ?? null)
                 : undefined;
+            const gateway = yield* loadGatewayDeciderState(command, new Date());
             // A background review stays off a harness whose subscription window is short (DESIGN §14.5).
             const shortQuota = send && current?.aux ? yield* loadShortQuota(new Date()) : undefined;
             const decision = decide(
@@ -288,6 +290,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ...(pinned !== undefined && { pinned }),
                 ...(reverting !== undefined && { reverting }),
                 ...(device !== undefined && { device }),
+                ...gateway,
                 ...(shortQuota && { shortQuota }),
                 ...(health && { health }),
                 ...(sticky && { stickyFailure: sticky }),

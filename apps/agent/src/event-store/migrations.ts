@@ -461,6 +461,35 @@ const providerHealth = Effect.gen(function* () {
   )`;
 });
 
+/**
+ * The messaging gateway's senders (DESIGN §15): pairing requests with their code's salted hash, never the code, the
+ * senders the owner paired, and each platform's owner. None existed before.
+ */
+const gateway = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table gateway_pairings (
+    request_id text primary key,
+    platform text not null,
+    chat_id text not null,
+    sender_id text not null,
+    sender_name text not null,
+    code_hash text not null,
+    salt text not null,
+    requested_at text not null,
+    expires_at text not null,
+    answer text
+  )`;
+  yield* sql`create table gateway_senders (
+    platform text not null,
+    sender_id text not null,
+    name text not null,
+    paired_at text not null,
+    revoked_at text,
+    primary key (platform, sender_id)
+  )`;
+  yield* sql`create table gateway_owners (platform text primary key, sender_id text not null)`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -492,4 +521,5 @@ export const migrations = {
   "28_devices": devices,
   "29_session_harness": sessionHarness,
   "30_provider_health": providerHealth,
+  "31_gateway": gateway,
 };

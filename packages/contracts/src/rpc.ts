@@ -13,6 +13,7 @@ import {
   TurnStatus,
   UserInputRequested,
 } from "./events.ts";
+import { GatewayUnavailable, GatewayView, PendingPairing } from "./gateway.ts";
 import { GcReport, GcUnavailable } from "./gc.ts";
 import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { AccessMode, Item, Quota, Usage } from "./items.ts";
@@ -64,6 +65,8 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "CommandsNotTrusted",
     "DeviceExists",
     "DeviceNotFound",
+    "PairingNotFound",
+    "SenderNotFound",
   ]),
   message: Schema.String,
 }) {}
@@ -407,6 +410,15 @@ export class Api extends RpcGroup.make(
   /** Pairs the device that raised `requestId`: verdandid makes its token and hands it only to that device. */
   Rpc.make("DeviceApprove", { payload: { requestId: Schema.String }, success: DeviceView, error: DevicesUnavailable }),
   Rpc.make("DeviceDeny", { payload: { requestId: Schema.String }, error: DevicesUnavailable }),
+  /** Chat senders waiting to pair and who has access (DESIGN §15), then both again whenever either changes. */
+  Rpc.make("GatewaySubscribe", { payload: { subscriptionId: Schema.String }, success: GatewayView, stream: true }),
+  Rpc.make("GatewayList", { success: GatewayView }),
+  /** Approves the pairing request whose sender got `code` in their DM; `owner` also makes them the platform's owner. */
+  Rpc.make("GatewayPair", {
+    payload: { code: Schema.String, owner: Schema.Boolean },
+    success: PendingPairing,
+    error: GatewayUnavailable,
+  }),
   Rpc.make("TerminalSubscribe", {
     payload: { terminalId: TerminalId, subscriptionId: Schema.String },
     success: TerminalFeed,

@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { AttachmentRef, AttachmentUpload } from "./attachments.ts";
 import { DecisionAnswer } from "./decisions.ts";
 import { DevicePair, DeviceRevoke } from "./devices.ts";
+import { GatewayOwnerSet, GatewayPairingRequest, PairingApprove, PairingDeny, SenderRevoke } from "./gateway.ts";
 import { HarnessEvent } from "./harness.ts";
 import { CommandId, profileStream, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { HandedSource, VerifierRun } from "./items.ts";
@@ -540,6 +541,10 @@ export const ClientCommand = Schema.Union([
   CommandsTrustRevoke,
   DeviceRevoke,
   ApprovalsSmartSet,
+  PairingApprove,
+  PairingDeny,
+  SenderRevoke,
+  GatewayOwnerSet,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
 
@@ -594,6 +599,11 @@ export const Command = Schema.Union([
   CommandsTrustRequest,
   DeviceRevoke,
   DevicePair,
+  GatewayPairingRequest,
+  PairingApprove,
+  PairingDeny,
+  SenderRevoke,
+  GatewayOwnerSet,
 ]);
 export type Command = typeof Command.Type;
 

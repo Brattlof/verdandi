@@ -76,6 +76,22 @@ export const slashCommands = {
     dispatches: [],
     whileBusy: "run",
   },
+  approve: {
+    args: [{ name: "request" }],
+    help: "allows what the agent asked: a request's Approve button",
+    surfaces: ["gateway"],
+    ownerOnly: true,
+    dispatches: ["approval.respond"],
+    whileBusy: "run",
+  },
+  deny: {
+    args: [{ name: "request" }],
+    help: "denies what the agent asked: a request's Deny button",
+    surfaces: ["gateway"],
+    ownerOnly: true,
+    dispatches: ["approval.respond"],
+    whileBusy: "run",
+  },
   skip: {
     args: [],
     help: "declines the agent's question",

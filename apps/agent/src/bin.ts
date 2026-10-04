@@ -6,6 +6,7 @@ import { run } from "./cli/run.ts";
 import { web } from "./cli/web.ts";
 import { decisions } from "./decisions/decisions-cli.ts";
 import { devices } from "./devices/devices-cli.ts";
+import { gateway } from "./gateway/gateway-cli.ts";
 import { gc } from "./gc/gc-cli.ts";
 import { requireBun } from "./home/bun-version.ts";
 import { start } from "./main.ts";
@@ -23,6 +24,7 @@ const usage = `Usage:
   verdandi web   [--home <dir>] [--port <n>] [--host <ip>] [--no-open]   serve the web UI until Ctrl+C and open it in your browser, relaying to the running verdandid or one it runs meanwhile; --host 0.0.0.0 (or this machine's LAN or Tailscale address) also opens it to your local network or tailnet on --port, never to the internet
   verdandi doctor [--home <dir>]                  check the setup: Bun, Claude Code, git, the home, the database, what the next cleanup sweep removes, and verdandid
   verdandi devices list | approve <request> | deny <request> | revoke <device> [--home <dir>]   list the paired devices and the pairing requests waiting (each with the code its device shows), approve or deny a request, or revoke a device so its token stops working and its connections close; through the running verdandid
+  verdandi gateway senders | senders revoke <platform> <sender> | pair <code> [--owner] | deny <request> | owner <platform> <sender> [--home <dir>]   who may reach Verdandi from chat apps: list the senders with access and those waiting to pair; let one in with the code they got in their DM (--owner also makes them the platform's owner, who alone approves requests and runs owner-only commands there), deny one, revoke a sender, or name the owner; through the running verdandid
   verdandi gc [--dry-run] [--home <dir>]          run the cleanup policy in gc.yaml now: remove old checkpoints and the worktrees of threads archived long ago (never one with uncommitted changes); --dry-run only lists them
   verdandi chat  [--home <dir>] [--here | --workspace] [--harness <h>] [--model <m>] [--effort <e> | --auto] [--budget thrifty|balanced|max|policy] [--raise-cap] [--thread <id>] [--plain]   the same as bare verdandi: chat with the thread for this folder (or the workspace), or the one named; route flags pin a route, --auto lets the router pick, --budget sets how it trades cost for strength, --raise-cap raises each reached spend cap for the rest of its period
   verdandi chat  --list [--archived] [--home <dir>]  list every thread by project; --archived includes archived ones
@@ -54,6 +56,7 @@ const commands: Record<string, (argv: readonly string[]) => Promise<void>> = {
   trajectories,
   gc,
   devices,
+  gateway,
   skills,
   key,
   schedule,

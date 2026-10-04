@@ -28,6 +28,7 @@ import { reachedCap } from "../event-store/decider.ts";
 import { Engine } from "../event-store/engine.ts";
 import { loadDeciderState, loadMemory } from "../event-store/projector.ts";
 import { ApprovalSettings, HarnessRegistry, ProfileSkills } from "../event-store/reactor.ts";
+import { Gateway, GatewayLive, type GatewaySetup } from "../gateway/gateway.ts";
 import { Gc, GcLive, GcScheduleLive } from "../gc/gc.ts";
 import { workspaceDir } from "../home/workspace.ts";
 import { pickFolder } from "../projects/folder-picker.ts";
@@ -59,6 +60,7 @@ const Handlers = (home: string) =>
       const skillFolders = yield* ProfileSkills;
       const approvals = yield* ApprovalSettings;
       const devices = yield* Devices;
+      const gateway = yield* Gateway;
       const harnesses = Object.keys(registry) as HarnessId[];
       const routing = routingFor(registry);
       const subscriptions = new Map<string, Deferred.Deferred<void>>();
@@ -221,6 +223,9 @@ const Handlers = (home: string) =>
         DevicesList: () => devices.view,
         DeviceApprove: ({ requestId }) => devices.approve(requestId),
         DeviceDeny: ({ requestId }) => devices.deny(requestId),
+        GatewaySubscribe: ({ subscriptionId }) => untilUnsubscribed(subscriptionId, gateway.feed),
+        GatewayList: () => gateway.view,
+        GatewayPair: ({ code, owner }) => gateway.pair(code, owner),
         TerminalSubscribe: ({ terminalId, subscriptionId }) => untilUnsubscribed(subscriptionId, terminals.feed(terminalId)),
       };
     }),
@@ -369,11 +374,14 @@ const ProtocolWithToken = (home: string, token: string) =>
     }),
   );
 
-/** verdandid: the core and its token-protected WebSocket API on 127.0.0.1, serving no web page (ADR 0026). Port 0 picks a free port. */
+/**
+ * verdandid: the core and its token-protected WebSocket API on 127.0.0.1, serving no web page (ADR 0026). Port 0 picks a
+ * free port. Only an always-on one is given `gateway`, the chat apps to connect (DESIGN §11).
+ */
 export const ServerLayer = (
   home: string,
   harnesses: Partial<Record<HarnessId, HarnessAdapter>>,
-  options: { readonly port?: number } = {},
+  options: { readonly port?: number; readonly gateway?: GatewaySetup } = {},
 ) => {
   const token = randomBytes(32).toString("hex");
   const rpc = RpcServer.layer(Api).pipe(
@@ -407,6 +415,7 @@ export const ServerLayer = (
     Layer.provideMerge(TerminalsLive),
     Layer.provideMerge(GcLive(home)),
     Layer.provideMerge(DevicesLive),
+    Layer.provideMerge(GatewayLive(options.gateway)),
     Layer.provideMerge(AppLayer(home, harnesses)),
   );
 };

@@ -20,6 +20,7 @@ import {
   isWorthReviewing,
   type MemoryScope,
   type MemoryView,
+  type Platform,
   type ProjectId,
   type ProviderHealth,
   profileStream,
@@ -160,6 +161,15 @@ export type DeciderState = {
   readonly skill?: { readonly state: SkillState; readonly usedAt: string } | null;
   /** The device a `device.pair` or `device.revoke` names, or null when none was paired with that id. */
   readonly device?: { readonly revoked: boolean } | null;
+  /** The pairing request a `pairing.approve` or `pairing.deny` names, if it waits and hasn't expired; null otherwise. */
+  readonly pairing?: {
+    readonly platform: Platform;
+    readonly chatId: string;
+    readonly senderId: string;
+    readonly senderName: string;
+  } | null;
+  /** Whether the sender a `sender.revoke` names is paired, and whether they own the platform. */
+  readonly gatewaySender?: { readonly paired: boolean; readonly owner: boolean };
   /** Whether the user pinned the skill a proposal, `skill.curate`, `skill.pin` or `skill.unpin` names, loaded for those commands. */
   readonly pinned?: boolean;
   /** The written change a `skill.revert` names, from `skill_changes`, or null when there's none. */
@@ -190,6 +200,9 @@ export const projectIdFor = (path: string): ProjectId => {
   const normalized = path.replaceAll("\\", "/").replace(/^([a-zA-Z]):/, (_, d: string) => `${d.toLowerCase()}:`);
   return createHash("sha256").update(normalized).digest("hex").slice(0, 32) as ProjectId;
 };
+
+const pairingGone = (requestId: string) =>
+  `No pairing request ${requestId} waits: it was answered, or its hour ran out and the sender has to ask again. verdandi gateway senders lists the waiting ones.`;
 
 const reject = (reason: CommandRejected["reason"], message: string): Decision => Result.fail(new CommandRejected({ reason, message }));
 const accept = (...events: Event[]): Decision => Result.succeed(events);
@@ -952,6 +965,39 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     state.device
       ? reject("DeviceExists", `Device ${c.deviceId} is already paired.`)
       : accept({ type: "device.paired", v: 1, threadId: profileStream, deviceId: c.deviceId, name: c.name, tokenHash: c.tokenHash }),
+  // The gateway's senders belong to the profile too (DESIGN §15). `pairing.request` comes from the gateway, which
+  // already asked the access module whether this sender may pair now.
+  "pairing.request": (_, c) => {
+    const { type: _type, commandId: _id, ...request } = c;
+    return accept({ type: "pairing.requested", v: 1, threadId: profileStream, ...request });
+  },
+  "pairing.approve": (state, c) => {
+    if (!state.pairing) return reject("PairingNotFound", pairingGone(c.requestId));
+    const { platform, senderId } = state.pairing;
+    return accept(
+      { type: "pairing.approved", v: 1, threadId: profileStream, requestId: c.requestId, ...state.pairing },
+      ...(c.owner ? [{ type: "gateway.owner.changed", v: 1, threadId: profileStream, platform, senderId } as const] : []),
+    );
+  },
+  "pairing.deny": (state, c) =>
+    state.pairing
+      ? accept({ type: "pairing.denied", v: 1, threadId: profileStream, requestId: c.requestId })
+      : reject("PairingNotFound", pairingGone(c.requestId)),
+  "sender.revoke": (state, c) => {
+    const { paired = false, owner = false } = state.gatewaySender ?? {};
+    if (!paired && !owner)
+      return reject(
+        "SenderNotFound",
+        `${c.platform} sender ${c.senderId} isn't paired or the owner. verdandi gateway senders lists them; a sender on gateway.yaml's allowFrom is taken off there.`,
+      );
+    const { platform, senderId } = c;
+    return accept(
+      ...(paired ? [{ type: "sender.revoked", v: 1, threadId: profileStream, platform, senderId } as const] : []),
+      ...(owner ? [{ type: "gateway.owner.changed", v: 1, threadId: profileStream, platform, senderId: null } as const] : []),
+    );
+  },
+  "gateway.owner.set": (_, c) =>
+    accept({ type: "gateway.owner.changed", v: 1, threadId: profileStream, platform: c.platform, senderId: c.senderId }),
   "device.revoke": (state, c) =>
     !state.device
       ? reject("DeviceNotFound", `No device ${c.deviceId} is paired. verdandi devices list shows them.`)

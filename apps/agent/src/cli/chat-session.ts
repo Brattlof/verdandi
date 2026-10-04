@@ -26,6 +26,7 @@ import {
 } from "@verdandi/contracts";
 import { Context, Effect, type ManagedRuntime, Stream } from "effect";
 import { pairingLine } from "../devices/devices-cli.ts";
+import { senderPairingLine } from "../gateway/gateway-cli.ts";
 import { workspaceDir } from "../home/workspace.ts";
 import type { connect } from "../rpc/client.ts";
 import { skillsAction } from "../skills/skills-cli.ts";
@@ -384,6 +385,21 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
       ),
     ),
   );
+  // So does a chat app's sender asking to be let in (DESIGN §15).
+  const gatewaySubscription = crypto.randomUUID();
+  const gatewayFeed = runtime.runPromise(
+    client.GatewaySubscribe({ subscriptionId: gatewaySubscription }).pipe(
+      Stream.runForEach((view) =>
+        Effect.sync(() => {
+          for (const p of view.pending) {
+            if (noticed.has(p.requestId)) continue;
+            noticed.add(p.requestId);
+            io.write(`\n[${senderPairingLine(p)}]\n`);
+          }
+        }),
+      ),
+    ),
+  );
 
   const noSnapshot = new Error("The thread feed ended before its snapshot arrived. Restart verdandid and try again.");
   feed.then(() => snapshot.reject(noSnapshot), snapshot.reject);
@@ -555,7 +571,8 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
   const close = async () => {
     await runtime.runPromise(client.Unsubscribe({ subscriptionId }));
     await runtime.runPromise(client.Unsubscribe({ subscriptionId: devicesSubscription }));
-    await Promise.all([feed, devicesFeed]);
+    await runtime.runPromise(client.Unsubscribe({ subscriptionId: gatewaySubscription }));
+    await Promise.all([feed, devicesFeed, gatewayFeed]);
   };
   return {
     input,
