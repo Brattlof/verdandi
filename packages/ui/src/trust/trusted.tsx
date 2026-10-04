@@ -46,7 +46,7 @@ export const TrustedCommandsList = ({ connection }: { connection: Connection }) 
                   "Context files the injection scan flagged"
                 ) : (
                   <>
-                    {t.purpose === "verifiers" ? "Verifiers" : "Worktree setup"} from{" "}
+                    {{ verifiers: "Verifiers", setup: "Worktree setup", mcp: "MCP servers" }[t.purpose]} from{" "}
                     <span className="font-mono">{trustFiles[t.purpose]}</span>
                   </>
                 )}{" "}

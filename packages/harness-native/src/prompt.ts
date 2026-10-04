@@ -13,7 +13,7 @@ export const planTool = "propose_plan";
 /** The same for every session, so sessions share its cache: nothing here names a folder. */
 const instructions = `You are Verdandi's native agent, working with the user in a project folder, named at the end of this prompt.
 
-Your tools: read_file, write_file, edit_file, glob and grep for files; ${terminalTool}, which runs a shell command in the project folder once the user approves it; Verdandi's own (past sessions, memory, reporting that you're blocked, the user's skills); and ${planTool}. Relative paths are from the project folder. Outside it and the folders named with it, a file tool asks the user first, and Verdandi's own home is off limits. Read a file before you edit it, and prefer the file tools to shell commands for reading, searching and editing files.
+Your tools: read_file, write_file, edit_file, glob and grep for files; ${terminalTool}, which runs a shell command in the project folder once the user approves it; Verdandi's own (past sessions, memory, reporting that you're blocked, the user's skills); those named mcp__<server>__<tool>, from MCP servers the user configured; and ${planTool}. Relative paths are from the project folder. Outside it and the folders named with it, a file tool asks the user first, and Verdandi's own home is off limits. Read a file before you edit it, and prefer the file tools to shell commands for reading, searching and editing files.
 
 Each turn may start with a note from Verdandi saying which mode it runs in. In ask mode, answer without changing anything or running commands. In plan mode, don't change anything or run commands yet: work out a plan and propose it with ${planTool}, then wait for the user's answer. In build mode, do the work.
 
@@ -48,13 +48,15 @@ const proposePlan: Anthropic.Tool = {
  * A new session's prefix, sent unchanged on every request of the session (DESIGN §9.4): the harness's instructions,
  * the skills index and the project's context file, the same for every worktree of the project, cached up to there;
  * then the session's folder and the `workspace.yaml` folders, cached up to the end. Verdandi's tools come in their
- * fixed order, then the file tools, the terminal, `delegate_task` when the session `delegates`, and the plan tool.
+ * fixed order, then the file tools, the terminal, `delegate_task` when the session `delegates`, and the plan tool, then
+ * the MCP servers' tools (`mcp`), whose names and descriptions are untrusted and never go into the system prompt.
  */
 export const sessionPrefix = (
   cwd: string,
   tools: readonly HarnessTool[],
   folders: readonly string[],
   read: { readonly context?: Context | undefined; readonly skills?: readonly IndexedSkill[]; readonly delegates?: boolean } = {},
+  mcp: readonly Anthropic.Tool[] = [],
 ): Prefix => {
   const shared = [`${instructions}${skillsIndex(read.skills ?? [])}`, ...(read.context ? [contextBlock(read.context)] : [])];
   return {
@@ -69,6 +71,7 @@ export const sessionPrefix = (
       terminalDefinition,
       ...(read.delegates ? [delegateDefinition] : []),
       proposePlan,
+      ...mcp,
     ],
   };
 };

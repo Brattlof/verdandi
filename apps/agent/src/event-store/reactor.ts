@@ -26,13 +26,14 @@ import type {
 } from "@verdandi/contracts";
 import { trustFiles } from "@verdandi/contracts";
 import { Decide, flagged, injectionQuestion, injectionWarning } from "@verdandi/decisions";
-import { ToolFailed, verdandiTools } from "@verdandi/tools";
+import { type Screen, ToolFailed, verdandiTools } from "@verdandi/tools";
 import { Cause, Context, Deferred, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { changedByTurns, changedSince, checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
 import { editedFiles } from "../diffs/diff.ts";
 import { handoffBlock, handoffPrompt, handoffSummary, loadThreadDigest, touchedFiles } from "../handoff/handoff.ts";
 import { memoryNudge } from "../memory/memory.ts";
+import type { loadMcp } from "../native/mcp-config.ts";
 import { loadFreshOutcome, loadTaskDigest, parseReview, reviewPrompt, skillsRefused } from "../review/review.ts";
 import { repeatedError } from "../routing/repeated-error.ts";
 import { searchSessions } from "../search/search.ts";
@@ -79,6 +80,9 @@ export class ProfileSkills extends Context.Service<ProfileSkills, SkillFolders>(
 
 /** Where the profile keeps threads' git worktrees, as `<repo>/<branch>` (DESIGN §13). */
 export class WorktreesDir extends Context.Service<WorktreesDir, string>()("verdandi/WorktreesDir") {}
+
+/** The MCP servers a native session in a folder connects to (`loadMcp` for the profile's home), read when it opens. */
+export class McpConfig extends Context.Service<McpConfig, (folder: string) => ReturnType<typeof loadMcp>>()("verdandi/McpConfig") {}
 
 /** Where the profile keeps attachments' bytes, which harness turns read by path. */
 export class AttachmentsDir extends Context.Service<AttachmentsDir, string>()("verdandi/AttachmentsDir") {}
@@ -142,6 +146,7 @@ export const ReactorLive = Layer.effect(
     const decide = yield* Decide;
     const skillFolders = yield* ProfileSkills;
     const reviews = yield* ReviewSettings;
+    const mcpConfig = yield* McpConfig;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
     /** The adapter running each thread's current turn: where answers to its requests go. */
@@ -188,6 +193,16 @@ export const ReactorLive = Layer.effect(
       engine.dispatch({ type: "harness.report", commandId: randomUUID() as CommandId, threadId, turnId, event });
 
     const skills = makeSkillProposals(engine.dispatch, skillFolders, sql);
+    /** Scans untrusted text a tool hands the agent: a flagged one still reaches it, under the warning; recording it is best effort. */
+    const screen: Screen = (source, text, at) =>
+      Effect.gen(function* () {
+        const [answer] = (yield* decide.decide({ state: text, questions: [injectionQuestion] })).answers;
+        if (!answer || !flagged(answer)) return text;
+        yield* engine
+          .dispatch({ type: "injection.flag", commandId: randomUUID() as CommandId, ...at, source, text, answer })
+          .pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record the injection flag on turn ${at.turnId}.`, cause)));
+        return `${injectionWarning}\n\n${text}`;
+      });
     /** Verdandi's own tools (DESIGN §9.6), built once: every turn gets this same list, so a session's never changes. */
     const tools = verdandiTools({
       search: (query, allProjects, at) =>
@@ -222,16 +237,7 @@ export const ReactorLive = Layer.effect(
           ),
       },
       approveMemorySaves: toolSettings.approveMemorySaves,
-      // A flagged result still reaches the agent, under the warning; recording it is best effort.
-      screen: (source, text, at) =>
-        Effect.gen(function* () {
-          const [answer] = (yield* decide.decide({ state: text, questions: [injectionQuestion] })).answers;
-          if (!answer || !flagged(answer)) return text;
-          yield* engine
-            .dispatch({ type: "injection.flag", commandId: randomUUID() as CommandId, ...at, source, text, answer })
-            .pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record the injection flag on turn ${at.turnId}.`, cause)));
-          return `${injectionWarning}\n\n${text}`;
-        }),
+      screen,
       proposeSkill: skills.propose,
       skills: {
         list: () => Effect.sync(() => readableSkills(skillFolders).map(({ name, description }) => ({ name, description }))),
@@ -456,6 +462,24 @@ export const ReactorLive = Layer.effect(
         yield* Effect.forEach(hits, (h) => flagContext({ threadId, turnId }, h.file, h.text, h.answer, false), { discard: true });
         return { allowed: !unattended && (yield* trusted(threadId, turnId, "context", list)), files };
       });
+
+    /**
+     * The MCP servers a native session of turn `turnId` connects to in `cwd` (DESIGN §9.4), read when it opens: the
+     * project's own start only once the user trusts that exact list, else they're left out with a notice. A broken config
+     * rejects, naming the file and key.
+     */
+    const mcpFor = (threadId: ThreadId, turnId: TurnId, cwd: string) => async () => {
+      const loaded = mcpConfig(cwd);
+      if (loaded.trust.length === 0 || (await Effect.runPromise(trusted(threadId, turnId, "mcp", loaded.trust))))
+        return { servers: loaded.servers, notices: loaded.notices };
+      return {
+        servers: loaded.servers.filter((s) => !loaded.project.includes(s.name)),
+        notices: [
+          ...loaded.notices,
+          `Verdandi didn't start this project's MCP servers (${loaded.project.join(", ")}, from ${trustFiles.mcp}): they weren't allowed. This session has none of their tools; a new thread asks again.`,
+        ],
+      };
+    };
 
     /** How a list of commands reads in a notice: each in backticks. */
     const listed = (commands: readonly string[]) => commands.map((c) => `\`${c}\``).join(", ");
@@ -735,7 +759,15 @@ export const ReactorLive = Layer.effect(
             mode,
             ...(attachments.length > 0 && { attachments: attachments.map((a) => ({ ...a, path: join(attachmentsDir, a.id) })) }),
             steers,
-            ...(aux ? {} : { tools, scan: scanFor({ threadId, turnId }), ...(delegate && { delegate }) }),
+            ...(aux
+              ? {}
+              : {
+                  tools,
+                  scan: scanFor({ threadId, turnId }),
+                  ...(delegate && { delegate }),
+                  mcp: mcpFor(threadId, turnId, cwd),
+                  screen: (text: string) => Effect.runPromise(screen("mcp", text, { threadId, turnId })),
+                }),
             // The snapshot a new session starts with goes to its first turn only (DESIGN §14.2), and so does a handoff's summary.
             ...memoryFor(thread.memory_snapshot, turnId),
             ...(handoff && { handoff }),
