@@ -9,6 +9,15 @@ import { MemoryScope } from "./memory.ts";
 import { Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
 import { BudgetMode } from "./routing.ts";
+import {
+  ScheduleCreate,
+  ScheduleFire,
+  SchedulePause,
+  ScheduleRemove,
+  ScheduleResume,
+  ScheduleRunReport,
+  ScheduleRunStart,
+} from "./schedule.ts";
 import { SkillAction, SkillChange } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 import { TaskRating } from "./task.ts";
@@ -540,6 +549,10 @@ export const ClientCommand = Schema.Union([
   CommandsTrustRevoke,
   DeviceRevoke,
   ApprovalsSmartSet,
+  ScheduleCreate,
+  SchedulePause,
+  ScheduleResume,
+  ScheduleRemove,
 ]);
 export type ClientCommand = typeof ClientCommand.Type;
 
@@ -594,6 +607,13 @@ export const Command = Schema.Union([
   CommandsTrustRequest,
   DeviceRevoke,
   DevicePair,
+  ScheduleCreate,
+  SchedulePause,
+  ScheduleResume,
+  ScheduleRemove,
+  ScheduleFire,
+  ScheduleRunStart,
+  ScheduleRunReport,
 ]);
 export type Command = typeof Command.Type;
 

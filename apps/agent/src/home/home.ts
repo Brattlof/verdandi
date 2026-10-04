@@ -41,9 +41,12 @@ export const alive = (pid: number) => {
   }
 };
 
-/** Written by verdandid when it starts, read by clients: where the server listens and its token. */
+/**
+ * Written by verdandid when it starts, read by clients: where the server listens and its token. `alwaysOn` marks one
+ * `verdandi start` runs, which runs scheduled jobs; one a chat runs in its own process doesn't.
+ */
 export const serverFile = (home: string) => join(home, "server.json");
-export type ServerFile = { readonly port: number; readonly token: string; readonly pid: number };
+export type ServerFile = { readonly port: number; readonly token: string; readonly pid: number; readonly alwaysOn?: boolean };
 
 /** The `server.json` of the verdandid running for `home`, or undefined when none is (no file, or one a stopped process left). */
 export const runningServer = (home: string): ServerFile | undefined => {

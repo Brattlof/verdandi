@@ -2,6 +2,10 @@ import { Schema } from "effect";
 import type { HarnessId } from "./route.ts";
 import type { QuotaView, ThreadSummary } from "./rpc.ts";
 
+/** Usage in USD kept apart by access mode, never summed: metered was paid, subscription is what the plan covered, at API prices. */
+export const SpendSplit = Schema.Struct({ meteredUsd: Schema.Number, subscriptionUsd: Schema.Number });
+export type SpendSplit = typeof SpendSplit.Type;
+
 /** Who a spend cap covers: every project in the profile, or one project (DESIGN §8.9). */
 export const CapScope = Schema.Literals(["profile", "project"]);
 export type CapScope = typeof CapScope.Type;

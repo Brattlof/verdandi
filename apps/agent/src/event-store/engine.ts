@@ -25,6 +25,7 @@ import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { loadHealth, stickyFailure } from "../routing/provider-health.ts";
 import { type RoutingContext, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
+import { loadScheduleState } from "../schedule/schedule-store.ts";
 import { loadShortQuota, loadSpendState } from "../spend/spend.ts";
 import type { SpendCaps } from "../spend/spend-caps.ts";
 import { decide, handedText } from "./decider.ts";
@@ -78,6 +79,8 @@ export type EngineOptions = {
   readonly spendCaps?: Effect.Effect<Result.Result<SpendCaps, string>>;
   /** The model catalog, which tells the turns a reached spend cap stops: those that spend metered dollars. Without it, every turn. */
   readonly catalog?: Catalog;
+  /** The time scheduled jobs are decided at (DESIGN §15). Defaults to the system clock; tests pass their own. */
+  readonly now?: () => Date;
 };
 
 export const EngineLive = (options: EngineOptions = {}) =>
@@ -93,6 +96,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
       const streaming = new Set<TurnId>();
       const projectOne = options.project ?? project;
       const decider = options.decide ?? rulesDecide;
+      const clock = options.now ?? (() => new Date());
 
       const append = (command: Command, event: Event) =>
         Effect.gen(function* () {
@@ -277,6 +281,9 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 : undefined;
             // A background review stays off a harness whose subscription window is short (DESIGN §14.5).
             const shortQuota = send && current?.aux ? yield* loadShortQuota(new Date()) : undefined;
+            // A scheduled job's commands read the job, and decide at the time now (DESIGN §15).
+            const schedule =
+              command.type.startsWith("schedule.") && "jobId" in command ? yield* loadScheduleState(command, clock()) : undefined;
             const decision = decide(
               {
                 ...state,
@@ -291,6 +298,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ...(shortQuota && { shortQuota }),
                 ...(health && { health }),
                 ...(sticky && { stickyFailure: sticky }),
+                ...(schedule && { schedule }),
               },
               command,
             );

@@ -1,5 +1,6 @@
 import type { HarnessTool, SessionHit } from "@verdandi/contracts";
 import type { Effect } from "effect";
+import { cronjobTool, type ScheduleServices } from "./cronjob.ts";
 import type { Screen, ToolAt, ToolFailed } from "./define.ts";
 import { type MemoryServices, memorySaveTool, memorySearchTool } from "./memory.ts";
 import { reportBlockedTool } from "./report-blocked.ts";
@@ -7,6 +8,7 @@ import { sessionSearchTool } from "./session-search.ts";
 import { type ProposeSkill, skillManageTool } from "./skill-manage.ts";
 import { type SkillServices, skillsListTool, skillViewTool } from "./skills.ts";
 
+export type { JobRequest, ScheduleServices } from "./cronjob.ts";
 export { type Args, defineTool, type Screen, type ToolAt, ToolFailed } from "./define.ts";
 export { memoryLevel, memoryUsed } from "./memory.ts";
 export { hitsForAgent } from "./session-search.ts";
@@ -26,6 +28,8 @@ export type ToolServices = {
   readonly proposeSkill: ProposeSkill;
   /** Lists and reads the user's skills (DESIGN §14.4). */
   readonly skills: SkillServices;
+  /** Creates, lists and pauses scheduled jobs (DESIGN §15). */
+  readonly schedules: ScheduleServices;
 };
 
 /** Every Verdandi tool, in a fixed order: harnesses serve this list unchanged for a session's life (DESIGN §9.6). */
@@ -37,4 +41,5 @@ export const verdandiTools = (services: ToolServices): readonly HarnessTool[] =>
   skillManageTool(services.proposeSkill),
   skillsListTool(services.skills, services.screen),
   skillViewTool(services.skills, services.screen),
+  cronjobTool(services.schedules),
 ];

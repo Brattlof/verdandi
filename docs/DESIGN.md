@@ -715,7 +715,7 @@ Codex through its JSON-RPC `app-server`, OpenCode, and ACP-speaking agents. Ever
 | **ACP server** | Use the native agent from editors that support ACP | M6 |
 | **MCP server** | Expose memory, skills and sessions to other MCP clients | M3 (for Claude Code), then public in M6 |
 
-**Who runs verdandid.** One per profile. Bare `verdandi` and `verdandi run` connect to the one running, or else start one in their own process that stops when they end; meanwhile other clients can connect to it (`verdandi web`) and lose it when the chat quits. Whatever has to outlive a chat needs an always-on verdandid, `verdandi start` or the desktop app: other devices, and in M5 the scheduler and gateway, which only an always-on verdandid starts, so a bot doesn't go offline when a terminal closes.
+**Who runs verdandid.** One per profile. Bare `verdandi` and `verdandi run` connect to the one running, or else start one in their own process that stops when they end; meanwhile other clients can connect to it (`verdandi web`) and lose it when the chat quits. Whatever has to outlive a chat needs an always-on verdandid, `verdandi start` or the desktop app: other devices, the scheduler and, in M5, the gateway, which only an always-on verdandid starts, so a job or a bot doesn't stop when a terminal closes. `server.json` says whether the running one is always-on, so `verdandi schedule add` can say when a job will wait for one.
 
 **The agent serves no web page (ADR 0026).** The agent is the `verdandi` binary, verdandid and the CLI (`apps/agent`): the brain, the terminal chat and the gateway. It listens only on `127.0.0.1`, an API for local clients behind the profile's token, and refuses every browser page. Chatting in the terminal or from a messaging app needs nothing else.
 
@@ -897,20 +897,22 @@ Trajectories from open or local models don't have this restriction. The exporter
 
 ## 15. Always-on: scheduler, gateway, profiles
 
-- **Scheduler:**
-  - **When:** schedules can be a duration ("in 2h"), plain language ("every weekday at 7"), a cron expression, or a one-off time.
-  - **What each job can have:**
+- **Scheduler** (ADR 0032):
+  - **When:** a cron expression or nickname read in the job's time zone, a one-off time, or a duration ("in 2h"). The agent turns plain language ("every weekday at 7") into one of those.
+  - **What each job has:** its task and mode; a route, pinned or the router's pick under its project's policy; task limits that narrow its class's; a worktree, on by default in a project's git repo and never in the workspace; whether missed runs collapse into one or are skipped; and the thread that owns it, whose stream its events go on. Still to come:
     - skills to load,
-    - a route override,
     - a script to run first,
     - `contextFrom` to chain in earlier job outputs,
     - where its output goes: a channel, a thread or a notification, set in the job's config. A job the agent creates with `cronjob` delivers to its own thread's binding; pointing it anywhere else is your edit.
   - **Where:** in the job's project, or in the workspace when it names none (§13).
-  - **Who runs them:** only an always-on verdandid (§11). Until it does, `verdandi schedule` registers OS jobs (crontab, launchd or Task Scheduler) that call `verdandi run --deny-requests --json`, which runs a verdandid for the run when none is up; each job has a cron expression, a folder, a mode and a route, and logs each run's exit code, thread and cost.
+  - **Who runs them:** only an always-on verdandid (§11). One timer waits for the job whose next run comes first, re-armed at boot and on every change, and looks again at least each minute, so a host that slept is noticed. When it fires, the decider claims the occurrence and moves the job's next run on in one transaction, so an occurrence runs at most once.
+  - **Catch-up**, a pure function of the schedule, the occurrence due and the time now: grace is half the period, from 2 minutes to 2 hours. A late occurrence inside grace runs once; past grace, the missed ones collapse into one run, or are all skipped if the job says so; a one-off more than 2 minutes late is retired, never run. However long the host slept, nothing runs in a burst, and every skip is recorded with its reason.
+  - **Runs:** each claimed occurrence gets a thread of its own in the job's project or the workspace, in a worktree when the job has one, labelled with its job, and Verdandi sends the job's text there as an ordinary turn, so routing, spend caps, task limits, verifiers, escalation and outcomes apply unchanged. A refused turn (a reached spend cap, a broken policy) is the run's result. The run ends when its task stops; removing a job keeps its runs' threads.
+  - **Before verdandid's scheduler:** `verdandi schedule add` registered OS jobs (crontab, launchd or Task Scheduler) that call `verdandi run --deny-requests --json`. Such entries keep running until removed; `verdandi schedule list` shows them, and `remove --os` takes one out.
   - **Unattended runs:**
     - run in worktrees when their project is a git repo other than the workspace,
-    - use a restricted permission profile,
-    - have a hard budget,
+    - deny every request at once, recorded with the reason, as a background review's are (ADR 0023),
+    - have a hard budget: the job's limits, under the spend caps,
     - are stopped by a watchdog after a period with no activity,
     - **propose** memories for review instead of saving them.
 - **Messaging gateway:**

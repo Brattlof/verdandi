@@ -4,6 +4,7 @@ import { Decide } from "@verdandi/decisions";
 import { Effect, Layer, Result } from "effect";
 import { loadApprovalSettings } from "../approvals/approvals-config.ts";
 import { attachmentsDir } from "../attachments/attachments.ts";
+import { workspaceDir } from "../home/workspace.ts";
 import { loadMemorySettings } from "../memory/memory-config.ts";
 import { loadMcp } from "../native/mcp-config.ts";
 import { loadReviewSettings } from "../review/review-config.ts";
@@ -22,6 +23,7 @@ import {
   ReactorLive,
   ReviewSettings,
   ToolSettings,
+  WorkspaceDir,
   WorktreesDir,
 } from "./reactor.ts";
 
@@ -40,6 +42,7 @@ export const AppLayer = (
     readonly spendCapsHome?: string;
     readonly verifiers?: (projectPath: string) => readonly string[];
     readonly decide?: Decide["Service"];
+    readonly now?: () => Date;
   } = {},
 ) => {
   const routing = routingFor(harnesses);
@@ -88,6 +91,7 @@ export const AppLayer = (
     Layer.provideMerge(Layer.succeed(AttachmentsDir, attachmentsDir(home))),
     Layer.provideMerge(Layer.succeed(McpConfig, (folder: string) => loadMcp(home, folder))),
     Layer.provideMerge(Layer.succeed(WorktreesDir, join(home, "worktrees"))),
+    Layer.provideMerge(Layer.succeed(WorkspaceDir, workspaceDir(home))),
     Layer.provideMerge(Layer.sync(ProfileSkills, () => loadSkillFolders(home))),
     Layer.provideMerge(Layer.sync(ReviewSettings, () => loadReviewSettings(home))),
     Layer.provideMerge(Layer.sync(ApprovalSettings, () => loadApprovalSettings(home))),

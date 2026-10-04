@@ -27,7 +27,7 @@ export const threadList = (
     .map(([projectId, ts]) => {
       const lines = ts.map((t) => {
         const cost = describeCost(t.cost);
-        return `  ${t.threadId}  ${t.busy ? "busy" : t.archived ? "archived" : "idle"}  ${localMinute(t.lastActivityAt)}  ${t.title || "(no turns yet)"}${cost ? `  [${cost}]` : ""}`;
+        return `  ${t.threadId}  ${t.busy ? "busy" : t.archived ? "archived" : "idle"}  ${localMinute(t.lastActivityAt)}  ${t.job ? `[${t.job}] ` : ""}${t.title || "(no turns yet)"}${cost ? `  [${cost}]` : ""}`;
       });
       return `${paths.get(projectId) ?? projectId}\n${lines.join("\n")}\n`;
     })

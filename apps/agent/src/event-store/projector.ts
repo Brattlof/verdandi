@@ -31,7 +31,7 @@ import { Effect } from "effect";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
 import { sessionUntrusted, untrustedSource } from "../routing/untrusted.ts";
 import { skillUsed } from "../skills/skills.ts";
-import type { AuxStarted, DeciderState, PendingRequest } from "./decider.ts";
+import type { AuxStarted, DeciderState, PendingRequest, ScheduledRun } from "./decider.ts";
 
 type Projection<T extends Event["type"]> = (
   event: Extract<Event, { type: T }>,
@@ -116,6 +116,10 @@ const projectWorktree = (e: Parameters<typeof nextWorktree>[1]) =>
       yield* sql`update threads set worktree = ${next && JSON.stringify(next)} where id = ${e.threadId}`;
     }),
   );
+
+/** Moves job `jobId` to its next run; a job with none left is done. */
+const advance = (sql: SqlClient.SqlClient, jobId: string, next: string | null) =>
+  sql`update schedules set next_run_at = ${next}, state = case when ${next} is null then 'done' else state end where id = ${jobId}`;
 
 const projections: { [T in Event["type"]]: Projection<T> } = {
   "thread.created": (e, at) =>
@@ -462,6 +466,43 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
             where id = ${e.threadId} and running_turn_id = ${e.turnId}`,
       ),
     ),
+  "schedule.created": (e, at) =>
+    withSql(
+      (sql) => sql`insert into schedules (id, name, owner_thread_id, job, state, next_run_at, created_at)
+        values (${e.jobId}, ${e.job.name}, ${e.threadId}, ${JSON.stringify(e.job)}, ${e.nextRunAt === null ? "done" : "active"}, ${e.nextRunAt}, ${at})`,
+    ),
+  "schedule.paused": (e) => withSql((sql) => sql`update schedules set state = 'paused' where id = ${e.jobId}`),
+  "schedule.resumed": (e) =>
+    withSql(
+      (sql) =>
+        sql`update schedules set state = ${e.nextRunAt === null ? "done" : "active"}, next_run_at = ${e.nextRunAt} where id = ${e.jobId}`,
+    ),
+  "schedule.removed": (e) => withSql((sql) => sql`update schedules set state = 'removed', next_run_at = null where id = ${e.jobId}`),
+  // The key (job_id, scheduled_instant) refuses a second claim of one occurrence, should the decider ever allow one.
+  "schedule.occurrence.claimed": (e, at) =>
+    withSql((sql) =>
+      Effect.andThen(
+        sql`insert into schedule_runs (job_id, scheduled_instant, status, thread_id, at)
+          values (${e.jobId}, ${e.scheduledInstant}, 'running', ${e.runThreadId}, ${at})`,
+        advance(sql, e.jobId, e.nextRunAt),
+      ),
+    ),
+  "schedule.occurrence.skipped": (e, at) =>
+    withSql((sql) =>
+      Effect.andThen(
+        sql`insert into schedule_runs (job_id, scheduled_instant, status, at, ended_at, note)
+          values (${e.jobId}, ${e.from}, 'skipped', ${at}, ${at}, ${e.reason})`,
+        advance(sql, e.jobId, e.nextRunAt),
+      ),
+    ),
+  "schedule.run.started": (e) => withSql((sql) => sql`update threads set schedule = ${JSON.stringify(e)} where id = ${e.threadId}`),
+  "schedule.run.ended": (e, at) =>
+    withSql(
+      // A run that never got its thread keeps none.
+      (sql) => sql`update schedule_runs set status = ${e.status}, ended_at = ${at}, note = ${e.error ?? null},
+          thread_id = (select id from threads where id = schedule_runs.thread_id)
+        where job_id = ${e.jobId} and scheduled_instant = ${e.scheduledInstant}`,
+    ),
   "spend.cap.raised": (e, at, seq) =>
     withSql(
       (sql) =>
@@ -508,8 +549,9 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         session_first_turn: TurnId | null;
         revert: string | null;
         review: string | null;
+        schedule: string | null;
       }>`
-        select t.project_id, p.path, t.route, t.running_turn_id, t.session_id, t.review,
+        select t.project_id, p.path, t.route, t.running_turn_id, t.session_id, t.review, t.schedule,
           (select verifying from turns where id = t.running_turn_id) as verifying, t.task_id, t.pinned, t.budget_mode, t.worktree,
           t.pending_fork is not null as pending_fork, t.session_first_turn, t.revert,
           t.archived_at is not null as archived,
@@ -571,6 +613,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           sessionFirstTurn: row.session_first_turn,
           revert: row.revert === null ? null : (JSON.parse(row.revert) as StoredRevert),
           ...(row.review === null ? {} : { aux: JSON.parse(row.review) as AuxStarted }),
+          ...(row.schedule === null ? {} : { scheduled: JSON.parse(row.schedule) as ScheduledRun }),
           projectId: row.project_id,
           projectPath: row.path,
           route,
@@ -626,9 +669,10 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         reason: string | null;
         worktree: string | null;
         revert: string | null;
+        schedule: string | null;
       }>`
         select p.path, t.route, t.session_id, t.running_turn_id, t.pinned, t.archived_at is not null as archived, t.budget_mode, t.worktree,
-          t.revert,
+          t.revert, t.schedule,
           t.task_id, d.source, d.reason
         from threads t join projects p on p.id = t.project_id left join route_decisions d on d.task_id = t.task_id
         where t.id = ${threadId}`;
@@ -688,6 +732,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         sessionId: thread.session_id,
         worktree: thread.worktree === null ? null : (JSON.parse(thread.worktree) as WorktreeView),
         revert: revertView(thread.revert),
+        ...(thread.schedule && { schedule: scheduleLabel(JSON.parse(thread.schedule) as ScheduledRun) }),
         busy: thread.running_turn_id !== null,
         turns: turns.map(
           (t): TurnView => ({
@@ -727,6 +772,8 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
     }),
   );
 
+const scheduleLabel = ({ jobId, name, scheduledInstant }: ScheduledRun) => ({ jobId, name, scheduledInstant });
+
 /** A thread's title until auto-titling exists: the first line of its first turn, cut to 80 characters. */
 export const titleFrom = (text: string) => clip(text.trim().split(/\r?\n/, 1)[0] ?? "", 80);
 
@@ -759,8 +806,9 @@ export const loadThreadSummaries = (
       last_activity_at: string;
       metered_usd: number;
       subscription_usd: number;
+      job: string | null;
     }>`
-      select t.id, t.project_id, t.route, t.running_turn_id, t.archived_at is not null as archived,
+      select t.id, t.project_id, t.route, t.running_turn_id, t.archived_at is not null as archived, json_extract(t.schedule, '$.name') as job,
         (select text from turns where thread_id = t.id order by started_at, rowid limit 1) as first_text,
         (select total(u.cost_usd) from turns tu join usage_ledger u on u.turn_id = tu.id
           where tu.thread_id = t.id and u.access_mode = 'metered') as metered_usd,
@@ -781,6 +829,7 @@ export const loadThreadSummaries = (
           lastActivityAt: r.last_activity_at,
           route: JSON.parse(r.route) as Route,
           cost: { meteredUsd: r.metered_usd, subscriptionUsd: r.subscription_usd },
+          ...(r.job !== null && { job: r.job }),
         })),
       ),
     ),

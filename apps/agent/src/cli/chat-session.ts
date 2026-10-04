@@ -28,6 +28,7 @@ import { Context, Effect, type ManagedRuntime, Stream } from "effect";
 import { pairingLine } from "../devices/devices-cli.ts";
 import { workspaceDir } from "../home/workspace.ts";
 import type { connect } from "../rpc/client.ts";
+import { runBanner, scheduleLine } from "../schedule/schedule-lines.ts";
 import { skillsAction } from "../skills/skills-cli.ts";
 import { readAttachment } from "./attach.ts";
 import {
@@ -225,6 +226,8 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
             io.write(`[worktree setup ${e.command} ${e.passed ? "passed" : "failed"}]\n${tail}`);
           }
           if (e.type === "thread.worktree.removed") io.write("[worktree removed; its branch is kept]\n");
+          const job = scheduleLine(e);
+          if (job) io.write(`${job}\n`);
           if (e.type === "turn.started") {
             running = lastTurn = e.turnId;
             shown.push(e.turnId);
@@ -411,6 +414,7 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
     const where = tree.path ? ` at ${tree.path}` : "";
     io.write(`Worktree on branch ${tree.branch}${where}: ${tree.state}${tree.error ? `. ${tree.error}` : ""}\n`);
   }
+  if (thread.schedule) io.write(runBanner(thread.schedule));
   if (picked && worktree) await dispatch({ type: "thread.worktree.add", commandId: uuid<CommandId>(), threadId });
   if (argv.includes("--remove-worktree")) {
     const force = argv.includes("--force");

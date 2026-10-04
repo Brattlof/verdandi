@@ -29,11 +29,13 @@ import { Engine } from "../event-store/engine.ts";
 import { loadDeciderState, loadMemory } from "../event-store/projector.ts";
 import { ApprovalSettings, HarnessRegistry, ProfileSkills } from "../event-store/reactor.ts";
 import { Gc, GcLive, GcScheduleLive } from "../gc/gc.ts";
-import { workspaceDir } from "../home/workspace.ts";
+import { isWorkspace, workspaceDir } from "../home/workspace.ts";
 import { pickFolder } from "../projects/folder-picker.ts";
 import { resolveProjectPath } from "../projects/project.ts";
 import { catalogFor, decideRoute, routingFor, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
+import { loadJobs } from "../schedule/schedule-store.ts";
+import { SchedulerLive } from "../schedule/scheduler.ts";
 import { searchSessions } from "../search/search.ts";
 import { loadSkillsView, SkillCurationScheduleLive } from "../skills/skill-curation.ts";
 import { loadSkillHistory } from "../skills/skill-history.ts";
@@ -77,21 +79,26 @@ const Handlers = (home: string) =>
           }),
         );
       return {
-        // Trust boundaries, checked here so the decider stays pure: the project path is resolved, and
-        // attachments are checked and stored, so the command and its events carry references, never bytes.
+        // Trust boundaries, checked here so the decider stays pure: project paths are resolved (a job's in the workspace
+        // names none), and attachments are checked and stored, so the command and its events carry references, never bytes.
         CommandDispatch: (command) =>
           (command.type === "thread.create"
             ? Effect.map(resolveProjectPath(command.projectPath), (projectPath): Command => ({ ...command, projectPath }))
-            : command.type === "turn.send"
+            : command.type === "schedule.create" && command.job.project !== null
               ? Effect.map(
-                  // Stored before the engine accepts the turn: a rejected turn's bytes stay until the daily sweep (AttachmentSweepLive).
-                  storeAttachments(attachmentsDir(home), command.attachments ?? []),
-                  (refs): Command => {
-                    const { attachments: _, ...rest } = command;
-                    return refs.length > 0 ? { ...rest, attachments: refs } : rest;
-                  },
+                  resolveProjectPath(command.job.project),
+                  (path): Command => ({ ...command, job: { ...command.job, project: isWorkspace(home, path) ? null : path } }),
                 )
-              : Effect.succeed(command)
+              : command.type === "turn.send"
+                ? Effect.map(
+                    // Stored before the engine accepts the turn: a rejected turn's bytes stay until the daily sweep (AttachmentSweepLive).
+                    storeAttachments(attachmentsDir(home), command.attachments ?? []),
+                    (refs): Command => {
+                      const { attachments: _, ...rest } = command;
+                      return refs.length > 0 ? { ...rest, attachments: refs } : rest;
+                    },
+                  )
+                : Effect.succeed(command)
           ).pipe(Effect.flatMap(engine.dispatch), Effect.catchTag("SqlError", Effect.die)),
         ThreadSubscribe: ({ threadId, subscriptionId }) => untilUnsubscribed(subscriptionId, engine.feed(threadId)),
         ProjectsSubscribe: ({ subscriptionId, archived }) =>
@@ -158,6 +165,7 @@ const Handlers = (home: string) =>
             Effect.provideService(SqlClient.SqlClient, sql),
             Effect.catchTag("SqlError", Effect.die),
           ),
+        SchedulesList: () => loadJobs().pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
         TrustedCommandsList: ({ threadId }) =>
           listTrusted(threadId).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
         SessionSearch: (query) =>
@@ -369,11 +377,14 @@ const ProtocolWithToken = (home: string, token: string) =>
     }),
   );
 
-/** verdandid: the core and its token-protected WebSocket API on 127.0.0.1, serving no web page (ADR 0026). Port 0 picks a free port. */
+/**
+ * verdandid: the core and its token-protected WebSocket API on 127.0.0.1, serving no web page (ADR 0026). Port 0 picks a
+ * free port. Only an always-on one (`verdandi start`) runs the scheduler (DESIGN §11), so jobs never stop with a chat.
+ */
 export const ServerLayer = (
   home: string,
   harnesses: Partial<Record<HarnessId, HarnessAdapter>>,
-  options: { readonly port?: number } = {},
+  options: { readonly port?: number; readonly alwaysOn?: boolean } = {},
 ) => {
   const token = randomBytes(32).toString("hex");
   const rpc = RpcServer.layer(Api).pipe(
@@ -402,7 +413,13 @@ export const ServerLayer = (
       return { port: address.port, token };
     }),
   );
-  return Layer.mergeAll(info, AttachmentSweepLive(home), GcScheduleLive, SkillCurationScheduleLive).pipe(
+  return Layer.mergeAll(
+    info,
+    AttachmentSweepLive(home),
+    GcScheduleLive,
+    SkillCurationScheduleLive,
+    options.alwaysOn ? SchedulerLive : Layer.empty,
+  ).pipe(
     Layer.provideMerge(http),
     Layer.provideMerge(TerminalsLive),
     Layer.provideMerge(GcLive(home)),
