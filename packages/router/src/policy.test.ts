@@ -82,3 +82,10 @@ test("a policy that asks for an effort its model doesn't take fails loudly, nami
       "which takes low, medium, high, max. Pick one of those, or another target.",
   );
 });
+
+test("delegation limits default to three children at once, one level deep, and a project can change them within bounds", () => {
+  expect(loadPolicy().delegation).toEqual({ maxConcurrent: 3, maxDepth: 1 });
+  expect(loadPolicy([project("delegation: { maxDepth: 0 }\n")]).delegation).toEqual({ maxConcurrent: 3, maxDepth: 0 });
+  expect(() => loadPolicy([project("delegation: { maxConcurrent: 0 }\n")])).toThrow(/routing\.yaml.*delegation.*maxConcurrent/s);
+  expect(() => loadPolicy([project("delegation: { maxDepth: 9 }\n")])).toThrow(/routing\.yaml.*delegation.*maxDepth/s);
+});

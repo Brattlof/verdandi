@@ -147,6 +147,8 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "provider.recovered": (thread) => thread,
   "turn.rerouted": (thread, e) => addItem(thread, e.turnId, { kind: "route.switch", from: e.from, to: e.to, reason: e.reason }),
   "turn.effort.set": (thread, e) => addItem(thread, e.turnId, { kind: "effort", from: e.from, to: e.to, reason: e.reason }),
+  "task.delegated": (thread, e) =>
+    addItem(thread, e.turnId, { kind: "delegation", route: e.to, reason: e.decision.reason, parentToolUseId: e.toolUseId }),
   // A plan approved with the user's edit keeps both versions on its item.
   "approval.resolved": (thread, e) => {
     const edited = e.resolution.decision === "allow" ? e.resolution.plan : undefined;

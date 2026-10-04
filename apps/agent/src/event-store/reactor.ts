@@ -85,15 +85,19 @@ export class AttachmentsDir extends Context.Service<AttachmentsDir, string>()("v
 
 /**
  * The project's verifiers and how many times the same tool error repeats before it escalates its task
- * (`escalation.verifiers` and `escalation.repeatedErrors` in its routing policy), read when a turn needs them.
- * `fromProject`: the verifiers come from the project's own policy file, so they run only once the user trusts them;
- * false for those Verdandi's caller supplied (a batch task's `verify`).
+ * (`escalation.verifiers` and `escalation.repeatedErrors` in its routing policy), and its `delegation` limits for the
+ * native agent's subtasks (DESIGN §9.4), read when a turn needs them. `fromProject`: the verifiers come from the
+ * project's own policy file, so they run only once the user trusts them; false for those Verdandi's caller supplied (a
+ * batch task's `verify`).
  */
 export class ProjectEscalation extends Context.Service<
   ProjectEscalation,
-  (
-    projectPath: string,
-  ) => Effect.Effect<{ readonly verifiers: readonly string[]; readonly fromProject: boolean; readonly repeatedErrors: number }>
+  (projectPath: string) => Effect.Effect<{
+    readonly verifiers: readonly string[];
+    readonly fromProject: boolean;
+    readonly repeatedErrors: number;
+    readonly delegation: { readonly maxConcurrent: number; readonly maxDepth: number };
+  }>
 >()("verdandi/ProjectEscalation") {}
 
 export class Reactor extends Context.Service<
@@ -284,6 +288,36 @@ export const ReactorLive = Layer.effect(
           return true;
         }),
       );
+
+    /**
+     * Delegation for the native agent of turn `turnId` (DESIGN §9.4): `task.delegate` routes each subtask as a task of its
+     * own and records it on the turn, or is rejected, and its message goes back to the agent.
+     */
+    const delegateFor = (
+      threadId: ThreadId,
+      turnId: TurnId,
+      limits: { readonly maxConcurrent: number; readonly maxDepth: number },
+    ): NonNullable<HarnessRunInput["delegate"]> => ({
+      ...limits,
+      route: ({ toolUseId, task, profile }) => {
+        const commandId = randomUUID() as CommandId;
+        return Effect.runPromise(
+          engine.dispatch({ type: "task.delegate", commandId, threadId, turnId, toolUseId, task, ...(profile && { profile }) }).pipe(
+            Effect.andThen(sql<{ moved: string }>`
+              select json_extract(payload, '$.to') as moved from events where command_id = ${commandId} and type = 'task.delegated'`),
+            Effect.map(([row]) =>
+              row ? { route: JSON.parse(row.moved) as Route } : { error: "Verdandi recorded no route for the subtask." },
+            ),
+            Effect.catchTag("CommandRejected", (e) => Effect.succeed({ error: e.message })),
+            Effect.catchCause((cause) =>
+              Effect.as(Effect.logWarning(`Could not route a subtask of turn ${turnId}.`, cause), {
+                error: "Verdandi couldn't route the subtask because of an internal error.",
+              }),
+            ),
+          ),
+        );
+      },
+    });
 
     // A failed write is retried by the sweep below when verdandid next starts.
     const record = (threadId: ThreadId, turnId: TurnId) =>
@@ -646,6 +680,7 @@ export const ReactorLive = Layer.effect(
         const aux = thread.review === null ? null : (JSON.parse(thread.review) as AuxStarted);
         const nudge = aux ? undefined : memoryNudge(thread.turn_number, toolSettings.memoryNudgeEvery);
         const context = yield* contextAllowed(threadId, turnId, adapter, cwd, aux !== null);
+        const delegate = aux ? undefined : delegateFor(threadId, turnId, (yield* projectEscalation(thread.path)).delegation);
         if (!context.allowed)
           return yield* fail(
             `Verdandi didn't start the agent: its injection scan flagged ${listed(context.files)}, which the ${route.harness} harness would load into the agent's context, and they weren't allowed. Remove what the scan flagged, or send the turn again and allow them if you trust them.`,
@@ -700,7 +735,7 @@ export const ReactorLive = Layer.effect(
             mode,
             ...(attachments.length > 0 && { attachments: attachments.map((a) => ({ ...a, path: join(attachmentsDir, a.id) })) }),
             steers,
-            ...(aux ? {} : { tools, scan: scanFor({ threadId, turnId }) }),
+            ...(aux ? {} : { tools, scan: scanFor({ threadId, turnId }), ...(delegate && { delegate }) }),
             // The snapshot a new session starts with goes to its first turn only (DESIGN §14.2), and so does a handoff's summary.
             ...memoryFor(thread.memory_snapshot, turnId),
             ...(handoff && { handoff }),

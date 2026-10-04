@@ -104,6 +104,11 @@ export const Item = Schema.Union([
     requestId: Schema.optionalKey(Schema.String),
     reason: Schema.String,
   }),
+  /**
+   * The native agent's `delegate_task` call `parentToolUseId` runs its subtask in a child session on `route`, routed as
+   * a task of its own for `reason` (DESIGN §9.4). The child's steps carry the same `parentToolUseId`.
+   */
+  Schema.Struct({ kind: Schema.Literal("delegation"), route: Route, reason: Schema.String, parentToolUseId }),
   /** Auto effort ran this turn at `to` instead of its task's `from` (DESIGN §8.7): a light or heavy turn. */
   Schema.Struct({ kind: Schema.Literal("effort"), from: Effort, to: Effort, reason: Schema.String }),
   /** Verdandi ran a project verifier after the agent finished changing files. */

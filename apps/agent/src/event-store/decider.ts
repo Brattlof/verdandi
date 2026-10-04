@@ -46,6 +46,7 @@ import { memorySnapshot, overCap, sameAs, scanMemory } from "../memory/memory.ts
 import {
   auxClassification,
   decideDeescalation,
+  decideDelegation,
   decideEscalation,
   decideExecuteRoute,
   decideFallback,
@@ -763,6 +764,40 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       return reject("TurnNotRunning", `Turn ${c.turnId} isn't running, so there's no task to report blocked.`);
     }
     return accept({ type: "task.blocked", v: 1, threadId: c.threadId, taskId: state.thread.taskId, turnId: c.turnId, reason: c.reason });
+  },
+  // A subtask the native agent delegates runs in a child session routed as a task of its own, recorded on the turn (DESIGN
+  // §9.4); its usage counts on the turn. A reached spend cap stops one that would spend metered dollars.
+  "task.delegate": (state, c) => {
+    const { thread, routing } = state;
+    if (thread?.runningTurnId !== c.turnId) return reject("TurnNotRunning", "The turn that delegated this subtask has ended.");
+    if (!routing) return reject("NoRoute", "This verdandid routes no tasks, so it can't route a delegated subtask.");
+    const cap = reachedCap(state.spend);
+    const decided = decideDelegation(
+      thread,
+      cap ? { ...routing, capped: cap } : routing,
+      c.task,
+      state.decisions?.answers ?? [],
+      c.profile,
+    );
+    if (Result.isFailure(decided)) return reject(decided.failure.reason, decided.failure.message);
+    const decision = decided.success;
+    const stop = capped(state.spend, decision.target);
+    if (stop) return stop;
+    const recorded: Event[] = state.decisions
+      ? [{ type: "decision.recorded", v: 2, threadId: c.threadId, turnId: c.turnId, ...state.decisions, state: c.task }]
+      : [];
+    // A child is a session of its own: it has no subagents.
+    const to = { harness: decision.target.harness, model: decision.target.model, effort: decision.effort };
+    return accept(...recorded, {
+      type: "task.delegated",
+      v: 1,
+      threadId: c.threadId,
+      turnId: c.turnId,
+      toolUseId: c.toolUseId,
+      ...(c.profile && { profile: c.profile }),
+      to,
+      decision,
+    });
   },
   "task.error.repeat": (state, c) => {
     if (state.thread?.runningTurnId !== c.turnId || !state.thread.taskId) {

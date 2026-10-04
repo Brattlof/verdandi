@@ -102,6 +102,9 @@ export const buildTrajectory = (events: readonly StoredEvent[], turnId: TurnId):
       case "turn.effort.set":
         items.push({ kind: "effort", from: e.from, to: e.to, reason: e.reason });
         break;
+      case "task.delegated":
+        items.push({ kind: "delegation", route: e.to, reason: e.decision.reason, parentToolUseId: e.toolUseId });
+        break;
       case "task.blocked":
         items.push({ kind: "blocked", reason: e.reason });
         break;

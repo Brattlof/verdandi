@@ -298,6 +298,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   // The turn goes on at `to`; the thread keeps its route, which the next turn starts on.
   "turn.rerouted": (e) => addItem(e.turnId, { kind: "route.switch", from: e.from, to: e.to, reason: e.reason }),
   "turn.effort.set": (e) => addItem(e.turnId, { kind: "effort", from: e.from, to: e.to, reason: e.reason }),
+  "task.delegated": (e) => addItem(e.turnId, { kind: "delegation", route: e.to, reason: e.decision.reason, parentToolUseId: e.toolUseId }),
   "approval.requested": insertRequest,
   "user-input.requested": insertRequest,
   "skill.proposed": (e, at) =>

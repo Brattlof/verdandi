@@ -17,6 +17,7 @@ import {
   type RouteStats,
   type RouteTarget,
   type SpendCapped,
+  type SubagentProfile,
   type TaskClass,
   type UntrustedInput,
 } from "@verdandi/contracts";
@@ -349,6 +350,51 @@ export const decideEscalation = (thread: RoutingThread, routing: RoutingContext,
   const policy = thread.budgetMode ? { ...routing.policy.success, mode: thread.budgetMode } : routing.policy.success;
   const target = targetOf(thread.route, policy.catalog);
   return escalate({ target, effort: thread.route.effort, escalations, failure, harnesses: routing.harnesses }, policy);
+};
+
+/**
+ * Pure: the route of the child session for subtask `text`, which the agent of `thread`'s running turn delegated (DESIGN
+ * §9.4), classified by the decision layer's `answers` to `taskQuestions`. A `profile` the thread's route holds a
+ * subagent route for runs there; otherwise the router picks among the policy's targets on the thread's harness, for a
+ * fresh session, no lower than the floor while the parent's session holds untrusted input, and falls back to the
+ * thread's route when the policy has none there. The thread's pin doesn't bind its subtasks.
+ */
+export const decideDelegation = (
+  thread: RoutingThread,
+  routing: RoutingContext,
+  text: string,
+  answers: readonly DecisionAnswer[],
+  profile?: SubagentProfile,
+): Result.Result<RouteDecision, RoutingFailure> => {
+  const { harness } = thread.route;
+  const sub = profile && thread.route.subagents?.[profile];
+  if (Result.isFailure(routing.policy) && !sub) return Result.fail({ reason: "InvalidPolicy", message: routing.policy.failure });
+  const layered = Result.getOrElse(routing.policy, () => routing.builtIn);
+  const policy = thread.budgetMode ? { ...layered, mode: thread.budgetMode } : layered;
+  const classification = classificationOf(answers) ?? unclassified;
+  try {
+    return Result.succeed(
+      route(
+        {
+          text,
+          mode: "build",
+          harnesses: [harness],
+          parent: { target: targetOf(thread.route, policy.catalog), effort: thread.route.effort },
+          ...(profile && sub
+            ? { profile: { name: profile, target: targetOf({ harness, ...sub }, policy.catalog), effort: sub.effort } }
+            : {}),
+          ...(routing.capped ? { capped: routing.capped } : {}),
+          ...(routing.health ? { health: routing.health } : {}),
+          ...warmUntrusted(thread),
+        },
+        policy,
+        () => classification,
+      ),
+    );
+  } catch (e) {
+    if (!(e instanceof RouterError)) throw e;
+    return Result.fail({ reason: "NoRoute", message: e.message });
+  }
 };
 
 /**

@@ -200,6 +200,16 @@ export const Policy = Schema.Struct({
    * keeps it on a target with a forbidden access mode or below `minTier`: smaller models are easier to hijack.
    */
   untrusted: Schema.optionalKey(Floor),
+  /**
+   * The native agent's `delegate_task` (DESIGN §9.4): at most `maxConcurrent` child sessions of one turn run at once,
+   * and children nest at most `maxDepth` deep, 0 turning delegation off (built-in: 3 and 1, so a child can't delegate).
+   */
+  delegation: Schema.optionalKey(
+    Schema.Struct({
+      maxConcurrent: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 8 }))),
+      maxDepth: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 3 }))),
+    }),
+  ),
 });
 export type Policy = typeof Policy.Type;
 

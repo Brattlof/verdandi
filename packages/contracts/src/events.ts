@@ -7,7 +7,7 @@ import { HandedSource, Item, Quota, UsageFields, VerifierRun } from "./items.ts"
 import { MemoryScope } from "./memory.ts";
 import { ProviderHealth } from "./provider-health.ts";
 import { Question, Resolution } from "./requests.ts";
-import { Effort, HarnessId, InteractionMode, Route } from "./route.ts";
+import { Effort, HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
 import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInputs, RouteInputsV1, UntrustedInput } from "./routing.ts";
 import { SkillAction, SkillChange, SkillState } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
@@ -224,6 +224,21 @@ export const TurnEffortSet = Schema.Struct({
   to: Effort,
   reason: Schema.String,
 });
+/**
+ * The native agent of running turn `turnId` delegated a subtask with `delegate_task` call `toolUseId` (DESIGN §9.4): its
+ * child session runs on `to`, routed as a task of its own (`decision`; a `profile` it named takes the parent route's
+ * subagent route). The child's usage counts on the turn, and so on its task. Projected as a `delegation` item.
+ */
+export const TaskDelegated = Schema.Struct({
+  type: Schema.Literal("task.delegated"),
+  v: v1,
+  threadId: ThreadId,
+  turnId: TurnId,
+  toolUseId: Schema.String,
+  profile: Schema.optionalKey(SubagentProfile),
+  to: Route,
+  decision: RouteDecision,
+});
 /** The harness waits for the user to allow or deny a tool call. */
 export const ApprovalRequested = Schema.Struct({
   type: Schema.Literal("approval.requested"),
@@ -296,7 +311,8 @@ const DecisionRecordedV1 = Schema.Struct({
 /**
  * The decision layer answered questions about turn `turnId` (DESIGN §9.8), committed right before that turn's
  * `task.started` or `turn.started`. The turn's text is the state, kept only in its `turn.started`, unless `state`
- * holds what was asked about instead: a finished task's digest, asked about after its turn `turnId` (§14.5). Logged
+ * holds what was asked about instead: a finished task's digest, asked about after its turn `turnId` (§14.5), or a
+ * subtask the turn's agent delegated, right before its `task.delegated` (§9.4). Logged
  * for the lab, to measure other backends against the one that answered. v1 always read the turn's text.
  */
 export const DecisionRecorded = Schema.Struct({
@@ -799,6 +815,7 @@ export const Event = Schema.Union([
   ProviderRecovered,
   TurnRerouted,
   TurnEffortSet,
+  TaskDelegated,
   ApprovalRequested,
   UserInputRequested,
   PlanRequested,
@@ -908,6 +925,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "provider.recovered@1": ProviderRecovered,
   "turn.rerouted@1": TurnRerouted,
   "turn.effort.set@1": TurnEffortSet,
+  "task.delegated@1": TaskDelegated,
   "approval.requested@1": ApprovalRequested,
   "user-input.requested@1": UserInputRequested,
   "plan.requested@1": PlanRequested,

@@ -132,6 +132,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
               (command.type === "turn.send" ||
                 command.type === "spend.cap.raise" ||
                 command.type === "task.escalate" ||
+                command.type === "task.delegate" ||
                 rejectsPlan ||
                 (command.type === "harness.report" &&
                   (command.event.type === "plan.requested" || command.event.type === "provider.failed"))) &&
@@ -159,6 +160,11 @@ export const EngineLive = (options: EngineOptions = {}) =>
             const starts = send && current && (current.taskId === null || at);
             // A routed task's turn after one whose verifiers all passed is classified too: mechanical work de-escalates it.
             const deescalates = send && !starts && current?.pinned === false && current.lastTurnVerified;
+            // A subtask the native agent delegates is routed as a task of its own (DESIGN §9.4), unless it names a profile
+            // its route holds.
+            const delegates = command.type === "task.delegate" && current?.runningTurnId === command.turnId ? command : undefined;
+            const routesDelegate =
+              delegates && !(delegates.profile && current?.route.subagents?.[delegates.profile]) ? delegates : undefined;
             // Provider health (DESIGN §9.5): routing leaves failing providers out, a harness's provider report records or clears a
             // failure and may move its turn to a fallback, and a continuing turn whose route's provider reported a reset still
             // ahead starts on one.
@@ -169,13 +175,17 @@ export const EngineLive = (options: EngineOptions = {}) =>
             const continues = send && current && current.taskId !== null && !at && !current.pinned ? current : undefined;
             const now = new Date();
             const health =
-              reported || continues || starts || plans || escalates || rejectsPlan || deescalates ? yield* loadHealth(now) : undefined;
+              reported || continues || starts || plans || escalates || rejectsPlan || deescalates || delegates
+                ? yield* loadHealth(now)
+                : undefined;
             const sticky =
               continues && health && options.catalog ? stickyFailure(health, continues.route, options.catalog, now) : undefined;
-            // Routing reads the project's policy file, so only when this command starts a task, routes a planned task's build,
-            // escalates, may de-escalate, or may fall back.
+            // Routing reads the project's policy file, so only when this command starts a task, routes a planned task's build
+            // or a delegated subtask, escalates, may de-escalate, or may fall back.
             const routing =
-              current && (starts || plans || escalates || rejectsPlan || deescalates || reported === "provider.failed") && options.routing
+              current &&
+              (starts || plans || escalates || rejectsPlan || deescalates || delegates || reported === "provider.failed") &&
+              options.routing
                 ? {
                     ...(yield* options.routing(current.projectPath)),
                     ...(health && { health }),
@@ -193,7 +203,9 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ? { state: at ? at.text : send.text, questions }
                 : command.type === "task.review"
                   ? { state: command.digest, questions: [reviewQuestion] }
-                  : undefined;
+                  : routesDelegate && routing
+                    ? { state: routesDelegate.task, questions: taskQuestions(routing) }
+                    : undefined;
             // ponytail: asked inside the write transaction, which is free on `rules`; ask before it once a backend takes real time (ADR 0009).
             const decisions = asked && { questions: asked.questions, answers: (yield* decider.decide(asked)).answers };
             // A follow-up correcting the agent may escalate its routed task (DESIGN §8.7), which reads the project's policy.

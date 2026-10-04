@@ -37,9 +37,10 @@ export const AppLayer = (
   } = {},
 ) => {
   const routing = routingFor(harnesses);
-  // A broken policy runs no verifiers and counts no repeated errors; it already rejects the next routed turn, naming the file and key.
+  // A broken policy runs no verifiers and counts no repeated errors; it already rejects the next routed turn, naming the file
+  // and key, and a delegated subtask, which keeps the built-in delegation limits until it's fixed.
   const escalation = (projectPath: string) =>
-    Effect.flatMap(routing(projectPath), ({ policy }) => {
+    Effect.flatMap(routing(projectPath), ({ policy, builtIn }) => {
       const supplied = options.verifiers?.(projectPath) ?? [];
       return Result.isSuccess(policy)
         ? Effect.succeed({
@@ -47,11 +48,13 @@ export const AppLayer = (
               ? { verifiers: supplied, fromProject: false }
               : { verifiers: policy.success.verifiers, fromProject: true }),
             repeatedErrors: policy.success.escalation.repeatedErrors,
+            delegation: policy.success.delegation,
           })
         : Effect.as(Effect.logWarning(`Skipped the project's verifiers and repeated errors: ${policy.failure}`), {
             verifiers: [],
             fromProject: false,
             repeatedErrors: 0,
+            delegation: builtIn.delegation,
           });
     });
   return ReactorLive.pipe(

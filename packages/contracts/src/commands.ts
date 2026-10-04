@@ -7,7 +7,7 @@ import { CommandId, profileStream, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { HandedSource, VerifierRun } from "./items.ts";
 import { MemoryScope } from "./memory.ts";
 import { Resolution } from "./requests.ts";
-import { HarnessId, InteractionMode, Route } from "./route.ts";
+import { HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
 import { BudgetMode } from "./routing.ts";
 import { SkillAction, SkillChange } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
@@ -215,6 +215,20 @@ export const TaskBlock = Schema.Struct({
   threadId: ThreadId,
   turnId: TurnId,
   reason: Schema.String,
+});
+
+/**
+ * Internal: the native agent of running turn `turnId` delegates `task` with `delegate_task` call `toolUseId`, naming
+ * `profile` when it wants the route's explorer or reviewer (DESIGN §9.4): Verdandi routes the child. Clients cannot send it.
+ */
+export const TaskDelegate = Schema.Struct({
+  type: Schema.Literal("task.delegate"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  toolUseId: Schema.String,
+  task: Schema.String,
+  profile: Schema.optionalKey(SubagentProfile),
 });
 
 /**
@@ -529,6 +543,7 @@ export const Command = Schema.Union([
   CheckpointsReport,
   TaskBlock,
   TaskErrorRepeat,
+  TaskDelegate,
   WorktreeReported,
   VerifiersStart,
   VerifierReport,

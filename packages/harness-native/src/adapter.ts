@@ -17,8 +17,9 @@ import { Effect, Stream } from "effect";
 import { type CacheBreaks, cacheBreak, fingerprint, type Sent } from "./cache-check.ts";
 import { nativeCatalog } from "./catalog.ts";
 import { indexSkills, readContext, type SkillEntry } from "./context.ts";
+import { concurrently, delegateArgs, delegateTool, summaryOf } from "./delegate.ts";
 import { access, fileTools, type Reach, runFileTool } from "./file-tools.ts";
-import { modeNotes, opensFiles, planTool, sessionPrefix, turnContent } from "./prompt.ts";
+import { childContent, modeNotes, opensFiles, planTool, sessionPrefix, turnContent } from "./prompt.ts";
 import { classify } from "./provider-failure.ts";
 import { runTerminal, type Terminal, terminalTool } from "./terminal.ts";
 import {
@@ -32,14 +33,21 @@ import {
   type Transcript,
 } from "./transcript.ts";
 
-/** The running turn of a session: requests waiting for the user, steers waiting for the next safe point. */
+/**
+ * The running turn of a session: requests waiting for the user, steers waiting for the next safe point. A delegated
+ * child runs a turn of its own that shares its parent's requests, running commands and spend (DESIGN §9.4).
+ */
 type Turn = {
   readonly waiting: Map<string, (resolution: Resolution) => void>;
   readonly steers: string[];
   /** Plan mode until the user approves the plan; then the turn goes on building. */
   planning: boolean;
-  /** The terminal command running, which an interrupt waits for until its process tree is gone. */
-  running: Promise<unknown> | undefined;
+  /** The terminal commands running, which an interrupt waits for until their process trees are gone. */
+  readonly running: Set<Promise<unknown>>;
+  /** What the turn's requests, its children's included, cost so far: what counts against the task's `maxCost`. */
+  readonly spent: { usd: number };
+  /** 0 for the thread's own session, 1 for a child it delegated to, and so on. */
+  readonly depth: number;
 };
 
 /** One native session per thread, kept between turns. */
@@ -92,6 +100,8 @@ async function* request(turn: Turn, event: (requestId: string) => HarnessEvent):
   return resolution;
 }
 
+type ToolResult = { readonly text: string; readonly isError?: boolean };
+
 const feedback = (r: Resolution) => (r.decision === "deny" && r.feedback ? ` Their feedback: ${r.feedback}` : "");
 
 /** Why this turn may change nothing and run no command yet (`ask`, or `plan` before the plan is approved), or undefined. */
@@ -104,16 +114,23 @@ const heldBack = (turn: Turn, mode: InteractionMode) =>
 
 /**
  * Runs one tool call: the plan tool raises `plan.requested`, a file tool checks its path (asking outside the thread's
- * reach, ADR 0025), the terminal asks before every command, and a Verdandi tool that `ask`s raises
- * `approval.requested` first. A file tool or the terminal runs only in a session whose tool list has it.
+ * reach, ADR 0025), the terminal asks before every command, `delegate_task` runs a child session, and a Verdandi tool
+ * that `ask`s raises `approval.requested` first. A file tool, the terminal or `delegate_task` runs only in a session
+ * whose tool list has it.
  */
 async function* runTool(
   use: Anthropic.ToolUseBlock,
   input: HarnessRunInput,
   session: Session,
   turn: Turn,
-  local: { readonly reach: Reach; readonly terminal: Terminal; readonly signal: AbortSignal },
-): AsyncGenerator<HarnessEvent, { readonly text: string; readonly isError?: boolean }> {
+  local: {
+    readonly reach: Reach;
+    readonly terminal: Terminal;
+    readonly signal: AbortSignal;
+    /** Runs a `delegate_task` call in a child session. */
+    readonly delegate: (use: Anthropic.ToolUseBlock) => AsyncGenerator<HarnessEvent, ToolResult>;
+  },
+): AsyncGenerator<HarnessEvent, ToolResult> {
   const args = (typeof use.input === "object" && use.input !== null ? use.input : {}) as Record<string, unknown>;
   if (use.name === planTool) {
     if (!turn.planning) {
@@ -138,8 +155,9 @@ async function* runTool(
         : "The user approved the plan. Build it now.",
     };
   }
-  // A session from before the file tools or the terminal keeps the tool list it started with.
+  // A session from before the file tools, the terminal or delegation keeps the tool list it started with.
   const has = session.transcript.prefix.tools.some((t) => t.name === use.name);
+  if (use.name === delegateTool && has) return yield* local.delegate(use);
   if (use.name === terminalTool && has) {
     const held = heldBack(turn, input.mode);
     if (held) return { text: held, isError: true };
@@ -153,11 +171,11 @@ async function* runTool(
     }));
     if (r.decision !== "allow") return { text: `The user denied this.${feedback(r)}`, isError: true };
     const running = runTerminal(args, input.cwd, local.terminal, use.id, local.signal);
-    turn.running = running;
+    turn.running.add(running);
     try {
       return await running;
     } finally {
-      turn.running = undefined;
+      turn.running.delete(running);
     }
   }
   const file = fileTools[use.name];
@@ -257,7 +275,8 @@ export const makeNativeAdapter = (options: {
       const { scan } = input;
       const context = scan && (await readContext(input.cwd, scan));
       const skills = scan ? await indexSkills(options.skills?.() ?? [], scan) : [];
-      const prefix = sessionPrefix(input.cwd, input.tools ?? [], options.reach.folders, { context, skills });
+      const delegates = (input.delegate?.maxDepth ?? 0) > 0;
+      const prefix = sessionPrefix(input.cwd, input.tools ?? [], options.reach.folders, { context, skills, delegates });
       const transcript = createTranscript(dir, randomUUID(), prefix);
       const flagged = skills.filter((s) => s.flagged).map((s) => s.name);
       return bind(transcript, "build", [
@@ -334,9 +353,13 @@ export const makeNativeAdapter = (options: {
     if (levels.length > 0 && wanted !== (saidEffort(session.transcript.entries) ?? session.route.effort))
       append({ role: "system", content: [], output_config: { effort: wanted } });
     append({ role: "user", content });
-    let spent = 0;
     for (let requests = 1; ; requests++) {
       const limits = input.limits;
+      // What the turn's children spent counts too (DESIGN §9.4).
+      if (limits?.maxCost !== undefined && limits.spentUsd + turn.spent.usd > limits.maxCost) {
+        yield finished("limit", `Stopped at the task's $${limits.maxCost} cost limit.`);
+        return;
+      }
       // The task's earlier turns' model calls count too, reported as they're made so an interrupt doesn't lose them.
       if (limits?.maxTurns !== undefined) {
         if (limits.spentTurns + requests > limits.maxTurns) {
@@ -370,7 +393,8 @@ export const makeNativeAdapter = (options: {
         reply = await stream.finalMessage();
       } catch (e) {
         const failed = signal.aborted ? undefined : classify(e, model);
-        if (!failed) throw e;
+        // A child's failure goes back to the agent that delegated to it, which decides what's next.
+        if (!failed || turn.depth > 0) throw e;
         failing.add(`${entry.provider} ${failed.model ?? ""}`);
         // Verdandi records it and answers: allowed once `reroute` moved the turn to a fallback, else why it stops (DESIGN §9.5).
         const r = yield* request(turn, (requestId) => ({ type: "provider.failed", requestId, provider: entry.provider, ...failed }));
@@ -392,7 +416,7 @@ export const makeNativeAdapter = (options: {
         cacheWriteTokens: reply.usage.cache_creation_input_tokens ?? 0,
       };
       const costUsd = listCost(entry.price, tokens);
-      spent += costUsd;
+      turn.spent.usd += costUsd;
       yield { type: "usage", model, accessMode: "metered", ...tokens, costUsd };
       for (const block of reply.content)
         if (block.type === "text" && block.text !== "") yield { type: "item", item: { kind: "assistant.message", text: block.text } };
@@ -409,7 +433,7 @@ export const makeNativeAdapter = (options: {
         );
         return;
       }
-      if (limits?.maxCost !== undefined && limits.spentUsd + spent > limits.maxCost) {
+      if (limits?.maxCost !== undefined && limits.spentUsd + turn.spent.usd > limits.maxCost) {
         yield finished("limit", `Stopped at the task's $${limits.maxCost} cost limit.`);
         return;
       }
@@ -423,18 +447,102 @@ export const makeNativeAdapter = (options: {
         append({ role: "user", content: steers.map(text) });
         continue;
       }
-      // ponytail: tools run one at a time; upgrade to running the ones that are safe together in parallel (DESIGN §9.4) once there are slow ones.
+      // Consecutive delegate_task calls run together, at most `maxConcurrent` at once (DESIGN §9.4).
+      // ponytail: other tools run one at a time; upgrade to running the ones that are safe together in parallel (DESIGN §9.4) once there are slow ones.
       const results: Anthropic.ToolResultBlockParam[] = [];
-      for (const use of uses) {
-        yield { type: "item", item: { kind: "tool.call", toolUseId: use.id, name: use.name, input: use.input } };
-        const result = yield* runTool(use, input, session, turn, { reach, terminal: options.terminal, signal });
-        const isError = result.isError === true;
-        results.push({ type: "tool_result", tool_use_id: use.id, content: result.text, ...(isError && { is_error: true }) });
-        yield { type: "item", item: { kind: "tool.result", toolUseId: use.id, isError, content: result.text } };
+      const local = {
+        reach,
+        terminal: options.terminal,
+        signal,
+        delegate: (use: Anthropic.ToolUseBlock) => child(use, session, input, turn, signal),
+      };
+      for (let i = 0; i < uses.length; ) {
+        const together = uses[i]?.name === delegateTool ? uses.slice(i).findIndex((u) => u.name !== delegateTool) : 1;
+        const batch = uses.slice(i, together < 0 ? uses.length : i + together);
+        i += batch.length;
+        for (const use of batch) yield { type: "item", item: { kind: "tool.call", toolUseId: use.id, name: use.name, input: use.input } };
+        const done = yield* concurrently(
+          batch.map((use) => () => runTool(use, input, session, turn, local)),
+          input.delegate?.maxConcurrent ?? 1,
+        );
+        for (const [k, use] of batch.entries()) {
+          const result = done[k] ?? { text: "The tool didn't run.", isError: true };
+          const isError = result.isError === true;
+          results.push({ type: "tool_result", tool_use_id: use.id, content: result.text, ...(isError && { is_error: true }) });
+          yield { type: "item", item: { kind: "tool.result", toolUseId: use.id, isError, content: result.text } };
+        }
       }
       // All results in one message, then the steers: the next safe point (DESIGN §9.4).
       append({ role: "user", content: [...results, ...turn.steers.splice(0).map(text)] });
     }
+  }
+
+  /**
+   * Runs `delegate_task` call `use` of `parent`'s turn (DESIGN §9.4): Verdandi routes the subtask, recorded on the turn,
+   * and a child session on that route does it in one turn, starting from the parent's system prompt, with its tools
+   * less `report_blocked`, and less `delegate_task` at the policy's depth. It works read-only for a profile, or while the
+   * parent is held back (`ask`, or planning). Its steps carry the call's id, its requests and usage are the parent turn's,
+   * and its spend counts against the task's `maxCost`, but its model calls not against `maxTurns`. Its last reply is the
+   * result; a failure goes back to the parent as an error result, but an interrupt stops it with the parent.
+   */
+  async function* child(
+    use: Anthropic.ToolUseBlock,
+    parent: Session,
+    input: HarnessRunInput,
+    turn: Turn,
+    signal: AbortSignal,
+  ): AsyncGenerator<HarnessEvent, ToolResult> {
+    const call = delegateArgs((typeof use.input === "object" && use.input !== null ? use.input : {}) as Record<string, unknown>);
+    if ("error" in call) return { text: call.error, isError: true };
+    const delegation = input.delegate;
+    const depth = turn.depth + 1;
+    if (!delegation || depth > delegation.maxDepth)
+      return {
+        text: "Delegation is off here (delegation.maxDepth in the project's routing policy): do the subtask yourself.",
+        isError: true,
+      };
+    const routed = await delegation.route({ toolUseId: use.id, task: call.task, ...(call.profile && { profile: call.profile }) });
+    if ("error" in routed) return { text: `Verdandi didn't delegate the subtask: ${routed.error}`, isError: true };
+    const mode = call.profile || heldBack(turn, input.mode) ? "ask" : "build";
+    const leftOut = new Set(["report_blocked", ...(depth < delegation.maxDepth ? [] : [delegateTool])]);
+    const { system, tools } = parent.transcript.prefix;
+    const transcript = createTranscript(options.sessionsDir, randomUUID(), { system, tools: tools.filter((t) => !leftOut.has(t.name)) });
+    const session: Session = { transcript, route: routed.route, mode, turn: undefined };
+    const own: Turn = { waiting: turn.waiting, steers: [], planning: false, running: turn.running, spent: turn.spent, depth };
+    // Its own route and mode, and the task's cost limit, but not its turn count, which counts the main agent's model calls.
+    const { effort: _effort, limits, ...rest } = input;
+    const childInput: HarnessRunInput = {
+      ...rest,
+      route: routed.route,
+      mode,
+      ...(limits && {
+        limits: {
+          taskId: limits.taskId,
+          spentUsd: limits.spentUsd,
+          spentTurns: 0,
+          ...(limits.maxCost !== undefined && { maxCost: limits.maxCost }),
+        },
+      }),
+    };
+    const steps = loop(session, childInput, childContent(call.task, mode), own, signal);
+    let end: Extract<HarnessEvent, { type: "turn.finished" }> | undefined;
+    try {
+      for (let step = await steps.next(); !step.done; step = await steps.next()) {
+        const e = step.value;
+        if (e.type === "turn.finished") end = e;
+        else if (e.type === "item")
+          yield e.item.kind === "assistant.message" || e.item.kind === "tool.call" || e.item.kind === "tool.result"
+            ? { type: "item", item: { ...e.item, parentToolUseId: use.id } }
+            : e;
+        // Its text streams nowhere: the parent's reply is what the user reads as it comes.
+        else if (e.type !== "text.delta" && e.type !== "model.called") yield e;
+      }
+    } catch (e) {
+      if (signal.aborted) throw e;
+      return { text: `The subagent failed: ${failure(e).message}`, isError: true };
+    }
+    if (end?.status !== "success") return { text: `The subagent stopped: ${end?.error ?? "it ended without finishing"}`, isError: true };
+    return { text: summaryOf(transcript.entries) };
   }
 
   return {
@@ -470,7 +578,14 @@ export const makeNativeAdapter = (options: {
                 text: "This native session started before the agent could open files, so it sees only the attached files' names. A new thread can open them.",
               },
             });
-          const turn: Turn = { waiting: new Map(), steers: [], planning: input.mode === "plan", running: undefined };
+          const turn: Turn = {
+            waiting: new Map(),
+            steers: [],
+            planning: input.mode === "plan",
+            running: new Set(),
+            spent: { usd: 0 },
+            depth: 0,
+          };
           session.turn = turn;
           const controller = new AbortController();
           const generator = loop(session, input, content, turn, controller.signal);
@@ -487,7 +602,7 @@ export const makeNativeAdapter = (options: {
                   controller.abort();
                   if (session.turn === turn) session.turn = undefined;
                 }),
-                Effect.promise(() => turn.running ?? Promise.resolve()),
+                Effect.promise(() => Promise.all(turn.running)),
               ),
             ),
           );
