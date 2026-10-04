@@ -201,13 +201,14 @@ const known = (taskClass: TaskClass, why: string): DecisionAnswer => ({
 });
 
 /**
- * An auxiliary thread's class, which Verdandi knows without asking: a background review's (DESIGN §14.5) or a
- * handoff's (§8.2 lever 5). Given to the router in place of the decision layer's answers, never recorded as one.
+ * An auxiliary thread's class, which Verdandi knows without asking: a background review's (DESIGN §14.5), a
+ * handoff's (§8.2 lever 5) or a compression's (§16). Given to the router in place of the decision layer's answers, never recorded as one.
  */
 export const auxClassification = {
   "review.started": known("aux.review", "a background review of a finished task"),
   "handoff.started": known("aux.handoff", "a handoff summary of a thread moving to another harness"),
-} satisfies Record<"review.started" | "handoff.started", DecisionAnswer>;
+  "compression.started": known("aux.compress", "a compression summary of a long native session"),
+} satisfies Record<"review.started" | "handoff.started" | "compression.started", DecisionAnswer>;
 
 /** When the answers hold no classification, the router takes its safe default. */
 const unclassified = { taskClass: "chat.general", difficulty: 0, confidence: 0, lowConfidence: true, why: "no classification" } as const;

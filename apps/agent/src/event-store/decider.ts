@@ -78,8 +78,8 @@ export type PendingRequest = {
   readonly trust?: { readonly purpose: TrustPurpose; readonly commands: readonly string[]; readonly hash: string };
 };
 
-/** What marks a thread as Verdandi's own auxiliary one: a background review's or a handoff's, hidden and unattended. */
-export type AuxStarted = Extract<Event, { type: "review.started" | "handoff.started" }>;
+/** What marks a thread as Verdandi's own auxiliary one: a background review's, a handoff's or a compression's, hidden and unattended. */
+export type AuxStarted = Extract<Event, { type: "review.started" | "handoff.started" | "compression.started" }>;
 
 /** What the decider needs to know about the command's thread; `undefined` when it doesn't exist. */
 export type DeciderState = {
@@ -358,8 +358,8 @@ const planEscalation = (state: DeciderState, threadId: ThreadId, turnId: TurnId,
 
 /**
  * Why auxiliary task `aux` can't run on `target`: a background review would spend metered dollars and `review.yaml`
- * doesn't allow that (DESIGN §14.5), or the harness's subscription window is short. A handoff may spend metered
- * dollars, under the spend caps: the user's own turn waits on it. Undefined when it can.
+ * doesn't allow that (DESIGN §14.5), or the harness's subscription window is short. A handoff or a compression may
+ * spend metered dollars, under the spend caps: the user's own turn waits on it. Undefined when it can.
  */
 const auxProblem = (state: DeciderState, aux: AuxStarted, target: RouteTarget): string | undefined => {
   const paying = state.spend && Result.isSuccess(state.spend) ? state.spend.success.paying : [];
@@ -374,6 +374,7 @@ const auxProblem = (state: DeciderState, aux: AuxStarted, target: RouteTarget): 
 const auxKinds = {
   "review.started": { name: "background review", skipped: "ReviewSkipped", reply: "reply with the JSON only" },
   "handoff.started": { name: "handoff summary", skipped: "HandoffSkipped", reply: "reply with the summary only" },
+  "compression.started": { name: "compression summary", skipped: "CompressionSkipped", reply: "reply with the summary only" },
 } as const satisfies Record<AuxStarted["type"], { name: string; skipped: CommandRejected["reason"]; reply: string }>;
 
 /**
@@ -1024,6 +1025,21 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
             pinned: false,
           },
           { type: "handoff.started", v: 1, threadId: c.threadId, for: c.for, from: c.from, to: c.to },
+        ),
+  "compression.start": (state, c) =>
+    state.thread
+      ? accept()
+      : accept(
+          {
+            type: "thread.created",
+            v: 1,
+            threadId: c.threadId,
+            projectId: projectIdFor(c.projectPath),
+            projectPath: c.projectPath,
+            route: defaultRoute,
+            pinned: false,
+          },
+          { type: "compression.started", v: 1, threadId: c.threadId, for: c.for },
         ),
   // Untrusted: scanned like the agent's own saves and proposals, then left for the user.
   "review.propose": (state, c) => {

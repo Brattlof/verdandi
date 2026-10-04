@@ -13,8 +13,7 @@ const harnessNames: Record<HarnessId, string> = {
 };
 
 /** The summary's sections, in order (DESIGN §8.2 lever 5). The model writes all but `Files touched`, which Verdandi fills. */
-const sections = ["Goal", "Constraints", "Progress", "Decisions", "Files touched", "Open issues", "Next steps"] as const;
-type Section = (typeof sections)[number];
+export const handoffSections = ["Goal", "Constraints", "Progress", "Decisions", "Files touched", "Open issues", "Next steps"] as const;
 
 const handoffHeader = "Verdandi is handing a thread over";
 
@@ -42,14 +41,15 @@ const maxReply = 6000;
 const maxFiles = 50;
 
 /**
- * Pure: the summary a new session starts from, in its fixed sections: the model's `reply` sorted into them (an
- * unheaded reply is all Progress, a section it left out is "None."), and Files touched from the thread's checkpoints,
- * never the model's. `files` is undefined when the checkpoints can't say (a folder outside git).
+ * Pure: a summary in fixed `sections` (a handoff's, or a compression's, DESIGN §16): the model's `reply` sorted into
+ * them (an unheaded reply is all Progress, a section it left out is "None."), and Files touched from the thread's
+ * checkpoints, never the model's. `files` is undefined when the checkpoints can't say (a folder outside git).
+ * `missing` names the sections, Files touched aside, the reply has no heading for. The reply is clipped to `longest` characters.
  */
-export const handoffSummary = (reply: string, files: readonly string[] | undefined) => {
-  const found = new Map<Section, string[]>();
-  let current: Section | undefined;
-  for (const line of clip(reply.trim(), maxReply).split("\n")) {
+export const sectioned = (reply: string, sections: readonly string[], files: readonly string[] | undefined, longest = maxReply) => {
+  const found = new Map<string, string[]>();
+  let current: string | undefined;
+  for (const line of clip(reply.trim(), longest).split("\n")) {
     const heading = /^#{1,6}\s*(.+?)\s*:?\s*$/.exec(line)?.[1]?.toLowerCase();
     const section = heading === undefined ? undefined : sections.find((s) => s.toLowerCase() === heading);
     if (section) {
@@ -67,7 +67,7 @@ export const handoffSummary = (reply: string, files: readonly string[] | undefin
       : files.length === 0
         ? ["None."]
         : [...files.slice(0, maxFiles).map((f) => `- ${f}`), ...(files.length > maxFiles ? [`- and ${files.length - maxFiles} more`] : [])];
-  return sections
+  const text = sections
     .flatMap((s) => {
       const body = s === "Files touched" ? touched : (found.get(s) ?? []);
       const text = body.join("\n").trim();
@@ -75,7 +75,11 @@ export const handoffSummary = (reply: string, files: readonly string[] | undefin
     })
     .join("\n")
     .trim();
+  return { text, missing: sections.filter((s) => s !== "Files touched" && !found.has(s)) };
 };
+
+/** The summary a new session starts from (DESIGN §8.2 lever 5), lenient: a section the model left out reads "None.". */
+export const handoffSummary = (reply: string, files: readonly string[] | undefined) => sectioned(reply, handoffSections, files).text;
 
 /**
  * The summary as the new session's first message carries it, after the memory snapshot (ADR 0016): fenced as data,

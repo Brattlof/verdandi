@@ -34,7 +34,8 @@ import { Effect, Stream } from "effect";
  * A background review's prompt ("Verdandi is reviewing a finished task …") is answered as a reviewer would, in JSON:
  * it proposes remembering, in project memory, whatever follows the digest's first "remember", and creating the skill
  * named after its first "skill:". A handoff's prompt ("Verdandi is handing a thread over …") is answered with the
- * summary's sections, its Goal the digest's first user message.
+ * summary's sections, its Goal the digest's first user message, and so is a compression's ("Verdandi is compressing a long
+ * session …"), with every section it asks for.
  * Every reply costs $0.01. Like Claude Code, it checks the task's `maxCost` after the call: when the task's
  * spend then exceeds it, the turn ends with status `limit`. Each turn is one model call against the task's `maxTurns`:
  * a task with none left ends its next turn with status `limit` at once. `calls` records every run.
@@ -230,6 +231,12 @@ ${goal}
 - Started on it.
 ## Next steps
 - Carry on.`;
+      return Stream.concat(Stream.fromIterable(start), reply(input.route.model, summary));
+    }
+    if (input.text.startsWith("Verdandi is compressing a long session")) {
+      const goal = /^User: (.+)$/m.exec(input.text)?.[1] ?? "unknown";
+      const sections = ["Constraints", "Progress", "Decisions", "Open issues", "Next steps", "Pending user asks"];
+      const summary = [`## Goal\n${goal}`, ...sections.map((s) => `## ${s}\nNone.`)].join("\n");
       return Stream.concat(Stream.fromIterable(start), reply(input.route.model, summary));
     }
     const fixing = input.text.startsWith("Verdandi ran the project's verifier") ? edited.get(input.threadId) : undefined;

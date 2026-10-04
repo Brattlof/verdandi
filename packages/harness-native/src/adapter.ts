@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { VERSION } from "@anthropic-ai/sdk/version";
 import {
@@ -16,6 +18,7 @@ import {
 import { Effect, Stream } from "effect";
 import { type CacheBreaks, cacheBreak, fingerprint, type Sent } from "./cache-check.ts";
 import { nativeCatalog } from "./catalog.ts";
+import { compress, compressAt, estimateTokens, retryAt, tailBudget } from "./compress.ts";
 import { indexSkills, readContext, type SkillEntry } from "./context.ts";
 import { concurrently, delegateArgs, delegateTool, summaryOf } from "./delegate.ts";
 import { access, fileTools, type Reach, runFileTool } from "./file-tools.ts";
@@ -25,7 +28,9 @@ import { classify } from "./provider-failure.ts";
 import { runTerminal, stopTrying, type Terminal, terminalTool } from "./terminal.ts";
 import { callTool, describeTool, searchDeferred, searchTool, type ToolSearch, unwrapCall } from "./tool-search.ts";
 import {
+  appendCompression,
   appendEntry,
+  compressionsThrough,
   createTranscript,
   type Entry,
   entriesThrough,
@@ -68,6 +73,8 @@ type Session = {
 
 /** The output each request leaves room for (`max_tokens`). */
 export const maxTokens = 64_000;
+/** How long the API keeps a prompt cached (the 5-minute TTL): a session idle longer has a cold cache, so pruning it is free. */
+const cacheTtlMs = 5 * 60_000;
 /** The beta that takes an effort-only system message within a conversation (ADR 0022). */
 const perMessageEffort = "mid-conversation-output-config-2026-07-01";
 const setKey = "Replace it with `verdandi key set anthropic` (or VERDANDI_ANTHROPIC_API_KEY), then restart verdandid.";
@@ -279,6 +286,8 @@ export const makeNativeAdapter = (options: {
    * the default), or Verdandi's bridge (`bridge`), for a provider without one.
    */
   readonly toolSearch?: ToolSearch;
+  /** False leaves sessions uncompressed (DESIGN §16): the recall exam, whose policies decide what a request keeps. */
+  readonly compress?: boolean;
 }): HarnessAdapter => {
   // Everything explicit, so nothing in the environment meant for Claude Code (a base URL, a token, debug logging) applies here.
   const client = new Anthropic({
@@ -290,9 +299,15 @@ export const makeNativeAdapter = (options: {
   });
   const sessions = new Map<ThreadId, Session>();
   const harnessVersion = `native (@anthropic-ai/sdk ${VERSION})`;
-  const reach = { ...options.reach, readable: [...options.reach.readable, options.terminal.outputs] };
+  // Tool results a compression moved to disk, which read_file may open (DESIGN §16).
+  const prunedDir = join(options.sessionsDir, "pruned");
+  const reach = { ...options.reach, readable: [...options.reach.readable, options.terminal.outputs, prunedDir] };
   // Per transcript, so a fork (a new transcript) starts fresh; a diagnostic, kept in memory only.
   const lastSent = new WeakMap<Transcript, Sent>();
+  /** Per transcript, the last request's prompt tokens and when it was sent: what compression triggers on (DESIGN §16). */
+  const lastPrompt = new WeakMap<Transcript, { readonly tokens: number; readonly at: number }>();
+  /** Transcripts whose last compression failed: tried again only past `retryAt` of the window. */
+  const failedCompression = new WeakSet<Transcript>();
   /**
    * The providers and models this process reported failing, as `provider model` (model empty for the whole provider): a
    * later success on one reports it's over. ponytail: kept in memory, so after a restart a failure lasts until its `until`;
@@ -302,12 +317,12 @@ export const makeNativeAdapter = (options: {
 
   /** Fingerprints a request and names what broke the cache since the session's last one (DESIGN §9.4). */
   const checkCache = (session: Session, body: Anthropic.MessageCreateParams) => {
-    const sent = fingerprint(session.route, body);
+    const sent = fingerprint(session.route, body, session.transcript.compressions.length);
     const previous = lastSent.get(session.transcript);
     lastSent.set(session.transcript, sent);
     const what = previous && cacheBreak(previous, sent);
     if (!what) return;
-    const message = `Native session ${session.transcript.id} broke the prompt cache: ${what}. Within a session the system prompt, tools and earlier messages never change, and the model, thinking and effort only with the route (ADR 0022).`;
+    const message = `Native session ${session.transcript.id} broke the prompt cache: ${what}. Within a session the system prompt and tools never change, earlier messages only at a compression, and the model, thinking and effort only with the route (ADR 0022).`;
     if (options.cacheBreaks === "throw") throw new HarnessError({ message });
     console.warn(message);
   };
@@ -401,7 +416,7 @@ export const makeNativeAdapter = (options: {
       // A revert (DESIGN §13): a new session holding the old one's messages through the turn it goes back to.
       const kept = resumed && entriesThrough(resumed, input.fork.atTurnId);
       if (resumed && kept) {
-        const transcript = createTranscript(dir, randomUUID(), resumed.prefix, kept);
+        const transcript = createTranscript(dir, randomUUID(), resumed.prefix, kept, compressionsThrough(resumed, kept.length));
         return bind(transcript, undefined, [started(transcript)]);
       }
       if (resumed)
@@ -465,6 +480,7 @@ export const makeNativeAdapter = (options: {
       const { model, effort } = session.route;
       const entry = nativeCatalog.find((e) => e.model === model);
       if (!entry) throw new HarnessError({ message: unknownModel(model) });
+      if (turn.depth === 0 && options.compress !== false) yield* compressIfDue(session, input, entry.context, signal);
       const body: Anthropic.MessageCreateParamsNonStreaming = {
         model,
         max_tokens: maxTokens,
@@ -472,7 +488,7 @@ export const makeNativeAdapter = (options: {
         tools: session.transcript.prefix.tools,
         // The second breakpoint moves along with the conversation; the first ends the fixed prefix.
         cache_control: { type: "ephemeral" },
-        messages: requestMessages(session.transcript.entries, entry.efforts.length > 0),
+        messages: requestMessages(session.transcript.entries, entry.efforts.length > 0, session.transcript.compressions.at(-1)),
         // A model without effort levels (Haiku 4.5) takes neither effort nor adaptive thinking.
         ...(entry.efforts.length === 0 ? {} : { thinking: { type: "adaptive" as const }, output_config: { effort } }),
       };
@@ -509,6 +525,7 @@ export const makeNativeAdapter = (options: {
         cacheReadTokens: reply.usage.cache_read_input_tokens ?? 0,
         cacheWriteTokens: reply.usage.cache_creation_input_tokens ?? 0,
       };
+      lastPrompt.set(session.transcript, { tokens: tokens.inputTokens + tokens.cacheReadTokens + tokens.cacheWriteTokens, at: Date.now() });
       const costUsd = listCost(entry.price, tokens);
       turn.spent.usd += costUsd;
       yield { type: "usage", model, accessMode: "metered", ...tokens, costUsd };
@@ -574,6 +591,69 @@ export const makeNativeAdapter = (options: {
       // All results in one message, then the steers: the next safe point (DESIGN §9.4).
       append({ role: "user", content: [...results, ...turn.steers.splice(0).map(text)] });
     }
+  }
+
+  /**
+   * Compresses the session before its next request when that's due (DESIGN §16): once the last request's prompt reached
+   * `compressAt` of the model's `window`, prune, then summarize through Verdandi's `summarize` if pruning didn't bring it
+   * under half that; and when the cache has gone cold (no request for the cache's TTL, or none since verdandid started),
+   * only prune, which costs no cache it hasn't lost already. A compression is a transcript entry, recorded on the turn as
+   * a `compression` item. One that fails writes nothing and says why in a `notice`; it's tried again past `retryAt`.
+   */
+  async function* compressIfDue(
+    session: Session,
+    input: HarnessRunInput,
+    window: number,
+    signal: AbortSignal,
+  ): AsyncGenerator<HarnessEvent> {
+    const { transcript } = session;
+    const last = lastPrompt.get(transcript);
+    const tokens = last?.tokens ?? estimateTokens(requestMessages(transcript.entries, true, transcript.compressions.at(-1)));
+    const trigger = compressAt(window) * window;
+    const due = tokens >= trigger && (!failedCompression.has(transcript) || tokens >= retryAt * window);
+    const cold = last === undefined || Date.now() - last.at > cacheTtlMs;
+    if (!due && !cold) return;
+    const done = await compress(transcript, {
+      tail: tailBudget(window),
+      summarizeOver: due ? trigger / 2 : Number.POSITIVE_INFINITY,
+      prune: (toolUseId, text) => {
+        const folder = join(prunedDir, transcript.id);
+        mkdirSync(folder, { recursive: true });
+        const file = join(folder, `${toolUseId}.txt`);
+        writeFileSync(file, text);
+        return file;
+      },
+      summarize: due ? input.summarize : undefined,
+    });
+    if (!done) return;
+    if ("error" in done) {
+      failedCompression.add(transcript);
+      yield {
+        type: "item",
+        item: {
+          kind: "notice",
+          text: `Verdandi couldn't compress this session (${done.error}), so it goes on as it is, and tries again at ${Math.round(retryAt * 100)}% of the context window.`,
+        },
+      };
+      return;
+    }
+    // After an interrupt nothing more reaches the transcript.
+    if (signal.aborted) throw new HarnessError({ message: "The turn was interrupted." });
+    failedCompression.delete(transcript);
+    appendCompression(transcript, done.compression);
+    const { system, tools } = transcript.prefix;
+    const after = estimateTokens({ system, tools, messages: requestMessages(transcript.entries, true, done.compression) });
+    yield {
+      type: "item",
+      item: {
+        kind: "compression",
+        tokensBefore: tokens,
+        tokensAfter: after,
+        pruned: done.pruned,
+        summarized: done.summarized,
+        costUsd: done.costUsd,
+      },
+    };
   }
 
   /**

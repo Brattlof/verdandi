@@ -100,6 +100,12 @@ const GOLDENS: Golden[] = [
     given: true,
     routes: { thrifty: "haiku low", balanced: "haiku low", max: "haiku low" },
   },
+  {
+    text: "Verdandi is compressing a long session of its native agent.",
+    taskClass: "aux.compress",
+    given: true,
+    routes: { thrifty: "haiku low", balanced: "haiku low", max: "haiku low" },
+  },
 ];
 
 /** How a reason names a "model effort" route: Haiku takes no effort level, so its reason names none. */

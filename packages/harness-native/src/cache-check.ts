@@ -11,9 +11,10 @@ const keyParams = (body: Anthropic.MessageCreateParams) => ({
   effort: JSON.stringify(body.output_config?.effort ?? null),
 });
 
-/** A request's fingerprint: what keys its cache, hashed, and the route it ran on. */
+/** A request's fingerprint: what keys its cache, hashed, the route it ran on, and how many compressions it was built after. */
 export type Sent = {
   readonly route: Route;
+  readonly compressions: number;
   readonly system: string;
   readonly tools: string;
   readonly params: ReturnType<typeof keyParams>;
@@ -26,8 +27,9 @@ export type Sent = {
 
 const hash = (value: unknown) => Bun.hash(JSON.stringify(value)).toString(36);
 
-export const fingerprint = (route: Route, body: Anthropic.MessageCreateParams): Sent => ({
+export const fingerprint = (route: Route, body: Anthropic.MessageCreateParams, compressions = 0): Sent => ({
   route,
+  compressions,
   system: hash(body.system),
   tools: hash(body.tools),
   params: keyParams(body),
@@ -54,8 +56,8 @@ const comparable = (s: Sent, to: Sent) => (s.params.model === to.params.model ? 
  * the same system prompt and tools, `previous`'s message blocks as a prefix of `next`'s (so a user message joined
  * after an interrupt still extends it), and the same model, thinking and effort unless the route changed, which the
  * task records (escalation, de-escalation, plan approval, a fallback or a route pick). A turn's own effort is an effort
- * message, which extends the messages like any other (#185). Compression (#186) will be the other allowed break; a new
- * session has no previous request.
+ * message, which extends the messages like any other (#185). A compression written since `previous` (DESIGN §16) is the
+ * one other allowed break, of the messages only; a new session has no previous request.
  */
 export const cacheBreak = (previous: Sent, next: Sent): string | undefined => {
   if (previous.system !== next.system) return "the system prompt changed";
@@ -65,6 +67,7 @@ export const cacheBreak = (previous: Sent, next: Sent): string | undefined => {
     const changed = (Object.keys(previous.params) as (keyof Sent["params"])[]).filter((k) => previous.params[k] !== next.params[k]);
     if (changed.length > 0) return `${changed.join(" and ")} changed without a route change`;
   }
+  if (next.compressions !== previous.compressions) return undefined;
   const before = comparable(previous, next);
   const after = comparable(next, previous);
   const at = before.findIndex((b, i) => after[i]?.hash !== b.hash);

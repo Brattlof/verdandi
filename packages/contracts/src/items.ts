@@ -22,9 +22,9 @@ export type VerifierRun = typeof VerifierRun.Type;
 /**
  * Untrusted text Verdandi puts in front of the agent (DESIGN §17): what an escalation's trigger hands its turn (a
  * verifier's output, the agent's own blocked reason, a repeated tool error), a Verdandi tool's result, the summary a
- * harness handoff seeds a new session with, an `mcp` tool's result (from an MCP server the native harness connects to,
- * DESIGN §9.4), or a `context` file (a context or skill file a harness loads by itself, or one the native harness puts
- * in its prompt). A `correction` escalation hands nothing: the user's own message is the turn.
+ * harness handoff seeds a new session with, a compression's summary, an `mcp` tool's result (from an MCP server the
+ * native harness connects to, DESIGN §9.4), or a `context` file (a context or skill file a harness loads by itself, or
+ * one the native harness puts in its prompt). A `correction` escalation hands nothing: the user's own message is the turn.
  */
 export const HandedSource = Schema.Literals([
   "verifier",
@@ -33,6 +33,7 @@ export const HandedSource = Schema.Literals([
   "session_search",
   "memory_search",
   "handoff",
+  "compression",
   "skills_list",
   "skill_view",
   "context",
@@ -47,6 +48,7 @@ export const handedSourceLabel: Record<HandedSource, string> = {
   session_search: "a session_search result",
   memory_search: "a memory_search result",
   handoff: "the handoff summary",
+  compression: "the compression summary",
   skills_list: "a skills_list result",
   skill_view: "a skill_view result",
   context: "a context file",
@@ -112,6 +114,19 @@ export const Item = Schema.Union([
    * a task of its own for `reason` (DESIGN §9.4). The child's steps carry the same `parentToolUseId`.
    */
   Schema.Struct({ kind: Schema.Literal("delegation"), route: Route, reason: Schema.String, parentToolUseId }),
+  /**
+   * The native harness compressed the session before this turn's next request (DESIGN §16): from about `tokensBefore`
+   * tokens to about `tokensAfter`, by moving `pruned` tool results to disk and, when `summarized`, a summary of the
+   * conversation before a recent tail, an `aux.compress` task that cost `costUsd`.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("compression"),
+    tokensBefore: Schema.Number,
+    tokensAfter: Schema.Number,
+    pruned: Schema.Number,
+    summarized: Schema.Boolean,
+    costUsd: Schema.Number,
+  }),
   /** Auto effort ran this turn at `to` instead of its task's `from` (DESIGN §8.7): a light or heavy turn. */
   Schema.Struct({ kind: Schema.Literal("effort"), from: Effort, to: Effort, reason: Schema.String }),
   /** Verdandi ran a project verifier after the agent finished changing files. */
@@ -181,3 +196,11 @@ export const Quota = Schema.Struct({
   usingOverage: Schema.Boolean,
 });
 export type Quota = typeof Quota.Type;
+
+/** A compression on a turn, as the user reads it: the same in the web UI and the terminal (DESIGN §16). */
+export const describeCompression = (item: Extract<Item, { kind: "compression" }>) => {
+  const k = (n: number) => `${Math.round(n / 1000)}K`;
+  const moved = item.pruned > 0 ? `moved ${item.pruned} tool result${item.pruned === 1 ? "" : "s"} to disk` : "";
+  const summed = item.summarized ? `summarized the earlier conversation for $${item.costUsd.toFixed(2)}` : "";
+  return `Compressed the session from about ${k(item.tokensBefore)} to ${k(item.tokensAfter)} tokens: ${[moved, summed].filter(Boolean).join(" and ")}.`;
+};

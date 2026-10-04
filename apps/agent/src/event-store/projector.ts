@@ -333,9 +333,10 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     withSql((sql) => sql`delete from trusted_commands where project_id = ${e.projectId} and hash = ${e.hash}`),
   // The digest and the review thread are in the event; the review thread is marked by its own `review.started`.
   "review.requested": () => Effect.void,
-  // The `review` column marks a thread as Verdandi's own auxiliary one, hidden from thread lists and search: a review's or a handoff's.
+  // The `review` column marks a thread as Verdandi's own auxiliary one, hidden from thread lists and search: a review's, a handoff's or a compression's.
   "review.started": (e) => withSql((sql) => sql`update threads set review = ${JSON.stringify(e)} where id = ${e.threadId}`),
   "handoff.started": (e) => withSql((sql) => sql`update threads set review = ${JSON.stringify(e)} where id = ${e.threadId}`),
+  "compression.started": (e) => withSql((sql) => sql`update threads set review = ${JSON.stringify(e)} where id = ${e.threadId}`),
   // The skill itself is on disk; a skill Verdandi created gets a row, so it can be curated (DESIGN §14.4). Reverting a
   // delete brings the row back only for a skill Verdandi created: a user's skill is never curated.
   "skill.applied": (e, at) =>

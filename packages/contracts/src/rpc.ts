@@ -60,6 +60,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "SkillChangeNotFound",
     "ReviewSkipped",
     "HandoffSkipped",
+    "CompressionSkipped",
     "CommandsNotTrusted",
     "DeviceExists",
     "DeviceNotFound",

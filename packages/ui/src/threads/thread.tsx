@@ -3,6 +3,7 @@ import {
   type CommandId,
   clip,
   codePointStart,
+  describeCompression,
   describeRevertFiles,
   describeRouteChange,
   type InteractionMode,
@@ -571,6 +572,11 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
   delegation: ({ item }) => (
     <p className="my-1 text-xs text-muted">
       Routed as a task of its own, on {item.route.model}: {item.reason}
+    </p>
+  ),
+  compression: ({ item }) => (
+    <p className="my-3 flex items-center gap-3 text-xs text-muted before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">
+      <span className="max-w-[80%] text-center">{describeCompression(item)}</span>
     </p>
   ),
   effort: ({ item }) => (

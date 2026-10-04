@@ -5,6 +5,7 @@ import {
   type CommandId,
   capReached,
   type DiffView,
+  describeCompression,
   describeRevertFiles,
   describeRouteChange,
   describeSpendCap,
@@ -240,6 +241,7 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
           if (e.type === "turn.item.added" && e.item.kind === "notice") io.write(`\n[${e.item.text}]\n`);
           if (e.type === "turn.item.added" && e.item.kind === "approval.auto")
             io.write(`\n[${e.item.decision === "allow" ? "auto-approved" : "refused"} by smart approvals: ${e.item.reason}]\n`);
+          if (e.type === "turn.item.added" && e.item.kind === "compression") io.write(`\n[${describeCompression(e.item)}]\n`);
           if (e.type === "turn.item.added" && e.item.kind === "handoff")
             io.write(
               `\n[handed over from ${e.item.from} to a new ${e.item.to} session, with this summary of the thread so far:]\n${e.item.summary}\n`,

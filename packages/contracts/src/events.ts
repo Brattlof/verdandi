@@ -367,6 +367,17 @@ export const HandoffStarted = Schema.Struct({
   to: HarnessId,
 });
 /**
+ * Thread `threadId` writes the summary a compression of turn `for.turnId`'s native session puts in place of the
+ * conversation before a recent tail (DESIGN §16): hidden like a handoff, its one turn runs as an `aux.compress` task with
+ * no Verdandi tools and nobody to ask.
+ */
+export const CompressionStarted = Schema.Struct({
+  type: Schema.Literal("compression.started"),
+  v: v1,
+  threadId: ThreadId,
+  for: Schema.Struct({ threadId: ThreadId, turnId: TurnId }),
+});
+/**
  * The decision layer flagged `text` from `source` as a likely injection (DESIGN §17) before Verdandi handed it to
  * the agent: it went over anyway, under a warning. On turn `turnId`, the one that handed it over or, for an
  * escalation's, the turn it escalated from. `text` is untrusted data, kept as the decision's state for the lab.
@@ -834,6 +845,7 @@ export const Event = Schema.Union([
   ReviewRequested,
   ReviewStarted,
   HandoffStarted,
+  CompressionStarted,
   InjectionFlagged,
   SpendCapRaised,
   VerifiersStarted,
@@ -945,6 +957,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "review.requested@1": ReviewRequested,
   "review.started@1": ReviewStarted,
   "handoff.started@1": HandoffStarted,
+  "compression.started@1": CompressionStarted,
   "injection.flagged@1": InjectionFlagged,
   "spend.cap.raised@1": SpendCapRaised,
   "verifiers.started@1": VerifiersStarted,

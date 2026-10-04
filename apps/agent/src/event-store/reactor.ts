@@ -31,6 +31,7 @@ import { Cause, Context, Deferred, Effect, Fiber, FiberSet, Layer, Queue, Result
 import { SqlClient } from "effect/unstable/sql";
 import { loadSmartApprovals, platformShell, rateCommand } from "../approvals/smart-approvals.ts";
 import { changedByTurns, changedSince, checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
+import { compressionBlock, compressionPrompt, compressionSummary } from "../compression/compression.ts";
 import { editedFiles } from "../diffs/diff.ts";
 import { handoffBlock, handoffPrompt, handoffSummary, loadThreadDigest, touchedFiles } from "../handoff/handoff.ts";
 import { memoryNudge } from "../memory/memory.ts";
@@ -121,9 +122,9 @@ const memoryFor = (stored: string | null, turnId: TurnId) => {
   const snapshot = stored === null ? undefined : (JSON.parse(stored) as { turnId: TurnId; text: string });
   return snapshot?.turnId === turnId ? { memory: snapshot.text } : {};
 };
-
+/** How long a turn waits for a handoff's or a compression's summary before it goes on without one. */
 /** How long a turn waits for its handoff summary before it starts without one. */
-const handoffTimeout = "5 minutes";
+const auxTimeout = "5 minutes";
 
 const errorMessage = (cause: Cause.Cause<unknown>) => {
   const error = Cause.findErrorOption(cause);
@@ -166,8 +167,8 @@ export const ReactorLive = Layer.effect(
     const latest = new Map<ThreadId, { readonly key: object; readonly turnId?: TurnId; readonly fiber: Fiber.Fiber<void> }>();
     /** Trust requests waiting for the user, by request id (the request's command id): true once allowed. */
     const trustAnswers = new Map<string, Deferred.Deferred<boolean>>();
-    /** Handoff threads whose one turn a waiting turn needs: its reply once it completes, undefined when it failed. */
-    const handoffReplies = new Map<ThreadId, Deferred.Deferred<string | undefined>>();
+    /** Handoff and compression threads whose one turn a waiting turn needs: its reply once it completes, undefined when it failed. */
+    const auxReplies = new Map<ThreadId, Deferred.Deferred<string | undefined>>();
 
     /** The main agent's last reply in turn `turnId`, or undefined when it gave none. */
     const lastReply = (turnId: TurnId) =>
@@ -590,7 +591,6 @@ export const ReactorLive = Layer.effect(
      * with a `notice` on the turn saying why, when it can't be written: the turn goes on without it.
      */
     const handOff = (threadId: ThreadId, turnId: TurnId, from: HarnessId, to: HarnessId, projectPath: string, cwd: string) => {
-      const auxThreadId = randomUUID() as ThreadId;
       const without = (why: string) =>
         Effect.as(
           report(threadId, turnId, {
@@ -606,50 +606,21 @@ export const ReactorLive = Layer.effect(
         const { digest, turnIds } = yield* loadThreadDigest(threadId, turnId);
         if (!digest) return undefined;
         const files = yield* touchedFiles(cwd, threadId, turnIds);
-        // Registered before the turn is sent, so its completion can never come first.
-        const replied = yield* Deferred.make<string | undefined>();
-        handoffReplies.set(auxThreadId, replied);
-        const sent = yield* Effect.result(
-          Effect.andThen(
-            engine.dispatch({
-              type: "handoff.start",
-              commandId: randomUUID() as CommandId,
-              threadId: auxThreadId,
-              projectPath,
-              for: { threadId, turnId },
-              from,
-              to,
-            }),
-            engine.dispatch({
-              type: "turn.send",
-              commandId: randomUUID() as CommandId,
-              threadId: auxThreadId,
-              turnId: randomUUID() as TurnId,
-              text: handoffPrompt(digest, from, to),
-              mode: "ask",
-            }),
-          ).pipe(Effect.catchTag("SqlError", Effect.die)),
+        const got = yield* auxReply(
+          {
+            type: "handoff.start",
+            commandId: randomUUID() as CommandId,
+            threadId: randomUUID() as ThreadId,
+            projectPath,
+            for: { threadId, turnId },
+            from,
+            to,
+          },
+          handoffPrompt(digest, from, to),
         );
-        if (Result.isFailure(sent)) return yield* without(sent.failure.message.replace(/\.$/, ""));
-        // ponytail: an interrupt of the waiting turn leaves the handoff's turn running to its end, unread; its route's maxCost
-        // bounds it. Upgrade: interrupt it too, if abandoned handoffs show up in the spend.
-        const reply = yield* Deferred.await(replied).pipe(Effect.timeoutOption(handoffTimeout));
-        if (reply._tag === "None") return yield* without("its turn took longer than 5 minutes");
-        if (!reply.value?.trim()) return yield* without("its turn ended without a summary");
-        const summary = handoffSummary(reply.value, files);
-        const [scan] = (yield* decide.decide({ state: summary, questions: [injectionQuestion] })).answers;
-        if (scan && flagged(scan))
-          yield* engine
-            .dispatch({
-              type: "injection.flag",
-              commandId: randomUUID() as CommandId,
-              threadId,
-              turnId,
-              source: "handoff",
-              text: summary,
-              answer: scan,
-            })
-            .pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record the injection flag on turn ${turnId}.`, cause)));
+        if ("error" in got) return yield* without(got.error);
+        const summary = handoffSummary(got.reply, files);
+        const scan = yield* scanHanded(threadId, turnId, "handoff", summary);
         yield* report(threadId, turnId, { type: "item", item: { kind: "handoff", from, to, summary } });
         return handoffBlock(summary, from, to, scan);
       }).pipe(
@@ -659,9 +630,100 @@ export const ReactorLive = Layer.effect(
             ? Effect.failCause(cause)
             : Effect.andThen(Effect.logWarning(`Could not hand thread ${threadId} off.`, cause), without("an internal error")),
         ),
-        Effect.ensuring(Effect.sync(() => handoffReplies.delete(auxThreadId))),
       );
     };
+
+    /**
+     * Runs Verdandi's own one-turn task `start` (a handoff's or a compression's hidden thread) with `prompt`, routed in
+     * its `aux.*` class like a review (spend caps, quota): its reply and turn once it completes, or why there's none.
+     */
+    const auxReply = (start: Extract<Command, { type: "handoff.start" | "compression.start" }>, prompt: string) => {
+      type AuxReply = { readonly error: string } | { readonly reply: string; readonly turnId: TurnId };
+      const failed = (error: string): AuxReply => ({ error });
+      const auxTurnId = randomUUID() as TurnId;
+      return Effect.gen(function* () {
+        // Registered before the turn is sent, so its completion can never come first.
+        const replied = yield* Deferred.make<string | undefined>();
+        auxReplies.set(start.threadId, replied);
+        const sent = yield* Effect.result(
+          Effect.andThen(
+            engine.dispatch(start),
+            engine.dispatch({
+              type: "turn.send",
+              commandId: randomUUID() as CommandId,
+              threadId: start.threadId,
+              turnId: auxTurnId,
+              text: prompt,
+              mode: "ask",
+            }),
+          ).pipe(Effect.catchTag("SqlError", Effect.die)),
+        );
+        if (Result.isFailure(sent)) return failed(sent.failure.message.replace(/\.$/, ""));
+        // ponytail: an interrupt of the waiting turn leaves the aux turn running to its end, unread; its route's maxCost
+        // bounds it. Upgrade: interrupt it too, if abandoned handoffs or compressions show up in the spend.
+        const reply = yield* Deferred.await(replied).pipe(Effect.timeoutOption(auxTimeout));
+        if (reply._tag === "None") return failed("its turn took longer than 5 minutes");
+        if (!reply.value?.trim()) return failed("its turn ended without a summary");
+        const done: AuxReply = { reply: reply.value, turnId: auxTurnId };
+        return done;
+      }).pipe(Effect.ensuring(Effect.sync(() => auxReplies.delete(start.threadId))));
+    };
+
+    /**
+     * Scans `text` Verdandi is about to hand turn `turnId`'s agent from `source`, recording a hit as `injection.flagged`
+     * (DESIGN §17): the scan's answer, for the fence's warning.
+     */
+    const scanHanded = (threadId: ThreadId, turnId: TurnId, source: "handoff" | "compression", text: string) =>
+      Effect.gen(function* () {
+        const [scan] = (yield* decide.decide({ state: text, questions: [injectionQuestion] })).answers;
+        if (scan && flagged(scan))
+          yield* engine
+            .dispatch({ type: "injection.flag", commandId: randomUUID() as CommandId, threadId, turnId, source, text, answer: scan })
+            .pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record the injection flag on turn ${turnId}.`, cause)));
+        return scan;
+      });
+
+    /**
+     * The native harness's `summarize` for turn `turnId` (DESIGN §16): background review first, when review.yaml turns it
+     * on, over the task's turns so far, so what's worth remembering is saved before the conversation is summarized; then
+     * the one turn of a hidden compression thread, an `aux.compress` task, writes the sections. Files touched comes from
+     * the checkpoints of the turns being summarized. Fails closed: a reply missing a section is refused.
+     */
+    const summarizeFor =
+      (
+        threadId: ThreadId,
+        turnId: TurnId,
+        taskId: TaskId | null,
+        projectPath: string,
+        cwd: string,
+      ): NonNullable<HarnessRunInput["summarize"]> =>
+      ({ digest, previous, turnIds }) =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            if (reviews.enabled && taskId) yield* askReview(threadId, turnId, taskId);
+            const got = yield* auxReply(
+              {
+                type: "compression.start",
+                commandId: randomUUID() as CommandId,
+                threadId: randomUUID() as ThreadId,
+                projectPath,
+                for: { threadId, turnId },
+              },
+              compressionPrompt(digest, previous),
+            );
+            if ("error" in got) return got;
+            const summary = compressionSummary(got.reply, yield* touchedFiles(cwd, threadId, turnIds));
+            if ("error" in summary) return summary;
+            const scan = yield* scanHanded(threadId, turnId, "compression", summary.sections);
+            const [spent] = yield* sql<{ usd: number }>`select total(cost_usd) as usd from usage_ledger where turn_id = ${got.turnId}`;
+            return { sections: summary.sections, block: compressionBlock(summary.sections, scan), costUsd: spent?.usd ?? 0 };
+          }).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.catchCause((cause) =>
+              Effect.as(Effect.logWarning(`Could not summarize turn ${turnId}'s session.`, cause), { error: "an internal error" }),
+            ),
+          ),
+        );
 
     const runTurn = (
       threadId: ThreadId,
@@ -799,6 +861,7 @@ export const ReactorLive = Layer.effect(
                   mcp: mcpFor(threadId, turnId, cwd),
                   screen: (text: string) => Effect.runPromise(screen("mcp", text, { threadId, turnId })),
                   ...(approvals.smart && { guard: guardFor(threadId, turnId) }),
+                  summarize: summarizeFor(threadId, turnId, thread.task_id, thread.path, cwd),
                 }),
             // The snapshot a new session starts with goes to its first turn only (DESIGN §14.2), and so does a handoff's summary.
             ...memoryFor(thread.memory_snapshot, turnId),
@@ -1068,12 +1131,12 @@ export const ReactorLive = Layer.effect(
         ).pipe(Effect.asVoid);
       }
       if (e.type === "turn.completed") {
-        // A handoff's turn, however it ended, lets the turn waiting for its summary go on.
-        const handoff = handoffReplies.get(e.threadId);
-        const replied = handoff
+        // A handoff's or compression's turn, however it ended, lets the turn waiting for its summary go on.
+        const aux = auxReplies.get(e.threadId);
+        const replied = aux
           ? Effect.andThen(
               e.status === "success" ? Effect.orElseSucceed(lastReply(e.turnId), () => undefined) : Effect.succeed(undefined),
-              (reply) => Deferred.succeed(handoff, reply),
+              (reply) => Deferred.succeed(aux, reply),
             )
           : Effect.void;
         const turn = latest.get(e.threadId);
