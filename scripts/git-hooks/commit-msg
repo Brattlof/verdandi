@@ -1,0 +1,2 @@
+#!/bin/sh
+exec bun scripts/git-hooks.ts commit-msg "$1"
