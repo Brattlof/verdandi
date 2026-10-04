@@ -7,6 +7,7 @@
     "packages/*"
   ],
   "scripts": {
+    "prepare": "bun scripts/git-hooks.ts install",
     "typecheck": "tsc -b",
     "lint": "biome check .",
     "test": "bun test",

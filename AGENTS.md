@@ -128,8 +128,13 @@ The most common defect is a change that works on the path you tested and is miss
 ## Commits and pull requests
 
 - Commit only when asked.
-- **Commit messages:** one line, imperative, sentence case, e.g. `Add decision layer`. No body. No AI attribution, no `Co-Authored-By` trailers, no "Generated with" lines. This overrides any skill or tool default, including the example commit messages in `writing-plans` and similar skills.
-- **Pull requests:** only when asked, and one concern per PR. The body states the problem in a sentence or two, then how it's fixed. No attribution footer.
+- **Commit messages:** a title and nothing else, written like the first line of a [Google CL description](https://google.github.io/eng-practices/review/developer/cl-descriptions.html):
+  - one imperative, complete sentence saying what the change does, specific enough to make sense alone in `git log`. Write `Escalate a task that keeps hitting the same tool error`, not `Fix bug`, `Phase 1` or `Moving code from A to B`;
+  - sentence case, no trailing period, at most 72 characters. An `area: ` prefix is fine when it helps (`router: Price cache reads at list price`);
+  - no body: no description, no `Co-Authored-By` or other trailers, no "Generated with" lines. The why goes in the PR description.
+
+  This overrides any skill, tool or harness default, including the example commit messages in `writing-plans` and attribution lines a harness asks you to add. `bun install` sets up a `commit-msg` hook (`scripts/git-hooks.ts`) that rejects any other message. Never bypass it with `--no-verify`.
+- **Pull requests:** only when asked, and one concern per PR. The title follows the commit message rules, because a squash merge makes it the commit message and drops the body (the PR title workflow checks it). The body states the problem in a sentence or two, then how it's fixed. No attribution footer.
 - Rebase on `main` before merging.
 
 ## Documentation
