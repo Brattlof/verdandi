@@ -42,8 +42,34 @@ export const SkillCuration = Schema.Struct({ state: SkillState, usedAt: Schema.S
 export type SkillCuration = typeof SkillCuration.Type;
 
 /**
+ * Where a hub skill comes from (DESIGN §14.4): `source`, a name from `sources` in the home's `skills.yaml`, the git
+ * `url` it named then, the skill's folder `path` in that repo, the `ref` the user asked for (a tag, a branch, `HEAD` or a
+ * SHA) and the full commit `sha` it resolved to, which an install is pinned to.
+ */
+export const HubPin = Schema.Struct({
+  source: Schema.String,
+  url: Schema.String,
+  path: Schema.String,
+  ref: Schema.String,
+  sha: Schema.String,
+});
+export type HubPin = typeof HubPin.Type;
+
+/**
+ * A file the user changed since it was installed, which an update leaves as it is: `before` is upstream's at the
+ * installed SHA (null when it had none) and `after` at the new one (null when it's gone), the change theirs to take or leave.
+ */
+export const HubKept = Schema.Struct({ path: Schema.String, before: Schema.NullOr(Schema.String), after: Schema.NullOr(Schema.String) });
+export type HubKept = typeof HubKept.Type;
+
+/** A scan's verdict on one file of a hub install: advice shown on the diff, never a refusal (DESIGN §14.4). */
+export const HubAdvice = Schema.Struct({ path: Schema.String, why: Schema.String });
+export type HubAdvice = typeof HubAdvice.Type;
+
+/**
  * One skill: its SKILL.md frontmatter's name and description, and its folder. `curation` only on skills Verdandi
- * created; `pinned` when the user pinned it, so no agent can change it and curation leaves it alone.
+ * created; `pinned` when the user pinned it, so no agent can change it and curation leaves it alone; `hub` when it was
+ * installed from a hub source, with the files changed on disk since (`edited`), which an update keeps.
  */
 export const SkillSummary = Schema.Struct({
   name: Schema.String,
@@ -51,6 +77,7 @@ export const SkillSummary = Schema.Struct({
   path: Schema.String,
   curation: Schema.optionalKey(SkillCuration),
   pinned: Schema.optionalKey(Schema.Boolean),
+  hub: Schema.optionalKey(Schema.Struct({ ...HubPin.fields, edited: Schema.Array(Schema.String) })),
 });
 export type SkillSummary = typeof SkillSummary.Type;
 

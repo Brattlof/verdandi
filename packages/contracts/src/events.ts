@@ -10,7 +10,7 @@ import { ProviderHealth } from "./provider-health.ts";
 import { Question, Resolution } from "./requests.ts";
 import { Effort, HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
 import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInputs, RouteInputsV1, UntrustedInput } from "./routing.ts";
-import { SkillAction, SkillChange, SkillState } from "./skills.ts";
+import { HubAdvice, HubKept, HubPin, SkillAction, SkillChange, SkillState } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 import { TaskRating } from "./task.ts";
 import { TrustPurpose } from "./trust.ts";
@@ -770,6 +770,56 @@ export const SkillStateChanged = Schema.Struct({
   by: Schema.Literals(["sweep", "user"]),
 });
 /**
+ * The user asked to install hub skill `skill` at `pin`, or to update it from SHA `from` (DESIGN §14.4), and verdandid
+ * fetched it: a pending request with no turn, on the Skills hub thread (`hubThread`), answered with `approval.respond`.
+ * `changes` are the files allowing it writes, each as it is in the profile's folder and as upstream has it. `kept` are
+ * files the user changed since install, which it leaves alone, with upstream's change to them. `digests` are upstream's
+ * files at `pin.sha` by SHA-256, recorded on install so a later update can tell an edit. `advice` is the scans' verdicts,
+ * shown on the diff: the user approves either way. Untrusted data.
+ */
+export const SkillInstallProposed = Schema.Struct({
+  type: Schema.Literal("skill.install.proposed"),
+  v: v1,
+  threadId: ThreadId,
+  requestId: Schema.String,
+  skill: Schema.String,
+  pin: HubPin,
+  from: Schema.optionalKey(Schema.String),
+  changes: Schema.Array(SkillChange),
+  kept: Schema.Array(HubKept),
+  digests: Schema.Record(Schema.String, Schema.String),
+  advice: Schema.Array(HubAdvice),
+});
+/**
+ * The user answered hub install request `requestId`, or Verdandi denied it (`reason`) because a newer proposal for the
+ * same skill replaced it. The `approval.resolved` of a request with no turn.
+ */
+export const SkillInstallResolved = Schema.Struct({
+  type: Schema.Literal("skill.install.resolved"),
+  v: v1,
+  threadId: ThreadId,
+  requestId: Schema.String,
+  resolution: Schema.Struct({ decision: Schema.Literals(["allow", "deny"]) }),
+  reason: Schema.optionalKey(Schema.String),
+});
+/**
+ * The reactor wrote the allowed hub install `requestId`: skill `skill` is installed at `pin`, its upstream files'
+ * digests `digests`. With `error`, nothing was written (a file changed since it was proposed, a guard refused a path),
+ * and the skill stays as it was. The skill's provenance, with its `skill.install.proposed`.
+ */
+export const SkillInstalled = Schema.Struct({
+  type: Schema.Literal("skill.installed"),
+  v: v1,
+  threadId: ThreadId,
+  requestId: Schema.String,
+  skill: Schema.String,
+  pin: HubPin,
+  digests: Schema.Record(Schema.String, Schema.String),
+  error: Schema.optionalKey(Schema.String),
+});
+/** The user uninstalled hub skill `skill`: the reactor moves its folder to the archive, never deleting it. On `profileStream`. */
+export const SkillUninstalled = Schema.Struct({ type: Schema.Literal("skill.uninstalled"), v: v1, threadId: ThreadId, skill: Schema.String });
+/**
  * verdandid would run the project's own `commands` (its verifiers or worktree setup, from `trustFiles`), which the user hasn't trusted for the
  * project, and asks first on running turn `turnId`: a pending request. Allowing it records `commands.trusted`; denying it
  * runs nothing. `hash` names the exact list, so a changed list asks again.
@@ -877,6 +927,10 @@ export const Event = Schema.Union([
   SkillPinned,
   SkillUnpinned,
   SkillStateChanged,
+  SkillInstallProposed,
+  SkillInstallResolved,
+  SkillInstalled,
+  SkillUninstalled,
   CommandsTrustRequested,
   CommandsTrusted,
   CommandsTrustRevoked,
@@ -994,6 +1048,10 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "skill.pinned@1": SkillPinned,
   "skill.unpinned@1": SkillUnpinned,
   "skill.state.changed@1": SkillStateChanged,
+  "skill.install.proposed@1": SkillInstallProposed,
+  "skill.install.resolved@1": SkillInstallResolved,
+  "skill.installed@1": SkillInstalled,
+  "skill.uninstalled@1": SkillUninstalled,
   "commands.trust.requested@1": CommandsTrustRequested,
   "commands.trusted@1": CommandsTrusted,
   "commands.trust.revoked@1": CommandsTrustRevoked,

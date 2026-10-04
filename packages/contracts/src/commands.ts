@@ -10,7 +10,7 @@ import { MemoryScope } from "./memory.ts";
 import { Resolution } from "./requests.ts";
 import { HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
 import { BudgetMode } from "./routing.ts";
-import { SkillAction, SkillChange } from "./skills.ts";
+import { HubKept, HubPin, SkillAction, SkillChange } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 import { TaskRating } from "./task.ts";
 import { TrustPurpose } from "./trust.ts";
@@ -363,6 +363,40 @@ export const SkillRevert = Schema.Struct({
 export const SkillPin = Schema.Struct({ type: Schema.Literal("skill.pin"), commandId: CommandId, skill: Schema.String });
 export const SkillUnpin = Schema.Struct({ type: Schema.Literal("skill.unpin"), commandId: CommandId, skill: Schema.String });
 
+/**
+ * Internal: verdandid fetched hub skill `skill` at `pin` for the user's install or update (the `SkillInstall` RPC) and
+ * proposes what it would write, as `skill.install.proposed` on the Skills hub thread `threadId`, which it creates in the
+ * workspace `projectPath` first if it has to. The decider checks each change and scans it. Clients cannot send it.
+ */
+export const SkillInstallPropose = Schema.Struct({
+  type: Schema.Literal("skill.install.propose"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  projectPath: Schema.String,
+  skill: Schema.String,
+  pin: HubPin,
+  from: Schema.optionalKey(Schema.String),
+  changes: Schema.Array(SkillChange),
+  kept: Schema.Array(HubKept),
+  digests: Schema.Record(Schema.String, Schema.String),
+});
+/** Internal: the reactor reporting that it wrote the allowed hub install `requestId`, or why it couldn't. */
+export const SkillInstallReport = Schema.Struct({
+  type: Schema.Literal("skill.install.report"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: Schema.String,
+  skill: Schema.String,
+  pin: HubPin,
+  digests: Schema.Record(Schema.String, Schema.String),
+  error: Schema.optionalKey(Schema.String),
+});
+/**
+ * The user uninstalls hub skill `skill`, from the Skills panel or `verdandi skills uninstall`: its folder moves to the
+ * archive. A profile matter, recorded on `profileStream`.
+ */
+export const SkillUninstall = Schema.Struct({ type: Schema.Literal("skill.uninstall"), commandId: CommandId, skill: Schema.String });
+
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
   type: Schema.Literal("harness.report"),
@@ -537,6 +571,7 @@ export const ClientCommand = Schema.Union([
   SkillRevert,
   SkillPin,
   SkillUnpin,
+  SkillUninstall,
   ApprovalRespond,
   CommandsTrustRevoke,
   DeviceRevoke,
@@ -572,6 +607,7 @@ export const Command = Schema.Union([
   SkillRevert,
   SkillPin,
   SkillUnpin,
+  SkillUninstall,
   ApprovalRespond,
   CommandsTrustRevoke,
   HarnessReport,
@@ -591,6 +627,8 @@ export const Command = Schema.Union([
   SkillPropose,
   SkillReport,
   SkillCurate,
+  SkillInstallPropose,
+  SkillInstallReport,
   TaskReview,
   ReviewStart,
   ReviewPropose,
