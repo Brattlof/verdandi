@@ -39,6 +39,14 @@ const example = `endpoints:
     models:
       qwen3:8b: { tier: S, context: 32768 }`;
 
+/** Whether a key sent to `url` would cross the network in the clear: plain http to a host other than this machine. */
+const cleartext = (url: URL) =>
+  url.protocol === "http:" && !(url.hostname === "localhost" || url.hostname === "[::1]" || /^127(\.\d+){3}$/.test(url.hostname));
+
+/** Why an endpoint that sends a key can't be at `at`, and the fix. */
+const keyOverHttp = (at: string, url: string) =>
+  `${at}.url: ${url} would send the endpoint's API key unencrypted. Use its https:// URL, or reach it on this machine (localhost, 127.0.0.1 or [::1]), e.g. through an SSH tunnel.`;
+
 const failIn = (file: string, message: string): never => {
   throw new Error(`${file}: ${message}
 Fix the file, or delete it. It looks like this:
@@ -70,6 +78,8 @@ const readEndpoints = (home: string) => {
     } catch {}
     if (!url || (url.protocol !== "http:" && url.protocol !== "https:"))
       fail(`${at}.url: ${endpoint.url} isn't an http(s) URL, e.g. http://127.0.0.1:11434/v1.`);
+    const insecure = url !== undefined && cleartext(url);
+    if (insecure && endpoint.access === "metered") fail(keyOverHttp(at, endpoint.url));
     if (Object.keys(endpoint.models).length === 0) fail(`${at}.models: list at least one model the endpoint serves.`);
     const models = Object.entries(endpoint.models).map(([model, m]): CatalogEntry => {
       const where = `${at}.models.${model}`;
@@ -96,7 +106,7 @@ const readEndpoints = (home: string) => {
         },
       };
     });
-    return { id, url: endpoint.url, access: endpoint.access, models };
+    return { id, url: endpoint.url, access: endpoint.access, insecure, models };
   });
 };
 
@@ -109,7 +119,7 @@ export const endpointCatalog = (home: string) => readEndpoints(home).flatMap((e)
 /**
  * The Chat Completions endpoints in `providers.yaml`, read when verdandid starts (ADR 0035). A broken file throws,
  * naming the file and key. Keys come from `VERDANDI_<NAME>_API_KEY` or the keychain; a metered endpoint without one
- * stays off, and `off` says why.
+ * stays off, and `off` says why. One that would send a key over plain http to another machine throws too.
  */
 export const loadEndpoints = async (
   home: string,
@@ -118,8 +128,10 @@ export const loadEndpoints = async (
 ): Promise<{ readonly endpoints: readonly Endpoint[]; readonly off: readonly string[] }> => {
   const endpoints: Endpoint[] = [];
   const off: string[] = [];
-  for (const { id, url, access, models } of readEndpoints(home)) {
+  for (const { id, url, access, insecure, models } of readEndpoints(home)) {
     const found = await findEndpointKey(id, env, secrets);
+    // A keyless local server may use plain http; one a key was found for may not, even on the LAN.
+    if (found.key !== undefined && insecure) failIn(providersFile(home), keyOverHttp(`endpoints.${id}`, url));
     if (found.key === undefined && access === "metered") off.push(`${id}: ${found.reason}`);
     else endpoints.push({ id, url, key: found.key, models });
   }

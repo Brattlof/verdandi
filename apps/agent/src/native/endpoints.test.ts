@@ -158,3 +158,29 @@ test("verdandid runs a native turn on a local endpoint and records its usage as 
     { access_mode: "local", cost_usd: 0 },
   ]);
 });
+
+test("an endpoint that would send a key must be on https, unless it's on this machine; a keyless one may use plain http", async () => {
+  const lan = `endpoints:
+  lan:
+    url: http://192.168.1.20:8000/v1
+    access: local
+    models:
+      qwen3:8b: { tier: S, context: 32768 }
+`;
+  const load = (text: string, env: Record<string, string> = {}) =>
+    loadEndpoints(homeWith(text), env, emptyKeychain).then(
+      (r) => r.endpoints.map((e) => e.id).join(),
+      (e: Error) => e.message,
+    );
+  const metered = await load(providers.replace("https://openrouter.ai", "http://openrouter.ai"));
+  expect(metered).toContain("providers.yaml");
+  expect(metered).toContain("endpoints.openrouter.url");
+  expect(metered).toContain("https://");
+  // A local endpoint with a key found for it would send the key in the clear.
+  const keyed = await load(lan, { VERDANDI_LAN_API_KEY: "lan-key" });
+  expect(keyed).toContain("endpoints.lan.url");
+  expect(keyed).not.toContain("lan-key");
+  expect(await load(lan)).toBe("lan");
+  expect(await load(lan.replace("192.168.1.20", "localhost"), { VERDANDI_LAN_API_KEY: "lan-key" })).toBe("lan");
+  expect(await load(lan.replace("192.168.1.20", "[::1]"), { VERDANDI_LAN_API_KEY: "lan-key" })).toBe("lan");
+});
