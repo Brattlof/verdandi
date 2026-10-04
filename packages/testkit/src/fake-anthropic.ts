@@ -1,6 +1,10 @@
-/** One content block of a scripted reply. */
+/**
+ * One content block of a scripted reply. `server` sends `block` whole, as a server tool's block arrives (e.g.
+ * `server_tool_use` or `tool_search_tool_result`).
+ */
 export type FakeBlock =
   | { readonly type: "text"; readonly text: string }
+  | { readonly type: "server"; readonly block: { readonly type: string } & Record<string, unknown> }
   | { readonly type: "thinking"; readonly thinking: string; readonly signature: string }
   | { readonly type: "tool_use"; readonly id: string; readonly name: string; readonly input: Record<string, unknown> };
 
@@ -59,6 +63,8 @@ const events = (reply: Extract<FakeReply, { blocks: unknown }>, model: string) =
       });
       delta({ type: "thinking_delta", thinking: b.thinking });
       delta({ type: "signature_delta", signature: b.signature });
+    } else if (b.type === "server") {
+      out.push({ type: "content_block_start", index, content_block: b.block } as { type: string });
     } else {
       out.push({ type: "content_block_start", index, content_block: { type: "tool_use", id: b.id, name: b.name, input: {} } } as {
         type: string;

@@ -5,6 +5,7 @@ import { type Context, contextBlock, type IndexedSkill, skillsIndex } from "./co
 import { delegateDefinition } from "./delegate.ts";
 import { fileTools } from "./file-tools.ts";
 import { terminalDefinition, terminalTool } from "./terminal.ts";
+import { bridgeTools, defers, serverSearch, type ToolSearch } from "./tool-search.ts";
 import type { Prefix } from "./transcript.ts";
 
 /** The harness's own tool: plan mode's way to ask the user to approve a plan (`plan.requested`). */
@@ -49,7 +50,9 @@ const proposePlan: Anthropic.Tool = {
  * the skills index and the project's context file, the same for every worktree of the project, cached up to there;
  * then the session's folder and the `workspace.yaml` folders, cached up to the end. Verdandi's tools come in their
  * fixed order, then the file tools, the terminal, `delegate_task` when the session `delegates`, and the plan tool, then
- * the MCP servers' tools (`mcp`), whose names and descriptions are untrusted and never go into the system prompt.
+ * the MCP servers' tools (`mcp`), whose names and descriptions are untrusted and never go into the system prompt. Once
+ * they're many (`defers`), they're deferred: with `server` search sent with `defer_loading` after the API's search
+ * tool; with the `bridge`, kept in `deferred`, behind its three tools.
  */
 export const sessionPrefix = (
   cwd: string,
@@ -57,7 +60,10 @@ export const sessionPrefix = (
   folders: readonly string[],
   read: { readonly context?: Context | undefined; readonly skills?: readonly IndexedSkill[]; readonly delegates?: boolean } = {},
   mcp: readonly Anthropic.Tool[] = [],
+  search: ToolSearch = "server",
 ): Prefix => {
+  const deferring = defers(mcp);
+  const bridge = deferring && search === "bridge";
   const shared = [`${instructions}${skillsIndex(read.skills ?? [])}`, ...(read.context ? [contextBlock(read.context)] : [])];
   return {
     system: [...shared, folderBlock(cwd, folders)].map((text, i) => ({
@@ -71,8 +77,9 @@ export const sessionPrefix = (
       terminalDefinition,
       ...(read.delegates ? [delegateDefinition] : []),
       proposePlan,
-      ...mcp,
+      ...(!deferring ? mcp : bridge ? bridgeTools(mcp) : [...mcp.map((t) => ({ ...t, defer_loading: true })), serverSearch]),
     ],
+    ...(bridge && { deferred: [...mcp] }),
   };
 };
 
