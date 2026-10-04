@@ -62,3 +62,7 @@ bun run verdandi doctor --home ./.verdandi-dev   # check your setup
 ## The name
 
 **Verðandi** (ᚹᛖᚱᚦᚨᚾᛞᛁ) is the Norn of the present, one of the three who weave the threads of fate at the roots of Yggdrasil. Verdandi decides, right now, how much model the next task gets. Not too big, not too small.
+
+## License
+
+[Apache-2.0](LICENSE).
