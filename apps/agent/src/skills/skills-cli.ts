@@ -138,7 +138,7 @@ const hubAction = (client: Client, sub: "install" | "update", words: readonly st
     const shown = `Verdandi would ${installTitle(request)} in your profile's skills folder:\n${installText(request)}`;
     if (!confirm) return `${shown}${waits}\n`;
     process.stdout.write(shown);
-    if (!(yield* confirm(request))) return `Not installed. ${waits}\n`;
+    if (!(yield* confirm(request))) return `Nothing written yet. ${waits}\n`;
     const refused = yield* client
       .CommandDispatch({
         type: "approval.respond",
