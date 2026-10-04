@@ -94,6 +94,21 @@ describe("Claude Code adapter", () => {
     }
   });
 
+  test("workspace.yaml's folders join a session's additional directories, except a confined thread's", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery();
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query, additionalDirectories: ["/att"], folders: ["/downloads"] });
+      await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "hi", U1))));
+      await Effect.runPromise(
+        Stream.runCollect(adapter.run({ ...input(home, "hi", U2), threadId: "thread-2" as ThreadId, confined: true })),
+      );
+      expect(spawns.map((s) => s.options.additionalDirectories)).toEqual([["/att", "/downloads"], ["/att"]]);
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
   test("Claude Code runs with the environment it's given, not this process's", async () => {
     const home = makeTempHome();
     try {

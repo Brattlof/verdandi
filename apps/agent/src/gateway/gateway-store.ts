@@ -1,7 +1,18 @@
-import type { Command, GatewaySender, GatewayView, PendingPairing, Platform } from "@verdandi/contracts";
+import {
+  type ChannelBinding,
+  type Command,
+  type GatewaySender,
+  type GatewayView,
+  type PendingPairing,
+  type Platform,
+  profileStream,
+  type ThreadId,
+  type TurnId,
+} from "@verdandi/contracts";
 import { Effect } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import type { AccessState } from "./access.ts";
+import type { DeliveryState } from "./outbox.ts";
 
 /** Reads of the gateway's read models (`gateway_pairings`, `gateway_senders`, `gateway_owners`). */
 
@@ -75,5 +86,39 @@ export const loadGatewayDeciderState = (command: Command, now: Date) =>
       const owner = yield* sql`select 1 from gateway_owners where platform = ${command.platform} and sender_id = ${command.senderId}`;
       return { gatewaySender: { paired: paired.length > 0, owner: owner.length > 0 } };
     }
-    return {};
+    if (!("threadId" in command) || command.threadId === profileStream) return {};
+    const { threadId } = command;
+    const [bound] = yield* sql<{ binding: string }>`select binding from channel_bindings where thread_id = ${threadId}`;
+    const binding = bound && (JSON.parse(bound.binding) as ChannelBinding);
+    // The running turn's last reply, which its end sends to the chat.
+    const ending =
+      binding &&
+      ((command.type === "harness.report" && command.event.type === "turn.finished") ||
+        command.type === "turn.interrupt" ||
+        command.type === "turn.recover");
+    const reply = ending ? yield* loadLastReply(command.turnId) : undefined;
+    const channel = binding && { channel: { threadId, binding, ...(reply !== undefined && { reply }) } };
+    if (command.type === "channel.bind") {
+      const [key] = yield* sql<{
+        threadId: ThreadId;
+      }>`select thread_id as threadId from channel_bindings where key = ${command.binding.key}`;
+      return { ...channel, binding: { keyThread: key?.threadId ?? null, threadKey: binding?.key ?? null } };
+    }
+    if (command.type === "delivery.attempt" || command.type === "delivery.report" || command.type === "delivery.abandon") {
+      const [delivery] = yield* sql<{ state: DeliveryState; attempts: number; turnId: TurnId }>`
+        select state, attempts, turn_id as turnId from deliveries where id = ${command.deliveryId}`;
+      return { ...channel, delivery: delivery ?? null };
+    }
+    return { ...channel };
+  });
+
+/** The last thing the main agent said in `turnId`, if it said anything. */
+const loadLastReply = (turnId: TurnId) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ payload: string }>`
+      select payload from items where turn_id = ${turnId} and json_extract(payload, '$.kind') = 'assistant.message'
+        and json_extract(payload, '$.parentToolUseId') is null
+      order by idx desc limit 1`;
+    return rows[0] && (JSON.parse(rows[0].payload) as { text: string }).text;
   });

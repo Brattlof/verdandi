@@ -561,6 +561,29 @@ test("a file tool asks before going outside the thread's folder, refuses Verdand
   expect(fake.requests).toHaveLength(4);
 });
 
+test("a confined thread's session gets none of workspace.yaml's folders: writing there asks, and its prompt doesn't name them", async () => {
+  const home = makeTempHome();
+  const extra = makeTempHome();
+  homes.push(home, extra);
+  const fake = makeFakeAnthropic([
+    { blocks: [{ type: "tool_use", id: "toolu_1", name: "write_file", input: { path: `${extra}/a.txt`, content: "x" } }] },
+    { blocks: [{ type: "text", text: "Asked." }] },
+  ]);
+  const base = options(home, fake.fetch);
+  const adapter = makeNativeAdapter({ ...base, reach: { ...base.reach, folders: [extra] } });
+  const cwd = `${home}/workspace`;
+  mkdirSync(cwd);
+  const asked: string[] = [];
+  await run(adapter, input("t1", "Write there", { cwd, confined: true }), (e) => {
+    if (e.type !== "approval.requested") return;
+    asked.push(e.toolName);
+    void Effect.runPromise(adapter.respond(threadId, e.requestId, { decision: "deny" }));
+  });
+  expect(asked).toEqual(["write_file"]);
+  expect(existsSync(`${extra}/a.txt`)).toBe(false);
+  expect(JSON.stringify(fake.requests[0])).not.toContain(JSON.stringify(extra).slice(1, -1));
+});
+
 test("a session from before the file tools keeps its tool list: no file tools, and attached files by name only", async () => {
   const { home, sessionsDir, adapter } = setup([
     { blocks: [{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.txt" } }] },

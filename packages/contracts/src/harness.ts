@@ -110,6 +110,13 @@ export type HarnessRunInput = {
    */
   readonly attachments?: readonly (AttachmentRef & { readonly path: string })[];
   /**
+   * The thread is bound to a chat where someone other than the platform's owner writes (DESIGN §23, question 10): its
+   * session gets none of `workspace.yaml`'s folders, so it asks before working anywhere outside its own folder (Claude
+   * Code: left out of `additionalDirectories`; native: out of its file tools' reach and its prompt). Fixed for the
+   * thread's life, like the session it shapes.
+   */
+  readonly confined?: true;
+  /**
    * The turn's interaction mode, applied before its prompt so the cache survives. `ask` and `plan`
    * must not change the project; a proposed plan becomes a `plan.requested`, and allowing it lets the
    * turn go on building. Every harness today supports all three (Claude Code, native, fake); one that can't

@@ -40,6 +40,17 @@ test("a malformed key is refused and nothing is stored; a set variable that shad
   expect(lines.at(-1)).toContain("VERDANDI_ANTHROPIC_API_KEY is set too");
 });
 
+test("`verdandi key set telegram` stores the gateway's bot token, refusing one that isn't a bot token", async () => {
+  const { store, entries } = memoryStore();
+  const token = `123456:${"a".repeat(35)}`;
+  const lines: string[] = [];
+  const io = { secrets: store, readKey: async () => token, out: (l: string) => void lines.push(l), env: {} };
+  await runKey(["set", "telegram"], io);
+  expect(entries.get("verdandi/telegram-bot-token")).toBe(token);
+  await expect(runKey(["set", "telegram"], { ...io, readKey: async () => key })).rejects.toThrow("isn't a Telegram bot token");
+  expect(lines.join("\n")).not.toContain(token);
+});
+
 test("the key is read up to Enter or the end of piped input, with Backspace applied", async () => {
   const prompts: string[] = [];
   expect(await readHidden(Readable.from(["sk-ant-ab", "x\u007fc\rleftover"]), (t) => void prompts.push(t))).toBe("sk-ant-abc");

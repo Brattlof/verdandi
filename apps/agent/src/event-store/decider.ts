@@ -43,6 +43,7 @@ import {
 import { flagged, guardQuestion, injectionQuestion } from "@verdandi/decisions";
 import { Result } from "effect";
 import { worktreeBranch } from "../checkpoints/refs.ts";
+import { type ChannelState, type DeliveryState, withDeliveries } from "../gateway/outbox.ts";
 import { memorySnapshot, overCap, sameAs, scanMemory } from "../memory/memory.ts";
 import {
   auxClassification,
@@ -173,6 +174,12 @@ export type DeciderState = {
   } | null;
   /** Whether the sender a `sender.revoke` names is paired, and whether they own the platform. */
   readonly gatewaySender?: { readonly paired: boolean; readonly owner: boolean };
+  /** The chat the command's thread replies to, if any, and its running turn's last reply: what the outbox sends. */
+  readonly channel?: ChannelState;
+  /** For `channel.bind`: the thread the key is bound to, and the key the thread is, null for neither. */
+  readonly binding?: { readonly keyThread: ThreadId | null; readonly threadKey: string | null };
+  /** The delivery a `delivery.*` command names, null when there's none. */
+  readonly delivery?: { readonly state: DeliveryState; readonly attempts: number; readonly turnId: TurnId } | null;
   /** Whether the user pinned the skill a proposal, `skill.curate`, `skill.pin` or `skill.unpin` names, loaded for those commands. */
   readonly pinned?: boolean;
   /**
@@ -1009,6 +1016,42 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
   },
   "gateway.owner.set": (_, c) =>
     accept({ type: "gateway.owner.changed", v: 1, threadId: profileStream, platform: c.platform, senderId: c.senderId }),
+  // A chat goes to one thread, and a thread replies to one chat (DESIGN §15).
+  "channel.bind": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    const { keyThread = null, threadKey = null } = state.binding ?? {};
+    if (keyThread === c.threadId && threadKey === c.binding.key) return accept();
+    if (keyThread !== null) return reject("ChannelBound", `That chat already goes to thread ${keyThread}. Unbind it there first.`);
+    if (threadKey !== null) return reject("ChannelBound", `Thread ${c.threadId} already replies to another chat. Unbind it first.`);
+    return accept({ type: "channel.bound", v: 1, threadId: c.threadId, binding: c.binding, confined: c.confined });
+  },
+  "channel.unbind": (state, c) =>
+    state.channel
+      ? accept({ type: "channel.unbound", v: 1, threadId: c.threadId, key: state.channel.binding.key })
+      : reject("ChannelNotBound", `Thread ${c.threadId} isn't bound to a chat, so there's nothing to unbind.`),
+  // The outbox's steps. A delivery sent or abandoned takes no more, so a retry that lost a race does nothing.
+  "delivery.attempt": (state, c) => {
+    const d = state.delivery;
+    if (!d || d.state === "sent" || d.state === "abandoned") return accept();
+    return accept({
+      type: "delivery.attempted",
+      v: 1,
+      threadId: c.threadId,
+      deliveryId: c.deliveryId,
+      attempt: d.attempts + 1,
+      duplicate: d.state === "attempted",
+    });
+  },
+  "delivery.report": (state, c) => {
+    if (state.delivery?.state !== "attempted") return accept();
+    const { type: _, commandId: __, ...report } = c;
+    return accept({ ...report, type: "delivery.reported", v: 1 });
+  },
+  "delivery.abandon": (state, c) => {
+    const d = state.delivery;
+    if (!d || d.state === "sent" || d.state === "abandoned") return accept();
+    return accept({ type: "delivery.abandoned", v: 1, threadId: c.threadId, deliveryId: c.deliveryId, turnId: d.turnId, reason: c.reason });
+  },
   "device.revoke": (state, c) =>
     !state.device
       ? reject("DeviceNotFound", `No device ${c.deviceId} is paired. verdandi devices list shows them.`)
@@ -1449,4 +1492,4 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
 
 /** Pure: turns a command into the events it causes, or rejects it. */
 export const decide = (state: DeciderState, command: Command): Decision =>
-  (handlers[command.type] as Handler<Command["type"]>)(state, command);
+  Result.map((handlers[command.type] as Handler<Command["type"]>)(state, command), (events) => withDeliveries(state.channel, events));

@@ -14,7 +14,7 @@ import {
   TurnStatus,
   UserInputRequested,
 } from "./events.ts";
-import { GatewayUnavailable, GatewayView, PendingPairing } from "./gateway.ts";
+import { ChannelBinding, GatewayUnavailable, GatewayView, PendingPairing } from "./gateway.ts";
 import { GcReport, GcUnavailable } from "./gc.ts";
 import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { AccessMode, Item, Quota, Usage } from "./items.ts";
@@ -70,6 +70,8 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "DeviceNotFound",
     "PairingNotFound",
     "SenderNotFound",
+    "ChannelBound",
+    "ChannelNotBound",
   ]),
   message: Schema.String,
 }) {}
@@ -182,6 +184,8 @@ export const ThreadView = Schema.Struct({
       outside: Schema.optionalKey(Schema.Array(Schema.String)),
     }),
   ),
+  /** The chat the thread replies to (DESIGN §15); absent when none. `channel.unbind` undoes it. */
+  binding: Schema.optionalKey(ChannelBinding),
   /** The git worktree the thread runs in; null when it runs in the project folder itself. */
   worktree: Schema.NullOr(WorktreeView),
   busy: Schema.Boolean,

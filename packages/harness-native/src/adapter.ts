@@ -375,7 +375,8 @@ export const makeNativeAdapter = (options: {
       const prefix = sessionPrefix(
         input.cwd,
         input.tools ?? [],
-        options.reach.folders,
+        // A confined thread (DESIGN §23, question 10) gets none of them.
+        input.confined ? [] : options.reach.folders,
         { context, skills, delegates },
         mcp?.definitions,
         options.toolSearch,
@@ -567,7 +568,7 @@ export const makeNativeAdapter = (options: {
       // ponytail: other tools run one at a time; upgrade to running the ones that are safe together in parallel (DESIGN §9.4) once there are slow ones.
       const results: Anthropic.ToolResultBlockParam[] = [];
       const local = {
-        reach,
+        reach: input.confined ? { ...reach, folders: [] } : reach,
         terminal: options.terminal,
         signal,
         delegate: (use: Anthropic.ToolUseBlock) => child(use, session, input, turn, signal),

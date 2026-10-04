@@ -20,6 +20,7 @@ import { type Connection, createStore, useStore, uuid } from "../client.ts";
 import { TurnAttachments } from "../composer/attachments.tsx";
 import { Composer, Requests } from "../composer/composer.tsx";
 import { SidePanel, TextDiff } from "../diffs/diff.tsx";
+import { BindingBar } from "../gateway/gateway.tsx";
 import { RouteMarkers } from "../routing/route.tsx";
 import { applyPanel, applyThreadFeed, closedPanel, type LiveThread, type LiveTurn } from "../state.ts";
 import { Longship } from "../ui/art.tsx";
@@ -157,6 +158,7 @@ export const ThreadPane = ({
           </span>
         </header>
         {thread.worktree && <WorktreeBar connection={connection} threadId={threadId} worktree={thread.worktree} busy={thread.busy} />}
+        {thread.binding && <BindingBar connection={connection} threadId={threadId} binding={thread.binding} />}
         {(thread.archived || archiveError) && (
           <p role="status" className={`border-b border-line bg-panel px-4 py-1.5 text-xs ${archiveError ? "text-error" : "text-muted"}`}>
             {archiveError ?? "This thread is archived: it's hidden from the thread list and takes no turns until you unarchive it."}

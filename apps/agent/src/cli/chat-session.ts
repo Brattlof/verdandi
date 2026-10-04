@@ -26,7 +26,7 @@ import {
 } from "@verdandi/contracts";
 import { Context, Effect, type ManagedRuntime, Stream } from "effect";
 import { pairingLine } from "../devices/devices-cli.ts";
-import { senderPairingLine } from "../gateway/gateway-cli.ts";
+import { bindingLine, senderPairingLine } from "../gateway/gateway-cli.ts";
 import { workspaceDir } from "../home/workspace.ts";
 import type { connect } from "../rpc/client.ts";
 import { skillsAction } from "../skills/skills-cli.ts";
@@ -455,6 +455,7 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
   }
   await showSpendCaps(argv.includes("--raise-cap"));
   await showSmartApprovals();
+  if (thread.binding) io.write(`${bindingLine(thread.binding)}; /unbind stops that.\n`);
   if (running) io.write("A turn is running; lines you type steer it.\n");
   else prompt();
   showRequest();
@@ -532,6 +533,10 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
     },
     revert,
     "undo-revert": () => dispatch({ type: "thread.revert.undo", commandId: uuid<CommandId>(), threadId }),
+    unbind: async () => {
+      if (await dispatch({ type: "channel.unbind", commandId: uuid<CommandId>(), threadId }))
+        io.write("[unbound: this thread no longer replies to its chat, and the chat's next message starts a new thread]\n");
+    },
     smart: async (args) => {
       const on = args[0] === "on" ? true : args[0] === "off" ? false : undefined;
       if (on === undefined) io.write("[usage: /smart on|off]\n");

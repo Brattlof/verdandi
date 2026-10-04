@@ -76,6 +76,22 @@ export const slashCommands = {
     dispatches: [],
     whileBusy: "run",
   },
+  new: {
+    args: [],
+    help: "starts a new conversation here; the old thread stays in Verdandi",
+    surfaces: ["gateway"],
+    ownerOnly: false,
+    dispatches: ["channel.unbind"],
+    whileBusy: "run",
+  },
+  unbind: {
+    args: [],
+    help: "stops this thread replying to the chat it's bound to; the chat's next message starts a new thread",
+    surfaces: ["chat"],
+    ownerOnly: true,
+    dispatches: ["channel.unbind"],
+    whileBusy: "run",
+  },
   approve: {
     args: [{ name: "request" }],
     help: "allows what the agent asked: a request's Approve button",

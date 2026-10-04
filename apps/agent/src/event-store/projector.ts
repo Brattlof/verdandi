@@ -1,6 +1,7 @@
 import type {
   AttachmentRef,
   BudgetMode,
+  ChannelBinding,
   Event,
   Item,
   MemoryEntry,
@@ -375,6 +376,32 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "pairing.denied": (e) => withSql((sql) => sql`update gateway_pairings set answer = 'denied' where request_id = ${e.requestId}`),
   "sender.revoked": (e, at) =>
     withSql((sql) => sql`update gateway_senders set revoked_at = ${at} where platform = ${e.platform} and sender_id = ${e.senderId}`),
+  "channel.bound": (e, at) =>
+    withSql((sql) =>
+      Effect.andThen(
+        sql`insert into channel_bindings (key, thread_id, binding, bound_at) values (${e.binding.key}, ${e.threadId}, ${JSON.stringify(e.binding)}, ${at})`,
+        // Once someone other than the owner can write in it, the thread stays confined (DESIGN §23, question 10).
+        e.confined ? Effect.asVoid(sql`update threads set confined = 1 where id = ${e.threadId}`) : Effect.void,
+      ),
+    ),
+  "channel.unbound": (e) => withSql((sql) => sql`delete from channel_bindings where thread_id = ${e.threadId}`),
+  "delivery.requested": (e, at) =>
+    withSql(
+      (sql) => sql`insert into deliveries (id, thread_id, turn_id, binding, text, buttons, requested_at, state)
+        values (${e.deliveryId}, ${e.threadId}, ${e.turnId}, ${JSON.stringify(e.binding)}, ${e.text}, ${JSON.stringify(e.buttons)}, ${at}, 'requested')`,
+    ),
+  "delivery.attempted": (e) =>
+    withSql((sql) => sql`update deliveries set attempts = ${e.attempt}, state = 'attempted' where id = ${e.deliveryId}`),
+  "delivery.reported": (e) =>
+    withSql(
+      (sql) => sql`update deliveries set state = ${e.outcome}, message_id = ${e.messageId ?? null}, error = ${e.error ?? null}
+        where id = ${e.deliveryId}`,
+    ),
+  "delivery.abandoned": (e) =>
+    Effect.andThen(
+      withSql((sql) => sql`update deliveries set state = 'abandoned', error = ${e.reason} where id = ${e.deliveryId}`),
+      addItem(e.turnId, { kind: "notice", text: `Verdandi couldn't deliver this to the chat it's bound to: ${e.reason}` }),
+    ),
   "gateway.owner.changed": (e) =>
     withSql((sql) =>
       e.senderId === null
@@ -688,10 +715,11 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         reason: string | null;
         worktree: string | null;
         revert: string | null;
+        binding: string | null;
       }>`
         select p.path, t.route, t.session_id, t.running_turn_id, t.pinned, t.archived_at is not null as archived, t.budget_mode, t.worktree,
           t.revert,
-          t.task_id, d.source, d.reason
+          t.task_id, d.source, d.reason, (select b.binding from channel_bindings b where b.thread_id = t.id) as binding
         from threads t join projects p on p.id = t.project_id left join route_decisions d on d.task_id = t.task_id
         where t.id = ${threadId}`;
       if (!thread) return null;
@@ -749,6 +777,7 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         tasks: yield* loadTasks(sql, threadId),
         sessionId: thread.session_id,
         worktree: thread.worktree === null ? null : (JSON.parse(thread.worktree) as WorktreeView),
+        ...(thread.binding !== null && { binding: JSON.parse(thread.binding) as ChannelBinding }),
         revert: revertView(thread.revert),
         busy: thread.running_turn_id !== null,
         turns: turns.map(
