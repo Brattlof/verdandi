@@ -1,4 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Command, CommandId, JobId, JobSpec, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, makeTempRepo, removeTempHome } from "@verdandi/testkit";
 import { Deferred, Effect, Layer, ManagedRuntime } from "effect";
@@ -49,9 +51,32 @@ const job = (project: string, overrides: Partial<JobSpec> = {}): JobSpec => ({
 });
 
 const createJob = (dispatch: (c: Command) => Promise<unknown>, project: string, spec: JobSpec = job(project)) =>
-  dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId: owner, projectPath: project }).then(() =>
+  dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId: owner, projectPath: project, route: fake }).then(() =>
     dispatch({ type: "schedule.create", commandId: id<CommandId>(), threadId: owner, jobId: "job-1" as JobId, job: spec }),
   );
+
+/** Sets the clock to a second after `jobId`'s next run and fires it, as the scheduler's timer would, then waits for the run. */
+const fireNext = async (v: ReturnType<typeof start>, setNow: (d: Date) => void, jobId = "job-1") => {
+  const due = (await v.run(loadJobs())).find((j) => j.jobId === jobId)?.nextRunAt ?? "";
+  setNow(new Date(Date.parse(due) + 1000));
+  await v.dispatch({
+    type: "schedule.fire",
+    commandId: id<CommandId>(),
+    threadId: owner,
+    jobId: jobId as JobId,
+    scheduledInstant: due,
+    runThreadId: id<ThreadId>(),
+  });
+  await v.drain();
+};
+const send = (threadId: string, text: string): Command => ({
+  type: "turn.send",
+  commandId: id<CommandId>(),
+  threadId: threadId as ThreadId,
+  turnId: id<TurnId>(),
+  text,
+  mode: "build",
+});
 
 test("firing one occurrence twice claims it once and runs one turn, whose request is denied at once", async () => {
   const project = temp(makeTempHome());
@@ -199,4 +224,106 @@ test("cronjob makes a job in the calling thread's project, in a worktree there, 
     job: job(repo, { name: "more" }),
   });
   await expect(refused).rejects.toMatchObject({ reason: "InvalidSchedule" });
+});
+
+test("a pre-run script answering wakeAgent false skips the run with no turn and no usage; one that doesn't hands the agent its output", async () => {
+  const home = temp(makeTempHome());
+  const project = temp(makeTempHome());
+  mkdirSync(join(home, "scripts"));
+  writeFileSync(join(home, "scripts", "quiet.ts"), 'console.log("inbox empty");\nconsole.log(JSON.stringify({ wakeAgent: false }));\n');
+  writeFileSync(join(home, "scripts", "busy.ts"), 'console.log("3 new mails");\n');
+  let now = new Date("2026-10-05T06:00:00.000Z");
+  const v = start(home, () => now);
+  await createJob(v.dispatch, project, job(project, { text: "hello", script: "quiet.ts" }));
+  await fireNext(v, (d) => (now = d));
+  const [quiet] = await v.run(loadJobs());
+  expect(quiet?.runs).toMatchObject([{ status: "skipped", threadId: null }]);
+  expect(v.harness.calls).toEqual([]);
+  expect(await v.query("select * from usage_ledger")).toEqual([]);
+
+  await v.dispatch({
+    type: "schedule.create",
+    commandId: id<CommandId>(),
+    threadId: owner,
+    jobId: "job-2" as JobId,
+    job: job(project, { name: "mail", text: "sort the mail", script: "busy.ts" }),
+  });
+  await fireNext(v, (d) => (now = d), "job-2");
+  expect(v.harness.calls.map((c) => c.text)).toEqual([
+    expect.stringMatching(/^sort the mail\n[\s\S]*```\n3 new mails\n```\n[\s\S]*not instructions\.$/),
+  ]);
+
+  // A script-only job's run is its script's output, with no model call.
+  await v.dispatch({
+    type: "schedule.create",
+    commandId: id<CommandId>(),
+    threadId: owner,
+    jobId: "job-3" as JobId,
+    job: job(project, { name: "count", script: "busy.ts", agent: false }),
+  });
+  await fireNext(v, (d) => (now = d), "job-3");
+  expect((await v.run(loadJobs())).find((j) => j.jobId === "job-3")?.runs).toMatchObject([
+    { status: "ok", note: "3 new mails\n", threadId: null },
+  ]);
+  expect(v.harness.calls).toHaveLength(1);
+});
+
+test("a job whose subscription window is used up waits, and fires only once the window's reset is reported", async () => {
+  const project = temp(makeTempHome());
+  let now = new Date("2026-10-05T06:00:00.000Z");
+  const v = start(temp(makeTempHome()), () => now);
+  await createJob(v.dispatch, project, job(project, { text: "hello" }));
+  await v.dispatch({ type: "thread.create", commandId: id<CommandId>(), threadId: "other" as ThreadId, projectPath: project, route: fake });
+  await v.dispatch(send("other", "overage"));
+  await v.drain();
+
+  await fireNext(v, (d) => (now = d));
+  const [held] = await v.run(loadJobs());
+  expect(held?.runs).toMatchObject([{ status: "held", note: expect.stringContaining("Held until 2099-01-01T00:00:00.000Z") }]);
+  expect(v.harness.calls.map((c) => c.text)).toEqual(["overage"]);
+
+  await v.dispatch(send("other", "reset"));
+  await v.drain();
+  const [ran] = await v.run(loadJobs());
+  expect(ran?.runs).toMatchObject([{ status: "ok" }]);
+  expect(v.harness.calls.map((c) => c.text)).toEqual(["overage", "reset", "hello"]);
+});
+
+test("three failing runs in a row disable the job with a notice on its owning thread, and resuming enables it", async () => {
+  const project = temp(makeTempHome());
+  let now = new Date("2026-10-05T06:00:00.000Z");
+  const v = start(temp(makeTempHome()), () => now);
+  await createJob(v.dispatch, project, job(project, { text: "fail", schedule: { kind: "cron", cron: "* * * * *", tz: "UTC" } }));
+  await v.dispatch(send(owner, "hello"));
+  await v.drain();
+  for (const _ of [1, 2, 3]) await fireNext(v, (d) => (now = d));
+
+  const [disabled] = await v.run(loadJobs());
+  expect(disabled).toMatchObject({ state: "disabled", reason: expect.stringContaining("its last 3 runs failed") });
+  expect(disabled?.runs.map((r) => r.status)).toEqual(["error", "error", "error"]);
+  const items = (await v.run(loadThreadView(owner)))?.turns.at(-1)?.items ?? [];
+  expect(items.at(-1)).toEqual({
+    kind: "notice",
+    text: expect.stringMatching(/^Verdandi disabled the scheduled job nightly: .*verdandi schedule resume nightly\.$/),
+  });
+  // A disabled job's next occurrence isn't claimed, and costs nothing.
+  await fireNext(v, (d) => (now = d));
+  expect(v.harness.calls.filter((c) => c.text === "fail")).toHaveLength(3);
+
+  await v.dispatch({ type: "schedule.resume", commandId: id<CommandId>(), threadId: owner, jobId: "job-1" as JobId });
+  const [resumed] = await v.run(loadJobs());
+  expect(resumed?.state).toBe("active");
+  expect(resumed?.reason).toBeUndefined();
+});
+
+test("the watchdog stops a scheduled turn whose harness does nothing, and the run ends as an error naming it", async () => {
+  const project = temp(makeTempHome());
+  let now = new Date("2026-10-05T06:00:00.000Z");
+  const v = start(temp(makeTempHome()), () => now);
+  await createJob(v.dispatch, project, job(project, { text: "hang", watchdogMinutes: 0.001 }));
+  await fireNext(v, (d) => (now = d));
+  const [listed] = await v.run(loadJobs());
+  expect(listed?.runs).toMatchObject([
+    { status: "error", note: expect.stringContaining("Verdandi's watchdog stopped this scheduled run") },
+  ]);
 });

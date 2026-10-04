@@ -55,6 +55,23 @@ export const loadShortQuota = (now: Date) =>
     });
   });
 
+/** A subscription window used up as of `now`: its harness, when it resets, and whether extra usage pays for more. */
+export type UsedUpWindow = { readonly harness: HarnessId; readonly until: string; readonly overage: boolean };
+
+/** The harnesses whose latest subscription window is used up as of `now`, with a reset still ahead (DESIGN §15). */
+export const loadUsedUp = (now: Date) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ harness: HarnessId; payload: string }>`select harness, payload from quota`;
+    return rows.flatMap((r): UsedUpWindow[] => {
+      const quota = JSON.parse(r.payload) as Quota;
+      const ahead = quota.resetsAt !== undefined && Date.parse(quota.resetsAt) > now.getTime();
+      return quota.status === "rejected" && quota.resetsAt && ahead
+        ? [{ harness: r.harness, until: quota.resetsAt, overage: quota.usingOverage }]
+        : [];
+    });
+  });
+
 /**
  * Each cap over `projectPath`'s threads as of `now`: the profile's first, then the project's. A cap's
  * limit is the configured one or the user's latest raise this period; its spend is metered usage since

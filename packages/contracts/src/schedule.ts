@@ -28,7 +28,9 @@ export type JobSchedule = typeof JobSchedule.Type;
  * What a job runs. `project` null runs it in the workspace (DESIGN §13). `route` absent lets the router pick each
  * run's route under the project's policy; `limits` tighten the task's own. `worktree` runs each run's thread in a
  * worktree of its own, never in the workspace. `missed`: what occurrences missed past the grace period become, one
- * run (`run`) or none (`skip`).
+ * run (`run`) or none (`skip`). `script`: a file in `<home>/scripts/` each run runs first, which can skip the run;
+ * `agent: false` runs only the script. `allowMetered`: a run may spend metered dollars (default no). `watchdogMinutes`:
+ * how long a run's turn may go without harness activity before it's stopped (default 10).
  */
 export const JobSpec = Schema.Struct({
   name: JobName,
@@ -40,12 +42,27 @@ export const JobSpec = Schema.Struct({
   limits: Schema.optionalKey(TaskLimits),
   worktree: Schema.Boolean,
   missed: Schema.Literals(["run", "skip"]),
+  script: Schema.optionalKey(Schema.String),
+  agent: Schema.optionalKey(Schema.Boolean),
+  allowMetered: Schema.optionalKey(Schema.Boolean),
+  watchdogMinutes: Schema.optionalKey(Schema.Number.check(Schema.isGreaterThan(0))),
 });
 export type JobSpec = typeof JobSpec.Type;
 
-/** How a run ended: its task completed (`ok`), failed or was interrupted (`error`), or stopped at a task limit. */
-export const RunStatus = Schema.Literals(["ok", "error", "limit"]);
+/**
+ * How a run ended, one of a closed set (DESIGN §15): its task completed (`ok`); its pre-run script found nothing to do
+ * (`skipped`); it waited for a used-up subscription window (`held`, until released); it failed, was interrupted or
+ * stopped by the watchdog (`error`); it stopped at a task limit (`limit`); a missing project or script, a broken policy
+ * or a route it may not spend on stopped it before any model call (`blocked_config`); its reply couldn't be delivered
+ * (`delivery_failed`, once replies go through the gateway's outbox).
+ */
+export const RunStatus = Schema.Literals(["ok", "skipped", "held", "error", "limit", "blocked_config", "delivery_failed"]);
 export type RunStatus = typeof RunStatus.Type;
+
+/** How many `error` or `blocked_config` runs in a row disable a job. */
+export const failuresToDisable = 3;
+/** How long a scheduled run's turn may go without harness activity, unless its job sets `watchdogMinutes`. */
+export const defaultWatchdogMinutes = 10;
 
 const owned = { commandId: CommandId, threadId: ThreadId, jobId: JobId } as const;
 
@@ -56,6 +73,11 @@ export const SchedulePause = Schema.Struct({ type: Schema.Literal("schedule.paus
 export const ScheduleResume = Schema.Struct({ type: Schema.Literal("schedule.resume"), ...owned });
 /** Removes a job; its runs' threads stay. */
 export const ScheduleRemove = Schema.Struct({ type: Schema.Literal("schedule.remove"), ...owned });
+/**
+ * Internal: held occurrence `scheduledInstant` may go on: its window's reset time came, or a harness reported a window
+ * that isn't used up. Its run sends its turn again, and is held again if its window still is.
+ */
+export const ScheduleRelease = Schema.Struct({ type: Schema.Literal("schedule.release"), ...owned, scheduledInstant: Schema.String });
 /**
  * Internal: the scheduler's timer reached the job's next run `scheduledInstant`. The decider claims it, at most once,
  * for a run on thread `runThreadId`, or skips it. Clients cannot send it.
@@ -79,14 +101,19 @@ export const ScheduleRunStart = Schema.Struct({
   route: Schema.optionalKey(Route),
   limits: Schema.optionalKey(TaskLimits),
   worktree: Schema.Boolean,
+  allowMetered: Schema.optionalKey(Schema.Boolean),
 });
-/** Internal: how claimed occurrence `scheduledInstant`'s run ended, reported once its task stops or its turn was refused. */
+/**
+ * Internal: how claimed occurrence `scheduledInstant`'s run ended, reported once its task stops, its turn was refused
+ * or its script decided. `output`: a script-only job's result, or what a skipping script printed.
+ */
 export const ScheduleRunReport = Schema.Struct({
   type: Schema.Literal("schedule.run.report"),
   ...owned,
   scheduledInstant: Schema.String,
   status: RunStatus,
   error: Schema.optionalKey(Schema.String),
+  output: Schema.optionalKey(Schema.String),
 });
 
 const v1 = Schema.Literal(1);
@@ -142,6 +169,8 @@ export const ScheduleRunStarted = Schema.Struct({
   ownerThreadId: ThreadId,
   scheduledInstant: Schema.String,
   limits: Schema.optionalKey(TaskLimits),
+  /** The job may spend metered dollars; absent, its turns never do (DESIGN §15). */
+  allowMetered: Schema.optionalKey(Schema.Boolean),
 });
 export const ScheduleRunEnded = Schema.Struct({
   type: Schema.Literal("schedule.run.ended"),
@@ -149,16 +178,43 @@ export const ScheduleRunEnded = Schema.Struct({
   scheduledInstant: Schema.String,
   status: RunStatus,
   error: Schema.optionalKey(Schema.String),
+  output: Schema.optionalKey(Schema.String),
 });
+/**
+ * Run thread `threadId`'s turn would have spent metered dollars because its target's subscription window is used up:
+ * the occurrence waits, with no turn, until `until` (the window's reset) or a report of a window that isn't.
+ */
+export const ScheduleOccurrenceHeld = Schema.Struct({
+  type: Schema.Literal("schedule.occurrence.held"),
+  v: v1,
+  threadId: ThreadId,
+  jobId: JobId,
+  scheduledInstant: Schema.String,
+  until: Schema.String,
+  reason: Schema.String,
+});
+export const ScheduleOccurrenceReleased = Schema.Struct({
+  type: Schema.Literal("schedule.occurrence.released"),
+  ...onOwner,
+  scheduledInstant: Schema.String,
+});
+/**
+ * The job stopped running after `failuresToDisable` failed runs in a row, for `reason`; resuming it enables it again.
+ * Its owning thread's latest turn gets a `notice` saying so.
+ */
+export const ScheduleDisabled = Schema.Struct({ type: Schema.Literal("schedule.disabled"), ...onOwner, reason: Schema.String });
 
 /** What a run's thread shows: the job it runs, and which occurrence. */
 export const ScheduleRunLabel = Schema.Struct({ jobId: JobId, name: JobName, scheduledInstant: Schema.String });
 export type ScheduleRunLabel = typeof ScheduleRunLabel.Type;
 
-/** One occurrence of a job: `running` until its run ends, or `skipped`, with why (`note`), or a run's error. */
+/**
+ * One occurrence of a job: `running` until its run ends, or how it ended, with `note`: why it was skipped or held, its
+ * error, or a script's output.
+ */
 export const JobRunView = Schema.Struct({
   scheduledInstant: Schema.String,
-  status: Schema.Literals(["running", "skipped", ...RunStatus.literals]),
+  status: Schema.Literals(["running", ...RunStatus.literals]),
   threadId: Schema.NullOr(ThreadId),
   at: Schema.String,
   endedAt: Schema.NullOr(Schema.String),
@@ -166,12 +222,16 @@ export const JobRunView = Schema.Struct({
 });
 export type JobRunView = typeof JobRunView.Type;
 
-/** A job as `SchedulesList` shows it, with its latest runs, newest first. `done`: a one-off that ran or was retired. */
+/**
+ * A job as `SchedulesList` shows it, with its latest runs, newest first. `done`: a one-off that ran or was retired;
+ * `disabled`: stopped after failing runs, for `reason`.
+ */
 export const JobView = Schema.Struct({
   jobId: JobId,
   ownerThreadId: ThreadId,
   job: JobSpec,
-  state: Schema.Literals(["active", "paused", "done"]),
+  state: Schema.Literals(["active", "paused", "done", "disabled"]),
+  reason: Schema.optionalKey(Schema.String),
   nextRunAt: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   runs: Schema.Array(JobRunView),

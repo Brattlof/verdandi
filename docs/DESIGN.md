@@ -899,21 +899,23 @@ Trajectories from open or local models don't have this restriction. The exporter
 
 - **Scheduler** (ADR 0032):
   - **When:** a cron expression or nickname read in the job's time zone, a one-off time, or a duration ("in 2h"). The agent turns plain language ("every weekday at 7") into one of those.
-  - **What each job has:** its task and mode; a route, pinned or the router's pick under its project's policy; task limits that narrow its class's; a worktree, on by default in a project's git repo and never in the workspace; whether missed runs collapse into one or are skipped; and the thread that owns it, whose stream its events go on. Still to come:
+  - **What each job has:** its task and mode; a route, pinned or the router's pick under its project's policy; task limits that narrow its class's; a worktree, on by default in a project's git repo and never in the workspace; whether missed runs collapse into one or are skipped; a script to run first; whether it may spend metered dollars; and the thread that owns it, whose stream its events go on. Still to come:
     - skills to load,
-    - a script to run first,
     - `contextFrom` to chain in earlier job outputs,
     - where its output goes: a channel, a thread or a notification, set in the job's config. A job the agent creates with `cronjob` delivers to its own thread's binding; pointing it anywhere else is your edit.
   - **Where:** in the job's project, or in the workspace when it names none (§13).
   - **Who runs them:** only an always-on verdandid (§11). One timer waits for the job whose next run comes first, re-armed at boot and on every change, and looks again at least each minute, so a host that slept is noticed. When it fires, the decider claims the occurrence and moves the job's next run on in one transaction, so an occurrence runs at most once.
   - **Catch-up**, a pure function of the schedule, the occurrence due and the time now: grace is half the period, from 2 minutes to 2 hours. A late occurrence inside grace runs once; past grace, the missed ones collapse into one run, or are all skipped if the job says so; a one-off more than 2 minutes late is retired, never run. However long the host slept, nothing runs in a burst, and every skip is recorded with its reason.
   - **Runs:** each claimed occurrence gets a thread of its own in the job's project or the workspace, in a worktree when the job has one, labelled with its job, and Verdandi sends the job's text there as an ordinary turn, so routing, spend caps, task limits, verifiers, escalation and outcomes apply unchanged. A refused turn (a reached spend cap, a broken policy) is the run's result. The run ends when its task stops; removing a job keeps its runs' threads.
+  - **A script first:** a job can name a script in `<home>/scripts/`, and only there, which each run runs first in the job's folder, through the platform shell with no input, a time limit and no provider keys. If its last line of output is `{"wakeAgent": false}`, the run ends as `skipped` at zero tokens; otherwise its output goes into the turn's message, fenced as data after the injection check. A script-only job records the output as its result, with no model call. There's no heartbeat primitive: a frequent job whose script checks for a change covers "check in when something changed".
+  - **Spend:** a job never spends metered dollars unless it allows it. When its target's subscription window is used up, the occurrence is held until the window resets, or a window that isn't used up is reported, and fires once then, instead of failing or moving to a metered target.
+  - **Run status**, one of a closed set: `ok`, `skipped`, `held`, `error`, `limit`, `blocked_config` (a missing project or script, or a broken policy, found before any model call), and `delivery_failed` once replies go through the outbox, which doesn't count as a failure. After 3 `error` or `blocked_config` runs in a row the job is disabled, and its owning thread gets a notice naming the cause and Resume, at zero tokens; resuming enables it and starts the count over.
   - **Before verdandid's scheduler:** `verdandi schedule add` registered OS jobs (crontab, launchd or Task Scheduler) that call `verdandi run --deny-requests --json`. Such entries keep running until removed; `verdandi schedule list` shows them, and `remove --os` takes one out.
   - **Unattended runs:**
     - run in worktrees when their project is a git repo other than the workspace,
     - deny every request at once, recorded with the reason, as a background review's are (ADR 0023),
-    - have a hard budget: the job's limits, under the spend caps,
-    - are stopped by a watchdog after a period with no activity,
+    - have a hard budget: the job's limits, under the spend caps, and no metered dollars unless the job allows them,
+    - are stopped by a watchdog after a period with no harness activity (10 minutes unless the job sets another), ending as `error`,
     - **propose** memories for review instead of saving them.
 - **Messaging gateway:**
   - One gateway process inside verdandid, with a `PlatformAdapter` for each platform.

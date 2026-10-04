@@ -47,7 +47,7 @@ A bypass of one of these is a vulnerability.
 These lower risk, and they can be bypassed by design. A bypass is a bug worth fixing, not a vulnerability.
 
 - The injection question (`untrusted.injection`, `injectionRules` in `packages/decisions/src/rules.ts`), the secret scans on memory (`scanMemory`) and skills (`scanSkill`), and trajectory redaction (`packages/trajectories/src/redact.ts`).
-- "Marked as data" fences around untrusted text handed to the agent (escalation hand-offs, the review digest, the memory snapshot's entries: `asData` in `apps/agent/src/trust/fence.ts`, a fence longer than any run of backticks in the text, so the text can't close it), attachments handed over as paths marked as data, and the warning over a flagged search or MCP tool result. A model can still follow what's inside one.
+- "Marked as data" fences around untrusted text handed to the agent (escalation hand-offs, the review digest, a scheduled job's pre-run script output, the memory snapshot's entries: `asData` in `apps/agent/src/trust/fence.ts`, a fence longer than any run of backticks in the text, so the text can't close it), attachments handed over as paths marked as data, and the warning over a flagged search or MCP tool result. A model can still follow what's inside one.
 - Background review's prompt rules on what never to capture, and its gate that offers skills only from a task whose last verifier run passed or that the user rated up (`skillsRefused` in `apps/agent/src/review/review.ts`). A passing verifier doesn't make a lesson true.
 - What an approval or plan mode limits. They're consent, not containment: they ask before a step, and don't limit what an approved step does or what the user's own harness settings already allow. The harness's own permission prompts and plan mode (Claude Code's read-only mode) are enforced by the harness.
 - The native harness's file tools' path rules (`access` in `packages/harness-native/src/file-tools.ts`): free in the thread's folder and the `workspace.yaml` folders, asking elsewhere, refusing the rest of the Verdandi home. They steer the agent's own tools, but anything run as the user, Claude Code's tools included, reaches the same files.
@@ -71,7 +71,7 @@ Today the only principal is the owner: the OS user, who holds the profile's toke
 
 - **The owner:** the OS user, holding the profile's token, and each device they paired (ADR 0028).
 - **Allowlisted channel senders:** they can start turns in their bound thread and never run owner commands (#212).
-- **Scheduled jobs** (ADR 0032, built): they run as the owner who created them, unattended: every request a run raises, a trust request included, is denied at once, so a run gets nothing it would have to ask for. They run under the job's limits and the spend caps, and a run can't create jobs.
+- **Scheduled jobs** (ADR 0032, built): they run as the owner who created them, unattended: every request a run raises, a trust request included, is denied at once, so a run gets nothing it would have to ask for. They run under the job's limits and the spend caps, never on metered dollars unless the job allows it, a run can't create jobs, and a job's pre-run script runs only from `<home>/scripts/`, which the agent's `cronjob` tool can't name.
 - **The agent:** never a principal. It acts for one, inside that principal's approvals.
 
 Tool outputs, gateway messages, memory entries, skill files and web pages stay data, never instructions (AGENTS.md's invariants).

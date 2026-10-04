@@ -20,6 +20,7 @@ import {
   Reactor,
   ReactorLive,
   ReviewSettings,
+  ScriptsDir,
   ToolSettings,
   WorkspaceDir,
   WorktreesDir,
@@ -506,6 +507,7 @@ describe("engine", () => {
       Layer.provideMerge(Layer.succeed(McpConfig, () => ({ servers: [], notices: [], trust: [], project: [] }))),
       Layer.provideMerge(Layer.succeed(WorktreesDir, "unused")),
       Layer.provideMerge(Layer.succeed(WorkspaceDir, "unused")),
+      Layer.provideMerge(Layer.succeed(ScriptsDir, "unused")),
       Layer.provideMerge(Layer.succeed(ToolSettings, { approveMemorySaves: false, memoryNudgeEvery: 0 })),
       Layer.provideMerge(
         Layer.succeed(ProjectEscalation, () =>

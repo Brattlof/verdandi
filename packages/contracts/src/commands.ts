@@ -13,6 +13,7 @@ import {
   ScheduleCreate,
   ScheduleFire,
   SchedulePause,
+  ScheduleRelease,
   ScheduleRemove,
   ScheduleResume,
   ScheduleRunReport,
@@ -612,6 +613,7 @@ export const Command = Schema.Union([
   ScheduleResume,
   ScheduleRemove,
   ScheduleFire,
+  ScheduleRelease,
   ScheduleRunStart,
   ScheduleRunReport,
 ]);

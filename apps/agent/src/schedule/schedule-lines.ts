@@ -19,8 +19,11 @@ const lines: { [T in ScheduleEvent["type"]]: (e: Extract<ScheduleEvent, { type: 
   "schedule.occurrence.skipped": (e) =>
     `[${e.name} skipped ${e.from === e.until ? `its run due at ${localMinute(e.from)}` : `its runs from ${localMinute(e.from)} to ${localMinute(e.until)}`}: ${e.reason}]`,
   "schedule.run.started": () => undefined,
+  "schedule.occurrence.held": (e) => `[${e.reason}]`,
+  "schedule.occurrence.released": (e) => `[${e.name}'s run due at ${localMinute(e.scheduledInstant)} goes on: its window may have reset]`,
+  "schedule.disabled": (e) => `[disabled ${e.name}: ${e.reason}. verdandi schedule resume ${e.name} enables it again]`,
   "schedule.run.ended": (e) =>
-    `[${e.name}'s run due at ${localMinute(e.scheduledInstant)} ended ${e.status}${e.error ? `: ${e.error}` : ""}]`,
+    `[${e.name}'s run due at ${localMinute(e.scheduledInstant)} ended ${e.status}${e.error ? `: ${e.error}` : e.output ? `: ${e.output.trimEnd()}` : ""}]`,
 };
 
 /** The chat's line for `e`, when it's a job event that has one. */

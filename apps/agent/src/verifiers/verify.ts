@@ -66,8 +66,11 @@ const collect = (streams: readonly ReadableStream<Uint8Array>[], file: string | 
   };
 };
 
-/** What a shell command did: its exit code (null when it was stopped or never started), its output's tail, and how long it took. */
-export type ShellRun = { readonly exitCode: number | null; readonly output: string; readonly durationMs: number };
+/**
+ * What a shell command did: its exit code (null when it was stopped or never started), its output's tail, and how long
+ * it took; with `stdout` asked for, the tail of its standard output alone.
+ */
+export type ShellRun = { readonly exitCode: number | null; readonly output: string; readonly durationMs: number; readonly stdout?: string };
 
 /**
  * Runs `command` through the platform shell in `cwd`, with no input and the environment without secrets (`childEnv`),
@@ -77,7 +80,7 @@ export type ShellRun = { readonly exitCode: number | null; readonly output: stri
 export const runShell = (
   command: string,
   cwd: string,
-  options: { readonly timeoutMs: number; readonly outputFile?: string },
+  options: { readonly timeoutMs: number; readonly outputFile?: string; readonly stdout?: boolean },
 ): Effect.Effect<ShellRun> => {
   const started = performance.now();
   const result = (exitCode: number | null, output: string): ShellRun => ({
@@ -107,12 +110,15 @@ export const runShell = (
       proc instanceof Error
         ? Effect.succeed(result(null, `Verdandi couldn't start it: ${proc.message}`))
         : Effect.gen(function* () {
-            const read = collect([proc.stdout, proc.stderr], options.outputFile);
+            const [out, own] = options.stdout ? proc.stdout.tee() : [proc.stdout];
+            const read = collect([out, proc.stderr], options.outputFile);
+            const readOwn = own && collect([own], undefined);
             const exited = yield* Effect.promise(() => proc.exited).pipe(Effect.timeoutOption(options.timeoutMs));
             if (Option.isNone(exited)) killTree(proc);
             const output = yield* Effect.promise(() => read(1000));
+            const stdout = readOwn && { stdout: yield* Effect.promise(() => readOwn(1000)) };
             return Option.isSome(exited)
-              ? result(exited.value, output)
+              ? { ...result(exited.value, output), ...stdout }
               : result(null, `${output}\n[Verdandi stopped it after ${Math.round(options.timeoutMs / 1000)} seconds.]`);
           }),
     // Answers once the shell is gone, so an interrupt that returns has left nothing running; bounded, in case it hangs.

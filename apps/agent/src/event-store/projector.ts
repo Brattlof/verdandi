@@ -13,6 +13,7 @@ import type {
   Route,
   RouteChange,
   RouteDecision,
+  RunStatus,
   SessionHit,
   StoredEvent,
   TaskId,
@@ -116,6 +117,20 @@ const projectWorktree = (e: Parameters<typeof nextWorktree>[1]) =>
       yield* sql`update threads set worktree = ${next && JSON.stringify(next)} where id = ${e.threadId}`;
     }),
   );
+
+/**
+ * A job's failed runs in a row after a run ends with each status: a failure adds one, a success or a skip starts over,
+ * and a held run or a delivery failure leaves the count as it is.
+ */
+const failureCount: Record<RunStatus, "add" | "reset" | "keep"> = {
+  ok: "reset",
+  skipped: "reset",
+  limit: "reset",
+  held: "keep",
+  delivery_failed: "keep",
+  error: "add",
+  blocked_config: "add",
+};
 
 /** Moves job `jobId` to its next run; a job with none left is done. */
 const advance = (sql: SqlClient.SqlClient, jobId: string, next: string | null) =>
@@ -472,10 +487,23 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         values (${e.jobId}, ${e.job.name}, ${e.threadId}, ${JSON.stringify(e.job)}, ${e.nextRunAt === null ? "done" : "active"}, ${e.nextRunAt}, ${at})`,
     ),
   "schedule.paused": (e) => withSql((sql) => sql`update schedules set state = 'paused' where id = ${e.jobId}`),
+  // Resuming enables a disabled job and starts its failure count over.
   "schedule.resumed": (e) =>
     withSql(
       (sql) =>
-        sql`update schedules set state = ${e.nextRunAt === null ? "done" : "active"}, next_run_at = ${e.nextRunAt} where id = ${e.jobId}`,
+        sql`update schedules set state = ${e.nextRunAt === null ? "done" : "active"}, next_run_at = ${e.nextRunAt}, failures = 0,
+          reason = null where id = ${e.jobId}`,
+    ),
+  "schedule.disabled": (e) => withSql((sql) => sql`update schedules set state = 'disabled', reason = ${e.reason} where id = ${e.jobId}`),
+  "schedule.occurrence.held": (e) =>
+    withSql(
+      (sql) => sql`update schedule_runs set status = 'held', held_until = ${e.until}, note = ${e.reason}
+        where job_id = ${e.jobId} and scheduled_instant = ${e.scheduledInstant}`,
+    ),
+  "schedule.occurrence.released": (e) =>
+    withSql(
+      (sql) => sql`update schedule_runs set status = 'running', held_until = null, note = null
+        where job_id = ${e.jobId} and scheduled_instant = ${e.scheduledInstant}`,
     ),
   "schedule.removed": (e) => withSql((sql) => sql`update schedules set state = 'removed', next_run_at = null where id = ${e.jobId}`),
   // The key (job_id, scheduled_instant) refuses a second claim of one occurrence, should the decider ever allow one.
@@ -497,11 +525,15 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     ),
   "schedule.run.started": (e) => withSql((sql) => sql`update threads set schedule = ${JSON.stringify(e)} where id = ${e.threadId}`),
   "schedule.run.ended": (e, at) =>
-    withSql(
-      // A run that never got its thread keeps none.
-      (sql) => sql`update schedule_runs set status = ${e.status}, ended_at = ${at}, note = ${e.error ?? null},
-          thread_id = (select id from threads where id = schedule_runs.thread_id)
-        where job_id = ${e.jobId} and scheduled_instant = ${e.scheduledInstant}`,
+    withSql((sql) =>
+      Effect.andThen(
+        // A run that never got its thread keeps none.
+        sql`update schedule_runs set status = ${e.status}, ended_at = ${at}, note = ${e.error ?? e.output ?? null},
+            thread_id = (select id from threads where id = schedule_runs.thread_id)
+          where job_id = ${e.jobId} and scheduled_instant = ${e.scheduledInstant}`,
+        sql`update schedules set failures = case ${failureCount[e.status]} when 'add' then failures + 1 when 'reset' then 0 else failures end
+          where id = ${e.jobId}`,
+      ),
     ),
   "spend.cap.raised": (e, at, seq) =>
     withSql(

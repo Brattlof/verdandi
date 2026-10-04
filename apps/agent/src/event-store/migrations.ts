@@ -492,6 +492,17 @@ const schedules = Effect.gen(function* () {
   yield* sql`alter table threads add column schedule text`;
 });
 
+/**
+ * A job's failed runs in a row, which disable it at 3, and why it was disabled (DESIGN §15); when a held occurrence
+ * may go on.
+ */
+const scheduleGuards = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table schedules add column failures integer not null default 0`;
+  yield* sql`alter table schedules add column reason text`;
+  yield* sql`alter table schedule_runs add column held_until text`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -524,4 +535,5 @@ export const migrations = {
   "29_session_harness": sessionHarness,
   "30_provider_health": providerHealth,
   "31_schedules": schedules,
+  "32_schedule_guards": scheduleGuards,
 };

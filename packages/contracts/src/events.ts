@@ -11,7 +11,10 @@ import { Effort, HarnessId, InteractionMode, Route, SubagentProfile } from "./ro
 import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInputs, RouteInputsV1, UntrustedInput } from "./routing.ts";
 import {
   ScheduleCreated,
+  ScheduleDisabled,
   ScheduleOccurrenceClaimed,
+  ScheduleOccurrenceHeld,
+  ScheduleOccurrenceReleased,
   ScheduleOccurrenceSkipped,
   SchedulePaused,
   ScheduleRemoved,
@@ -899,6 +902,9 @@ export const Event = Schema.Union([
   ScheduleOccurrenceSkipped,
   ScheduleRunStarted,
   ScheduleRunEnded,
+  ScheduleOccurrenceHeld,
+  ScheduleOccurrenceReleased,
+  ScheduleDisabled,
 ]);
 export type Event = typeof Event.Type;
 
@@ -1019,6 +1025,9 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "schedule.occurrence.skipped@1": ScheduleOccurrenceSkipped,
   "schedule.run.started@1": ScheduleRunStarted,
   "schedule.run.ended@1": ScheduleRunEnded,
+  "schedule.occurrence.held@1": ScheduleOccurrenceHeld,
+  "schedule.occurrence.released@1": ScheduleOccurrenceReleased,
+  "schedule.disabled@1": ScheduleDisabled,
 };
 
 /** The row shape an event is stored as. */
