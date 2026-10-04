@@ -4,7 +4,7 @@ import { readServerFile, resolveHome } from "../home/home.ts";
 import { connect } from "../rpc/client.ts";
 
 const gatewayUsage =
-  "verdandi gateway senders | senders revoke <platform> <sender> | pair <code> [--owner] | deny <request> | owner <platform> <sender>";
+  "verdandi gateway senders | senders revoke <platform> <sender> | pair <code> [--owner] | deny <request> | owner <platform> <sender> | owner <platform> --clear";
 
 /** One sender waiting to pair, as the terminal chat's notice and `verdandi gateway senders` show it. Never the code. */
 export const senderPairingLine = (p: PendingPairing) =>
@@ -42,7 +42,7 @@ const usage = () => {
 };
 
 /** Each subcommand, given its words after the subcommand: what it does through the client, and what it prints. */
-const actions: Record<string, (words: readonly string[], owner: boolean) => (client: Client) => Effect.Effect<string, unknown>> = {
+const actions: Record<string, (words: readonly string[], argv: readonly string[]) => (client: Client) => Effect.Effect<string, unknown>> = {
   senders: ([action = "list", platform = "", sender = ""]) => {
     if (action === "list") return (client) => Effect.map(client.GatewayList(), gatewayText);
     if (action !== "revoke" || !sender) return usage();
@@ -54,14 +54,18 @@ const actions: Record<string, (words: readonly string[], owner: boolean) => (cli
     } as const;
     return (client) => dispatched(client, command, "Revoked: their messages are ignored from now on, and they'd have to pair again.");
   },
-  pair: ([code = ""], owner) =>
-    code
+  pair: (words, argv) => {
+    // A code may be typed split, e.g. ABCD EFGH.
+    const code = words.join("");
+    const owner = argv.includes("--owner");
+    return code
       ? (client) =>
           client.GatewayPair({ code, owner }).pipe(
             Effect.flatMap((p) => said(`Let in ${p.platform} sender ${p.senderName} (${p.senderId})${owner ? " as the owner" : ""}.`)),
             Effect.catchTag("GatewayUnavailable", (e) => said(e.message)),
           )
-      : usage(),
+      : usage();
+  },
   deny: ([requestId = ""]) =>
     requestId
       ? (client) =>
@@ -71,19 +75,22 @@ const actions: Record<string, (words: readonly string[], owner: boolean) => (cli
             "Denied: their messages stay ignored.",
           )
       : usage(),
-  owner: ([platform = "", sender = ""]) => {
-    if (!sender) return usage();
+  owner: ([platform = "", sender = ""], argv) => {
+    const clear = argv.includes("--clear");
+    if (!sender === !clear) return usage();
     const command = {
       type: "gateway.owner.set",
       commandId: crypto.randomUUID() as CommandId,
       platform: platformOf(platform),
-      senderId: sender,
+      senderId: clear ? null : sender,
     } as const;
     return (client) =>
       dispatched(
         client,
         command,
-        `${platform} sender ${sender} is the owner: only they can approve requests and run owner-only commands from that chat app. verdandi gateway senders revoke ${platform} ${sender} takes it back.`,
+        clear
+          ? `${platform} has no owner now: nobody can run owner-only commands from it.`
+          : `${platform} sender ${sender} is the owner: only they can approve requests and run owner-only commands from that chat app. verdandi gateway owner ${platform} --clear takes it back.`,
       );
   },
 };
@@ -91,11 +98,11 @@ const actions: Record<string, (words: readonly string[], owner: boolean) => (cli
 /**
  * `verdandi gateway`: who may reach Verdandi from chat apps (DESIGN §15), through the running verdandid. Lists senders
  * and waiting pairing requests, approves one with the code its sender got (`--owner` makes them the platform's owner),
- * denies one, revokes a sender, and sets the owner.
+ * denies one, revokes a sender, and sets or clears the owner.
  */
 export const gateway = async (argv: readonly string[]) => {
   const [sub = "senders", ...words] = argv.filter((a, i) => !a.startsWith("--") && argv[i - 1] !== "--home");
-  const action = (actions[sub] ?? usage)(words, argv.includes("--owner"));
+  const action = (actions[sub] ?? usage)(words, argv);
   const server = readServerFile(resolveHome(argv));
   process.stdout.write(await Effect.runPromise(Effect.scoped(Effect.flatMap(connect(server), action))));
 };

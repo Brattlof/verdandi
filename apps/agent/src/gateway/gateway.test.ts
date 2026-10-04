@@ -142,6 +142,38 @@ test("a pairing request whose hour ran out is no longer listed and can't be appr
   expect(byId.message).toContain("its hour ran out");
 });
 
+test("approving a sender answers every request they left waiting", async () => {
+  const home = makeTempHome();
+  cleanups.push(() => removeTempHome(home));
+  const channel = makeFakeChannel();
+  const server = await start(home, channel);
+  cleanups.push(() => server.stop());
+  const ask = (requestId: string) =>
+    server.runtime.runPromise(
+      Effect.flatMap(Engine, (engine) =>
+        engine.dispatch({
+          type: "pairing.request",
+          commandId: crypto.randomUUID() as CommandId,
+          requestId,
+          platform: "fake",
+          chatId: "9",
+          senderId: "9",
+          senderName: "Twice",
+          codeHash: hashCode("00", requestId),
+          salt: "00",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      ),
+    );
+  await ask("first");
+  await ask("second");
+  expect((await server.call((c) => c.GatewayList())).pending).toHaveLength(2);
+  await server.call((c) =>
+    c.CommandDispatch({ type: "pairing.approve", commandId: crypto.randomUUID() as CommandId, requestId: "second", owner: false }),
+  );
+  expect((await server.call((c) => c.GatewayList())).pending).toEqual([]);
+});
+
 test("a broken gateway.yaml fails naming the file and key", () => {
   const home = makeTempHome();
   cleanups.push(() => removeTempHome(home));

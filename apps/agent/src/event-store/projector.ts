@@ -330,7 +330,9 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
   "pairing.approved": (e, at) =>
     withSql((sql) =>
       Effect.andThen(
-        sql`update gateway_pairings set answer = 'approved' where request_id = ${e.requestId}`,
+        // Any other request the sender left waiting is answered too: they're in.
+        sql`update gateway_pairings set answer = 'approved'
+          where request_id = ${e.requestId} or (platform = ${e.platform} and sender_id = ${e.senderId} and answer is null)`,
         sql`insert or replace into gateway_senders (platform, sender_id, name, paired_at) values (${e.platform}, ${e.senderId}, ${e.senderName}, ${at})`,
       ),
     ),

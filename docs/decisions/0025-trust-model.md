@@ -46,7 +46,7 @@ A bypass of one of these is a vulnerability.
    - anyone into a group that isn't on `groups`, or an unaddressed group message start a turn;
    - anyone but the platform's owner run a command the slash-command registry marks owner-only (`ownerOnly` in `packages/contracts/src/slash.ts`), approving and denying requests among them;
    - a chat set the owner. Only `gateway.owner.set` and `pairing.approve` with `owner` do, which come from the web UI or the CLI over the token;
-   - a pairing code be read back: the log keeps its salted SHA-256 (`hashCode` in `apps/agent/src/gateway/gateway.ts`), compared in constant time, and the code goes only to the sender's own DM.
+   - a pairing code reach anyone but the sender's own DM, or a chat approve one. The log keeps only its salted SHA-256 (`hashCode` in `apps/agent/src/gateway/gateway.ts`), compared in constant time, so a backup or an export doesn't show it; that's hygiene, not a boundary, since an 8-character code can be brute-forced from its hash, and whoever reads the database is already the OS user (boundary 1).
 
    What context text the module lets through (only senders allowed in the same chat, and Verdandi's own) is a boundary of who speaks, not of what the text says: it reaches the agent as untrusted data, and an allowed sender can still quote an injection.
 

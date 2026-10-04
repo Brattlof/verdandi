@@ -1,7 +1,7 @@
 import type { CommandId, DeviceId, DevicesView, GatewayView, PairingRequest, PairMessage } from "@verdandi/contracts";
 import { useEffect, useState } from "react";
 import { type Connection, uuid } from "../client.ts";
-import { ChatSenders } from "../gateway/gateway.tsx";
+import { ChatSenders, waitingPairings } from "../gateway/gateway.tsx";
 import { RuneMark, RuneText } from "../ui/runes.tsx";
 
 /** The code a device shows, split in two so it's read back without losing a digit. */
@@ -68,9 +68,10 @@ const RequestRow = ({ connection, request }: { connection: Connection; request: 
 /** Shown on every page but Devices while a device or a chat sender asks to pair, so the owner sees it wherever they are. */
 export const PairingBanner = ({ view, gateway }: { view: DevicesView | undefined; gateway: GatewayView | undefined }) => {
   const first = view?.pending[0];
-  const sender = gateway?.pending[0];
+  const senders = waitingPairings(gateway);
+  const sender = senders[0];
   if (!first && !sender) return null;
-  const more = (view?.pending.length ?? 0) + (gateway?.pending.length ?? 0) - 1;
+  const more = (view?.pending.length ?? 0) + senders.length - 1;
   return (
     <div role="status" className="flex flex-wrap items-center gap-x-2 border-b border-line bg-user px-4 py-2 text-sm">
       {first ? (

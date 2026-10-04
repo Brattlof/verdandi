@@ -1,4 +1,4 @@
-import type { CommandId, GatewaySender, GatewayView, PendingPairing } from "@verdandi/contracts";
+import type { CommandId, GatewayView, PendingPairing } from "@verdandi/contracts";
 import { useEffect, useState } from "react";
 import { type Connection, uuid } from "../client.ts";
 
@@ -19,8 +19,14 @@ export const useGateway = (connection: Connection) => {
   return view;
 };
 
-/** A sender asking to be let in: their platform, name and id, when they asked, and Approve, Approve as owner or Deny. */
-const PairingRow = ({ connection, pairing }: { connection: Connection; pairing: PendingPairing }) => {
+/** The requests still waiting: one whose hour ran out drops out of the view only when something else changes it. */
+export const waitingPairings = (view: GatewayView | undefined) => view?.pending.filter((p) => Date.parse(p.expiresAt) > Date.now()) ?? [];
+
+/**
+ * A sender asking to be let in: their platform, name and id, when they asked, and Approve, Approve as owner (naming the
+ * owner it replaces) or Deny.
+ */
+const PairingRow = ({ connection, pairing, owner }: { connection: Connection; pairing: PendingPairing; owner: string | undefined }) => {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string>();
   const answer = async (approve: boolean, owner = false) => {
@@ -55,7 +61,7 @@ const PairingRow = ({ connection, pairing }: { connection: Connection; pairing: 
           Deny
         </button>
         <button type="button" disabled={sending} onClick={() => answer(true, true)}>
-          Approve as owner
+          {owner ? `Approve as owner, replacing ${owner}` : "Approve as owner"}
         </button>
         <button type="button" className="border-go bg-go text-on-go hover:bg-go-hover" disabled={sending} onClick={() => answer(true)}>
           Approve
@@ -68,15 +74,12 @@ const PairingRow = ({ connection, pairing }: { connection: Connection; pairing: 
 /** The Devices page's chat apps: senders asking to be let in, and who has access, each with Revoke. */
 export const ChatSenders = ({ connection, view }: { connection: Connection; view: GatewayView | undefined }) => {
   const [error, setError] = useState<string>();
-  const revoke = async (s: GatewaySender) => {
-    const result = await connection.dispatch({
-      type: "sender.revoke",
-      commandId: uuid<CommandId>(),
-      platform: s.platform,
-      senderId: s.senderId,
-    });
+  const answer = async (command: Parameters<Connection["dispatch"]>[0]) => {
+    const result = await connection.dispatch(command);
     setError(result.ok ? undefined : result.message);
   };
+  const owners = new Map(view?.senders.filter((s) => s.owner).map((s) => [s.platform, s.name]));
+  const pending = waitingPairings(view);
   return (
     <section aria-labelledby="chat-senders" className="mt-10">
       <h2 id="chat-senders" className="eyebrow mb-2 text-muted">
@@ -89,10 +92,10 @@ export const ChatSenders = ({ connection, view }: { connection: Connection; view
         A sender Verdandi doesn't know gets a code in their DM and waits here. The owner alone approves requests and runs owner-only
         commands from a chat.
       </p>
-      {view?.pending.length ? (
+      {pending.length ? (
         <ul className="mb-4 flex flex-col gap-2">
-          {view.pending.map((p) => (
-            <PairingRow key={p.requestId} connection={connection} pairing={p} />
+          {pending.map((p) => (
+            <PairingRow key={p.requestId} connection={connection} pairing={p} owner={owners.get(p.platform)} />
           ))}
         </ul>
       ) : null}
@@ -113,7 +116,23 @@ export const ChatSenders = ({ connection, view }: { connection: Connection; view
                   {s.pairedAt && ` · paired ${when(s.pairedAt)}`}
                 </span>
               </span>
-              <button type="button" onClick={() => revoke(s)}>
+              <button
+                type="button"
+                onClick={() =>
+                  answer({
+                    type: "gateway.owner.set",
+                    commandId: uuid<CommandId>(),
+                    platform: s.platform,
+                    senderId: s.owner ? null : s.senderId,
+                  })
+                }
+              >
+                {s.owner ? "Stop being owner" : "Make owner"}
+              </button>
+              <button
+                type="button"
+                onClick={() => answer({ type: "sender.revoke", commandId: uuid<CommandId>(), platform: s.platform, senderId: s.senderId })}
+              >
                 Revoke
               </button>
             </li>
