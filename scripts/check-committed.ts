@@ -9,6 +9,7 @@ import { tokenPatterns } from "../packages/trajectories/src/redact.ts";
 const localOnly: readonly [RegExp, string][] = [
   [/(^|\/)\.plans\//, "plans and specs stay local"],
   [/(^|\/)spikes\//, "spike code stays local"],
+  [/(^|\/)evals\/compression\/private\//, "the compression exam's real sessions stay local"],
   [/(^|\/)\.verdandi-[^/]*\//, "a dev server's state folder"],
   [/(^|\/)server\.json$/, "holds a profile's token"],
   [/(^|\/)\.env(\.(?!example$)[^/]*)?$/, "holds secrets"],

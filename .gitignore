@@ -16,3 +16,6 @@ Thumbs.db
 
 # Dev server state (per worktree)
 .verdandi-dev/
+
+# The compression exam's transcripts and questions: real sessions, reviewed by hand, never committed.
+evals/compression/private/

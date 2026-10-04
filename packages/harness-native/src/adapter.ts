@@ -60,7 +60,8 @@ type Session = {
   turn: Turn | undefined;
 };
 
-const maxTokens = 64_000;
+/** The output each request leaves room for (`max_tokens`). */
+export const maxTokens = 64_000;
 /** The beta that takes an effort-only system message within a conversation (ADR 0022). */
 const perMessageEffort = "mid-conversation-output-config-2026-07-01";
 const setKey = "Replace it with `verdandi key set anthropic` (or VERDANDI_ANTHROPIC_API_KEY), then restart verdandid.";
