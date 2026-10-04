@@ -30,11 +30,14 @@ export const inRepo = (folder: string): boolean => {
   return up !== folder && inRepo(up);
 };
 
-/** Whether `folder` is the profile's workspace, however it's spelled (a symlink, a trailing slash). */
-export const isWorkspace = (home: string, folder: string) => {
+/** Whether `a` and `b` are one folder, however each is spelled (a symlink, a trailing slash). */
+export const sameFolder = (a: string, b: string) => {
   const real = (path: string) => (existsSync(path) ? realpathSync.native(path) : resolve(path));
-  return real(folder) === real(workspaceDir(home));
+  return real(a) === real(b);
 };
+
+/** Whether `folder` is the profile's workspace, however it's spelled. */
+export const isWorkspace = (home: string, folder: string) => sameFolder(folder, workspaceDir(home));
 
 /** The CLI remembers one thread per folder, in the Verdandi home. */
 export const cliThreadsFile = (home: string) => join(home, "cli-threads.json");

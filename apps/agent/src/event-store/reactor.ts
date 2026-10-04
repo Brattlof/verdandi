@@ -38,6 +38,8 @@ import { memoryNudge } from "../memory/memory.ts";
 import type { loadMcp } from "../native/mcp-config.ts";
 import { loadFreshOutcome, loadTaskDigest, parseReview, reviewPrompt, skillsRefused } from "../review/review.ts";
 import { repeatedError } from "../routing/repeated-error.ts";
+import { makeScheduleRuns } from "../schedule/schedule-runs.ts";
+import { makeScheduleTools } from "../schedule/schedule-tool.ts";
 import { searchSessions } from "../search/search.ts";
 import {
   applyChange,
@@ -88,6 +90,8 @@ export class WorktreesDir extends Context.Service<WorktreesDir, string>()("verda
 
 /** The MCP servers a native session in a folder connects to (`loadMcp` for the profile's home), read when it opens. */
 export class McpConfig extends Context.Service<McpConfig, (folder: string) => ReturnType<typeof loadMcp>>()("verdandi/McpConfig") {}
+/** The profile's workspace, where threads and scheduled jobs that name no project run (DESIGN §13). */
+export class WorkspaceDir extends Context.Service<WorkspaceDir, string>()("verdandi/WorkspaceDir") {}
 
 /** Where the profile keeps attachments' bytes, which harness turns read by path. */
 export class AttachmentsDir extends Context.Service<AttachmentsDir, string>()("verdandi/AttachmentsDir") {}
@@ -153,6 +157,7 @@ export const ReactorLive = Layer.effect(
     const reviews = yield* ReviewSettings;
     const mcpConfig = yield* McpConfig;
     const approvals = yield* ApprovalSettings;
+    const workspace = yield* WorkspaceDir;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
     /** The adapter running each thread's current turn: where answers to its requests go. */
@@ -209,6 +214,7 @@ export const ReactorLive = Layer.effect(
           .pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record the injection flag on turn ${at.turnId}.`, cause)));
         return `${injectionWarning}\n\n${text}`;
       });
+    const runs = makeScheduleRuns(engine.dispatch, sql, workspace);
     /** Verdandi's own tools (DESIGN §9.6), built once: every turn gets this same list, so a session's never changes. */
     const tools = verdandiTools({
       search: (query, allProjects, at) =>
@@ -216,6 +222,7 @@ export const ReactorLive = Layer.effect(
           const [thread] = yield* sql<{ project_id: ProjectId }>`select project_id from threads where id = ${at.threadId}`;
           return yield* searchSessions({ query, ...(!allProjects && thread && { projectId: thread.project_id }) });
         }).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.orDie),
+      schedules: makeScheduleTools(engine.dispatch, sql, workspace),
       block: (reason, at) =>
         engine.dispatch({ type: "task.block", commandId: randomUUID() as CommandId, ...at, reason }).pipe(
           Effect.asVoid,
@@ -752,8 +759,9 @@ export const ReactorLive = Layer.effect(
           turn_number: number;
           review: string | null;
           session_harness: HarnessId | null;
+          scheduled: number;
         }>`
-          select t.route, t.session_id, t.session_harness, p.path, t.worktree, t.review, t.pending_fork, t.memory_snapshot, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
+          select t.route, t.session_id, t.session_harness, p.path, t.worktree, t.review, t.schedule is not null as scheduled, t.pending_fork, t.memory_snapshot, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
             (select total(u.cost_usd) from usage_ledger u join turns n on n.id = u.turn_id
               where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId}) as spent_usd,
             (select count(*) from events e where e.thread_id = t.id and e.type = 'turn.model.called'
@@ -796,7 +804,8 @@ export const ReactorLive = Layer.effect(
         // before the user allows it.
         const aux = thread.review === null ? null : (JSON.parse(thread.review) as AuxStarted);
         const nudge = aux ? undefined : memoryNudge(thread.turn_number, toolSettings.memoryNudgeEvery);
-        const context = yield* contextAllowed(threadId, turnId, adapter, cwd, aux !== null);
+        // Nobody watches a review, a handoff or a scheduled job's run, so a flagged context file stops it without asking.
+        const context = yield* contextAllowed(threadId, turnId, adapter, cwd, aux !== null || thread.scheduled === 1);
         const delegate = aux ? undefined : delegateFor(threadId, turnId, (yield* projectEscalation(thread.path)).delegation);
         if (!context.allowed)
           return yield* fail(
@@ -1089,8 +1098,9 @@ export const ReactorLive = Layer.effect(
     yield* engine.react((stored) => {
       const e = stored.event;
       if (e.type === "turn.started") return startTurn(e.threadId, e.turnId, e.text, e.mode ?? "build", e.attachments ?? []);
-      // In `turns`, so `drain` waits for the review it starts.
+      // In `turns`, so `drain` waits for the review it starts, and the scheduled run.
       if (e.type === "review.requested") return FiberSet.run(turns, startReview(e)).pipe(Effect.asVoid);
+      if (e.type === "schedule.occurrence.claimed") return FiberSet.run(turns, runs.start(e)).pipe(Effect.asVoid);
       if (e.type === "turn.steered") {
         const queue = steerQueues.get(e.turnId);
         return queue ? Queue.offer(queue, e.text).pipe(Effect.asVoid) : Effect.void;
@@ -1143,10 +1153,11 @@ export const ReactorLive = Layer.effect(
         // Forked into `turns`, so the dispatch doesn't wait for the harness to stop or the trajectory to be written, and `drain` does.
         const stop =
           e.status === "interrupted" && turn?.turnId === e.turnId ? FiberSet.run(turns, Fiber.interrupt(turn.fiber)) : Effect.void;
+        // A scheduled run ends once its turn's fiber is done, escalation included: queued after it, it sees whether a turn follows.
         return Effect.andThen(
           replied,
           Effect.andThen(stop, FiberSet.run(turns, Effect.andThen(record(e.threadId, e.turnId), recordOutcomes(e.threadId)))),
-        ).pipe(Effect.asVoid);
+        ).pipe(Effect.andThen(enqueue(e.threadId, runs.settle(e.threadId))), Effect.asVoid);
       }
       // Queued like turns: a turn sent while its worktree is being added waits for it.
       if (e.type === "thread.worktree.requested") return enqueue(e.threadId, createWorktree(e.threadId));
@@ -1178,6 +1189,8 @@ export const ReactorLive = Layer.effect(
     yield* Effect.forEach(unfinished, (t) => enqueue(t.id, t.state === "creating" ? createWorktree(t.id) : dropWorktree(t.id, false)), {
       discard: true,
     });
+    // Scheduled runs a stopped verdandid left unfinished, ended before the scheduler can claim anything new.
+    yield* runs.recover.pipe(Effect.ignoreCause({ log: "Warn", message: "Could not end the scheduled runs a stopped verdandid left." }));
 
     // Turns that completed while nothing was listening: before a crash, in the recovery above, or before trajectories existed.
     yield* FiberSet.run(

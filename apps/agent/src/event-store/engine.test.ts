@@ -21,6 +21,7 @@ import {
   ReactorLive,
   ReviewSettings,
   ToolSettings,
+  WorkspaceDir,
   WorktreesDir,
 } from "./reactor.ts";
 
@@ -504,6 +505,7 @@ describe("engine", () => {
       Layer.provideMerge(Layer.succeed(AttachmentsDir, "unused")),
       Layer.provideMerge(Layer.succeed(McpConfig, () => ({ servers: [], notices: [], trust: [], project: [] }))),
       Layer.provideMerge(Layer.succeed(WorktreesDir, "unused")),
+      Layer.provideMerge(Layer.succeed(WorkspaceDir, "unused")),
       Layer.provideMerge(Layer.succeed(ToolSettings, { approveMemorySaves: false, memoryNudgeEvery: 0 })),
       Layer.provideMerge(
         Layer.succeed(ProjectEscalation, () =>

@@ -25,7 +25,11 @@ const claudeMissing: HarnessAdapter = {
  * `verdandi run --json` sharing the process keeps stdout; `quiet`, for those, keeps only warnings and leaves out the
  * lines about what runs as usual.
  */
-export const serve = async (home: string, argv: readonly string[], options: { readonly port?: number; readonly quiet?: boolean } = {}) => {
+export const serve = async (
+  home: string,
+  argv: readonly string[],
+  options: { readonly port?: number; readonly quiet?: boolean; readonly alwaysOn?: boolean } = {},
+) => {
   mkdirSync(attachmentsDir(home), { recursive: true });
   const file = serverFile(home);
   const running = runningServer(home);
@@ -53,14 +57,16 @@ export const serve = async (home: string, argv: readonly string[], options: { re
     Logger.layer([Logger.withConsoleError(Logger.formatSimple)]),
     Layer.succeed(References.MinimumLogLevel, options.quiet ? "Warn" : "Info"),
   );
-  const { port } = options;
-  const runtime = ManagedRuntime.make(ServerLayer(home, harnesses, port === undefined ? {} : { port }).pipe(Layer.provide(logs)));
+  const { port, alwaysOn = false } = options;
+  const runtime = ManagedRuntime.make(
+    ServerLayer(home, harnesses, { ...(port !== undefined && { port }), alwaysOn }).pipe(Layer.provide(logs)),
+  );
   const info = await runtime.runPromise(
     Effect.gen(function* () {
       return yield* ServerInfo;
     }),
   );
-  const server = { port: info.port, token: info.token, pid: process.pid } satisfies ServerFile;
+  const server = { port: info.port, token: info.token, pid: process.pid, ...(alwaysOn && { alwaysOn }) } satisfies ServerFile;
   writeFileSync(file, JSON.stringify(server), { mode: 0o600 });
   // A process that exits without `stop` (a second Ctrl+C) leaves no server.json behind for clients to try.
   const forget = () => rmSync(file, { force: true });
@@ -88,17 +94,19 @@ export const serverFor = async (home: string, argv: readonly string[]) => {
 };
 
 /**
- * `verdandi start`: runs verdandid in the foreground until Ctrl+C, for the clients that need it to outlive a chat (the
- * web UI, and later the scheduler, gateway and desktop app). It listens only on 127.0.0.1 and serves no web page
- * (ADR 0026): `verdandi web` serves the UI, and its `--host` opens that to other devices.
+ * `verdandi start`: runs verdandid in the foreground until Ctrl+C, for what needs it to outlive a chat: the scheduler,
+ * which only it runs, the web UI, and later the gateway and desktop app. It listens only on 127.0.0.1 and serves no web
+ * page (ADR 0026): `verdandi web` serves the UI, and its `--host` opens that to other devices.
  */
 export const start = async (argv: readonly string[]) => {
   const home = resolveHome(argv);
   if (argv.some((a) => a === "--host" || a.startsWith("--host=")))
     throw new Error("verdandid listens only on 127.0.0.1. To use the web UI from another device, run: verdandi web --host <address>");
   const port = flag(argv, "--port");
-  const { server, status, stop: shutdown } = await serve(home, argv, port === undefined ? {} : { port: Number(port) });
-  console.log(`verdandid listening on 127.0.0.1:${server.port} (home: ${home}). Chat with: verdandi; open the web UI with: verdandi web`);
+  const { server, status, stop: shutdown } = await serve(home, argv, { ...(port !== undefined && { port: Number(port) }), alwaysOn: true });
+  console.log(
+    `verdandid listening on 127.0.0.1:${server.port} (home: ${home}), running scheduled jobs. Chat with: verdandi; open the web UI with: verdandi web; list jobs with: verdandi schedule list`,
+  );
   for (const line of status) console.log(line);
 
   const stop = async () => {

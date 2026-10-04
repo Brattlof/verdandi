@@ -19,9 +19,10 @@ import { AccessMode, Item, Quota, Usage } from "./items.ts";
 import { MemoryView } from "./memory.ts";
 import { HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, CatalogModel, RouteDecision, TaskClass } from "./routing.ts";
+import { JobView, ScheduleRunLabel } from "./schedule.ts";
 import { SessionHit, SessionQuery } from "./search.ts";
 import { SkillHistoryEntry, SkillsView } from "./skills.ts";
-import { SpendCap } from "./spend.ts";
+import { SpendCap, SpendSplit } from "./spend.ts";
 import { RouteCost, TaskRating } from "./task.ts";
 import { TerminalFeed, TerminalId, TerminalSize, TerminalUnavailable, TerminalView } from "./terminal.ts";
 import { TrustedCommands } from "./trust.ts";
@@ -64,6 +65,9 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "CommandsNotTrusted",
     "DeviceExists",
     "DeviceNotFound",
+    "InvalidSchedule",
+    "ScheduleExists",
+    "ScheduleNotFound",
   ]),
   message: Schema.String,
 }) {}
@@ -178,6 +182,8 @@ export const ThreadView = Schema.Struct({
   ),
   /** The git worktree the thread runs in; null when it runs in the project folder itself. */
   worktree: Schema.NullOr(WorktreeView),
+  /** The scheduled job whose run this thread is, which Verdandi sent unattended; absent for every other thread. */
+  schedule: Schema.optionalKey(ScheduleRunLabel),
   busy: Schema.Boolean,
   turns: Schema.Array(TurnView),
   /** Oldest first, so a client can show each between the turns it came between. */
@@ -220,16 +226,14 @@ export const ThreadSummary = Schema.Struct({
    * subscription is what the plan covered, valued at API prices by the harness.
    */
   cost: Schema.Struct({ meteredUsd: Schema.Number, subscriptionUsd: Schema.Number }),
+  /** The scheduled job whose run this thread is; absent for every other thread. */
+  job: Schema.optionalKey(Schema.String),
 });
 export type ThreadSummary = typeof ThreadSummary.Type;
 
 /** A harness's subscription window as it last reported it, at `at` (ISO). */
 export const QuotaView = Schema.Struct({ harness: HarnessId, quota: Quota, at: Schema.String });
 export type QuotaView = typeof QuotaView.Type;
-
-/** Usage in USD kept apart by access mode, never summed: metered was paid, subscription is what the plan covered, at API prices. */
-export const SpendSplit = Schema.Struct({ meteredUsd: Schema.Number, subscriptionUsd: Schema.Number });
-export type SpendSplit = typeof SpendSplit.Type;
 
 /** What `UsageQuery` covers: one project or all, over the last `days` local days including today, or all time. */
 export const UsageFilter = Schema.Struct({
@@ -380,6 +384,8 @@ export class Api extends RpcGroup.make(
   /** The changes written to profile skill `skill`, newest first, each with why reverting it now would be refused, for the Skills panel. */
   Rpc.make("SkillHistoryGet", { payload: { skill: Schema.String }, success: Schema.Array(SkillHistoryEntry) }),
   /** The command lists the user trusted, in thread `threadId`'s project or in all, newest first; each one's thread revokes it. */
+  /** Every scheduled job but removed ones, by name, each with its latest runs (DESIGN §15). */
+  Rpc.make("SchedulesList", { success: Schema.Array(JobView) }),
   Rpc.make("TrustedCommandsList", { payload: { threadId: Schema.optionalKey(ThreadId) }, success: Schema.Array(TrustedCommands) }),
   /**
    * Past sessions' messages containing `query` (DESIGN §14.3, ADR 0006), newest first, at most 50. A query

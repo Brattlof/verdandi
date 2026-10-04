@@ -9,6 +9,16 @@ import { ProviderHealth } from "./provider-health.ts";
 import { Question, Resolution } from "./requests.ts";
 import { Effort, HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
 import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInputs, RouteInputsV1, UntrustedInput } from "./routing.ts";
+import {
+  ScheduleCreated,
+  ScheduleOccurrenceClaimed,
+  ScheduleOccurrenceSkipped,
+  SchedulePaused,
+  ScheduleRemoved,
+  ScheduleResumed,
+  ScheduleRunEnded,
+  ScheduleRunStarted,
+} from "./schedule.ts";
 import { SkillAction, SkillChange, SkillState } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
 import { TaskRating } from "./task.ts";
@@ -881,6 +891,14 @@ export const Event = Schema.Union([
   CommandsTrustRevoked,
   DevicePaired,
   DeviceRevoked,
+  ScheduleCreated,
+  SchedulePaused,
+  ScheduleResumed,
+  ScheduleRemoved,
+  ScheduleOccurrenceClaimed,
+  ScheduleOccurrenceSkipped,
+  ScheduleRunStarted,
+  ScheduleRunEnded,
 ]);
 export type Event = typeof Event.Type;
 
@@ -993,6 +1011,14 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "commands.trust.revoked@1": CommandsTrustRevoked,
   "device.paired@1": DevicePaired,
   "device.revoked@1": DeviceRevoked,
+  "schedule.created@1": ScheduleCreated,
+  "schedule.paused@1": SchedulePaused,
+  "schedule.resumed@1": ScheduleResumed,
+  "schedule.removed@1": ScheduleRemoved,
+  "schedule.occurrence.claimed@1": ScheduleOccurrenceClaimed,
+  "schedule.occurrence.skipped@1": ScheduleOccurrenceSkipped,
+  "schedule.run.started@1": ScheduleRunStarted,
+  "schedule.run.ended@1": ScheduleRunEnded,
 };
 
 /** The row shape an event is stored as. */

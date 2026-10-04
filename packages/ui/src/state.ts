@@ -127,6 +127,15 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "review.started": (thread) => thread,
   "handoff.started": (thread) => thread,
   "compression.started": (thread) => thread,
+  // A job's own events are on its owning thread; a run's thread is labelled with its job.
+  "schedule.run.started": (thread, { jobId, name, scheduledInstant }) => ({ ...thread, schedule: { jobId, name, scheduledInstant } }),
+  "schedule.created": (thread) => thread,
+  "schedule.paused": (thread) => thread,
+  "schedule.resumed": (thread) => thread,
+  "schedule.removed": (thread) => thread,
+  "schedule.occurrence.claimed": (thread) => thread,
+  "schedule.occurrence.skipped": (thread) => thread,
+  "schedule.run.ended": (thread) => thread,
   "plan.requested": (thread, e) =>
     addRequest(
       addItem(thread, e.turnId, {

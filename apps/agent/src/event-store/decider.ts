@@ -18,6 +18,9 @@ import {
   type HarnessId,
   isCorrection,
   isWorthReviewing,
+  type JobId,
+  JobName,
+  type JobSpec,
   type MemoryScope,
   type MemoryView,
   type ProjectId,
@@ -32,6 +35,7 @@ import {
   type SpendCapped,
   spendsMetered,
   type TaskId,
+  type TaskLimits,
   type TaskRating,
   type ThreadId,
   type TrustPurpose,
@@ -40,7 +44,7 @@ import {
   type WorktreeView,
 } from "@verdandi/contracts";
 import { flagged, guardQuestion, injectionQuestion } from "@verdandi/decisions";
-import { Result } from "effect";
+import { Result, Schema } from "effect";
 import { worktreeBranch } from "../checkpoints/refs.ts";
 import { memorySnapshot, overCap, sameAs, scanMemory } from "../memory/memory.ts";
 import {
@@ -58,6 +62,7 @@ import {
   routeOf,
   targetOf,
 } from "../routing/routing.ts";
+import { catchUp, occurrenceAfter, scheduleProblem } from "../schedule/catch-up.ts";
 import { changeProblem, invertChange, nameProblem, pinnedProblem, scanSkill } from "../skills/skills.ts";
 import type { SpendState } from "../spend/spend.ts";
 import { asData } from "../trust/fence.ts";
@@ -80,6 +85,18 @@ export type PendingRequest = {
 
 /** What marks a thread as Verdandi's own auxiliary one: a background review's, a handoff's or a compression's, hidden and unattended. */
 export type AuxStarted = Extract<Event, { type: "review.started" | "handoff.started" | "compression.started" }>;
+
+/** What marks a thread as a scheduled job's run (DESIGN §15): shown like any thread, but unattended. */
+export type ScheduledRun = Extract<Event, { type: "schedule.run.started" }>;
+
+/** A scheduled job as the decider reads it from `schedules`; removed jobs aren't loaded. */
+export type JobRow = {
+  readonly jobId: JobId;
+  readonly ownerThreadId: ThreadId;
+  readonly job: JobSpec;
+  readonly state: "active" | "paused" | "done";
+  readonly nextRunAt: string | null;
+};
 
 /** What the decider needs to know about the command's thread; `undefined` when it doesn't exist. */
 export type DeciderState = {
@@ -122,6 +139,8 @@ export type DeciderState = {
          * for every other thread.
          */
         readonly aux?: AuxStarted;
+        /** The job occurrence this thread runs, when it is a scheduled run (DESIGN §15); absent for every other thread. */
+        readonly scheduled?: ScheduledRun;
         /** How many escalation steps the current task has taken (DESIGN §8.7). */
         readonly taskEscalations: number;
         /** The running turn moved to a fallback once already (DESIGN §9.5). */
@@ -181,6 +200,16 @@ export type DeciderState = {
    * turn starts on a fallback. Loaded for an unpinned thread's continuing task.
    */
   readonly stickyFailure?: ProviderHealth;
+  /**
+   * Loaded for `schedule.*` commands: the time now, the job the command names (null when there's none, or it was
+   * removed), whether a job already has a `schedule.create`'s name, and the status of the occurrence a run report names.
+   */
+  readonly schedule?: {
+    readonly now: Date;
+    readonly job: JobRow | null;
+    readonly nameTaken: boolean;
+    readonly runStatus: string | null;
+  };
 };
 
 type Decision = Result.Result<Event[], CommandRejected>;
@@ -377,19 +406,24 @@ const auxKinds = {
   "compression.started": { name: "compression summary", skipped: "CompressionSkipped", reply: "reply with the summary only" },
 } as const satisfies Record<AuxStarted["type"], { name: string; skipped: CommandRejected["reason"]; reply: string }>;
 
+/** What a thread nobody watches is called, and what a plan it proposes is told instead; undefined for one someone does. */
+const unattendedKind = (thread: DeciderState["thread"]) =>
+  thread?.aux
+    ? auxKinds[thread.aux.type]
+    : thread?.scheduled && { name: "scheduled job", reply: "nobody can approve a plan, so give the plan as your answer" };
+
 /**
- * A request raised in an auxiliary task's turn, which runs with nobody to answer (DESIGN §14.5): recorded, then
- * denied at once, so the task goes on without it.
+ * A request raised in a turn nobody watches, an auxiliary task's or a scheduled job's (DESIGN §14.5, §15): recorded,
+ * then denied at once, so the task goes on without it.
  */
 const unattended = (
-  aux: AuxStarted,
+  { name, reply }: { readonly name: string; readonly reply: string },
   threadId: ThreadId,
   turnId: TurnId,
   request: Event & { readonly requestId: string },
   plan: boolean,
-): Decision => {
-  const { name, reply } = auxKinds[aux.type];
-  return accept(request, {
+): Decision =>
+  accept(request, {
     type: "approval.resolved",
     v: 1,
     threadId,
@@ -398,7 +432,23 @@ const unattended = (
     resolution: plan ? { decision: "deny", feedback: `This is a ${name}: ${reply}.` } : { decision: "deny" },
     reason: `A ${name} runs unattended, so nobody can answer it.`,
   });
+
+/** The tighter of each of two sets of task limits (DESIGN §8.9): a scheduled job's narrow its class's. */
+const tighter = (a: TaskLimits | undefined, b: TaskLimits | undefined): TaskLimits | undefined => {
+  if (!a || !b) return a ?? b;
+  const least = (x: number | undefined, y: number | undefined) => (x === undefined ? y : y === undefined ? x : Math.min(x, y));
+  const maxCost = least(a.maxCost, b.maxCost);
+  const maxTurns = least(a.maxTurns, b.maxTurns);
+  return { ...(maxCost !== undefined && { maxCost }), ...(maxTurns !== undefined && { maxTurns }) };
 };
+
+/** The job a `schedule.*` command names, when it exists and thread `threadId` owns it: its events go on that thread's stream. */
+const ownedJob = (state: DeciderState, threadId: ThreadId) => {
+  const job = state.schedule?.job;
+  return job && job.ownerThreadId === threadId ? job : undefined;
+};
+const noJob = (jobId: string) =>
+  reject("ScheduleNotFound", `There's no scheduled job ${jobId} on this thread: it was removed. verdandi schedule list shows the jobs.`);
 
 /** Why the thread's worktree can't take a turn now, naming the fix; undefined when it can (or there is none). */
 const worktreeProblem = (threadId: ThreadId, worktree: WorktreeView | null): string | undefined => {
@@ -483,12 +533,15 @@ const fromHarness = (state: DeciderState, threadId: ThreadId, turnId: TurnId, ev
       return cleared ? accept({ type: "provider.recovered", v: 1, threadId, turnId, provider, model }) : accept();
     }
     case "approval.requested":
-    case "user-input.requested":
-      return state.thread?.aux
-        ? unattended(state.thread.aux, threadId, turnId, { ...event, v: 1, threadId, turnId }, false)
+    case "user-input.requested": {
+      const nobody = unattendedKind(state.thread);
+      return nobody
+        ? unattended(nobody, threadId, turnId, { ...event, v: 1, threadId, turnId }, false)
         : accept({ ...event, v: 1, threadId, turnId });
+    }
     case "plan.requested": {
-      if (state.thread?.aux) return unattended(state.thread.aux, threadId, turnId, { ...event, v: 1, threadId, turnId }, true);
+      const nobody = unattendedKind(state.thread);
+      if (nobody) return unattended(nobody, threadId, turnId, { ...event, v: 1, threadId, turnId }, true);
       // A routed task started in plan mode moves its build to the class's own route when the plan is approved.
       const { thread, routing } = state;
       const cap = reachedCap(state.spend);
@@ -643,7 +696,10 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     const problem = aux && auxProblem(state, aux, decided.success.target);
     if (problem && auxKind) return reject(auxKind.skipped, `Verdandi skipped the ${auxKind.name}: ${problem}.`);
     const inputs = { ...routeInputs(state.thread, routing), ...(at && { at: at.name }) };
-    return accept(...recorded, { ...task, route: routeOf(decided.success), decision: decided.success, inputs }, ...turn);
+    // A scheduled job's limits narrow the task's (DESIGN §15: a hard budget for unattended runs).
+    const limits = tighter(decided.success.limits, state.thread.scheduled?.limits);
+    const decision = limits ? { ...decided.success, limits } : decided.success;
+    return accept(...recorded, { ...task, route: routeOf(decision), decision, inputs }, ...turn);
   },
   "thread.route.set": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
@@ -889,22 +945,34 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     if (problem) return reject("InvalidSkill", problem);
     const refused = c.change.after === null ? undefined : scanSkill(c.change.after, state.injection);
     if (refused) return reject("SkillRejected", `Not proposed. ${refused}`);
-    return accept({ type: "skill.proposed", v: 1, threadId: c.threadId, turnId: c.turnId, requestId: c.commandId, change: c.change });
+    const proposed = {
+      type: "skill.proposed",
+      v: 1,
+      threadId: c.threadId,
+      turnId: c.turnId,
+      requestId: c.commandId,
+      change: c.change,
+    } as const;
+    const nobody = unattendedKind(state.thread);
+    return nobody ? unattended(nobody, c.threadId, c.turnId, proposed, false) : accept(proposed);
   },
   // The reactor asks before it runs a command list the user hasn't trusted in the project; a turn that ended asks nothing.
-  "commands.trust.request": (state, c) =>
-    state.thread?.runningTurnId === c.turnId
-      ? accept({
-          type: "commands.trust.requested",
-          v: 1,
-          threadId: c.threadId,
-          turnId: c.turnId,
-          requestId: c.commandId,
-          purpose: c.purpose,
-          commands: c.commands,
-          hash: commandsHash(c.commands),
-        })
-      : reject("TurnNotRunning", `Turn ${c.turnId} isn't running, so nothing waits to run the project's commands.`),
+  "commands.trust.request": (state, c) => {
+    if (state.thread?.runningTurnId !== c.turnId)
+      return reject("TurnNotRunning", `Turn ${c.turnId} isn't running, so nothing waits to run the project's commands.`);
+    const requested = {
+      type: "commands.trust.requested",
+      v: 1,
+      threadId: c.threadId,
+      turnId: c.turnId,
+      requestId: c.commandId,
+      purpose: c.purpose,
+      commands: c.commands,
+      hash: commandsHash(c.commands),
+    } as const;
+    const nobody = unattendedKind(state.thread);
+    return nobody ? unattended(nobody, c.threadId, c.turnId, requested, false) : accept(requested);
+  },
   "commands.trust.revoke": (state, c) => {
     if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
     if (!state.thread.trustedCommands.includes(c.hash))
@@ -1313,6 +1381,130 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
           ...(c.withheld && { withheld: true }),
         })
       : reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`),
+  // A job's events go on its owning thread's stream (ADR 0032); the engine loads the job and the time.
+  "schedule.create": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist.`);
+    if (state.thread.scheduled)
+      return reject(
+        "InvalidSchedule",
+        "A scheduled job's run can't create jobs. Say in your reply what you'd schedule, and the user can add it with verdandi schedule add.",
+      );
+    const { schedule } = state;
+    if (!schedule || schedule.job) return reject("ScheduleExists", `Job ${c.jobId} exists already.`);
+    const { name } = c.job;
+    if (!Schema.is(JobName)(name))
+      return reject("InvalidSchedule", `"${name}" can't name a job: use letters, digits, - and _, up to 64 of them, e.g. nightly-deps.`);
+    if (schedule.nameTaken)
+      return reject(
+        "ScheduleExists",
+        `A job named ${name} exists already. Pick another name, or remove it first: verdandi schedule remove ${name}`,
+      );
+    if (c.job.project === null && c.job.worktree)
+      return reject("InvalidSchedule", "A job in the workspace never runs in a worktree. Leave worktree off, or name a project.");
+    const problem = scheduleProblem(c.job.schedule, schedule.now);
+    if (problem) return reject("InvalidSchedule", problem);
+    const first = c.job.schedule.kind === "once" ? new Date(c.job.schedule.at) : occurrenceAfter(c.job.schedule, schedule.now);
+    return accept({
+      type: "schedule.created",
+      v: 1,
+      threadId: c.threadId,
+      jobId: c.jobId,
+      job: c.job,
+      nextRunAt: first?.toISOString() ?? null,
+    });
+  },
+  "schedule.pause": (state, c) => {
+    const job = ownedJob(state, c.threadId);
+    if (!job) return noJob(c.jobId);
+    return job.state === "active"
+      ? accept({ type: "schedule.paused", v: 1, threadId: c.threadId, jobId: c.jobId, name: job.job.name })
+      : accept();
+  },
+  // From now on: what it missed while paused doesn't run. A one-off keeps its time, so one long past is retired when it fires.
+  "schedule.resume": (state, c) => {
+    const job = ownedJob(state, c.threadId);
+    if (!job || !state.schedule) return noJob(c.jobId);
+    if (job.state !== "paused") return accept();
+    const { schedule } = job.job;
+    const next =
+      schedule.kind === "once"
+        ? new Date(schedule.at).toISOString()
+        : (occurrenceAfter(schedule, state.schedule.now)?.toISOString() ?? null);
+    return accept({ type: "schedule.resumed", v: 1, threadId: c.threadId, jobId: c.jobId, name: job.job.name, nextRunAt: next });
+  },
+  "schedule.remove": (state, c) => {
+    const job = ownedJob(state, c.threadId);
+    return job ? accept({ type: "schedule.removed", v: 1, threadId: c.threadId, jobId: c.jobId, name: job.job.name }) : noJob(c.jobId);
+  },
+  // At most once per occurrence: the claim moves the next run on in the same commit, so firing it again decides to [].
+  "schedule.fire": (state, c) => {
+    const job = ownedJob(state, c.threadId);
+    const now = state.schedule?.now;
+    if (!job || !now || job.state !== "active" || job.nextRunAt !== c.scheduledInstant || new Date(job.nextRunAt) > now) return accept();
+    const { claim, skipped, next } = catchUp(job.job.schedule, job.job.missed, new Date(job.nextRunAt), now);
+    const at = { v: 1, threadId: c.threadId, jobId: c.jobId, name: job.job.name, nextRunAt: next?.toISOString() ?? null } as const;
+    const skip =
+      skipped &&
+      ({
+        type: "schedule.occurrence.skipped",
+        ...at,
+        from: skipped.from.toISOString(),
+        until: skipped.until.toISOString(),
+        reason: skipped.reason,
+      } as const);
+    const claimed =
+      claim &&
+      ({
+        type: "schedule.occurrence.claimed",
+        ...at,
+        scheduledInstant: claim.toISOString(),
+        runThreadId: c.runThreadId,
+      } as const);
+    // The claim last: its reaction starts the run.
+    return accept(...(skip ? [skip] : []), ...(claimed ? [claimed] : []));
+  },
+  "schedule.run.start": (state, c) =>
+    state.thread
+      ? accept()
+      : accept(
+          {
+            type: "thread.created",
+            v: 1,
+            threadId: c.threadId,
+            projectId: projectIdFor(c.projectPath),
+            projectPath: c.projectPath,
+            route: c.route ?? defaultRoute,
+            pinned: c.route !== undefined,
+          },
+          {
+            type: "schedule.run.started",
+            v: 1,
+            threadId: c.threadId,
+            jobId: c.jobId,
+            name: c.name,
+            ownerThreadId: c.ownerThreadId,
+            scheduledInstant: c.scheduledInstant,
+            ...(c.limits && { limits: c.limits }),
+          },
+          ...(c.worktree
+            ? [{ type: "thread.worktree.requested", v: 1, threadId: c.threadId, branch: worktreeBranch(c.threadId) } as const]
+            : []),
+        ),
+  "schedule.run.report": (state, c) => {
+    const job = ownedJob(state, c.threadId);
+    if (!job || state.schedule?.runStatus !== "running") return accept();
+    const { scheduledInstant, status, error } = c;
+    return accept({
+      type: "schedule.run.ended",
+      v: 1,
+      threadId: c.threadId,
+      jobId: c.jobId,
+      name: job.job.name,
+      scheduledInstant,
+      status,
+      ...(error !== undefined && { error }),
+    });
+  },
   "turn.recover": (state, c) =>
     state.thread?.runningTurnId === c.turnId
       ? accept(...denyPending(state, c.threadId, c.turnId, "verdandid stopped while this was waiting for an answer."), {

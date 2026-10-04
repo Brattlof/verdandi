@@ -461,6 +461,37 @@ const providerHealth = Effect.gen(function* () {
   )`;
 });
 
+/**
+ * Scheduled jobs and their occurrences (DESIGN §10, §15), projected from `schedule.*` events. An occurrence is claimed
+ * at most once: `(job_id, scheduled_instant)` is the key. A run's thread is marked by its `schedule.run.started` in
+ * `threads.schedule`.
+ */
+const schedules = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table schedules (
+    id text primary key,
+    name text not null,
+    owner_thread_id text not null,
+    job text not null,
+    state text not null,
+    next_run_at text,
+    created_at text not null
+  )`;
+  yield* sql`create unique index schedules_name on schedules (name) where state != 'removed'`;
+  yield* sql`create index schedules_due on schedules (next_run_at) where state = 'active'`;
+  yield* sql`create table schedule_runs (
+    job_id text not null,
+    scheduled_instant text not null,
+    status text not null,
+    thread_id text,
+    at text not null,
+    ended_at text,
+    note text,
+    primary key (job_id, scheduled_instant)
+  )`;
+  yield* sql`alter table threads add column schedule text`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -492,4 +523,5 @@ export const migrations = {
   "28_devices": devices,
   "29_session_harness": sessionHarness,
   "30_provider_health": providerHealth,
+  "31_schedules": schedules,
 };

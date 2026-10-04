@@ -71,7 +71,7 @@ Today the only principal is the owner: the OS user, who holds the profile's toke
 
 - **The owner:** the OS user, holding the profile's token, and each device they paired (ADR 0028).
 - **Allowlisted channel senders:** they can start turns in their bound thread and never run owner commands (#212).
-- **Scheduled jobs:** they run as the owner, under a restricted profile and a budget.
+- **Scheduled jobs** (ADR 0032, built): they run as the owner who created them, unattended: every request a run raises, a trust request included, is denied at once, so a run gets nothing it would have to ask for. They run under the job's limits and the spend caps, and a run can't create jobs.
 - **The agent:** never a principal. It acts for one, inside that principal's approvals.
 
 Tool outputs, gateway messages, memory entries, skill files and web pages stay data, never instructions (AGENTS.md's invariants).
