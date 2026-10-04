@@ -136,6 +136,9 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "schedule.occurrence.claimed": (thread) => thread,
   "schedule.occurrence.skipped": (thread) => thread,
   "schedule.run.ended": (thread) => thread,
+  "schedule.occurrence.held": (thread) => thread,
+  "schedule.occurrence.released": (thread) => thread,
+  "schedule.disabled": (thread) => thread, // its notice comes as a turn.item.added
   "plan.requested": (thread, e) =>
     addRequest(
       addItem(thread, e.turnId, {

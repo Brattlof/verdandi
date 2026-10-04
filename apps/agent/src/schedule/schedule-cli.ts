@@ -12,8 +12,31 @@ import { connect } from "../rpc/client.ts";
 import { listOsJobs, type OsJobListing, osRegistrar, type Registrar, removeOsJob } from "./schedule.ts";
 import { describeWhen, localZone, parseWhen } from "./when.ts";
 
-const valueFlags = ["--home", "--cron", "--tz", "--at", "--in", "--project", "--route", "--mode", "--max-cost", "--max-turns"];
-const switches = ["--here", "--workspace", "--worktree", "--no-worktree", "--skip-missed", "--os", "--dev-fake-harness"];
+const valueFlags = [
+  "--home",
+  "--cron",
+  "--tz",
+  "--at",
+  "--in",
+  "--project",
+  "--route",
+  "--mode",
+  "--max-cost",
+  "--max-turns",
+  "--script",
+  "--watchdog",
+];
+const switches = [
+  "--here",
+  "--workspace",
+  "--worktree",
+  "--no-worktree",
+  "--skip-missed",
+  "--script-only",
+  "--allow-metered",
+  "--os",
+  "--dev-fake-harness",
+];
 
 const usage =
   'Usage: verdandi schedule add <name> "<task>" (--cron <expression> [--tz <zone>] | --at <time> | --in <duration>) [flags] | list | runs <name> | pause <name> | resume <name> | remove <name> [--os]';
@@ -57,6 +80,10 @@ export const parseJob = (home: string, argv: readonly string[], cwd: string, now
   const route = parseBatchRoute(flag(argv, "--route") ?? "auto");
   const maxCost = positive(argv, "--max-cost", false);
   const maxTurns = positive(argv, "--max-turns", true);
+  const watchdogMinutes = positive(argv, "--watchdog", false);
+  const script = flag(argv, "--script");
+  if (argv.includes("--script-only") && script === undefined)
+    throw new Error("--script-only runs the job's script alone: name it with --script.");
   const project = flag(argv, "--project");
   const named = [project !== undefined && "--project", argv.includes("--here") && "--here", argv.includes("--workspace") && "--workspace"];
   if (named.filter(Boolean).length > 1) throw new Error(`Pick one of ${named.filter(Boolean).join(" and ")}.`);
@@ -80,6 +107,10 @@ export const parseJob = (home: string, argv: readonly string[], cwd: string, now
       ...((maxCost || maxTurns) && { limits: { ...(maxCost && { maxCost }), ...(maxTurns && { maxTurns }) } }),
       worktree: repo && !argv.includes("--no-worktree"),
       missed: argv.includes("--skip-missed") ? "skip" : "run",
+      ...(script !== undefined && { script }),
+      ...(argv.includes("--script-only") && { agent: false }),
+      ...(argv.includes("--allow-metered") && { allowMetered: true }),
+      ...(watchdogMinutes && { watchdogMinutes }),
     },
   };
 };
@@ -91,17 +122,19 @@ const howLine = (job: JobSpec) => {
     Boolean,
   );
   const how = [
+    job.script && (job.agent === false ? `only its script ${job.script}` : `after its script ${job.script}`),
     job.worktree && "in a worktree",
     job.mode !== "build" && `in ${job.mode} mode`,
     route,
     limits.length && `at most ${limits.join(" and ")}`,
+    job.allowMetered && "may spend metered dollars",
   ];
   return `"${job.text}" in ${job.project ?? "the workspace"}, ${how.filter(Boolean).join(", ")}${job.missed === "skip" ? "; skips missed runs" : ""}`;
 };
 
 /** One occurrence: when it was due, how it went, and its thread or why it was skipped. */
 const runLine = (r: JobView["runs"][number]) =>
-  `${localMinute(r.scheduledInstant)}  ${r.status}${r.threadId ? `  verdandi chat --thread ${r.threadId}` : ""}${r.note ? `  (${r.note})` : ""}`;
+  `${localMinute(r.scheduledInstant)}  ${r.status}${r.threadId ? `  verdandi chat --thread ${r.threadId}` : ""}${r.note ? `  (${r.note.trimEnd()})` : ""}`;
 
 /** `schedule list`'s text: each job, when it runs next, and how its last run went. */
 export const jobsText = (jobs: readonly JobView[]) =>
@@ -109,7 +142,12 @@ export const jobsText = (jobs: readonly JobView[]) =>
     ? 'No scheduled jobs. Add one with: verdandi schedule add <name> "<task>" --cron "<expression>"\n'
     : jobs
         .map((j) => {
-          const state = j.state === "active" && j.nextRunAt ? `next ${localMinute(j.nextRunAt)}` : j.state;
+          const state =
+            j.state === "active" && j.nextRunAt
+              ? `next ${localMinute(j.nextRunAt)}`
+              : j.state === "disabled"
+                ? `disabled: ${j.reason ?? "it kept failing"}; verdandi schedule resume ${j.job.name} enables it`
+                : j.state;
           const last = j.runs[0];
           return `${j.job.name}  ${describeWhen(j.job.schedule)}  ${state}\n  ${howLine(j.job)}\n  ${last ? `last: ${runLine(last)}` : "hasn't run yet"}\n`;
         })
@@ -205,7 +243,7 @@ export const schedule = async (argv: readonly string[], registrar: Registrar = o
       yield* client.CommandDispatch({ type, commandId: crypto.randomUUID() as CommandId, threadId: job.ownerThreadId, jobId: job.jobId });
       return {
         "schedule.pause": `Paused ${job.job.name}: it doesn't run until verdandi schedule resume ${job.job.name}.\n`,
-        "schedule.resume": `Resumed ${job.job.name}: it runs from its next time on; what it missed while paused doesn't run.\n`,
+        "schedule.resume": `Resumed ${job.job.name}: it runs from its next time on; what it missed meanwhile doesn't run.\n`,
         "schedule.remove": `Removed ${job.job.name}; its runs' threads stay.\n`,
       }[type];
     }).pipe(Effect.catchTag("CommandRejected", (e) => said(`${e.message}\n`)));

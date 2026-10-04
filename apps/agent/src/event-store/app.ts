@@ -9,6 +9,7 @@ import { loadMemorySettings } from "../memory/memory-config.ts";
 import { loadMcp } from "../native/mcp-config.ts";
 import { loadReviewSettings } from "../review/review-config.ts";
 import { catalogFor, routingFor, rulesDecide } from "../routing/routing.ts";
+import { scriptsDir } from "../schedule/schedule-script.ts";
 import { loadSkillFolders } from "../skills/skills-config.ts";
 import { loadSpendCaps } from "../spend/spend-caps.ts";
 import { SqlLive } from "./db.ts";
@@ -22,6 +23,7 @@ import {
   ProjectEscalation,
   ReactorLive,
   ReviewSettings,
+  ScriptsDir,
   ToolSettings,
   WorkspaceDir,
   WorktreesDir,
@@ -92,6 +94,7 @@ export const AppLayer = (
     Layer.provideMerge(Layer.succeed(McpConfig, (folder: string) => loadMcp(home, folder))),
     Layer.provideMerge(Layer.succeed(WorktreesDir, join(home, "worktrees"))),
     Layer.provideMerge(Layer.succeed(WorkspaceDir, workspaceDir(home))),
+    Layer.provideMerge(Layer.succeed(ScriptsDir, scriptsDir(home))),
     Layer.provideMerge(Layer.sync(ProfileSkills, () => loadSkillFolders(home))),
     Layer.provideMerge(Layer.sync(ReviewSettings, () => loadReviewSettings(home))),
     Layer.provideMerge(Layer.sync(ApprovalSettings, () => loadApprovalSettings(home))),

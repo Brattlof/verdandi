@@ -13,6 +13,7 @@ import {
   type DecisionQuestion,
   defaultRoute,
   type Event,
+  failuresToDisable,
   formatUsd,
   type HarnessEvent,
   type HarnessId,
@@ -64,7 +65,7 @@ import {
 } from "../routing/routing.ts";
 import { catchUp, occurrenceAfter, scheduleProblem } from "../schedule/catch-up.ts";
 import { changeProblem, invertChange, nameProblem, pinnedProblem, scanSkill } from "../skills/skills.ts";
-import type { SpendState } from "../spend/spend.ts";
+import type { SpendState, UsedUpWindow } from "../spend/spend.ts";
 import { asData } from "../trust/fence.ts";
 import { commandsHash } from "../trust/trust.ts";
 import type { StoredRevert } from "./projector.ts";
@@ -94,8 +95,10 @@ export type JobRow = {
   readonly jobId: JobId;
   readonly ownerThreadId: ThreadId;
   readonly job: JobSpec;
-  readonly state: "active" | "paused" | "done";
+  readonly state: "active" | "paused" | "done" | "disabled";
   readonly nextRunAt: string | null;
+  /** Its failed runs in a row since it last succeeded or was resumed. */
+  readonly failures: number;
 };
 
 /** What the decider needs to know about the command's thread; `undefined` when it doesn't exist. */
@@ -210,6 +213,8 @@ export type DeciderState = {
     readonly nameTaken: boolean;
     readonly runStatus: string | null;
   };
+  /** Subscription windows used up now, loaded for a scheduled run's `turn.send`: it waits for one instead of spending metered dollars. */
+  readonly usedUp?: readonly UsedUpWindow[];
 };
 
 type Decision = Result.Result<Event[], CommandRejected>;
@@ -447,6 +452,42 @@ const ownedJob = (state: DeciderState, threadId: ThreadId) => {
   const job = state.schedule?.job;
   return job && job.ownerThreadId === threadId ? job : undefined;
 };
+/**
+ * What a scheduled run's turn does instead of starting on `target` (undefined: the router found none), when its job
+ * may not spend metered dollars or its target's window is used up (DESIGN §15): wait for the window's reset
+ * (`schedule.occurrence.held`), or be refused, naming the fix. Undefined when it starts.
+ */
+const scheduledSpend = (
+  state: DeciderState,
+  run: ScheduledRun,
+  target: RouteTarget | { readonly noRoute: string },
+  paying: readonly HarnessId[],
+): Decision | undefined => {
+  const windows = state.usedUp ?? [];
+  const routed = "harness" in target ? target : undefined;
+  const window = routed ? windows.find((w) => w.harness === routed.harness && !(run.allowMetered && w.overage)) : windows[0];
+  if (window && (routed || !run.allowMetered)) {
+    const why = window.overage ? "the job may not spend metered dollars on extra usage" : "turns there fail until it resets";
+    return accept({
+      type: "schedule.occurrence.held",
+      v: 1,
+      threadId: run.threadId,
+      jobId: run.jobId,
+      scheduledInstant: run.scheduledInstant,
+      until: window.until,
+      reason: `Held until ${window.until}: the ${window.harness} subscription window is used up, and ${why}.`,
+    });
+  }
+  if (run.allowMetered || (routed && !spendsMetered(routed, paying))) return undefined;
+  const fix = "Pin the job to a subscription or local route, or let it spend with verdandi schedule add --allow-metered.";
+  return reject(
+    "MeteredNotAllowed",
+    routed
+      ? `The job's route, ${routed.model} on ${routed.harness}, spends metered dollars, and the job may not. ${fix}`
+      : `${"noRoute" in target ? target.noRoute : ""} The job may not spend metered dollars. ${fix}`,
+  );
+};
+
 const noJob = (jobId: string) =>
   reject("ScheduleNotFound", `There's no scheduled job ${jobId} on this thread: it was removed. verdandi schedule list shows the jobs.`);
 
@@ -682,16 +723,26 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     }
     const task = { type: "task.started", v: 3, threadId: c.threadId, taskId: c.turnId as string as TaskId } as const;
     if (!state.routing) return onRoute ?? accept(...recorded, { ...task, route: state.thread.route }, ...turn);
-    const routing = cap ? { ...state.routing, capped: cap } : state.routing;
+    // A scheduled job that may not spend metered dollars routes around them, as a reached cap does (DESIGN §15).
+    const run = state.thread.scheduled;
+    const paying = state.spend && Result.isSuccess(state.spend) ? state.spend.success.paying : [];
+    const guard = !cap && run && !run.allowMetered ? { cap: "scheduled job's $0 allowance", paying } : cap;
+    const routing = guard ? { ...state.routing, capped: guard } : state.routing;
     const images = c.attachments?.filter((a) => a.kind === "image").length ?? 0;
     const answers = aux ? [auxClassification[aux.type]] : (state.decisions?.answers ?? []);
     const decided = decideRoute(state.thread, routing, text, c.mode, answers, images, at?.name);
     if (Result.isFailure(decided)) {
-      // Every target left would spend metered dollars: the cap is what stops the turn.
-      const stop = decided.failure.reason === "NoRoute" && cap ? capped(state.spend, undefined) : undefined;
+      // Every target left would spend metered dollars: the cap, or the job's allowance, is what stops the turn.
+      const metered = decided.failure.reason === "NoRoute";
+      const stop =
+        metered && cap
+          ? capped(state.spend, undefined)
+          : metered && run && !run.allowMetered
+            ? scheduledSpend(state, run, { noRoute: decided.failure.message }, paying)
+            : undefined;
       return stop ?? reject(decided.failure.reason, decided.failure.message);
     }
-    const stop = capped(state.spend, decided.success.target);
+    const stop = capped(state.spend, decided.success.target) ?? (run && scheduledSpend(state, run, decided.success.target, paying));
     if (stop) return stop;
     const problem = aux && auxProblem(state, aux, decided.success.target);
     if (problem && auxKind) return reject(auxKind.skipped, `Verdandi skipped the ${auxKind.name}: ${problem}.`);
@@ -1401,6 +1452,15 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       );
     if (c.job.project === null && c.job.worktree)
       return reject("InvalidSchedule", "A job in the workspace never runs in a worktree. Leave worktree off, or name a project.");
+    // Only a file in the profile's scripts folder runs: no path, so nothing outside it.
+    const { script } = c.job;
+    if (script !== undefined && (!/^[\w][\w.-]*$/.test(script) || script.includes("..")))
+      return reject(
+        "InvalidSchedule",
+        `"${script}" can't name a script: give the name of a file in the profile's scripts folder, e.g. check-inbox.ts.`,
+      );
+    if (c.job.agent === false && script === undefined)
+      return reject("InvalidSchedule", "A job that runs only its script needs one. Name it with --script.");
     const problem = scheduleProblem(c.job.schedule, schedule.now);
     if (problem) return reject("InvalidSchedule", problem);
     const first = c.job.schedule.kind === "once" ? new Date(c.job.schedule.at) : occurrenceAfter(c.job.schedule, schedule.now);
@@ -1420,11 +1480,12 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       ? accept({ type: "schedule.paused", v: 1, threadId: c.threadId, jobId: c.jobId, name: job.job.name })
       : accept();
   },
-  // From now on: what it missed while paused doesn't run. A one-off keeps its time, so one long past is retired when it fires.
+  // From now on: what it missed while paused doesn't run. A one-off keeps its time, so one long past is retired when it
+  // fires. A disabled job is enabled again, its failures forgotten.
   "schedule.resume": (state, c) => {
     const job = ownedJob(state, c.threadId);
     if (!job || !state.schedule) return noJob(c.jobId);
-    if (job.state !== "paused") return accept();
+    if (job.state !== "paused" && job.state !== "disabled") return accept();
     const { schedule } = job.job;
     const next =
       schedule.kind === "once"
@@ -1485,24 +1546,51 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
             ownerThreadId: c.ownerThreadId,
             scheduledInstant: c.scheduledInstant,
             ...(c.limits && { limits: c.limits }),
+            ...(c.allowMetered && { allowMetered: true }),
           },
           ...(c.worktree
             ? [{ type: "thread.worktree.requested", v: 1, threadId: c.threadId, branch: worktreeBranch(c.threadId) } as const]
             : []),
         ),
+  // The 3rd failed run in a row disables the job, with a notice on its owning thread's latest turn (DESIGN §15).
   "schedule.run.report": (state, c) => {
     const job = ownedJob(state, c.threadId);
     if (!job || state.schedule?.runStatus !== "running") return accept();
-    const { scheduledInstant, status, error } = c;
-    return accept({
+    const { scheduledInstant, status, error, output } = c;
+    const { name } = job.job;
+    const ended: Event = {
       type: "schedule.run.ended",
+      v: 1,
+      threadId: c.threadId,
+      jobId: c.jobId,
+      name,
+      scheduledInstant,
+      status,
+      ...(error !== undefined && { error }),
+      ...(output !== undefined && { output }),
+    };
+    const failed = status === "error" || status === "blocked_config";
+    if (!failed || job.state !== "active" || job.failures + 1 < failuresToDisable) return accept(ended);
+    const reason = `its last ${failuresToDisable} runs failed, the latest with ${firstLine(error ?? status)}`;
+    const turnId = state.thread?.lastTurnId;
+    const text = `Verdandi disabled the scheduled job ${name}: ${reason}. Fix the cause, then resume it with verdandi schedule resume ${name}.`;
+    return accept(
+      ended,
+      { type: "schedule.disabled", v: 1, threadId: c.threadId, jobId: c.jobId, name, reason },
+      ...(turnId ? [{ type: "turn.item.added", v: 1, threadId: c.threadId, turnId, item: { kind: "notice", text } } as const] : []),
+    );
+  },
+  "schedule.release": (state, c) => {
+    const job = ownedJob(state, c.threadId);
+    if (!job || state.schedule?.runStatus !== "held") return accept();
+    const { scheduledInstant } = c;
+    return accept({
+      type: "schedule.occurrence.released",
       v: 1,
       threadId: c.threadId,
       jobId: c.jobId,
       name: job.job.name,
       scheduledInstant,
-      status,
-      ...(error !== undefined && { error }),
     });
   },
   "turn.recover": (state, c) =>

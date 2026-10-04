@@ -26,7 +26,7 @@ import { loadHealth, stickyFailure } from "../routing/provider-health.ts";
 import { type RoutingContext, rulesDecide, taskQuestions } from "../routing/routing.ts";
 import { loadRoutingMemory } from "../routing/routing-memory.ts";
 import { loadScheduleState } from "../schedule/schedule-store.ts";
-import { loadShortQuota, loadSpendState } from "../spend/spend.ts";
+import { loadShortQuota, loadSpendState, loadUsedUp } from "../spend/spend.ts";
 import type { SpendCaps } from "../spend/spend-caps.ts";
 import { decide, handedText } from "./decider.ts";
 import { loadDeciderState, loadMemory, loadProjects, loadQuotas, loadThreadSummaries, loadThreadView, project } from "./projector.ts";
@@ -281,6 +281,8 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 : undefined;
             // A background review stays off a harness whose subscription window is short (DESIGN §14.5).
             const shortQuota = send && current?.aux ? yield* loadShortQuota(new Date()) : undefined;
+            // A scheduled run's turn waits for a used-up subscription window instead of spending metered dollars (DESIGN §15).
+            const usedUp = send && current?.scheduled ? yield* loadUsedUp(new Date()) : undefined;
             // A scheduled job's commands read the job, and decide at the time now (DESIGN §15).
             const schedule =
               command.type.startsWith("schedule.") && "jobId" in command ? yield* loadScheduleState(command, clock()) : undefined;
@@ -299,6 +301,7 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ...(health && { health }),
                 ...(sticky && { stickyFailure: sticky }),
                 ...(schedule && { schedule }),
+                ...(usedUp && { usedUp }),
               },
               command,
             );

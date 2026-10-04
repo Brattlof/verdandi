@@ -24,7 +24,7 @@ export type VerifierRun = typeof VerifierRun.Type;
  * verifier's output, the agent's own blocked reason, a repeated tool error), a Verdandi tool's result, the summary a
  * harness handoff seeds a new session with, a compression's summary, an `mcp` tool's result (from an MCP server the
  * native harness connects to, DESIGN §9.4), or a `context` file (a context or skill file a harness loads by itself, or
- * one the native harness puts in its prompt). A `correction` escalation hands nothing: the user's own message is the turn.
+ * one the native harness puts in its prompt), or a scheduled job's pre-run `script` output (DESIGN §15). A `correction` escalation hands nothing: the user's own message is the turn.
  */
 export const HandedSource = Schema.Literals([
   "verifier",
@@ -38,6 +38,7 @@ export const HandedSource = Schema.Literals([
   "skill_view",
   "context",
   "mcp",
+  "script",
 ]);
 export type HandedSource = typeof HandedSource.Type;
 /** What each source is, for the user. */
@@ -53,6 +54,7 @@ export const handedSourceLabel: Record<HandedSource, string> = {
   skill_view: "a skill_view result",
   context: "a context file",
   mcp: "an MCP tool's result",
+  script: "a scheduled job's pre-run script output",
 };
 
 /** How a flagged injection is introduced to the user, before its `why`: the same in the web UI and the terminal. */

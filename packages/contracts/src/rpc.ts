@@ -68,6 +68,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "InvalidSchedule",
     "ScheduleExists",
     "ScheduleNotFound",
+    "MeteredNotAllowed",
   ]),
   message: Schema.String,
 }) {}

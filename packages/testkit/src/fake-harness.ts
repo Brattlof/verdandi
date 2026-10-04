@@ -17,7 +17,8 @@ import { Effect, Stream } from "effect";
 
 /**
  * A scripted harness for tests. Text "fail" fails the turn, "hang" runs until interrupted, "gate" waits for
- * `release()`, "overage" reports a used-up subscription window and answers on metered usage, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan (echoing the user's edit when approved with one), each
+ * `release()`, "overage" reports a used-up subscription window and answers on metered usage, "reset" reports a window that
+ * isn't used up any more, "approve" asks to edit a file, "ask" asks a question and "plan" proposes a plan (echoing the user's edit when approved with one), each
  * finishing once `respond` answers on the model of the route `reroute` last moved the turn to, "steer" waits for the first steer and answers it, "edit <path>"
  * appends a line to that file, relative to the turn's folder, through an Edit tool call, "write <path> <text>" writes the text to that file through a
  * Bash call, the way an agent's `cat >` would, and a turn Verdandi sends to escalate a failed verifier ("Verdandi ran the
@@ -139,6 +140,13 @@ export const makeFakeHarness = () => {
         quota: { status: "rejected", window: "five_hour", utilization: 1, resetsAt: "2099-01-01T00:00:00.000Z", usingOverage: true },
       };
       return Stream.concat(Stream.fromIterable([...start, quota]), reply(input.route.model, "on extra usage", "metered"));
+    }
+    if (input.text === "reset") {
+      const quota: HarnessEvent = {
+        type: "quota",
+        quota: { status: "allowed", window: "five_hour", utilization: 0, resetsAt: "2099-01-01T05:00:00.000Z", usingOverage: false },
+      };
+      return Stream.concat(Stream.fromIterable([...start, quota]), reply(input.route.model, "the window reset"));
     }
     if (input.text.startsWith("provider ")) {
       const reason = input.text.slice("provider ".length) as ProviderFailure;

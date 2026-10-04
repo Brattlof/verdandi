@@ -24,7 +24,7 @@ import type {
   WorktreeReport,
   WorktreeView,
 } from "@verdandi/contracts";
-import { trustFiles } from "@verdandi/contracts";
+import { defaultWatchdogMinutes, trustFiles } from "@verdandi/contracts";
 import { Decide, flagged, injectionQuestion, injectionWarning } from "@verdandi/decisions";
 import { type Screen, ToolFailed, verdandiTools } from "@verdandi/tools";
 import { Cause, Context, Deferred, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
@@ -93,6 +93,9 @@ export class McpConfig extends Context.Service<McpConfig, (folder: string) => Re
 /** The profile's workspace, where threads and scheduled jobs that name no project run (DESIGN §13). */
 export class WorkspaceDir extends Context.Service<WorkspaceDir, string>()("verdandi/WorkspaceDir") {}
 
+/** The profile's scripts folder, the only place a scheduled job's pre-run script runs from (DESIGN §15). */
+export class ScriptsDir extends Context.Service<ScriptsDir, string>()("verdandi/ScriptsDir") {}
+
 /** Where the profile keeps attachments' bytes, which harness turns read by path. */
 export class AttachmentsDir extends Context.Service<AttachmentsDir, string>()("verdandi/AttachmentsDir") {}
 
@@ -158,6 +161,7 @@ export const ReactorLive = Layer.effect(
     const mcpConfig = yield* McpConfig;
     const approvals = yield* ApprovalSettings;
     const workspace = yield* WorkspaceDir;
+    const scripts = yield* ScriptsDir;
     const sql = yield* SqlClient.SqlClient;
     const turns = yield* FiberSet.make();
     /** The adapter running each thread's current turn: where answers to its requests go. */
@@ -214,7 +218,6 @@ export const ReactorLive = Layer.effect(
           .pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record the injection flag on turn ${at.turnId}.`, cause)));
         return `${injectionWarning}\n\n${text}`;
       });
-    const runs = makeScheduleRuns(engine.dispatch, sql, workspace);
     /** Verdandi's own tools (DESIGN §9.6), built once: every turn gets this same list, so a session's never changes. */
     const tools = verdandiTools({
       search: (query, allProjects, at) =>
@@ -262,6 +265,14 @@ export const ReactorLive = Layer.effect(
       },
     });
 
+    /** Scheduled jobs' runs (DESIGN §15): started on a claim, sent again on a release, ended once their task stops. */
+    const runs = makeScheduleRuns({
+      dispatch: engine.dispatch,
+      sql,
+      workspace,
+      scripts,
+      scan: (text) => Effect.map(decide.decide({ state: text, questions: [injectionQuestion] }), ({ answers }) => answers[0]),
+    });
     /** The injection question's answer per text, by its hash: a context file is scanned once per content (DESIGN §17). */
     const scanned = new Map<string, DecisionAnswer | undefined>();
     const scanText = (text: string) =>
@@ -760,8 +771,11 @@ export const ReactorLive = Layer.effect(
           review: string | null;
           session_harness: HarnessId | null;
           scheduled: number;
+          watchdog: number | null;
         }>`
-          select t.route, t.session_id, t.session_harness, p.path, t.worktree, t.review, t.schedule is not null as scheduled, t.pending_fork, t.memory_snapshot, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
+          select t.route, t.session_id, t.session_harness, p.path, t.worktree, t.review, t.schedule is not null as scheduled,
+            (select json_extract(s.job, '$.watchdogMinutes') from schedules s where s.id = json_extract(t.schedule, '$.jobId')) as watchdog,
+            t.pending_fork, t.memory_snapshot, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
             (select total(u.cost_usd) from usage_ledger u join turns n on n.id = u.turn_id
               where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId}) as spent_usd,
             (select count(*) from events e where e.thread_id = t.id and e.type = 'turn.model.called'
@@ -850,7 +864,16 @@ export const ReactorLive = Layer.effect(
               Effect.andThen(adapter.respond(threadId, event.requestId, { decision: "deny" }), Effect.failCause(cause)),
             ),
           );
-        yield* adapter
+        // Nobody watches a scheduled run: a watchdog stops its turn once the harness has done nothing for a while (DESIGN §15).
+        const watchdogMinutes = thread.scheduled === 1 ? (thread.watchdog ?? defaultWatchdogMinutes) : undefined;
+        let active = Date.now();
+        const idle = (ms: number): Effect.Effect<void> =>
+          Effect.suspend(() => {
+            if (finished) return Effect.never;
+            const left = active + ms - Date.now();
+            return left <= 0 ? Effect.void : Effect.andThen(Effect.sleep(left), idle(ms));
+          });
+        const harnessRun = adapter
           .run({
             threadId,
             cwd,
@@ -889,6 +912,7 @@ export const ReactorLive = Layer.effect(
           })
           .pipe(
             Stream.runForEach((event) => {
+              active = Date.now();
               if (event.type === "text.delta") return engine.publishDelta(threadId, turnId, event.text);
               if (event.type === "item" && event.item.kind === "tool.call") calls.push(event.item);
               if (event.type === "item" && event.item.kind === "tool.result" && event.item.isError) toolFailed = true;
@@ -946,6 +970,14 @@ export const ReactorLive = Layer.effect(
                 }
               });
             }),
+          );
+        const stalled =
+          watchdogMinutes === undefined
+            ? yield* Effect.as(harnessRun, false)
+            : yield* Effect.raceFirst(Effect.as(harnessRun, false), Effect.as(idle(watchdogMinutes * 60_000), true));
+        if (stalled)
+          return yield* fail(
+            `Verdandi's watchdog stopped this scheduled run: its harness did nothing for ${watchdogMinutes} minutes. Nobody watches a scheduled run, so a stuck one would hold its thread. Set --watchdog on the job for a longer wait.`,
           );
         if (!finished) yield* fail("The harness stopped without finishing the turn.");
       }).pipe(
@@ -1101,6 +1133,10 @@ export const ReactorLive = Layer.effect(
       // In `turns`, so `drain` waits for the review it starts, and the scheduled run.
       if (e.type === "review.requested") return FiberSet.run(turns, startReview(e)).pipe(Effect.asVoid);
       if (e.type === "schedule.occurrence.claimed") return FiberSet.run(turns, runs.start(e)).pipe(Effect.asVoid);
+      if (e.type === "schedule.occurrence.released") return FiberSet.run(turns, runs.resend(e)).pipe(Effect.asVoid);
+      // A window that isn't used up lets each held run try again; one whose window still is waits again (DESIGN §15).
+      if (e.type === "harness.quota.reported" && e.quota.status !== "rejected")
+        return FiberSet.run(turns, runs.releaseHeld).pipe(Effect.asVoid);
       if (e.type === "turn.steered") {
         const queue = steerQueues.get(e.turnId);
         return queue ? Queue.offer(queue, e.text).pipe(Effect.asVoid) : Effect.void;

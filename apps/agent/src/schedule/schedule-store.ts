@@ -10,6 +10,8 @@ type JobRecord = {
   state: JobRow["state"];
   next_run_at: string | null;
   created_at: string;
+  failures: number;
+  reason: string | null;
 };
 
 const jobRow = (r: JobRecord): JobRow => ({
@@ -18,6 +20,7 @@ const jobRow = (r: JobRecord): JobRow => ({
   job: JSON.parse(r.job) as JobSpec,
   state: r.state,
   nextRunAt: r.next_run_at,
+  failures: r.failures,
 });
 
 /** What the decider needs for a `schedule.*` command (`DeciderState.schedule`), at `now`. */
@@ -29,7 +32,7 @@ export const loadScheduleState = (command: Extract<Command, { type: `schedule.${
       command.type === "schedule.create" &&
       (yield* sql`select 1 from schedules where name = ${command.job.name} and state != 'removed'`).length > 0;
     const [run] =
-      command.type === "schedule.run.report"
+      command.type === "schedule.run.report" || command.type === "schedule.release"
         ? yield* sql<{ status: string }>`select status from schedule_runs
             where job_id = ${command.jobId} and scheduled_instant = ${command.scheduledInstant}`
         : [];
@@ -66,6 +69,7 @@ export const loadJobs = (runs = 20) =>
             ownerThreadId,
             job,
             state,
+            ...(r.reason !== null && { reason: r.reason }),
             nextRunAt,
             createdAt: r.created_at,
             runs: rows.map((run) => ({
@@ -82,11 +86,25 @@ export const loadJobs = (runs = 20) =>
     );
   });
 
-/** The active job whose next run comes first, which the scheduler's one timer waits for. */
+/**
+ * What the scheduler's one timer waits for: the active job whose next run comes first, or the held occurrence whose
+ * window resets first (`held`), whichever is sooner.
+ */
 export const loadDueJob = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const [due] = yield* sql<{ id: JobId; owner_thread_id: ThreadId; next_run_at: string }>`
-    select id, owner_thread_id, next_run_at from schedules where state = 'active' and next_run_at is not null
+  const [due] = yield* sql<{ id: JobId; owner_thread_id: ThreadId; next_run_at: string; held: string | null }>`
+    select id, owner_thread_id, next_run_at, null as held from schedules where state = 'active' and next_run_at is not null
+    union all
+    select s.id, s.owner_thread_id, r.held_until, r.scheduled_instant from schedule_runs r join schedules s on s.id = r.job_id
+    where r.status = 'held' and s.state != 'removed'
     order by next_run_at limit 1`;
   return due;
+});
+
+/** The occurrences waiting for a used-up subscription window, with their job's owner. */
+export const loadHeldRuns = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return yield* sql<{ job_id: JobId; owner: ThreadId; scheduled_instant: string }>`
+    select r.job_id, s.owner_thread_id as owner, r.scheduled_instant from schedule_runs r join schedules s on s.id = r.job_id
+    where r.status = 'held' and s.state != 'removed'`;
 });

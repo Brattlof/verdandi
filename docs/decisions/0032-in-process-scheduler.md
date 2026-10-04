@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (issue #210, 2026-10-04).
+Accepted (issues #210 and #211, 2026-10-04).
 
 ## Context
 
@@ -18,7 +18,8 @@ A scheduled run should behave like any other turn: routed, under the spend caps 
 4. **Catch-up is pure** (`catchUp` in `src/schedule/catch-up.ts`): from the schedule, the occurrence due and the time now. Grace is half the gap to the next occurrence, clamped to 2 minutes–2 hours. Inside grace the occurrence runs once; past grace the missed ones collapse into one run, or are all skipped when the job sets `missed: skip`; a one-off more than 2 minutes late is retired. The next run is always the first occurrence after now, so a host that slept never fires in a burst. Skipped occurrences are recorded as one `schedule.occurrence.skipped` per firing, as a range (`from`–`until`) with its reason, so a long outage of a frequent job costs one event, not one per occurrence.
 5. **A run is an ordinary turn.** Reacting to a claim, the reactor dispatches `schedule.run.start` (the run's own `thread.created`, `schedule.run.started`, and a worktree request when the job has one; the project folder or the workspace) and sends the job's `turn.send`. A refused turn is the run's result. The run ends when its task stops: the reactor queues a check behind the turn's fiber, so an escalation's follow-up turn keeps the run going, and reports `schedule.run.report` → `schedule.run.ended` with the last turn's status (`error` when a verifier failed on it). On start, runs a stopped verdandid left are ended, never started again.
 6. **Unattended.** `schedule.run.started` marks the thread (`threads.schedule`) the way `review.started` marks a review's. The decider denies its approval, question, plan, skill and trust requests at once with the reason (ADR 0023), and a flagged context file stops its turn without asking. A job's limits narrow its task's (`tighter`). A run's thread can't create jobs.
-7. **The agent's tool takes no route.** `cronjob` (create, list, pause) asks first and has no route, model, effort or limit parameters, so an agent-made job runs on the router's pick under its project's policy, as Hermes keeps model and provider out of its scheduling tool.
+7. **Guards** (#211). A job's pre-run script runs only from `<home>/scripts/`, before the run's thread exists, so `{"wakeAgent": false}` ends the run `skipped` with no thread and no model call. A job without `allowMetered` routes as under a reached cap (its "cap" is the job's $0 allowance), and a turn whose target's subscription window is used up records `schedule.occurrence.held` instead of starting; `schedule.release` (a quota report of a window that isn't used up, or the timer at the reset) sends the turn again, which is held again if the window still is. Runs end with one status of a closed set; `schedules.failures` counts `error` and `blocked_config` in a row, and the third disables the job with a notice on the owning thread's latest turn. A watchdog races each scheduled turn's harness stream and ends a turn with no harness event for its job's `watchdogMinutes` (default 10) as an error.
+8. **The agent's tool takes no route.** `cronjob` (create, list, pause) asks first and has no route, model, effort or limit parameters, so an agent-made job runs on the router's pick under its project's policy, as Hermes keeps model and provider out of its scheduling tool.
 
 ## Consequences
 
@@ -26,4 +27,6 @@ A scheduled run should behave like any other turn: routed, under the spend caps 
 - A job needs `verdandi start` running. `verdandi schedule add` says so when none is; what a job misses meanwhile is caught up by the rules above when it starts.
 - A run is counted at the occurrence it was claimed for, even when it started late or several occurrences collapsed into it.
 - OS scheduler entries from #209 keep working until removed: `fire` stays, `list` shows them and `remove --os` takes them out.
-- Not yet: `schedule.updated` (edit a job in place), skills to load, a pre-run script, `contextFrom`, delivery to a channel, and the watchdog (DESIGN §15).
+- A held run sends its turn again from the start, its script included, so the agent gets the script's output as of then.
+- A script's verdict reads its standard output alone; its error output only shows when it fails.
+- Not yet: `schedule.updated` (edit a job in place), skills to load, `contextFrom`, and delivery to a channel, whose failures will be `delivery_failed` (DESIGN §15).

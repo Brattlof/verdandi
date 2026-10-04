@@ -106,6 +106,14 @@ test("schedule add takes a cron expression in a zone, a time, or a duration, and
     limits: { maxCost: 1.5, maxTurns: 20 },
     missed: "skip",
   });
+  expect(job("--in", "2h", "--script", "check.ts", "--script-only", "--allow-metered", "--watchdog", "30")).toMatchObject({
+    script: "check.ts",
+    agent: false,
+    allowMetered: true,
+    watchdogMinutes: 30,
+  });
+  expect(job("--in", "2h")).not.toHaveProperty("allowMetered");
+  expect(() => job("--in", "2h", "--script-only")).toThrow("name it with --script");
   expect(() => job("--in", "2h", "--cron", "@daily")).toThrow("one of --cron, --at or --in");
   expect(() => job("--in", "soon")).toThrow("--in takes a duration");
   expect(() => job("--in", "2h", "--max-turns", "1.5")).toThrow("--max-turns takes a whole number");
