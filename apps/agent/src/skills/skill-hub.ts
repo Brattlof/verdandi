@@ -33,9 +33,18 @@ const maxBytes = 1024 * 1024;
 
 const unavailable = (message: string) => new CommandRejected({ reason: "SkillHubUnavailable", message });
 
+/** How long a fetch may take before git is killed: the RPC waits on it. */
+const fetchLimitMs = 5 * 60 * 1000;
+
+/**
+ * Nobody answers a prompt: a source that wants credentials fails at once instead of waiting on a terminal git opened,
+ * or Git Credential Manager's window.
+ */
+const noPrompts = { GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "never" };
+
 /** Runs git in `cwd` and fails, naming `what` and git's own words, unless it exits 0. Returns its stdout. */
-const run = (cwd: string, args: readonly string[], what: string) =>
-  git(cwd, args).pipe(
+const run = (cwd: string, args: readonly string[], what: string, timeoutMs?: number) =>
+  git(cwd, args, noPrompts, undefined, timeoutMs).pipe(
     Effect.mapError((e) => unavailable(e.message)),
     Effect.flatMap((r) =>
       r.code === 0 ? Effect.succeed(r.stdout) : Effect.fail(unavailable(`${what}: ${r.stderr.trim() || `git exited with ${r.code}`}`)),
@@ -51,9 +60,13 @@ const cloneBare = (url: string, source: string) =>
     Effect.gen(function* () {
       const dir = mkdtempSync(join(tmpdir(), "verdandi-hub-"));
       const repo = join(dir, "repo.git");
-      yield* run(dir, ["clone", "--bare", "--quiet", "--", url, repo], `Couldn't fetch the source ${source} (${url})`).pipe(
-        Effect.tapError(() => Effect.sync(() => rmSync(dir, { recursive: true, force: true }))),
-      );
+      // ponytail: a full clone per proposal, bounded only by time; a cached mirror under the home if sources grow large.
+      yield* run(
+        dir,
+        ["clone", "--bare", "--quiet", "--", url, repo],
+        `Couldn't fetch the source ${source} (${url}) within ${fetchLimitMs / 60_000} minutes. Check the URL in skills.yaml, and that it needs no password`,
+        fetchLimitMs,
+      ).pipe(Effect.tapError(() => Effect.sync(() => rmSync(dir, { recursive: true, force: true }))));
       return repo;
     }),
     (repo) => Effect.sync(() => rmSync(dirname(repo), { recursive: true, force: true, maxRetries: 3 })),
@@ -97,6 +110,9 @@ const readSkillAt = (repo: string, sha: string, path: string, source: string) =>
   Effect.gen(function* () {
     const where = `${path} in ${source} at ${sha.slice(0, 12)}`;
     const inside = (yield* listTree(repo, sha, source, path)).filter((e) => e.file.startsWith(`${path}/`));
+    // Two names one folder can't tell apart on Windows or macOS would overwrite each other there.
+    const folded = inside.map((e) => e.file.toLowerCase());
+    const twin = inside.find((e, i) => folded.indexOf(e.file.toLowerCase()) !== i);
     if (!inside.some((e) => e.file === `${path}/SKILL.md`)) {
       const found = (yield* listTree(repo, sha, source))
         .filter((e) => e.file === "SKILL.md" || e.file.endsWith("/SKILL.md"))
@@ -108,6 +124,10 @@ const readSkillAt = (repo: string, sha: string, path: string, source: string) =>
         ),
       );
     }
+    if (twin)
+      return yield* Effect.fail(
+        unavailable(`${where} has two files named ${twin.file.slice(path.length + 1)} but for case, which Verdandi can't install.`),
+      );
     const bytes = inside.reduce((sum, e) => sum + e.size, 0);
     if (inside.length > maxFiles || bytes > maxBytes)
       return yield* Effect.fail(
@@ -140,7 +160,7 @@ const readSkillAt = (repo: string, sha: string, path: string, source: string) =>
  * replaces only files whose local digest is still the one `installed` recorded; any other, edited or deleted by the
  * user, is kept, with upstream's change to it (`before` is upstream at the installed commit) offered in `kept`, unless
  * `take` names it, which replaces it too. Files the user added are never touched. `edited` lists the files the user
- * changed, and `digests` are `after`'s, to record.
+ * changed that it keeps, `taken` those it replaces as asked, and `digests` are `after`'s, to record.
  */
 export const planHub = (input: {
   readonly skill: string;
@@ -155,12 +175,13 @@ export const planHub = (input: {
   const changes: SkillChange[] = [];
   const kept: HubKept[] = [];
   const edited: string[] = [];
+  const taken: string[] = [];
   for (const path of paths) {
     const now = local.get(path) ?? null;
     const next = after.get(path) ?? null;
     const recorded = installed?.[path];
     const isEdited = installed !== undefined && (recorded === undefined ? now !== null : digest(now) !== recorded);
-    if (isEdited) edited.push(path);
+    if (isEdited) (take.has(path) ? taken : edited).push(path);
     if (isEdited && !take.has(path)) {
       const was = before.get(path) ?? null;
       if (was !== next) kept.push({ path, before: was, after: next });
@@ -168,7 +189,7 @@ export const planHub = (input: {
     }
     if (now !== next) changes.push({ action: "write_file", skill, path, before: now, after: next });
   }
-  return { changes, kept, edited, digests: Object.fromEntries([...after].map(([path, text]) => [path, digest(text)])) };
+  return { changes, kept, edited, taken, digests: Object.fromEntries([...after].map(([path, text]) => [path, digest(text)])) };
 };
 
 /** What the user asked of the hub: install `skill`, or update it when it's installed. */
@@ -273,7 +294,7 @@ export const proposeInstall = (home: string, folders: SkillFolders, dispatch: En
         const local = yield* readLocal(new Set([...after.keys(), ...Object.keys(installed?.digests ?? {})]));
         const take = new Set(request.take ?? []);
         const planned = planHub({ skill, after, local, take, ...(installed && before && { installed: installed.digests, before }) });
-        const notEdited = [...take].find((p) => !planned.edited.includes(p));
+        const notEdited = [...take].find((p) => !planned.taken.includes(p));
         if (notEdited !== undefined)
           return yield* new CommandRejected({
             reason: "InvalidSkill",
@@ -295,6 +316,7 @@ export const proposeInstall = (home: string, folders: SkillFolders, dispatch: En
       ...(installed && { from: installed.pin.sha }),
       changes: planned.changes,
       kept: planned.kept,
+      taken: planned.taken,
       digests: planned.digests,
     });
     const [row] = yield* sql<{ payload: string }>`select payload from requests where id = ${commandId}`;

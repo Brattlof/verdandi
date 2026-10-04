@@ -12,9 +12,9 @@ const inherited = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIR
 /**
  * Runs git in `cwd`. No optional locks, so it never refreshes the user's index; literal pathspecs, so
  * `[id].tsx` is a file name, not a glob; paths unquoted; paths past Windows' 260 characters allowed. Fails
- * only when git can't start: a non-zero exit is the caller's to read.
+ * only when git can't start: a non-zero exit is the caller's to read. With `timeoutMs`, git is killed past it.
  */
-export const git = (cwd: string, args: readonly string[], env: Record<string, string> = {}, input?: string) =>
+export const git = (cwd: string, args: readonly string[], env: Record<string, string> = {}, input?: string, timeoutMs?: number) =>
   Effect.tryPromise({
     try: async (): Promise<GitResult> => {
       const base = Object.fromEntries(Object.entries(childEnv()).filter(([k]) => !inherited.includes(k)));
@@ -26,6 +26,7 @@ export const git = (cwd: string, args: readonly string[], env: Record<string, st
           stdin: input === undefined ? "ignore" : new TextEncoder().encode(input),
           stdout: "pipe",
           stderr: "pipe",
+          ...(timeoutMs !== undefined && { timeout: timeoutMs }),
         },
       );
       const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);

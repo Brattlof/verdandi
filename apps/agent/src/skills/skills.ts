@@ -13,20 +13,24 @@ export const nameProblem = (name: string) =>
     ? undefined
     : `${JSON.stringify(name)} isn't a skill name: use 1 to 64 lowercase letters, digits and single hyphens, e.g. deploy-notes.`;
 
+/** A Windows device name, which no folder there can hold as a file, whatever its extension. */
+const deviceName = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
 /**
  * Why `path` isn't a file path inside a skill folder, or undefined when it is: relative, forward slashes, no `.` or
- * `..` segment, no drive letter, colon, backslash or control character. Symlinks are the disk's to check.
+ * `..` segment, no drive letter, colon, backslash or control character, and a name every OS can write (none of
+ * `<>"|?*`, no Windows device name, no segment ending in a dot or space). Symlinks are the disk's to check.
  */
 export const pathProblem = (path: string) => {
   const segments = path.split("/");
   const outside =
     path === "" ||
     path.startsWith("/") ||
-    /[\\:\p{Cc}]/u.test(path) ||
-    segments.some((s) => s === "" || s === "." || s === "..") ||
+    /[\\:<>"|?*\p{Cc}]/u.test(path) ||
+    segments.some((s) => s === "" || s === "." || s === ".." || deviceName.test(s) || /[. ]$/.test(s)) ||
     path.length > 256;
   return outside
-    ? `${JSON.stringify(path)} isn't a file path inside the skill: give a relative path with forward slashes and no .. segment, e.g. scripts/check.sh.`
+    ? `${JSON.stringify(path)} isn't a file path inside the skill: give a relative path with forward slashes, no .. segment and a name every OS can hold, e.g. scripts/check.sh.`
     : undefined;
 };
 

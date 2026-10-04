@@ -348,7 +348,10 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
         yield* sql`delete from skills where name = ${e.skill}`;
       }),
     ),
-  "skill.uninstalled": (e) => withSql((sql) => sql`delete from skill_installs where name = ${e.skill}`),
+  "skill.uninstall.requested": () => Effect.void, // the reactor moves the folder, then reports
+  // A folder that couldn't be moved stays installed.
+  "skill.uninstalled": (e) =>
+    e.error === undefined ? withSql((sql) => sql`delete from skill_installs where name = ${e.skill}`) : Effect.void,
   "skill.pinned": (e, at) => withSql((sql) => sql`insert or replace into skill_pins (name, pinned_at) values (${e.skill}, ${at})`),
   "skill.unpinned": (e) => withSql((sql) => sql`delete from skill_pins where name = ${e.skill}`),
   "device.paired": (e, at) =>

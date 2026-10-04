@@ -672,11 +672,11 @@ const fileTag = (before: string | null, after: string | null) => (before === nul
 const InstallApproval = ({ request, sending, respond, connection }: CardProps<"skill.install.proposed"> & { connection: Connection }) => {
   const [taking, setTaking] = useState<string>();
   const [error, setError] = useState<string>();
-  const { skill, pin, from, changes, kept, advice } = request;
-  // Taking upstream's file is a new proposal at the same commit, which replaces this one.
+  const { skill, pin, from, changes, kept, taken, advice } = request;
+  // Taking upstream's file is a new proposal from the same ref, with the files taken so far, which replaces this one.
   const take = async (path: string) => {
     setTaking(path);
-    const result = await connection.installSkill({ skill, ref: pin.sha, take: [path] });
+    const result = await connection.installSkill({ skill, ref: pin.ref, take: [...taken, path] });
     setTaking(undefined);
     if (!result.ok) setError(result.message);
   };

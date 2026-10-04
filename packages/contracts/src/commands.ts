@@ -378,6 +378,7 @@ export const SkillInstallPropose = Schema.Struct({
   from: Schema.optionalKey(Schema.String),
   changes: Schema.Array(SkillChange),
   kept: Schema.Array(HubKept),
+  taken: Schema.Array(Schema.String),
   digests: Schema.Record(Schema.String, Schema.String),
 });
 /** Internal: the reactor reporting that it wrote the allowed hub install `requestId`, or why it couldn't. */
@@ -396,6 +397,13 @@ export const SkillInstallReport = Schema.Struct({
  * archive. A profile matter, recorded on `profileStream`.
  */
 export const SkillUninstall = Schema.Struct({ type: Schema.Literal("skill.uninstall"), commandId: CommandId, skill: Schema.String });
+/** Internal: the reactor moved uninstalled hub skill `skill`'s folder to the archive, or says why it couldn't. */
+export const SkillUninstallReport = Schema.Struct({
+  type: Schema.Literal("skill.uninstall.report"),
+  commandId: CommandId,
+  skill: Schema.String,
+  error: Schema.optionalKey(Schema.String),
+});
 
 /** Internal: a reactor reporting what the harness did. Clients cannot send it. */
 export const HarnessReport = Schema.Struct({
@@ -629,6 +637,7 @@ export const Command = Schema.Union([
   SkillCurate,
   SkillInstallPropose,
   SkillInstallReport,
+  SkillUninstallReport,
   TaskReview,
   ReviewStart,
   ReviewPropose,

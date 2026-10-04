@@ -193,11 +193,12 @@ export const skillsAction = (client: Client, words: readonly string[], confirm?:
     if (sub === "uninstall") {
       const refused = yield* rejected({ type: "skill.uninstall", commandId: crypto.randomUUID() as CommandId, skill: name });
       if (refused) return `${refused}\n`;
+      // The folder is moved before the receipt comes back; one that couldn't be stays installed.
       const still = (yield* client.SkillsList()).folders.some(
-        (f) => f.source === "profile" && f.skills.some((s) => basename(s.path) === name),
+        (f) => f.source === "profile" && f.skills.some((s) => basename(s.path) === name && s.hub),
       );
       return still
-        ? `Uninstalled ${name}, but its folder couldn't be moved to the archive, so Claude Code still loads it; verdandid's log says why. Move or delete it by hand.\n`
+        ? `Not uninstalled: ${name}'s folder couldn't be moved to the archive, so it stays installed; verdandid's log says why. Close any program that has a file of it open, and try again.\n`
         : `Uninstalled ${name}: its folder moved to the archive, where nothing loads it.\n`;
     }
     if (sub === "pin" || sub === "unpin") {

@@ -11,7 +11,7 @@ import { loadThreadView } from "../event-store/projector.ts";
 import { ProfileSkills } from "../event-store/reactor.ts";
 import { curateSkills, loadSkillsView } from "./skill-curation.ts";
 import { loadSkillHistory } from "./skill-history.ts";
-import { type HubRequest, planHub, proposeInstall } from "./skill-hub.ts";
+import { type HubRequest, loadInstall, planHub, proposeInstall } from "./skill-hub.ts";
 import { digest } from "./skills.ts";
 
 setDefaultTimeout(gitHeavyTimeout);
@@ -61,7 +61,13 @@ const setup = async (source: string) => {
   const read = (path: string) => (existsSync(file(path)) ? readFileSync(file(path), "utf8") : null);
   const hub = async () =>
     (await run(loadSkillsView)).folders.find((f) => f.source === "profile")?.skills.find((s) => s.name === "deploy-notes")?.hub;
-  return { home, runtime, run, propose, answer, file, read, hub };
+  const uninstall = () =>
+    run(
+      Effect.flatMap(Engine, (e) =>
+        e.dispatch({ type: "skill.uninstall", commandId: crypto.randomUUID() as CommandId, skill: "deploy-notes" }),
+      ),
+    );
+  return { home, runtime, run, propose, answer, file, read, hub, uninstall };
 };
 
 test("a hub skill installs at the SHA its tag resolves to, and only once its diff is allowed", async () => {
@@ -138,6 +144,7 @@ test("an update keeps a file the user edited and offers upstream's change to it 
 
   // Taking upstream's version is a proposal of its own, from the user's file to upstream's.
   const take = await propose({ skill: "deploy-notes", take: ["scripts/check.sh"] });
+  expect(take.request?.taken).toEqual(["scripts/check.sh"]);
   expect(take.request?.changes).toEqual([
     { action: "write_file", skill: "deploy-notes", path: "scripts/check.sh", before: "echo my own check\n", after: "echo checking v2\n" },
   ]);
@@ -146,6 +153,34 @@ test("an update keeps a file the user edited and offers upstream's change to it 
   expect(await hub()).toMatchObject({ sha: v2, edited: [] });
   // Each file written is in the skill's history, so it can be seen and reverted.
   expect((await run(loadSkillHistory("deploy-notes"))).map((e) => e.change.path)).toContain("scripts/check.sh");
+});
+
+test("uninstalling archives the folder each time, and an update proposed before it writes nothing after", async () => {
+  const repo = makeTempHome();
+  dirs.push(repo);
+  git(repo, "init", "-q");
+  commit(repo, { "skills/deploy-notes/SKILL.md": skillMd("Run the deploy script.") }, "v1");
+  const { home, propose, answer, read, run, uninstall } = await setup(repo);
+  const install = async () => {
+    const proposed = await propose({ skill: "deploy-notes", source: "local", path: "skills/deploy-notes" });
+    await answer(proposed.request?.requestId ?? "", { decision: "allow" });
+  };
+  await install();
+  // A commit outside the skill moves its SHA with no file to write: only the install check stops it once uninstalled.
+  commit(repo, { "README.md": "Skills.\n" }, "v2");
+  const stale = await propose({ skill: "deploy-notes" });
+  expect(stale.request?.changes).toEqual([]);
+  await uninstall();
+  expect(read("SKILL.md")).toBeNull();
+  expect(await run(loadInstall("deploy-notes"))).toBeUndefined();
+  await answer(stale.request?.requestId ?? "", { decision: "allow" });
+  expect(await run(loadInstall("deploy-notes"))).toBeUndefined();
+
+  // An older archived copy doesn't stop the next uninstall: it goes beside it.
+  await install();
+  await uninstall();
+  expect(read("SKILL.md")).toBeNull();
+  for (const folder of ["deploy-notes", "deploy-notes-2"]) expect(existsSync(join(home, "skills-archive", folder, "SKILL.md"))).toBe(true);
 });
 
 test("a newer proposal for a skill replaces the one waiting, and a file changed meanwhile writes nothing", async () => {

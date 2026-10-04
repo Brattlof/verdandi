@@ -122,6 +122,7 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
     pendingRequests: thread.pendingRequests.filter((r) => r.requestId !== e.requestId),
   }),
   "skill.installed": (thread) => thread,
+  "skill.uninstall.requested": (thread) => thread, // on the profile's stream, never a thread's
   "skill.uninstalled": (thread) => thread,
   "device.paired": (thread) => thread, // on the profile's stream, never a thread's
   "device.revoked": (thread) => thread,

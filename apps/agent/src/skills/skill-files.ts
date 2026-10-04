@@ -167,32 +167,69 @@ export const readSkillFile = (
   return "error" in at ? at : { text: readIfFile(at.file) };
 };
 
+/** Writes `text` to `file`, or removes it for null. */
+const put = (file: string, text: string | null) => {
+  if (text === null) rmSync(file, { force: true });
+  else {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text);
+  }
+};
+
 /**
  * Writes the approved `changes` of one hub install or update together: nothing when any one can't be written (a guard
- * refused, or a file isn't its `before` any more), else each. Says why it wrote nothing, or nothing. Only the reactor calls it.
+ * refused, or a file isn't its `before` any more), else each, putting the ones written back as they were if a later one
+ * fails. Says why it wrote nothing, or nothing. Only the reactor calls it.
  */
 export const applyChanges = (folders: SkillFolders, changes: readonly SkillChange[]): string | undefined => {
+  const stale = (change: SkillChange) =>
+    `${change.skill}/${change.path} changed since the install was proposed, so nothing was written. Install or update it again to see the files as they are now.`;
+  const written: { readonly file: string; readonly before: string | null }[] = [];
   try {
-    const plans = changes.map((change) => ({
-      change,
-      how: plan(
-        folders,
-        change,
-        `${change.skill}/${change.path} changed since the install was proposed, so nothing was written. Install or update it again to see the files as they are now.`,
-      ),
-    }));
-    for (const { how } of plans) if ("error" in how) return how.error;
-    for (const { change, how } of plans) {
-      if (!("file" in how)) continue; // only a create that reverts a delete moves a folder, and an install writes files
-      if (change.after === null) rmSync(how.file, { force: true });
-      else {
-        mkdirSync(dirname(how.file), { recursive: true });
-        writeFileSync(how.file, change.after);
-      }
+    const files: { readonly file: string; readonly change: SkillChange }[] = [];
+    for (const change of changes) {
+      const how = plan(folders, change, stale(change));
+      if ("error" in how) return how.error;
+      // Only a create that reverts a delete moves a folder; an install's changes all write files.
+      if (!("file" in how)) return stale(change);
+      files.push({ file: how.file, change });
+    }
+    for (const { file, change } of files) {
+      written.push({ file, before: change.before });
+      put(file, change.after);
     }
     return undefined;
   } catch (e) {
-    return `Couldn't write the skill ${changes[0]?.skill ?? ""}: ${e instanceof Error ? e.message : String(e)}`;
+    const undone = written.every(({ file, before }) => {
+      try {
+        put(file, before);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    return `Couldn't write the skill ${changes[0]?.skill ?? ""}: ${e instanceof Error ? e.message : String(e)}. ${undone ? "Nothing was left changed." : "Some files couldn't be put back; check the skill's folder."}`;
+  }
+};
+
+/**
+ * Moves hub skill `name`'s folder into the archive on uninstall, under its own name or, when an archived folder has
+ * that already, the first free `<name>-<n>`, so uninstalling never fails for an older copy. Never deletes. Says why it
+ * couldn't, or nothing.
+ */
+export const archiveSkill = (folders: SkillFolders, name: string): string | undefined => {
+  const wrong = nameProblem(name);
+  if (wrong) return wrong;
+  const from = join(folders.profile, name);
+  if (!present(from)) return undefined;
+  let to = join(folders.archive, name);
+  for (let n = 2; present(to); n++) to = join(folders.archive, `${name}-${n}`);
+  try {
+    mkdirSync(folders.archive, { recursive: true });
+    renameSync(from, to);
+    return undefined;
+  } catch (e) {
+    return `Couldn't move the skill ${name} from ${from} to ${to}: ${e instanceof Error ? e.message : String(e)}. Close any program that has a file of it open, and uninstall it again.`;
   }
 };
 

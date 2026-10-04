@@ -49,7 +49,7 @@ export const installText = (r: InstallRequest) => {
   const none = r.changes.length === 0 ? "No file changes: allowing it records the new commit.\n" : "";
   const kept = r.kept.map(
     (k) =>
-      `=== ${k.path}: you changed it, so it stays as you left it. Upstream's change, to take with \`verdandi skills update ${r.skill} --take ${k.path}\`:\n${diffText(k.before, k.after)}\n`,
+      `=== ${k.path}: you changed it, so it stays as you left it. Upstream's change, to take with \`verdandi skills update ${r.skill} --ref ${r.pin.ref}${[...r.taken, k.path].map((p) => ` --take ${p}`).join("")}\`:\n${diffText(k.before, k.after)}\n`,
   );
   const advice =
     r.advice.length === 0

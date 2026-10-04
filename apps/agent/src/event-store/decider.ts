@@ -1073,14 +1073,16 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
     const { type: _, commandId: _c, ...report } = c;
     return accept({ ...report, type: "skill.installed", v: 1 });
   },
-  // The user's own: a profile matter, on its stream, like a pin. The reactor moves the folder to the archive.
+  // The user's own: a profile matter, on its stream, like a pin. The reactor moves the folder to the archive, then reports.
   "skill.uninstall": (state, c) =>
     state.installed
-      ? accept({ type: "skill.uninstalled", v: 1, threadId: profileStream, skill: c.skill })
+      ? accept({ type: "skill.uninstall.requested", v: 1, threadId: profileStream, skill: c.skill })
       : reject(
           "SkillNotInstalled",
           `${c.skill} wasn't installed from the hub, so there's nothing to uninstall. The Skills panel and verdandi skills list mark hub skills.`,
         ),
+  "skill.uninstall.report": (_state, c) =>
+    accept({ type: "skill.uninstalled", v: 1, threadId: profileStream, skill: c.skill, ...(c.error !== undefined && { error: c.error }) }),
   // A no is logged and ends there, at no model cost; a yes asks the reactor to review the digest (DESIGN §14.5).
   "task.review": (state, c) => {
     if (!state.thread || state.thread.aux || !state.decisions) return accept();

@@ -773,7 +773,8 @@ export const SkillStateChanged = Schema.Struct({
  * The user asked to install hub skill `skill` at `pin`, or to update it from SHA `from` (DESIGN §14.4), and verdandid
  * fetched it: a pending request with no turn, on the Skills hub thread (`hubThread`), answered with `approval.respond`.
  * `changes` are the files allowing it writes, each as it is in the profile's folder and as upstream has it. `kept` are
- * files the user changed since install, which it leaves alone, with upstream's change to them. `digests` are upstream's
+ * files the user changed since install, which it leaves alone, with upstream's change to them, and `taken` those it
+ * replaces with upstream's anyway, as the user asked. `digests` are upstream's
  * files at `pin.sha` by SHA-256, recorded on install so a later update can tell an edit. `advice` is the scans' verdicts,
  * shown on the diff: the user approves either way. Untrusted data.
  */
@@ -787,6 +788,7 @@ export const SkillInstallProposed = Schema.Struct({
   from: Schema.optionalKey(Schema.String),
   changes: Schema.Array(SkillChange),
   kept: Schema.Array(HubKept),
+  taken: Schema.Array(Schema.String),
   digests: Schema.Record(Schema.String, Schema.String),
   advice: Schema.Array(HubAdvice),
 });
@@ -817,8 +819,24 @@ export const SkillInstalled = Schema.Struct({
   digests: Schema.Record(Schema.String, Schema.String),
   error: Schema.optionalKey(Schema.String),
 });
-/** The user uninstalled hub skill `skill`: the reactor moves its folder to the archive, never deleting it. On `profileStream`. */
-export const SkillUninstalled = Schema.Struct({ type: Schema.Literal("skill.uninstalled"), v: v1, threadId: ThreadId, skill: Schema.String });
+/** The user asked to uninstall hub skill `skill`: the reactor moves its folder to the archive. On `profileStream`. */
+export const SkillUninstallRequested = Schema.Struct({
+  type: Schema.Literal("skill.uninstall.requested"),
+  v: v1,
+  threadId: ThreadId,
+  skill: Schema.String,
+});
+/**
+ * Hub skill `skill` is uninstalled: its folder moved to the archive, never deleted. With `error`, it couldn't be moved,
+ * and the skill stays installed. On `profileStream`.
+ */
+export const SkillUninstalled = Schema.Struct({
+  type: Schema.Literal("skill.uninstalled"),
+  v: v1,
+  threadId: ThreadId,
+  skill: Schema.String,
+  error: Schema.optionalKey(Schema.String),
+});
 /**
  * verdandid would run the project's own `commands` (its verifiers or worktree setup, from `trustFiles`), which the user hasn't trusted for the
  * project, and asks first on running turn `turnId`: a pending request. Allowing it records `commands.trusted`; denying it
@@ -930,6 +948,7 @@ export const Event = Schema.Union([
   SkillInstallProposed,
   SkillInstallResolved,
   SkillInstalled,
+  SkillUninstallRequested,
   SkillUninstalled,
   CommandsTrustRequested,
   CommandsTrusted,
@@ -1051,6 +1070,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "skill.install.proposed@1": SkillInstallProposed,
   "skill.install.resolved@1": SkillInstallResolved,
   "skill.installed@1": SkillInstalled,
+  "skill.uninstall.requested@1": SkillUninstallRequested,
   "skill.uninstalled@1": SkillUninstalled,
   "commands.trust.requested@1": CommandsTrustRequested,
   "commands.trusted@1": CommandsTrusted,
