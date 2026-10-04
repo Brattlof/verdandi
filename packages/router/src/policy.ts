@@ -40,6 +40,8 @@ export type ResolvedPolicy = {
    * same tool error comes back before that's a trigger, 0 never (DESIGN §8.7).
    */
   readonly escalation: { readonly ladder: readonly EscalationStep[]; readonly maxAutoEscalations: number; readonly repeatedErrors: number };
+  /** How many delegated child sessions of a turn run at once, and how deep they nest, 0 none (DESIGN §9.4). */
+  readonly delegation: { readonly maxConcurrent: number; readonly maxDepth: number };
   readonly catalog: Catalog;
 };
 
@@ -197,6 +199,7 @@ export const loadPolicy = (layers: readonly PolicyLayer[] = [], catalog: Catalog
       maxAutoEscalations: merged.escalation?.maxAutoEscalations ?? 1,
       repeatedErrors: merged.escalation?.repeatedErrors ?? 3,
     },
+    delegation: { maxConcurrent: merged.delegation?.maxConcurrent ?? 3, maxDepth: merged.delegation?.maxDepth ?? 1 },
     catalog,
   };
 };

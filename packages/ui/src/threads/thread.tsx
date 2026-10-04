@@ -521,7 +521,7 @@ const clipOutput = (text: string, max = 4000) => {
 const summarize = (input: unknown) => {
   if (typeof input !== "object" || input === null) return "";
   const record = input as Record<string, unknown>;
-  const value = ["file_path", "command", "pattern", "path", "url", "description", "prompt"]
+  const value = ["file_path", "command", "pattern", "path", "url", "description", "prompt", "task"]
     .map((k) => record[k])
     .find((v) => typeof v === "string");
   return typeof value === "string" ? clip(value, 80) : "";
@@ -565,6 +565,12 @@ const itemViews: { [K in Item["kind"]]: (props: { item: Extract<Item, { kind: K 
       <span className="max-w-[80%] text-center">
         Route changed by the router: {describeRouteChange(item.from, item.to)}. {item.reason}
       </span>
+    </p>
+  ),
+  // Under the delegate_task call it routed, with the child's steps.
+  delegation: ({ item }) => (
+    <p className="my-1 text-xs text-muted">
+      Routed as a task of its own, on {item.route.model}: {item.reason}
     </p>
   ),
   effort: ({ item }) => (

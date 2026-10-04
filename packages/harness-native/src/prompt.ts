@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import type Anthropic from "@anthropic-ai/sdk";
 import { formatBytes, type HarnessRunInput, type HarnessTool, type InteractionMode, type imageMediaTypes } from "@verdandi/contracts";
 import { type Context, contextBlock, type IndexedSkill, skillsIndex } from "./context.ts";
+import { delegateDefinition } from "./delegate.ts";
 import { fileTools } from "./file-tools.ts";
 import { terminalDefinition, terminalTool } from "./terminal.ts";
 import type { Prefix } from "./transcript.ts";
@@ -47,13 +48,13 @@ const proposePlan: Anthropic.Tool = {
  * A new session's prefix, sent unchanged on every request of the session (DESIGN §9.4): the harness's instructions,
  * the skills index and the project's context file, the same for every worktree of the project, cached up to there;
  * then the session's folder and the `workspace.yaml` folders, cached up to the end. Verdandi's tools come in their
- * fixed order, then the file tools, the terminal and the plan tool.
+ * fixed order, then the file tools, the terminal, `delegate_task` when the session `delegates`, and the plan tool.
  */
 export const sessionPrefix = (
   cwd: string,
   tools: readonly HarnessTool[],
   folders: readonly string[],
-  read: { readonly context?: Context | undefined; readonly skills?: readonly IndexedSkill[] } = {},
+  read: { readonly context?: Context | undefined; readonly skills?: readonly IndexedSkill[]; readonly delegates?: boolean } = {},
 ): Prefix => {
   const shared = [`${instructions}${skillsIndex(read.skills ?? [])}`, ...(read.context ? [contextBlock(read.context)] : [])];
   return {
@@ -62,7 +63,13 @@ export const sessionPrefix = (
       text,
       ...((i === shared.length - 1 || i === shared.length) && { cache_control: { type: "ephemeral" as const } }),
     })),
-    tools: [...tools.map(definition), ...Object.values(fileTools).map((t) => t.definition), terminalDefinition, proposePlan],
+    tools: [
+      ...tools.map(definition),
+      ...Object.values(fileTools).map((t) => t.definition),
+      terminalDefinition,
+      ...(read.delegates ? [delegateDefinition] : []),
+      proposePlan,
+    ],
   };
 };
 
@@ -75,6 +82,16 @@ export const modeNotes: Record<InteractionMode, string> = {
   plan: `Verdandi: this turn runs in plan mode. Don't change anything yet: work out a plan and propose it with ${planTool}.`,
   build: "Verdandi: this turn runs in build mode. Do the work.",
 };
+
+/** A child session's one message (DESIGN §9.4): who it answers to and what it hands back, its mode, then the subtask. */
+export const childContent = (task: string, mode: Extract<InteractionMode, "ask" | "build">): Anthropic.ContentBlockParam[] => [
+  {
+    type: "text",
+    text: "Verdandi: you're a subagent. Another agent delegated the task below to you and sees only your final reply, so end with a summary of what you did and found: the paths, names and facts it needs, and anything you couldn't do, and why.",
+  },
+  { type: "text", text: modeNotes[mode] },
+  { type: "text", text: task },
+];
 
 /**
  * A turn's user message (DESIGN §9.4, anything that changes between turns goes here): a new session's memory

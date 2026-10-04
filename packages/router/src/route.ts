@@ -12,6 +12,7 @@ import {
   type RouteTarget,
   type RuleTrace,
   type SpendCapped,
+  type SubagentProfile,
   type SubagentRoutes,
   spendsMetered,
   type Tier,
@@ -35,6 +36,16 @@ export type RouteInput = {
    * the policy's effort for the task's class. A name that isn't one of them throws a `PinError`.
    */
   readonly at?: string;
+  /**
+   * A subtask the native agent delegated naming a subagent profile its route holds (DESIGN §9.4): the child runs on that
+   * profile's route, as the policy routed it with the parent's task. Like a pin, it skips routing.
+   */
+  readonly profile?: Pinned & { readonly name: SubagentProfile };
+  /**
+   * The route of the agent that delegated this subtask (DESIGN §9.4): when no target of the policy is available, the
+   * child runs there instead of failing. Its session isn't the child's, so it's never `current`.
+   */
+  readonly parent?: Pinned;
   /** The thread's warm session, how many tokens of context it has cached, and the subagent routes it started with. */
   readonly current?: Pinned & { readonly cachedTokens: number; readonly subagents?: SubagentRoutes };
   /** Files the task touches beyond those its text names, matched against policy restrictions. */
@@ -68,7 +79,8 @@ export type RouteInput = {
   /**
    * The untrusted input `current`'s warm session holds, given only when the session has tools that write files or run
    * commands (DESIGN §17). No route keeps that session, i.e. stays on its harness, below the policy's `untrusted`
-   * floor. Pins ignore it.
+   * floor. Without `current` it's the input of the session a delegated subtask's text comes from (§9.4), and no target
+   * goes below the floor. Pins ignore it.
    */
   readonly untrusted?: UntrustedInput;
 };
@@ -147,7 +159,8 @@ const routeSubagents = (
 const dollars = (n: number) => `$${n < 0.01 ? n.toPrecision(1) : n.toFixed(2)}`;
 const kTokens = (n: number) => `${Math.round(n / 1000)}K`;
 
-type Pin = Pinned & { readonly reason: string; readonly note: string };
+/** What stage 0 skips routing for, and as what: the user's pin, or a delegated subtask's profile, the policy's. */
+type Pin = Pinned & { readonly reason: string; readonly note: string; readonly source?: "policy" };
 
 /**
  * Stage 0 for `@name`: the catalog's model of that name on a running harness. It keeps the effort of the thread's warm
@@ -217,11 +230,18 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const pin: Pin | undefined =
     input.at !== undefined
       ? atPinned(input, input.at, policy.catalog, { effort: resolveSpec(rule, policy.mode, planning).effort ?? "medium", of })
-      : input.pin && {
-          ...input.pin,
-          reason: `You pinned ${describe(input.pin.target, input.pin.effort)}.`,
-          note: `pinned ${input.pin.target.harness} · ${input.pin.target.model} · ${input.pin.effort}; routing skipped`,
-        };
+      : input.profile
+        ? {
+            ...input.profile,
+            source: "policy",
+            reason: `The route's ${input.profile.name} runs on ${describe(input.profile.target, input.profile.effort)}.`,
+            note: `the route's ${input.profile.name} subagent: ${input.profile.target.harness} · ${input.profile.target.model} · ${input.profile.effort}; routing skipped`,
+          }
+        : input.pin && {
+            ...input.pin,
+            reason: `You pinned ${describe(input.pin.target, input.pin.effort)}.`,
+            note: `pinned ${input.pin.target.harness} · ${input.pin.target.model} · ${input.pin.effort}; routing skipped`,
+          };
   if (pin) {
     const { target } = pin;
     const clamped: RuleTrace[] = [];
@@ -230,7 +250,7 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
     // The policy's subagents don't apply to a pin; a warm session still keeps its own.
     const sub = routeSubagents(input, {}, target, effort, new Map(), () => 0);
     return {
-      source: "pin",
+      source: pin.source ?? "pin",
       ...classified,
       target,
       effort,
@@ -247,8 +267,9 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
   const restrictions = policy.restrictions.filter((r) => paths.some((p) => new Bun.Glob(r.match).match(p)));
   const cachedTokens = input.current?.cachedTokens ?? 0;
   const capped = input.capped && `the ${input.capped.cap} of metered spend is reached`;
-  const tainted = input.untrusted && input.current;
-  const read = input.untrusted && `this session read untrusted input (${input.untrusted.source}, turn ${input.untrusted.turn})`;
+  const read =
+    input.untrusted &&
+    `${input.current ? "this session" : "the session that delegated it"} read untrusted input (${input.untrusted.source}, turn ${input.untrusted.turn})`;
   const untrustedFloor = policy.untrusted;
   const unhealthy = (t: RouteTarget) => input.health?.find((h) => healthCovers(h, t.provider, t.model));
   const unavailable = (t: CatalogEntry) => {
@@ -265,8 +286,8 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
       if (r.forbid?.includes(t.access)) return `${t.access} is forbidden for ${r.match}`;
       if (r.minTier && rank(t.tier) < rank(r.minTier)) return `tier ${t.tier} is below ${r.minTier} for ${r.match}`;
     }
-    // Only a target on the session's harness keeps the session, and its context with it.
-    if (tainted && read && t.harness === tainted.target.harness) {
+    // Only a target on the session's harness keeps the session, and its context with it; a delegated child takes its text.
+    if (read && (!input.current || t.harness === input.current.target.harness)) {
       if (untrustedFloor.forbid?.includes(t.access)) return `${t.access} is forbidden while ${read}`;
       if (untrustedFloor.minTier && rank(t.tier) < rank(untrustedFloor.minTier))
         return `tier ${t.tier} is below ${untrustedFloor.minTier} while ${read}`;
@@ -287,8 +308,24 @@ export const route = (input: RouteInput, policy: ResolvedPolicy, classify: Class
         ? `all ${candidates.size} targets available`
         : `dropped ${[...dropped].map(([n, why]) => `${n}: ${why}`).join("; ")}`,
   });
-  if (candidates.size === 0) throw new RouterError(`No target is available: ${[...dropped].map(([n, why]) => `${n}: ${why}`).join("; ")}.`);
   trace.push(...signalNotes);
+  if (candidates.size === 0) {
+    if (!input.parent) throw new RouterError(`No target is available: ${[...dropped].map(([n, why]) => `${n}: ${why}`).join("; ")}.`);
+    // A delegated subtask the policy has no target for runs where the agent that delegated it does.
+    const { target } = input.parent;
+    const effort = fit(target, input.parent.effort, "candidates");
+    const entry = policy.catalog.find((e) => same(e, target));
+    return {
+      source: "policy",
+      ...classified,
+      target,
+      effort,
+      ...(entry && { estimate: { tokens, cost: effectiveCost(entry, tokens, input), switchCost: 0 } }),
+      reason: `No target in the policy is available for this ${unsure ? "" : `${c.taskClass} `}subtask, so it runs on the delegating agent's ${describe(target, effort)}.`,
+      trace,
+      ...limits,
+    };
+  }
 
   // Stage 4: the cheapest available target the class accepts. If none is left, the cheapest one at
   // least as capable as the weakest it accepts, and failing that the strongest there is.

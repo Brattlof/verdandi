@@ -247,6 +247,11 @@ const runTurn = (server: ServerFile, o: Options) =>
         if (!atLineStart) write("\n");
         if (!o.json) process.stderr.write(`[fell back to ${e.to.model} ${e.to.effort} for this turn: ${e.reason}]\n`);
       }
+      // A delegated subtask's cost is the turn's, so it's in the task's.
+      if (e.type === "task.delegated" && e.turnId === current && !o.json) {
+        if (!atLineStart) write("\n");
+        process.stderr.write(`[delegated a subtask to ${e.to.model} ${e.to.effort}: ${e.decision.reason}]\n`);
+      }
       if (e.type === "thread.route.changed") pinned = true;
       if (e.type === "thread.route.unpinned") pinned = false;
       if (e.type === "task.escalated" && e.turnId === current) {

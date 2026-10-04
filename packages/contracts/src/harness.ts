@@ -4,7 +4,7 @@ import type { TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields } from "./items.ts";
 import { ProviderFailure } from "./provider-health.ts";
 import { Question, type Resolution } from "./requests.ts";
-import type { Effort, HarnessId, InteractionMode, Route } from "./route.ts";
+import type { Effort, HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
 import type { TaskLimits } from "./routing.ts";
 
 /** What every harness adapter reports, normalized. */
@@ -177,6 +177,23 @@ export type HarnessRunInput = {
    * in a new session's prompt, with a `notice`). Absent when Verdandi doesn't scan, e.g. a background review.
    */
   readonly scan?: (file: string, text: string) => Promise<boolean>;
+  /**
+   * Delegation (DESIGN §9.4): `route` routes subtask `task`, which the agent delegated with tool call `toolUseId`
+   * (naming `profile` for the route's explorer or reviewer), as a task of its own, recorded on the turn, and resolves
+   * to the route its child session runs on, or why it can't run. At most `maxConcurrent` children of the turn run at
+   * once, nested at most `maxDepth` deep (0: no delegation), from the project's routing policy. Native only: a child is
+   * a fresh session on the turn's harness, whose requests and usage are the turn's (Claude Code routes its own Task
+   * subagents through `route.subagents`, ADR 0014; fake: none). Absent when Verdandi doesn't delegate, e.g. a background review.
+   */
+  readonly delegate?: {
+    readonly route: (call: {
+      readonly toolUseId: string;
+      readonly task: string;
+      readonly profile?: SubagentProfile;
+    }) => Promise<{ readonly route: Route } | { readonly error: string }>;
+    readonly maxConcurrent: number;
+    readonly maxDepth: number;
+  };
 };
 
 /**
