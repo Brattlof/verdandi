@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { type DecisionAnswer, type Item, type SkillChange, skillFileCap } from "@verdandi/contracts";
 import { flagged } from "@verdandi/decisions";
 import { containsSecret } from "@verdandi/trajectories";
@@ -12,20 +13,24 @@ export const nameProblem = (name: string) =>
     ? undefined
     : `${JSON.stringify(name)} isn't a skill name: use 1 to 64 lowercase letters, digits and single hyphens, e.g. deploy-notes.`;
 
+/** A Windows device name, which no folder there can hold as a file, whatever its extension. */
+const deviceName = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
 /**
  * Why `path` isn't a file path inside a skill folder, or undefined when it is: relative, forward slashes, no `.` or
- * `..` segment, no drive letter, colon, backslash or control character. Symlinks are the disk's to check.
+ * `..` segment, no drive letter, colon, backslash or control character, and a name every OS can write (none of
+ * `<>"|?*`, no Windows device name, no segment ending in a dot or space). Symlinks are the disk's to check.
  */
 export const pathProblem = (path: string) => {
   const segments = path.split("/");
   const outside =
     path === "" ||
     path.startsWith("/") ||
-    /[\\:\p{Cc}]/u.test(path) ||
-    segments.some((s) => s === "" || s === "." || s === "..") ||
+    /[\\:<>"|?*\p{Cc}]/u.test(path) ||
+    segments.some((s) => s === "" || s === "." || s === ".." || deviceName.test(s) || /[. ]$/.test(s)) ||
     path.length > 256;
   return outside
-    ? `${JSON.stringify(path)} isn't a file path inside the skill: give a relative path with forward slashes and no .. segment, e.g. scripts/check.sh.`
+    ? `${JSON.stringify(path)} isn't a file path inside the skill: give a relative path with forward slashes, no .. segment and a name every OS can hold, e.g. scripts/check.sh.`
     : undefined;
 };
 
@@ -85,6 +90,12 @@ export const invertChange = (change: SkillChange): SkillChange => ({
   before: change.after,
   after: change.before,
 });
+
+/**
+ * A skill file's SHA-256 in hex, or "" for a missing one: a hub install records its upstream files' (DESIGN §14.4), so an
+ * update can tell a file the user changed, or deleted, from one it may replace.
+ */
+export const digest = (text: string | null) => (text === null ? "" : createHash("sha256").update(text).digest("hex"));
 
 /** Why agents can't change skill `skill`: the user pinned it. Says how to go on. */
 export const pinnedProblem = (skill: string) =>

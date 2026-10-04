@@ -490,6 +490,38 @@ const gateway = Effect.gen(function* () {
   yield* sql`create table gateway_owners (platform text primary key, sender_id text not null)`;
 });
 
+/**
+ * The skills hub (DESIGN §14.4): `requests.turn_id` may be null, for an install request, which has no turn (SQLite can't
+ * drop a NOT NULL, so the table is copied), and `skill_installs` keeps each installed hub skill's pin and its upstream
+ * files' digests, from `skill.installed` and `skill.uninstalled`; none were installed yet.
+ */
+const skillHub = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table requests_next (
+    id text primary key,
+    thread_id text not null references threads (id),
+    turn_id text references turns (id),
+    kind text not null,
+    payload text not null,
+    resolution text,
+    reason text,
+    requested_at text not null,
+    resolved_at text
+  )`;
+  yield* sql`insert into requests_next (id, thread_id, turn_id, kind, payload, resolution, reason, requested_at, resolved_at)
+    select id, thread_id, turn_id, kind, payload, resolution, reason, requested_at, resolved_at from requests`;
+  yield* sql`drop table requests`;
+  yield* sql`alter table requests_next rename to requests`;
+  yield* sql`create index requests_pending on requests (thread_id) where resolution is null`;
+  yield* sql`create table skill_installs (
+    name text primary key,
+    pin text not null,
+    digests text not null,
+    thread_id text not null,
+    installed_at text not null
+  )`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -522,4 +554,5 @@ export const migrations = {
   "29_session_harness": sessionHarness,
   "30_provider_health": providerHealth,
   "31_gateway": gateway,
+  "32_skill_hub": skillHub,
 };

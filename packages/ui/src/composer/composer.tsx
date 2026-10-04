@@ -561,6 +561,9 @@ const RequestCard = ({
         {request.type === "skill.proposed" && <SkillApproval request={request} sending={sending} respond={respond} />}
         {request.type === "memory.proposed" && <MemoryApproval request={request} sending={sending} respond={respond} />}
         {request.type === "commands.trust.requested" && <TrustApproval request={request} sending={sending} respond={respond} />}
+        {request.type === "skill.install.proposed" && (
+          <InstallApproval request={request} sending={sending} respond={respond} connection={connection} />
+        )}
         {error && (
           <p role="alert" className="mt-2 text-error">
             {error}
@@ -653,6 +656,104 @@ const SkillApproval = ({ request, sending, respond }: CardProps<"skill.proposed"
           onClick={() => respond({ decision: "allow" })}
         >
           Allow
+        </button>
+      </div>
+    </>
+  );
+};
+
+/** Whether a hub file is new, removed or changed, for its heading. */
+const fileTag = (before: string | null, after: string | null) => (before === null ? " (new)" : after === null ? " (removed)" : "");
+
+/**
+ * A hub skill's install or update (DESIGN §14.4): every file's diff, scripts included, the scans' verdicts as advice,
+ * and the files the user changed, which it keeps, each with upstream's change and a way to take it instead.
+ */
+const InstallApproval = ({ request, sending, respond, connection }: CardProps<"skill.install.proposed"> & { connection: Connection }) => {
+  const [taking, setTaking] = useState<string>();
+  const [error, setError] = useState<string>();
+  const { skill, pin, from, changes, kept, taken, advice } = request;
+  // Taking upstream's file is a new proposal from the same ref, with the files taken so far, which replaces this one.
+  const take = async (path: string) => {
+    setTaking(path);
+    const result = await connection.installSkill({ skill, ref: pin.ref, take: [...taken, path] });
+    setTaking(undefined);
+    if (!result.ok) setError(result.message);
+  };
+  return (
+    <>
+      <h3 className="font-serif text-lg font-semibold">
+        {from ? "Update" : "Install"} the hub skill <span className="font-mono">{skill}</span>?
+      </h3>
+      <p className="text-xs text-muted [overflow-wrap:anywhere]">
+        From <span className="font-mono">{pin.source}</span> ({pin.path}), pinned to commit{" "}
+        <span className="font-mono">{pin.sha.slice(0, 12)}</span>
+        {pin.ref === pin.sha ? "" : ` (${pin.ref})`}
+        {from ? `, from ${from.slice(0, 12)}` : ""}. Into your profile's skills folder; nothing is written unless you allow it.
+      </p>
+      <section aria-label="What the scans flagged" className="mt-2">
+        {advice.length === 0 ? (
+          <p className="text-xs text-muted">The scans flagged nothing, which proves nothing: read every file before you allow it.</p>
+        ) : (
+          <ul className="text-xs text-warn">
+            {advice.map((a) => (
+              <li key={a.path} className="[overflow-wrap:anywhere]">
+                <span className="font-mono">{a.path}</span>: {a.why}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section aria-label="Files it writes" className="mt-2 max-h-[30vh] overflow-y-auto border border-line bg-bg">
+        {changes.length === 0 && <p className="px-2 py-1 text-xs text-muted">No file changes: allowing it records the new commit.</p>}
+        {changes.map((c) => (
+          <div key={c.path}>
+            <p className="border-b border-line px-2 pt-1 font-mono text-xs font-medium">
+              {c.path}
+              {fileTag(c.before, c.after)}
+            </p>
+            <TextDiff before={c.before ?? ""} after={c.after ?? ""} />
+          </div>
+        ))}
+      </section>
+      {kept.length > 0 && (
+        <section aria-label="Files you changed, which it keeps" className="mt-2 max-h-[30vh] overflow-y-auto border border-line bg-bg">
+          {kept.map((k) => (
+            <div key={k.path}>
+              <div className="flex items-center justify-between gap-2 border-b border-line px-2 pt-1">
+                <p className="text-xs">
+                  <span className="font-mono font-medium">{k.path}</span>: you changed it, so it stays as you left it. Upstream's change:
+                </p>
+                <button
+                  type="button"
+                  className="shrink-0 px-2 text-xs"
+                  disabled={sending || taking !== undefined}
+                  onClick={() => void take(k.path)}
+                >
+                  {taking === k.path ? "Fetching…" : "Take upstream's"}
+                </button>
+              </div>
+              <TextDiff before={k.before ?? ""} after={k.after ?? ""} />
+            </div>
+          ))}
+        </section>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 text-error [overflow-wrap:anywhere]">
+          {error}
+        </p>
+      )}
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+        <button type="button" disabled={sending} onClick={() => respond({ decision: "deny" })}>
+          Decline
+        </button>
+        <button
+          type="button"
+          className="border-go bg-go text-on-go hover:bg-go-hover"
+          disabled={sending}
+          onClick={() => respond({ decision: "allow" })}
+        >
+          {from ? "Update" : "Install"}
         </button>
       </div>
     </>

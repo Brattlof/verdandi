@@ -8,6 +8,7 @@ import {
   CommandsTrustRequested,
   MemoryProposed,
   PlanRequested,
+  SkillInstallProposed,
   SkillProposed,
   StoredEvent,
   TurnStatus,
@@ -59,6 +60,8 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "SkillPinned",
     "SkillNotPinned",
     "SkillChangeNotFound",
+    "SkillNotInstalled",
+    "SkillHubUnavailable",
     "ReviewSkipped",
     "HandoffSkipped",
     "CompressionSkipped",
@@ -187,10 +190,19 @@ export const ThreadView = Schema.Struct({
   routeChanges: Schema.Array(RouteChange),
   /**
    * Requests still waiting for an answer, oldest first, so a client that reconnects can answer them. A background
-   * review's proposals (`memory.proposed`, and `skill.proposed` on a turn that has ended) wait here too (DESIGN §14.5).
+   * review's proposals (`memory.proposed`, and `skill.proposed` on a turn that has ended) wait here too (DESIGN §14.5), and
+   * on the Skills hub thread, hub installs and updates, which have no turn (`skill.install.proposed`, §14.4).
    */
   pendingRequests: Schema.Array(
-    Schema.Union([ApprovalRequested, UserInputRequested, PlanRequested, SkillProposed, MemoryProposed, CommandsTrustRequested]),
+    Schema.Union([
+      ApprovalRequested,
+      UserInputRequested,
+      PlanRequested,
+      SkillProposed,
+      MemoryProposed,
+      CommandsTrustRequested,
+      SkillInstallProposed,
+    ]),
   ),
 });
 export type ThreadView = typeof ThreadView.Type;
@@ -382,6 +394,24 @@ export class Api extends RpcGroup.make(
   Rpc.make("SkillsList", { success: SkillsView }),
   /** The changes written to profile skill `skill`, newest first, each with why reverting it now would be refused, for the Skills panel. */
   Rpc.make("SkillHistoryGet", { payload: { skill: Schema.String }, success: Schema.Array(SkillHistoryEntry) }),
+  /**
+   * Fetches hub skill `skill` and proposes installing it (DESIGN §14.4): from `source` (a name in `skills.yaml`'s
+   * `sources`) at its folder `path` in the repo (default: the skill's name), or, for an installed skill, an update from
+   * its source. `ref` is a tag, branch or SHA (default: the default branch, or for an update the ref it was installed
+   * from), resolved to a full SHA here. `take` names locally edited files an update overwrites with upstream's. The
+   * proposal waits on the Skills hub thread; `request` is null when there's nothing to change.
+   */
+  Rpc.make("SkillInstall", {
+    payload: {
+      skill: Schema.String,
+      source: Schema.optionalKey(Schema.String),
+      path: Schema.optionalKey(Schema.String),
+      ref: Schema.optionalKey(Schema.String),
+      take: Schema.optionalKey(Schema.Array(Schema.String)),
+    },
+    success: Schema.Struct({ threadId: ThreadId, sha: Schema.String, request: Schema.NullOr(SkillInstallProposed) }),
+    error: CommandRejected,
+  }),
   /** The command lists the user trusted, in thread `threadId`'s project or in all, newest first; each one's thread revokes it. */
   Rpc.make("TrustedCommandsList", { payload: { threadId: Schema.optionalKey(ThreadId) }, success: Schema.Array(TrustedCommands) }),
   /**

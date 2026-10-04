@@ -204,6 +204,9 @@ test("the guard's rules: kebab-case names, relative paths inside the skill", () 
   expect(pathProblem("SKILL.md")).toBeUndefined();
   expect(pathProblem("scripts/check.sh")).toBeUndefined();
   for (const bad of ["", "../x", "a/../../x", "./x", "a//b", "/abs", "C:/x", "c:x", "a\\b", "a/\0b"]) expect(pathProblem(bad)).toBeString();
+  // Names Windows can't write fail on every OS, so a skill moves between machines and a hub install never half-writes.
+  for (const bad of ["aux.md", "refs/CON", "a?b", "a*b", "a|b", 'a"b', "dir./x", "x "]) expect(pathProblem(bad)).toBeString();
+  expect(pathProblem("references/aux-notes.md")).toBeUndefined();
 });
 
 test("the skills list shows each skill with its source", async () => {

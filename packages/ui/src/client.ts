@@ -241,6 +241,19 @@ export const connect = (endpoint: Endpoint) => {
     return undefined;
   };
 
+  /**
+   * Fetches hub skill `skill` and proposes installing or updating it (DESIGN §14.4): the request waits on the Skills hub
+   * thread, or is null when there's nothing to change. A refusal's message names the fix.
+   */
+  const installSkill = async (
+    request: Parameters<Rpc["SkillInstall"]>[0],
+  ): Promise<{ readonly ok: true; readonly proposed: boolean } | { readonly ok: false; readonly message: string }> => {
+    const exit = await run((rpc) => rpc.SkillInstall(request));
+    if (Exit.isSuccess(exit)) return { ok: true, proposed: exit.value.request !== null };
+    const rejected = failure(exit.cause, CommandRejected);
+    return rejected ? { ok: false, message: rejected.message } : disconnected;
+  };
+
   /** The changes written to profile skill `skill`, newest first; undefined when the connection is lost. */
   const skillHistory = async (skill: string): Promise<readonly SkillHistoryEntry[] | undefined> => {
     const exit = await run((rpc) => rpc.SkillHistoryGet({ skill }));
@@ -343,6 +356,7 @@ export const connect = (endpoint: Endpoint) => {
     memory,
     skills,
     skillHistory,
+    installSkill,
     trusted,
     terminals,
     follow,

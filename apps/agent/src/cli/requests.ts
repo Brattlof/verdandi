@@ -27,6 +27,41 @@ export const skillPrompt = (r: Extract<PendingRequest, { type: "skill.proposed" 
   return `\n[skill] The agent proposes to ${skillChangeTitle(r.change)}:\n${diff.join("\n")}\nAllow? [y/n] `;
 };
 
+type InstallRequest = Extract<PendingRequest, { type: "skill.install.proposed" }>;
+
+/** What a hub install request would do, in a few words: install or update, from where, at which commit. */
+export const installTitle = ({ from, skill, pin }: InstallRequest) =>
+  `${from ? "update" : "install"} the hub skill ${skill} from ${pin.source} to ${pin.sha.slice(0, 12)}${pin.ref === pin.sha ? "" : ` (${pin.ref})`}`;
+
+const diffText = (before: string | null, after: string | null) =>
+  lineDiff(before ?? "", after ?? "")
+    .map((l) => `${marks[l.line]} ${l.text}`)
+    .join("\n");
+
+const tag = (before: string | null, after: string | null) => (before === null ? " (new)" : after === null ? " (removed)" : "");
+
+/**
+ * A hub install's every file as a diff, the scans' advice, then the files the user changed, which it keeps, each with
+ * upstream's change to take or leave: the user approves what they read (DESIGN §14.4).
+ */
+export const installText = (r: InstallRequest) => {
+  const files = r.changes.map((c) => `=== ${c.path}${tag(c.before, c.after)}\n${diffText(c.before, c.after)}\n`);
+  const none = r.changes.length === 0 ? "No file changes: allowing it records the new commit.\n" : "";
+  const kept = r.kept.map(
+    (k) =>
+      `=== ${k.path}: you changed it, so it stays as you left it. Upstream's change, to take with \`verdandi skills update ${r.skill} --ref ${r.pin.ref}${[...r.taken, k.path].map((p) => ` --take ${p}`).join("")}\`:\n${diffText(k.before, k.after)}\n`,
+  );
+  const advice =
+    r.advice.length === 0
+      ? "The scans flagged nothing, which proves nothing: read it before you allow it.\n"
+      : `The scans flagged, as advice:\n${r.advice.map((a) => `  ${a.path}: ${a.why}`).join("\n")}\n`;
+  return `${files.join("")}${none}${kept.join("")}${advice}`;
+};
+
+/** A hub install or update, from the Skills hub thread: its whole diff, then the question. */
+export const installPrompt = (r: InstallRequest) =>
+  `\n[skill hub] Verdandi would ${installTitle(r)} in your profile's skills folder:\n${installText(r)}Allow? [y/n] `;
+
 /**
  * A proposed memory: from a background review (DESIGN §14.5), or the agent's own save in a turn that read untrusted
  * input (§17). What it would remember, where, and why it asks.

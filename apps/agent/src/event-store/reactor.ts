@@ -41,6 +41,8 @@ import { repeatedError } from "../routing/repeated-error.ts";
 import { searchSessions } from "../search/search.ts";
 import {
   applyChange,
+  applyChanges,
+  archiveSkill,
   placeSkill,
   prepareChange,
   readableSkills,
@@ -48,6 +50,7 @@ import {
   type SkillFolders,
   viewSkill,
 } from "../skills/skill-files.ts";
+import { loadInstall } from "../skills/skill-hub.ts";
 import { makeSkillProposals } from "../skills/skill-proposals.ts";
 import { recordTaskOutcomes, staleOutcomeThreads } from "../tasks/task-outcome.ts";
 import { recordTrajectory, unrecordedTurns } from "../tasks/trajectory.ts";
@@ -1119,6 +1122,42 @@ export const ReactorLive = Layer.effect(
             ...(error && { error }),
           })
           .pipe(Effect.ignoreCause({ log: "Warn", message: `Could not record how skill revert ${e.changeId} went.` }));
+      }
+      // An allowed hub install is written at once, inside its answer's dispatch, so the receipt means its outcome is recorded too.
+      if (e.type === "skill.install.resolved") {
+        if (e.resolution.decision !== "allow") return Effect.void;
+        return Effect.gen(function* () {
+          const [row] = yield* sql<{ payload: string }>`select payload from requests where id = ${e.requestId}`;
+          if (!row) return;
+          const { skill, pin, digests, changes, from } = JSON.parse(row.payload) as Extract<Event, { type: "skill.install.proposed" }>;
+          // An install proposed against another state (installed, updated or uninstalled since) would write the wrong files.
+          const now = yield* loadInstall(skill).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+          const error =
+            now?.pin.sha === from
+              ? applyChanges(skillFolders, changes)
+              : `${skill} was ${now ? `installed at ${now.pin.sha.slice(0, 12)}` : "uninstalled"} since this was proposed, so nothing was written. Install or update it again.`;
+          yield* engine.dispatch({
+            type: "skill.install.report",
+            commandId: randomUUID() as CommandId,
+            threadId: e.threadId,
+            requestId: e.requestId,
+            skill,
+            pin,
+            digests,
+            ...(error && { error }),
+          });
+        }).pipe(Effect.ignoreCause({ log: "Warn", message: `Could not install hub skill request ${e.requestId}.` }));
+      }
+      // Uninstalling moves the folder out of what Claude Code loads, never deleting it, inside the dispatch, so the
+      // receipt means its outcome is recorded too.
+      if (e.type === "skill.uninstall.requested") {
+        const error = archiveSkill(skillFolders, e.skill);
+        return engine
+          .dispatch({ type: "skill.uninstall.report", commandId: randomUUID() as CommandId, skill: e.skill, ...(error && { error }) })
+          .pipe(
+            Effect.andThen(error ? Effect.logWarning(error) : Effect.void),
+            Effect.ignoreCause({ log: "Warn", message: `Could not record how uninstalling ${e.skill} went.` }),
+          );
       }
       // A skill proposal is Verdandi's own request: its answer writes the skill, in `turns` so `drain` waits for it. So is a
       // trust request, whose answer a turn waits on.

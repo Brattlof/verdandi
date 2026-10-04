@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks), #242 (trusted project commands) and #177 (scanned context files). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local. Amended by ADR 0028: each device other than a page `verdandi web` opens pairs and gets its own revocable token. Amended by ADR 0031: a project's own MCP servers are among its trusted commands, and native MCP tools ask. Amended by #212: the gateway's access module is a boundary, and chat senders and each platform's owner are principals. Amended by #216: opt-in smart approvals, a heuristic, decide some native terminal commands without asking.
+Accepted (issue #197, 2026-10-03). Describes the code as of #235 (secrets kept from child processes), #236 (`Origin` checks), #242 (trusted project commands) and #177 (scanned context files). Amended by ADR 0026: verdandid serves no web page and refuses every browser, `verdandi web` serves the UI with a page token of its own and checks the page's `Origin`, and the LAN gate moved to it (`apps/web/src/lan-gate.ts`) and counts Tailscale's range as local. Amended by ADR 0028: each device other than a page `verdandi web` opens pairs and gets its own revocable token. Amended by ADR 0031: a project's own MCP servers are among its trusted commands, and native MCP tools ask. Amended by #212: the gateway's access module is a boundary, and chat senders and each platform's owner are principals. Amended by #216: opt-in smart approvals, a heuristic, decide some native terminal commands without asking. Amended by ADR 0037: hub skill installs and updates are asks, verdandid fetches their files itself, and the scans on them advise without refusing.
 
 ## Context
 
@@ -33,12 +33,13 @@ A bypass of one of these is a vulnerability.
    - Project paths must be existing folders, stored as their real paths (`resolveProjectPath` in `apps/agent/src/projects/project.ts`).
    - Attachments are counted and sized, and an image's bytes must match its type, before anything is stored (`storeAttachments` in `apps/agent/src/attachments/attachments.ts`).
    - A skill change must stay inside one kebab-case skill in the profile's folder, with no link on the way and no overlap with an extra folder (`prepareChange` in `apps/agent/src/skills/skill-files.ts`).
+   - A hub install's files come from verdandid's own fetch of a source named in `skills.yaml`, at the commit it resolved, never from a client, and only as text files with no links or submodules; each passes the same path guard when proposed and again when written (`proposeInstall` in `apps/agent/src/skills/skill-hub.ts`, `applyChanges`).
 5. **The asks Verdandi itself enforces.** Nothing runs or is written past one of these without the user's answer:
    - a project's own commands (its verifiers in `.verdandi/routing.yaml`, its worktree setup in `.verdandi/worktree.yaml`, the MCP servers its `.verdandi/mcp.yaml` and imported `.mcp.json` configure, ADR 0031) run only once the user trusts that exact list in the project, by its hash (`apps/agent/src/trust/trust.ts`), and a changed list asks again. Unattended runs only run trusted lists;
    - a Verdandi tool marked `ask` (`packages/tools`) runs only once allowed;
    - a native `terminal` command runs only once allowed, every one (`runTool` in `packages/harness-native/src/adapter.ts`), unless the user turned on smart approvals (below), which then decide some without asking;
    - a native MCP tool runs only once allowed, unless the user's own config marks it as not asking, and every one in ask and plan mode (`runTool`; imported Claude Code servers always ask);
-   - a skill change, or a memory save or proposal that asks, writes nothing until allowed.
+   - a skill change, a hub skill's install or update (ADR 0037), or a memory save or proposal that asks, writes nothing until allowed. A clean scan never skips a hub install's ask.
 
    Getting one of these past its ask is a vulnerability. What the approved step then does is not: an approval is consent, not containment.
 6. **The gateway's access decisions** (DESIGN §15). One pure function, `access` in `apps/agent/src/gateway/access.ts`, decides what an incoming chat message may do; adapters only report facts. A bypass is a vulnerability when it lets:
@@ -54,7 +55,7 @@ A bypass of one of these is a vulnerability.
 
 These lower risk, and they can be bypassed by design. A bypass is a bug worth fixing, not a vulnerability.
 
-- The injection question (`untrusted.injection`, `injectionRules` in `packages/decisions/src/rules.ts`), the secret scans on memory (`scanMemory`) and skills (`scanSkill`), and trajectory redaction (`packages/trajectories/src/redact.ts`).
+- The injection question (`untrusted.injection`, `injectionRules` in `packages/decisions/src/rules.ts`), the secret scans on memory (`scanMemory`) and skills (`scanSkill`; on a hub install, advice shown on its diff, never a refusal, since the user asked for it and approves either way), and trajectory redaction (`packages/trajectories/src/redact.ts`).
 - "Marked as data" fences around untrusted text handed to the agent (escalation hand-offs, the review digest, the memory snapshot's entries: `asData` in `apps/agent/src/trust/fence.ts`, a fence longer than any run of backticks in the text, so the text can't close it), attachments handed over as paths marked as data, and the warning over a flagged search or MCP tool result. A model can still follow what's inside one.
 - Background review's prompt rules on what never to capture, and its gate that offers skills only from a task whose last verifier run passed or that the user rated up (`skillsRefused` in `apps/agent/src/review/review.ts`). A passing verifier doesn't make a lesson true.
 - What an approval or plan mode limits. They're consent, not containment: they ask before a step, and don't limit what an approved step does or what the user's own harness settings already allow. The harness's own permission prompts and plan mode (Claude Code's read-only mode) are enforced by the harness.
@@ -92,13 +93,13 @@ The rivals' incidents argue for these defaults. Each one names what holds it tod
    - the PTY host starts with `--no-env-file`.
 
    This is hygiene, not a boundary: an agent running as you can read any file you can, so a key in `.env` is only as private as that file, and the keychain is the better home for it.
-2. **No default outbound calls.** verdandid calls only the user's harness and the providers they configured. The native harness's client has a fixed base URL (`https://api.anthropic.com`, `packages/harness-native/src/adapter.ts`) and runs only with a key. There is no telemetry. The web UI bundles its fonts (`@fontsource-variable`, `apps/web/src/styles.css`) and shows remote Markdown images as text (`apps/web/src/ui/markdown.tsx`). Anything more must be named in config and stays off until turned on.
+2. **No default outbound calls.** verdandid calls only the user's harness and the providers they configured. The native harness's client has a fixed base URL (`https://api.anthropic.com`, `packages/harness-native/src/adapter.ts`) and runs only with a key. There is no telemetry. The web UI bundles its fonts (`@fontsource-variable`, `apps/web/src/styles.css`) and shows remote Markdown images as text (`apps/web/src/ui/markdown.tsx`). Anything more must be named in config and stays off until turned on: a hub install or update fetches, through git, only from a source named under `sources` in `skills.yaml`, and only when the user asks for it (ADR 0037).
 3. **Consent first for self-improvement.**
    - A skill change is a `skill.proposed` request with a diff, and nothing is written until the user allows it (`apps/agent/src/skills/`).
    - Background review is off unless `review.yaml` sets `enabled: true`, and each of its proposals is a pending request.
    - Memory saves ask too: `approveSaves` now defaults to `true` (`apps/agent/src/memory/memory-config.ts`). This turns ADR 0016's opt-in into an opt-out, and `approveSaves: false` in `memory.yaml` restores the old behaviour. The user's own saves from the Memory tab don't ask.
 4. **No full-context heartbeats.** Background model work runs on a digest (`apps/agent/src/review/review.ts`), as a routed task with a cost cap: `aux.review` at `maxCost` 0.25 in `packages/router/src/policy.json`. It never spends metered dollars unless `review.yaml` sets `allowMetered: true` (ADR 0023).
-5. **No open code marketplace.** Skills come only from the profile's folder and the read-only `extraFolders` named in `skills.yaml`, and the agent changes them only through the approval diff. No plugin exists yet. DESIGN §17 and §18 require content-only bundles first, code only out of process, pinned installs, and consent bound to a hash of the declared capabilities. Hub skills will install pinned to a commit, through the same proposal flow (#218).
+5. **No open code marketplace.** Skills come only from the profile's folder, the read-only `extraFolders` named in `skills.yaml`, and hub installs from the git `sources` named there, each pinned to a full commit SHA and written only after the user allows its diff of every file (ADR 0037); the agent changes them only through the approval diff. No plugin exists yet. DESIGN §17 and §18 require content-only bundles first, code only out of process, pinned installs, and consent bound to a hash of the declared capabilities.
 
 `SECURITY.md` points here and says how to report a vulnerability.
 

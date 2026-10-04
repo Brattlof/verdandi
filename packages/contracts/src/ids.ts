@@ -12,6 +12,12 @@ export type ThreadId = typeof ThreadId.Type;
  */
 export const profileStream = "profile" as ThreadId;
 
+/**
+ * The profile's Skills hub thread, in its workspace (DESIGN §13, §14.4): where install and update requests wait, since a
+ * CLI install has no thread of its own. Created by the first install. Never a UUID, so never a user's thread.
+ */
+export const hubThread = "skills-hub" as ThreadId;
+
 /** Also sent to Claude Code as the prompt's `uuid`, so a turn can be forked at later (ADR 0004). */
 export const TurnId = Schema.String.pipe(Schema.brand("TurnId"));
 export type TurnId = typeof TurnId.Type;

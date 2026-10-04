@@ -2,12 +2,13 @@ import {
   type ClientCommand,
   type CommandId,
   historyLabel,
+  hubThread,
   type SkillHistoryEntry,
   type SkillSource,
   type SkillSummary,
   type SkillsView,
 } from "@verdandi/contracts";
-import { useCallback, useEffect, useId, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useId, useState } from "react";
 import { type Connection, uuid } from "../client.ts";
 import { TextDiff } from "../diffs/diff.tsx";
 import { Rune } from "../ui/runes.tsx";
@@ -21,6 +22,17 @@ const folderName = (path: string) => path.split(/[\\/]/).at(-1) ?? path;
 
 /** Sends `command`: undefined once it's done, or why it was refused. */
 type Send = (command: ClientCommand) => Promise<string | undefined>;
+
+const hubLink = `#thread=${hubThread}`;
+
+/** What a hub install or update came to: a request waiting on the Skills hub thread, or why there's none. */
+type Proposed = { readonly waits: true } | { readonly waits: false; readonly text: string };
+const proposedOf = (result: Awaited<ReturnType<Connection["installSkill"]>>, skill: string): Proposed =>
+  !result.ok
+    ? { waits: false, text: result.message }
+    : result.proposed
+      ? { waits: true }
+      : { waits: false, text: `${skill} is already at that commit, with nothing to change.` };
 
 /**
  * The Skills tab (DESIGN §14.4): the profile's skills, which the agent proposes with skill_manage and the user
@@ -43,6 +55,13 @@ export const SkillsTab = ({ connection }: { connection: Connection }) => {
     s.curation && act({ type: "skill.restore", commandId: uuid<CommandId>(), threadId: s.curation.threadId, skill: folderName(s.path) });
   const pin = (s: SkillSummary) =>
     act({ type: s.pinned ? "skill.unpin" : "skill.pin", commandId: uuid<CommandId>(), skill: folderName(s.path) });
+  const uninstall = (s: SkillSummary) => act({ type: "skill.uninstall", commandId: uuid<CommandId>(), skill: folderName(s.path) });
+  const [proposed, setProposed] = useState<Proposed>();
+  /** Install or update through verdandid, which fetches the skill; the request then waits on the Skills hub thread. */
+  const hub = async (request: Parameters<Connection["installSkill"]>[0]) => {
+    setError(undefined);
+    setProposed(proposedOf(await connection.installSkill(request), request.skill));
+  };
   if (!view) return <p className="p-3 text-xs text-muted">Loading…</p>;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 text-xs">
@@ -66,6 +85,18 @@ export const SkillsTab = ({ connection }: { connection: Connection }) => {
           {error}
         </p>
       )}
+      {proposed && (
+        <p role="status" className="mt-2 [overflow-wrap:anywhere]">
+          {proposed.waits ? (
+            <>
+              It waits for you, with every file's diff, on the <a href={hubLink}>Skills hub thread</a>.
+            </>
+          ) : (
+            proposed.text
+          )}
+        </p>
+      )}
+      <InstallForm install={(request) => void hub(request)} />
       {view.folders.map(({ path, source, skills }, i) => {
         const headingId = `skills-folder-${i}`;
         return (
@@ -89,6 +120,8 @@ export const SkillsTab = ({ connection }: { connection: Connection }) => {
                     send={send}
                     restore={() => void restore(s)}
                     pin={() => void pin(s)}
+                    update={() => void hub({ skill: folderName(s.path) })}
+                    uninstall={() => void uninstall(s)}
                   />
                 ))}
               </ul>
@@ -100,7 +133,51 @@ export const SkillsTab = ({ connection }: { connection: Connection }) => {
   );
 };
 
-/** One skill: its state and description, Pin or Restore, and its history, fetched when opened. */
+/**
+ * Installs a hub skill (DESIGN §14.4): its folder in a source from `skills.yaml`'s `sources`, at a tag, branch or commit
+ * (default: the default branch), which verdandid resolves to a full SHA. The request then waits on the Skills hub thread.
+ */
+const InstallForm = ({ install }: { install: (request: { skill: string; source: string; path: string; ref?: string }) => void }) => {
+  const [source, setSource] = useState("");
+  const [path, setPath] = useState("");
+  const [ref, setRef] = useState("");
+  const id = useId();
+  const folder = path.trim().replace(/\/+$/, "");
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!source.trim() || !folder) return;
+    install({ skill: folder.split("/").at(-1) ?? folder, source: source.trim(), path: folder, ...(ref.trim() && { ref: ref.trim() }) });
+  };
+  return (
+    <form onSubmit={submit} aria-labelledby={`${id}-title`} className="mt-3 border border-line p-2">
+      <p id={`${id}-title`} className="font-medium">
+        Install from a hub source
+      </p>
+      <p className="text-muted">
+        Sources are git repos you name under sources in skills.yaml. Every file is shown as a diff before anything is written.
+      </p>
+      <div className="mt-1 flex flex-wrap items-end gap-2">
+        <label className="flex flex-col">
+          <span className="text-muted">Source</span>
+          <input value={source} onChange={(e) => setSource(e.target.value)} placeholder="anthropic" className="w-28" />
+        </label>
+        <label className="flex flex-col">
+          <span className="text-muted">Skill folder in it</span>
+          <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="skills/pdf" className="w-40" />
+        </label>
+        <label className="flex flex-col">
+          <span className="text-muted">Tag, branch or commit</span>
+          <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="default branch" className="w-32" />
+        </label>
+        <button type="submit" className="px-2 text-xs" disabled={!source.trim() || !folder}>
+          Fetch and review
+        </button>
+      </div>
+    </form>
+  );
+};
+
+/** One skill: its state and description, Pin or Restore, Update or Uninstall for a hub skill, and its history, fetched when opened. */
 const Skill = ({
   skill: s,
   source,
@@ -108,6 +185,8 @@ const Skill = ({
   send,
   restore,
   pin,
+  update,
+  uninstall,
 }: {
   skill: SkillSummary;
   source: SkillSource;
@@ -115,6 +194,8 @@ const Skill = ({
   send: Send;
   restore: () => void;
   pin: () => void;
+  update: () => void;
+  uninstall: () => void;
 }) => {
   const [open, setOpen] = useState(false);
   const historyId = useId();
@@ -148,6 +229,16 @@ const Skill = ({
               {s.pinned ? "Unpin" : "Pin"}
             </button>
           )}
+          {source === "profile" && s.hub && (
+            <>
+              <button type="button" className="px-2 text-xs" aria-label={`Update ${s.name} from ${s.hub.source}`} onClick={update}>
+                Update
+              </button>
+              <button type="button" className="px-2 text-xs" aria-label={`Uninstall ${s.name}`} onClick={uninstall}>
+                Uninstall
+              </button>
+            </>
+          )}
           {source === "archived" && s.curation?.state === "archived" && (
             <button type="button" className="px-2 text-xs" aria-label={`Restore ${s.name}`} onClick={restore}>
               Restore
@@ -156,6 +247,14 @@ const Skill = ({
         </div>
       </div>
       <p className="mt-0.5 text-muted [overflow-wrap:anywhere]">{s.description || "No description in its SKILL.md."}</p>
+      {s.hub && (
+        <p className="mt-0.5 text-muted [overflow-wrap:anywhere]">
+          From <span className="font-mono">{s.hub.source}</span> ({s.hub.path}) at{" "}
+          <span className="font-mono">{s.hub.sha.slice(0, 12)}</span>
+          {s.hub.ref === s.hub.sha ? "" : ` (${s.hub.ref})`}
+          {s.hub.edited.length > 0 && `; you changed ${s.hub.edited.join(", ")}, which updates keep`}
+        </p>
+      )}
       {open && (
         <div id={historyId}>
           <SkillHistory skill={folderName(s.path)} connection={connection} send={send} />

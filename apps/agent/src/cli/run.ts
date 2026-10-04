@@ -24,7 +24,7 @@ import { serverFor } from "../main.ts";
 import { expandHome } from "../projects/project.ts";
 import { connect } from "../rpc/client.ts";
 import { spendSplit } from "../spend/usage.ts";
-import { type PendingRequest, skillChangeTitle, trustedCommandsLine } from "./requests.ts";
+import { installTitle, type PendingRequest, skillChangeTitle, trustedCommandsLine } from "./requests.ts";
 
 /** How `verdandi run` ends, as its usage line in `bin.ts` documents. Any other error (verdandid couldn't start, the turn rejected) exits 1. */
 export const exitCodes = { completed: 0, usage: 2, failed: 3, limit: 4, request: 5, interrupted: 130 } as const;
@@ -134,7 +134,9 @@ const describeRequest = (r: PendingRequest) =>
           ? `approval to ${skillChangeTitle(r.change)}`
           : r.type === "memory.proposed"
             ? `approval to remember: ${r.text}`
-            : `approval of its plan:\n${r.plan}`;
+            : r.type === "skill.install.proposed"
+              ? `approval to ${installTitle(r)}`
+              : `approval of its plan:\n${r.plan}`;
 
 const uuid = <T>() => crypto.randomUUID() as T;
 type Signal = ThreadFeed | { readonly kind: "sigint" } | { readonly kind: "ended" };

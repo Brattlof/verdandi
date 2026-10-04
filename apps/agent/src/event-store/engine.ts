@@ -244,6 +244,19 @@ export const EngineLive = (options: EngineOptions = {}) =>
                       : undefined;
             const [injection] =
               untrusted === undefined ? [] : (yield* decider.decide({ state: untrusted, questions: [injectionQuestion] })).answers;
+            // A hub install's new files are scanned one by one, for the advice its diff shows (DESIGN §14.4).
+            const injections =
+              command.type === "skill.install.propose"
+                ? yield* Effect.forEach(command.changes, (change) =>
+                    change.after === null
+                      ? Effect.succeed(undefined)
+                      : Effect.map(decider.decide({ state: change.after, questions: [injectionQuestion] }), (d) => d.answers[0]),
+                  )
+                : undefined;
+            const installed =
+              command.type === "skill.uninstall"
+                ? (yield* sql`select 1 from skill_installs where name = ${command.skill}`).length > 0
+                : undefined;
             // A skill Verdandi created has a row in `skills`; any other is never curated or restored.
             const skill =
               command.type === "skill.curate" || command.type === "skill.restore"
@@ -288,6 +301,8 @@ export const EngineLive = (options: EngineOptions = {}) =>
                 ...(injection && { injection }),
                 ...(skill !== undefined && { skill }),
                 ...(pinned !== undefined && { pinned }),
+                ...(injections && { injections }),
+                ...(installed !== undefined && { installed }),
                 ...(reverting !== undefined && { reverting }),
                 ...(device !== undefined && { device }),
                 ...gateway,

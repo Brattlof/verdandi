@@ -11,9 +11,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { type SkillChange, type SkillCuration, type SkillSource, type SkillsView, skillFileCap } from "@verdandi/contracts";
+import { type HubPin, type SkillChange, type SkillCuration, type SkillSource, type SkillsView, skillFileCap } from "@verdandi/contracts";
 import type { SkillEdit } from "@verdandi/tools";
-import { frontmatter, invertChange, nameProblem, pathProblem } from "./skills.ts";
+import { digest, frontmatter, invertChange, nameProblem, pathProblem } from "./skills.ts";
 
 /**
  * The profile's own skills folder, which Verdandi writes after the user approves and Claude Code loads, the folder
@@ -154,6 +154,85 @@ export const applyChange = (
   }
 };
 
+/**
+ * File `path` of profile skill `skill` as it is on disk (null when it doesn't exist), read through `skill_manage`'s path
+ * guards, or why it can't be read. What a hub install's changes start from.
+ */
+export const readSkillFile = (
+  folders: SkillFolders,
+  skill: string,
+  path: string,
+): { readonly text: string | null } | { readonly error: string } => {
+  const at = target(folders, skill, path);
+  return "error" in at ? at : { text: readIfFile(at.file) };
+};
+
+/** Writes `text` to `file`, or removes it for null. */
+const put = (file: string, text: string | null) => {
+  if (text === null) rmSync(file, { force: true });
+  else {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text);
+  }
+};
+
+/**
+ * Writes the approved `changes` of one hub install or update together: nothing when any one can't be written (a guard
+ * refused, or a file isn't its `before` any more), else each, putting the ones written back as they were if a later one
+ * fails. Says why it wrote nothing, or nothing. Only the reactor calls it.
+ */
+export const applyChanges = (folders: SkillFolders, changes: readonly SkillChange[]): string | undefined => {
+  const stale = (change: SkillChange) =>
+    `${change.skill}/${change.path} changed since the install was proposed, so nothing was written. Install or update it again to see the files as they are now.`;
+  const written: { readonly file: string; readonly before: string | null }[] = [];
+  try {
+    const files: { readonly file: string; readonly change: SkillChange }[] = [];
+    for (const change of changes) {
+      const how = plan(folders, change, stale(change));
+      if ("error" in how) return how.error;
+      // Only a create that reverts a delete moves a folder; an install's changes all write files.
+      if (!("file" in how)) return stale(change);
+      files.push({ file: how.file, change });
+    }
+    for (const { file, change } of files) {
+      written.push({ file, before: change.before });
+      put(file, change.after);
+    }
+    return undefined;
+  } catch (e) {
+    const undone = written.every(({ file, before }) => {
+      try {
+        put(file, before);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    return `Couldn't write the skill ${changes[0]?.skill ?? ""}: ${e instanceof Error ? e.message : String(e)}. ${undone ? "Nothing was left changed." : "Some files couldn't be put back; check the skill's folder."}`;
+  }
+};
+
+/**
+ * Moves hub skill `name`'s folder into the archive on uninstall, under its own name or, when an archived folder has
+ * that already, the first free `<name>-<n>`, so uninstalling never fails for an older copy. Never deletes. Says why it
+ * couldn't, or nothing.
+ */
+export const archiveSkill = (folders: SkillFolders, name: string): string | undefined => {
+  const wrong = nameProblem(name);
+  if (wrong) return wrong;
+  const from = join(folders.profile, name);
+  if (!present(from)) return undefined;
+  let to = join(folders.archive, name);
+  for (let n = 2; present(to); n++) to = join(folders.archive, `${name}-${n}`);
+  try {
+    mkdirSync(folders.archive, { recursive: true });
+    renameSync(from, to);
+    return undefined;
+  } catch (e) {
+    return `Couldn't move the skill ${name} from ${from} to ${to}: ${e instanceof Error ? e.message : String(e)}. Close any program that has a file of it open, and uninstall it again.`;
+  }
+};
+
 /** Why reverting the written `change` would be refused, as `revertStale` says it. */
 export const revertStale = (change: SkillChange) =>
   `${change.skill}/${change.path} changed since this change was written (by a later change or by hand), so reverting it would lose that. Nothing was written.`;
@@ -189,14 +268,25 @@ export const placeSkill = (folders: SkillFolders, name: string, archived: boolea
   }
 };
 
+/** An installed hub skill as `skill_installs` keeps it: its pin and its upstream files' digests at the pinned SHA. */
+export type HubInstall = { readonly pin: HubPin; readonly digests: Readonly<Record<string, string>> };
+
+/** The files of hub skill folder `folder` whose content isn't what `install` put there: edited or deleted since. */
+export const editedFiles = (folder: string, install: HubInstall) =>
+  Object.keys(install.digests)
+    .filter((path) => digest(readIfFile(join(folder, ...path.split("/")))) !== install.digests[path])
+    .toSorted();
+
 /**
  * The profile's skills folder, its archive (when it holds any), then each extra folder, with its skills: the folders in
- * it that hold a SKILL.md, each with its `curation` when Verdandi created it, and its pin when the user pinned it.
+ * it that hold a SKILL.md, each with its `curation` when Verdandi created it, its pin when the user pinned it, and its
+ * hub pin and edited files when it was installed from a hub source.
  */
 export const listSkills = (
   folders: SkillFolders,
   curation: ReadonlyMap<string, SkillCuration> = new Map(),
   pins: ReadonlySet<string> = new Set(),
+  installs: ReadonlyMap<string, HubInstall> = new Map(),
 ): SkillsView => {
   const skillsIn = (folder: string, source: SkillSource) => {
     let names: string[];
@@ -216,6 +306,7 @@ export const listSkills = (
       const data = frontmatter(text);
       const named = typeof data?.name === "string" ? data.name : name;
       const curated = source === "extra" ? undefined : curation.get(name);
+      const installed = source === "profile" ? installs.get(name) : undefined;
       return [
         {
           name: named,
@@ -223,6 +314,7 @@ export const listSkills = (
           path,
           ...(curated && { curation: curated }),
           ...(source === "profile" && pins.has(name) && { pinned: true }),
+          ...(installed && { hub: { ...installed.pin, edited: editedFiles(path, installed) } }),
         },
       ];
     });
