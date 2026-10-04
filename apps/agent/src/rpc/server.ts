@@ -423,7 +423,7 @@ export const ServerLayer = (
     Layer.provideMerge(TerminalsLive),
     Layer.provideMerge(GcLive(home)),
     Layer.provideMerge(DevicesLive),
-    Layer.provideMerge(GatewayLive(options.gateway)),
+    Layer.provideMerge(GatewayLive(home, options.gateway)),
     Layer.provideMerge(AppLayer(home, harnesses)),
   );
 };

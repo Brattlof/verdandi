@@ -5,6 +5,7 @@ import { makeFakeHarness } from "@verdandi/testkit";
 import { Effect, Layer, Logger, ManagedRuntime, References, Stream } from "effect";
 import { attachmentsDir } from "./attachments/attachments.ts";
 import { loadGatewayConfig } from "./gateway/gateway-config.ts";
+import { findTelegramToken, makeTelegramAdapter } from "./gateway/telegram.ts";
 import { childEnv } from "./home/child-env.ts";
 import { flag, resolveHome, runningServer, type ServerFile, serverFile } from "./home/home.ts";
 import { ensureWorkspace, loadTrustedFolders } from "./home/workspace.ts";
@@ -39,8 +40,12 @@ export const serve = async (
   ensureWorkspace(home);
   // A broken workspace.yaml stops here, naming the file and key.
   const folders = loadTrustedFolders(home);
-  // A broken gateway.yaml stops an always-on verdandid here, naming the file and key; one a chat runs never reads it.
-  const gateway = options.alwaysOn ? { config: loadGatewayConfig(home), adapters: [] } : undefined;
+  // A broken gateway.yaml or a malformed bot token stops an always-on verdandid here, naming the fix; one a chat runs never
+  // reads them. The token is read before the native harness takes Verdandi's secrets out of the environment.
+  const telegram = options.alwaysOn ? await findTelegramToken(process.env, Bun.secrets) : undefined;
+  const gateway = options.alwaysOn
+    ? { config: loadGatewayConfig(home), adapters: telegram?.token ? [makeTelegramAdapter({ token: telegram.token })] : [] }
+    : undefined;
   const claudePath = findClaude();
   // Only with an Anthropic API key configured; a malformed one stops here, naming the fix.
   const native = await nativeHarness(home, folders);
@@ -48,7 +53,8 @@ export const serve = async (
     "claude-code": claudePath
       ? makeClaudeCodeAdapter({
           claudePath,
-          additionalDirectories: [attachmentsDir(home), ...folders],
+          additionalDirectories: [attachmentsDir(home)],
+          folders,
           plugins: [skillsPlugin(home)],
           env: childEnv(),
         })
@@ -78,6 +84,13 @@ export const serve = async (
   const status = [
     ...(claudePath ? [] : ["Claude Code CLI not found on PATH; claude-code turns will fail until it is installed."]),
     ...(options.quiet ? [] : [native.status]),
+    ...(telegram
+      ? [
+          telegram.token !== undefined
+            ? `Telegram gateway on (bot token from ${telegram.source}).`
+            : `Telegram gateway off: ${telegram.reason}.`,
+        ]
+      : []),
     ...(folders.length ? [`The agent also works in ${folders.join(", ")} as in a thread's own folder (workspace.yaml).`] : []),
   ];
   const stop = async () => {
@@ -99,7 +112,7 @@ export const serverFor = async (home: string, argv: readonly string[]) => {
 
 /**
  * `verdandi start`: runs verdandid in the foreground until Ctrl+C, for the clients that need it to outlive a chat (the
- * web UI, and later the scheduler, gateway and desktop app). It listens only on 127.0.0.1 and serves no web page
+ * web UI, the messaging gateway, which only it runs, and later the scheduler and desktop app). It listens only on 127.0.0.1 and serves no web page
  * (ADR 0026): `verdandi web` serves the UI, and its `--host` opens that to other devices.
  */
 export const start = async (argv: readonly string[]) => {

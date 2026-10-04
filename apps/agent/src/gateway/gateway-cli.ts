@@ -1,4 +1,4 @@
-import { type CommandId, type GatewayView, type PendingPairing, Platform } from "@verdandi/contracts";
+import { type ChannelBinding, type CommandId, type GatewayView, type PendingPairing, Platform } from "@verdandi/contracts";
 import { Effect, Schema } from "effect";
 import { readServerFile, resolveHome } from "../home/home.ts";
 import { connect } from "../rpc/client.ts";
@@ -9,6 +9,10 @@ const gatewayUsage =
 /** One sender waiting to pair, as the terminal chat's notice and `verdandi gateway senders` show it. Never the code. */
 export const senderPairingLine = (p: PendingPairing) =>
   `${p.platform} sender ${p.senderName} (${p.senderId}) asks to be let in: they got a code in their DM. Approve it with verdandi gateway pair <code>, or deny it with verdandi gateway deny ${p.requestId}`;
+
+/** Where a bound thread's replies go, as the terminal chat says it. */
+export const bindingLine = (b: ChannelBinding) =>
+  `This thread replies to ${b.platform} chat ${b.chatId}${b.platformThread === null ? "" : ` (thread ${b.platformThread})`}`;
 
 /** Who has access on each platform, then the waiting requests. */
 export const gatewayText = (view: GatewayView) => {

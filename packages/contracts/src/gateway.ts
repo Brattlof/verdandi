@@ -1,5 +1,5 @@
 import { Data, type Effect, Schema, type Stream } from "effect";
-import { CommandId, ThreadId } from "./ids.ts";
+import { CommandId, ThreadId, TurnId } from "./ids.ts";
 
 /**
  * The messaging gateway (DESIGN §15). A `PlatformAdapter` reports what it sees in a chat app as facts; one pure module in
@@ -32,18 +32,165 @@ export type InboundMessage = {
   readonly command?: { readonly name: string; readonly args: readonly string[] };
   readonly text: string;
   readonly context: readonly ContextText[];
+  /** The platform's own thread inside the chat, e.g. a Telegram forum topic. */
+  readonly platformThread?: string;
 };
 
-/** A chat app couldn't be reached, or refused a message. */
-export class ChannelError extends Data.TaggedError("ChannelError")<{ readonly message: string }> {}
+/** A button under a message: pressing it comes back as the command line `command`, e.g. `approve <request>`. */
+export const Button = Schema.Struct({ label: Schema.String, command: Schema.String });
+export type Button = typeof Button.Type;
+
+/** A message to a chat, in its platform thread when it has one. */
+export type OutboundMessage = {
+  readonly chatId: string;
+  readonly platformThread?: string;
+  readonly text: string;
+  readonly buttons?: readonly Button[];
+};
+
+/** A chat app couldn't be reached, or refused a message. `gone`: the chat is gone (left, blocked, deleted), so retrying won't help. */
+export class ChannelError extends Data.TaggedError("ChannelError")<{ readonly message: string; readonly gone?: boolean }> {}
 
 /** One chat app, connected outbound only (DESIGN §15). */
 export interface PlatformAdapter {
   readonly platform: Platform;
   /** Incoming messages, as facts, until verdandid stops. */
   readonly messages: Stream.Stream<InboundMessage, ChannelError>;
-  readonly send: (chatId: string, text: string) => Effect.Effect<void, ChannelError>;
+  /** Sends a message, split at the platform's length limit, never inside a code fence; the id is the last part's. */
+  readonly send: (message: OutboundMessage) => Effect.Effect<{ readonly messageId: string }, ChannelError>;
+  /** Replaces the text of a message it sent, e.g. a turn's progress line. */
+  readonly edit: (chatId: string, messageId: string, text: string) => Effect.Effect<void, ChannelError>;
 }
+
+/**
+ * How chats map to conversations (DESIGN §15), after Hermes's defaults: a DM is its own conversation; in a group each
+ * sender gets their own (`per-sender`) or all share one (`shared`); a platform thread is shared by its participants.
+ */
+export type IsolationPolicy = { readonly group: "per-sender" | "shared"; readonly platformThread: "shared" | "per-sender" };
+export const defaultIsolation: IsolationPolicy = { group: "per-sender", platformThread: "shared" };
+
+/**
+ * The binding key of the conversation a message belongs to: one Verdandi thread per key. `shared` when more than one
+ * sender can write in it, so each message names its sender.
+ */
+export const bindingKey = (
+  m: Pick<InboundMessage, "platform" | "chatType" | "chatId" | "platformThread"> & { readonly senderId: string },
+  policy: IsolationPolicy = defaultIsolation,
+) => {
+  const part = encodeURIComponent;
+  const chat = `${m.platform}:${part(m.chatId)}`;
+  const sender = `:sender:${part(m.senderId)}`;
+  if (m.chatType === "dm") return { key: chat, shared: false };
+  if (m.platformThread !== undefined) {
+    const thread = `${chat}:thread:${part(m.platformThread)}`;
+    return policy.platformThread === "shared" ? { key: thread, shared: true } : { key: `${thread}${sender}`, shared: false };
+  }
+  return policy.group === "shared" ? { key: chat, shared: true } : { key: `${chat}${sender}`, shared: false };
+};
+
+/** Where a bound thread's replies go: only there, never somewhere the agent names. */
+export const ChannelBinding = Schema.Struct({
+  key: Schema.String,
+  platform: Platform,
+  chatId: Schema.String,
+  platformThread: Schema.NullOr(Schema.String),
+});
+export type ChannelBinding = typeof ChannelBinding.Type;
+
+/**
+ * Internal: the gateway binds a conversation's key to a thread. `confined`: a sender other than the platform's owner can
+ * write in it, so its turns get none of `workspace.yaml`'s folders (DESIGN §23, question 10).
+ */
+export const ChannelBind = Schema.Struct({
+  type: Schema.Literal("channel.bind"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  binding: ChannelBinding,
+  confined: Schema.Boolean,
+});
+/** Stops the thread replying to its chat; the chat's next message starts a new thread. */
+export const ChannelUnbind = Schema.Struct({ type: Schema.Literal("channel.unbind"), commandId: CommandId, threadId: ThreadId });
+export const ChannelBound = Schema.Struct({
+  type: Schema.Literal("channel.bound"),
+  v: Schema.Literal(1),
+  threadId: ThreadId,
+  binding: ChannelBinding,
+  confined: Schema.Boolean,
+});
+export const ChannelUnbound = Schema.Struct({
+  type: Schema.Literal("channel.unbound"),
+  v: Schema.Literal(1),
+  threadId: ThreadId,
+  key: Schema.String,
+});
+
+/**
+ * The outbox (DESIGN §15): a bound thread's final reply, or a request waiting for an answer, committed with the turn's
+ * own event. `deliveryId` is `reply:<turn>` or `request:<request>`.
+ */
+export const DeliveryRequested = Schema.Struct({
+  type: Schema.Literal("delivery.requested"),
+  v: Schema.Literal(1),
+  threadId: ThreadId,
+  deliveryId: Schema.String,
+  turnId: TurnId,
+  binding: ChannelBinding,
+  text: Schema.String,
+  buttons: Schema.Array(Button),
+});
+/** About to send; `duplicate`: an earlier attempt never reported back, or failed partway, so the chat may already have it. */
+export const DeliveryAttempted = Schema.Struct({
+  type: Schema.Literal("delivery.attempted"),
+  v: Schema.Literal(1),
+  threadId: ThreadId,
+  deliveryId: Schema.String,
+  attempt: Schema.Number,
+  duplicate: Schema.Boolean,
+});
+export const DeliveryReported = Schema.Struct({
+  type: Schema.Literal("delivery.reported"),
+  v: Schema.Literal(1),
+  threadId: ThreadId,
+  deliveryId: Schema.String,
+  outcome: Schema.Literals(["sent", "failed"]),
+  messageId: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(Schema.String),
+});
+/** Given up after `deliveryLimits`, or at once for a chat that's gone; shown on the turn. */
+export const DeliveryAbandoned = Schema.Struct({
+  type: Schema.Literal("delivery.abandoned"),
+  v: Schema.Literal(1),
+  threadId: ThreadId,
+  deliveryId: Schema.String,
+  turnId: TurnId,
+  reason: Schema.String,
+});
+/** Internal: the outbox's steps, which the gateway sends. */
+export const DeliveryAttempt = Schema.Struct({
+  type: Schema.Literal("delivery.attempt"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  deliveryId: Schema.String,
+});
+export const DeliveryReport = Schema.Struct({
+  type: Schema.Literal("delivery.report"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  deliveryId: Schema.String,
+  outcome: Schema.Literals(["sent", "failed"]),
+  messageId: Schema.optionalKey(Schema.String),
+  error: Schema.optionalKey(Schema.String),
+});
+export const DeliveryAbandon = Schema.Struct({
+  type: Schema.Literal("delivery.abandon"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  deliveryId: Schema.String,
+  reason: Schema.String,
+});
+
+/** At most this many attempts, within this long after the delivery was requested, before it's abandoned. */
+export const deliveryLimits = { attempts: 3, withinMs: 24 * 60 * 60_000 } as const;
 
 /**
  * Internal: an unknown sender asked to pair in a DM. verdandid makes the code and sends it to that DM only; the command

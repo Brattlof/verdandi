@@ -131,6 +131,17 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "pairing.denied": (thread) => thread,
   "sender.revoked": (thread) => thread,
   "gateway.owner.changed": (thread) => thread,
+  "channel.bound": (thread, e) => ({ ...thread, binding: e.binding }),
+  "channel.unbound": (thread) => {
+    const { binding: _, ...rest } = thread;
+    return rest;
+  },
+  // The outbox shows on the thread only when a delivery is abandoned, as the notice the projector adds too.
+  "delivery.requested": (thread) => thread,
+  "delivery.attempted": (thread) => thread,
+  "delivery.reported": (thread) => thread,
+  "delivery.abandoned": (thread, e) =>
+    addItem(thread, e.turnId, { kind: "notice", text: `Verdandi couldn't deliver this to the chat it's bound to: ${e.reason}` }),
   // A background review's proposal waits for the user like the agent's own requests; the review itself runs out of sight.
   "memory.proposed": addRequest,
   // Verdandi's own request to run the project's commands; trusted lists show on the projects page, fetched when opened.

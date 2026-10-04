@@ -522,6 +522,34 @@ const skillHub = Effect.gen(function* () {
   )`;
 });
 
+/**
+ * Chats bound to threads, and the outbox of what's sent to them (DESIGN §15): each delivery with how its attempts went.
+ * `threads.confined` marks a thread a sender other than the owner can write in, for good. None existed before.
+ */
+const channels = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`create table channel_bindings (
+    key text primary key,
+    thread_id text not null unique,
+    binding text not null,
+    bound_at text not null
+  )`;
+  yield* sql`alter table threads add column confined integer not null default 0`;
+  yield* sql`create table deliveries (
+    id text primary key,
+    thread_id text not null,
+    turn_id text not null,
+    binding text not null,
+    text text not null,
+    buttons text not null,
+    requested_at text not null,
+    attempts integer not null default 0,
+    state text not null,
+    message_id text,
+    error text
+  )`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -555,4 +583,5 @@ export const migrations = {
   "30_provider_health": providerHealth,
   "31_gateway": gateway,
   "32_skill_hub": skillHub,
+  "33_channels": channels,
 };

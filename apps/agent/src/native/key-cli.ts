@@ -1,4 +1,5 @@
 import { keychainEntry, keyProblem, keyVariable, type SecretStore } from "@verdandi/harness-native";
+import { telegramKeychainEntry, telegramTokenProblem, telegramTokenVariable } from "../gateway/telegram.ts";
 
 type HiddenInput = NodeJS.ReadableStream & { readonly isTTY?: boolean; setRawMode?: (on: boolean) => unknown };
 
@@ -6,7 +7,7 @@ type HiddenInput = NodeJS.ReadableStream & { readonly isTTY?: boolean; setRawMod
  * Reads one line without echoing it: keypress by keypress in raw mode on a terminal, or whatever is piped in.
  * Enter (or the end of piped input) finishes; Backspace deletes; Ctrl+C cancels.
  */
-export const readHidden = (input: HiddenInput, prompt: (text: string) => void) =>
+export const readHidden = (input: HiddenInput, prompt: (text: string) => void, label = "Anthropic API key") =>
   new Promise<string>((resolve, reject) => {
     const tty = input.isTTY === true && typeof input.setRawMode === "function";
     let value = "";
@@ -29,7 +30,7 @@ export const readHidden = (input: HiddenInput, prompt: (text: string) => void) =
     };
     const onEnd = () => finish(() => resolve(value));
     if (tty) {
-      prompt("Anthropic API key (it won't show as you type or paste): ");
+      prompt(`${label} (it won't show as you type or paste): `);
       input.setRawMode?.(true);
     }
     input.on("data", onData);
@@ -37,47 +38,66 @@ export const readHidden = (input: HiddenInput, prompt: (text: string) => void) =
     input.resume();
   });
 
-const usage = "verdandi key takes `set anthropic` or `delete anthropic`, e.g. verdandi key set anthropic";
+const usage =
+  "verdandi key takes `set anthropic`, `delete anthropic`, `set telegram` or `delete telegram`, e.g. verdandi key set anthropic";
+
+/** Each secret `verdandi key` keeps, what it's for, and what verdandid does with it once stored. */
+const secrets = {
+  anthropic: {
+    label: "Anthropic API key",
+    entry: keychainEntry,
+    variable: keyVariable,
+    problem: keyProblem,
+    stored: "Restart verdandid to run the native harness.",
+    deleted: "Restart verdandid to turn the native harness off.",
+  },
+  telegram: {
+    label: "Telegram bot token",
+    entry: telegramKeychainEntry,
+    variable: telegramTokenVariable,
+    problem: telegramTokenProblem,
+    stored: "Restart verdandi start to connect Telegram; gateway.yaml says who may use it.",
+    deleted: "Restart verdandi start to disconnect Telegram.",
+  },
+} as const;
 
 /**
- * `verdandi key set|delete anthropic`: stores the native harness's Anthropic API key in the OS keychain, or removes it
- * (ADR 0022). The key is read without echo and never printed. Tests pass their own store, never the real keychain.
+ * `verdandi key set|delete anthropic|telegram`: stores the native harness's Anthropic API key (ADR 0022) or the
+ * gateway's Telegram bot token (DESIGN §15) in the OS keychain, or removes it. It's read without echo and never
+ * printed. Tests pass their own store, never the real keychain.
  */
 export const runKey = async (
   argv: readonly string[],
   io: {
     readonly secrets: SecretStore;
-    readonly readKey: () => Promise<string>;
+    readonly readKey: (label: string) => Promise<string>;
     readonly out: (line: string) => void;
     readonly env: Readonly<Record<string, string | undefined>>;
   },
 ) => {
-  const [action, provider, ...rest] = argv;
-  if (provider !== "anthropic" || rest.length > 0 || (action !== "set" && action !== "delete")) throw new Error(usage);
+  const [action, which = "", ...rest] = argv;
+  if (!Object.hasOwn(secrets, which) || rest.length > 0 || (action !== "set" && action !== "delete")) throw new Error(usage);
+  const secret = secrets[which as keyof typeof secrets];
   const shadowed =
-    io.env[keyVariable] === undefined
+    io.env[secret.variable] === undefined
       ? ""
-      : ` ${keyVariable} is set too, and verdandid uses it over the keychain; unset it to use this one.`;
+      : ` ${secret.variable} is set too, and verdandid uses it over the keychain; unset it to use this one.`;
   if (action === "delete") {
-    const deleted = await io.secrets.delete(keychainEntry);
-    io.out(
-      deleted
-        ? "Removed the Anthropic API key from the OS keychain. Restart verdandid to turn the native harness off."
-        : "The OS keychain has no Anthropic API key.",
-    );
+    const deleted = await io.secrets.delete(secret.entry);
+    io.out(deleted ? `Removed the ${secret.label} from the OS keychain. ${secret.deleted}` : `The OS keychain has no ${secret.label}.`);
     return;
   }
-  const key = (await io.readKey()).trim();
-  const problem = keyProblem(key);
-  if (problem) throw new Error(`That isn't an Anthropic API key: ${problem}. Nothing was stored.`);
-  await io.secrets.set({ ...keychainEntry, value: key });
-  io.out(`Stored the Anthropic API key in the OS keychain. Restart verdandid to run the native harness.${shadowed}`);
+  const key = (await io.readKey(secret.label)).trim();
+  const problem = secret.problem(key);
+  if (problem) throw new Error(`That isn't a ${secret.label}: ${problem}. Nothing was stored.`);
+  await io.secrets.set({ ...secret.entry, value: key });
+  io.out(`Stored the ${secret.label} in the OS keychain. ${secret.stored}${shadowed}`);
 };
 
 export const key = (argv: readonly string[]) =>
   runKey(argv, {
     secrets: Bun.secrets,
-    readKey: () => readHidden(process.stdin, (text) => process.stderr.write(text)),
+    readKey: (label) => readHidden(process.stdin, (text) => process.stderr.write(text), label),
     out: (line) => console.log(line),
     env: process.env,
   });

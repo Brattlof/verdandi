@@ -447,6 +447,8 @@ export const makeClaudeCodeAdapter = (options: {
   readonly query?: QueryFn;
   /** Folders Claude Code may read besides the project, e.g. the profile's attachments. */
   readonly additionalDirectories?: readonly string[];
+  /** `workspace.yaml`'s folders, given as more `additionalDirectories` to every session but a confined one's (DESIGN §13). */
+  readonly folders?: readonly string[];
   /** Local plugin folders every session loads, e.g. the Verdandi home, whose `skills/` holds the profile's skills (ADR 0020). */
   readonly plugins?: readonly string[];
   /** The environment Claude Code runs with (default: this process's). verdandid passes its own without its secrets. */
@@ -546,7 +548,7 @@ export const makeClaudeCodeAdapter = (options: {
     id: "claude-code",
     loads: (cwd) =>
       claudeCodeLoads(cwd, {
-        additionalDirectories: options.additionalDirectories ?? [],
+        additionalDirectories: [...(options.additionalDirectories ?? []), ...(options.folders ?? [])],
         plugins: options.plugins ?? [],
         env: options.env ?? process.env,
       }),
@@ -599,7 +601,7 @@ export const makeClaudeCodeAdapter = (options: {
               options.query ?? query,
               options.claudePath,
               input,
-              options.additionalDirectories ?? [],
+              [...(options.additionalDirectories ?? []), ...(input.confined ? [] : (options.folders ?? []))],
               options.plugins ?? [],
               options.env ?? process.env,
               f,

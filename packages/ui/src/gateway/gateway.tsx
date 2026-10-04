@@ -1,4 +1,4 @@
-import type { CommandId, GatewayView, PendingPairing } from "@verdandi/contracts";
+import type { ChannelBinding, CommandId, GatewayView, PendingPairing, ThreadId } from "@verdandi/contracts";
 import { useEffect, useState } from "react";
 import { type Connection, uuid } from "../client.ts";
 
@@ -17,6 +17,26 @@ export const useGateway = (connection: Connection) => {
     [connection],
   );
   return view;
+};
+
+/** A thread bound to a chat (DESIGN §15): where its replies go, and Unbind, after which the chat's next message starts a new thread. */
+export const BindingBar = ({ connection, threadId, binding }: { connection: Connection; threadId: ThreadId; binding: ChannelBinding }) => {
+  const [error, setError] = useState<string>();
+  const unbind = async () => {
+    const result = await connection.dispatch({ type: "channel.unbind", commandId: uuid<CommandId>(), threadId });
+    if (!result.ok) setError(result.message);
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-panel px-4 py-1.5 text-xs">
+      <p role="status" className={`min-w-0 flex-1 [overflow-wrap:anywhere] ${error ? "text-error" : "text-muted"}`}>
+        {error ??
+          `Replies go to ${binding.platform} chat ${binding.chatId}${binding.platformThread === null ? "" : `, thread ${binding.platformThread}`}.`}
+      </p>
+      <button type="button" className="ml-auto px-2 text-xs" onClick={unbind}>
+        Unbind
+      </button>
+    </div>
+  );
 };
 
 /** The requests still waiting: one whose hour ran out drops out of the view only when something else changes it. */

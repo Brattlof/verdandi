@@ -125,6 +125,8 @@ const memoryFor = (stored: string | null, turnId: TurnId) => {
   const snapshot = stored === null ? undefined : (JSON.parse(stored) as { turnId: TurnId; text: string });
   return snapshot?.turnId === turnId ? { memory: snapshot.text } : {};
 };
+/** The Verdandi tools a confined thread keeps: none that reaches the owner's memory, sessions or skills. */
+const confinedTools = new Set(["report_blocked"]);
 /** How long a turn waits for a handoff's or a compression's summary before it goes on without one. */
 /** How long a turn waits for its handoff summary before it starts without one. */
 const auxTimeout = "5 minutes";
@@ -378,6 +380,9 @@ export const ReactorLive = Layer.effect(
      */
     const askReview = (threadId: ThreadId, turnId: TurnId, taskId: TaskId) =>
       Effect.gen(function* () {
+        // A confined thread's text comes from someone other than the owner: no unconfined review reads it (ADR 0036).
+        const [confined] = yield* sql<{ confined: number }>`select confined from threads where id = ${threadId}`;
+        if (confined?.confined === 1) return;
         const digest = yield* loadTaskDigest(threadId, taskId, turnId);
         if (!digest) return;
         const reviewThreadId = randomUUID() as ThreadId;
@@ -755,8 +760,9 @@ export const ReactorLive = Layer.effect(
           turn_number: number;
           review: string | null;
           session_harness: HarnessId | null;
+          confined: number;
         }>`
-          select t.route, t.session_id, t.session_harness, p.path, t.worktree, t.review, t.pending_fork, t.memory_snapshot, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
+          select t.route, t.session_id, t.session_harness, t.confined, p.path, t.worktree, t.review, t.pending_fork, t.memory_snapshot, t.transcript_path, t.task_id, json_extract(d.payload, '$.limits') as limits,
             (select total(u.cost_usd) from usage_ledger u join turns n on n.id = u.turn_id
               where n.thread_id = t.id and n.started_at >= k.started_at and n.id != ${turnId}) as spent_usd,
             (select count(*) from events e where e.thread_id = t.id and e.type = 'turn.model.called'
@@ -854,11 +860,15 @@ export const ReactorLive = Layer.effect(
             text,
             mode,
             ...(attachments.length > 0 && { attachments: attachments.map((a) => ({ ...a, path: join(attachmentsDir, a.id) })) }),
+            // A thread someone other than the owner writes in from a chat app gets none of workspace.yaml's folders.
+            ...(thread.confined === 1 && { confined: true as const }),
             steers,
             ...(aux
               ? {}
               : {
-                  tools,
+                  // A confined thread's session gets none of the tools that read or write the owner's memory, sessions or
+                  // skills, only report_blocked (ADR 0036). Fixed for the thread, so its session's tool list never changes.
+                  tools: thread.confined === 1 ? tools.filter((t) => confinedTools.has(t.name)) : tools,
                   scan: scanFor({ threadId, turnId }),
                   ...(delegate && { delegate }),
                   mcp: mcpFor(threadId, turnId, cwd),
@@ -867,7 +877,8 @@ export const ReactorLive = Layer.effect(
                   summarize: summarizeFor(threadId, turnId, thread.task_id, thread.path, cwd),
                 }),
             // The snapshot a new session starts with goes to its first turn only (DESIGN §14.2), and so does a handoff's summary.
-            ...memoryFor(thread.memory_snapshot, turnId),
+            // Nor the owner's memory.
+            ...(thread.confined === 1 ? {} : memoryFor(thread.memory_snapshot, turnId)),
             ...(handoff && { handoff }),
             // Every Nth turn of the thread nudges the agent to save memory, in the turn's message, never the system prompt.
             ...(nudge && { nudge }),

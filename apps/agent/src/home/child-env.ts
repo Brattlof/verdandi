@@ -1,6 +1,7 @@
 import { secretVariables } from "@verdandi/harness-native";
+import { telegramTokenVariable } from "../gateway/telegram.ts";
 
-const secret = new Set(secretVariables.map((name) => name.toUpperCase()));
+const secret = new Set([...secretVariables, telegramTokenVariable].map((name) => name.toUpperCase()));
 
 /**
  * The environment for a process Verdandi starts: its own, without Verdandi's secrets (`secretVariables`), so no

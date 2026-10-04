@@ -62,7 +62,7 @@ test("an unknown sender pairs by request id, and the database keeps only the cod
       owner: false,
     }),
   );
-  expect(await channel.next()).toEqual({ chatId: "9", text: expect.stringContaining("let you in") });
+  expect(await channel.next()).toMatchObject({ chatId: "9", text: expect.stringContaining("let you in") });
   const after = await server.call((c) => c.GatewayList());
   expect(after.senders).toEqual([{ platform: "fake", senderId: "9", name: "Stranger", pairedAt: expect.any(String), owner: false }]);
   expect(after.pending.map((p) => p.senderId)).toEqual(["8"]);
