@@ -51,3 +51,36 @@ export const BatchReport = Schema.Struct({
   results: Schema.Array(BatchResult),
 });
 export type BatchReport = typeof BatchReport.Type;
+
+/**
+ * One question of the compression recall exam (#207): about a fact of a long native transcript, with its gold answer.
+ * An `exact` answer is an identifier (a path, a SHA, an error string, a number, a command), matched as a string; a
+ * `judged` one (a decision the user made or rejected, a reason) is graded by a cheap model, and names the exact
+ * `evidence` in the transcript it rests on, which the offline score looks for.
+ */
+export const ExamQuestion = Schema.Union([
+  Schema.Struct({
+    id: Schema.String.check(Schema.isPattern(/^[\w.-]+$/)),
+    kind: Schema.Literal("exact"),
+    question: Schema.String,
+    answer: Schema.String.check(Schema.isMinLength(1)),
+    /** Other spellings that count, e.g. a SHA's short form. */
+    accept: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMinLength(1)))),
+  }),
+  Schema.Struct({
+    id: Schema.String.check(Schema.isPattern(/^[\w.-]+$/)),
+    kind: Schema.Literal("judged"),
+    question: Schema.String,
+    answer: Schema.String.check(Schema.isMinLength(1)),
+    evidence: Schema.NonEmptyArray(Schema.String.check(Schema.isMinLength(1))),
+  }),
+]);
+export type ExamQuestion = typeof ExamQuestion.Type;
+
+/** A transcript's exam file, `<name>.exam.json` beside the native transcript it asks about. Unknown keys are errors. */
+export const CompressionExam = Schema.Struct({
+  /** The native transcript's file name, in the exam file's folder. */
+  transcript: Schema.String,
+  questions: Schema.NonEmptyArray(ExamQuestion),
+});
+export type CompressionExam = typeof CompressionExam.Type;

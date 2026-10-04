@@ -21,6 +21,7 @@ test("a tracked file that must stay local is flagged, whatever it holds", () => 
     "x/state.db-wal",
     ".plans/plan.md",
     "spikes/a.ts",
+    "evals/compression/private/94aafb6a.jsonl",
   ]) {
     expect(checkFile(path, "{}")).toEqual([{ path, why: expect.stringContaining("git rm --cached") }]);
   }
