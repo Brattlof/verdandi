@@ -1,0 +1,23 @@
+{
+  "name": "pricing-card",
+  "title": "Pricing cards",
+  "description": "Two or three plan cards that rise in side by side, each with its name, price and a ticked feature list; then the featured plan lifts forward with an accent border and badge while the others dim. Plans are a JSON list of {\"name\", \"price\", \"features\": [...]}; Featured counts from 1 (0 for none). Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["pricing", "plans", "price", "tiers", "cards", "comparison", "saas", "product", "launch"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "title", "type": "string", "label": "Heading (empty for none)", "default": "Pick your plan" },
+    {
+      "id": "plans",
+      "type": "string",
+      "label": "Plans (JSON list of {name, price, features})",
+      "default": "[{\"name\":\"Starter\",\"price\":\"$0\",\"features\":[\"Local models\",\"One profile\",\"Community skills\"]},{\"name\":\"Pro\",\"price\":\"$20\",\"features\":[\"Every harness\",\"Smart routing\",\"Spend caps\",\"Session search\"]},{\"name\":\"Team\",\"price\":\"$60\",\"features\":[\"Shared skills\",\"Five profiles\",\"Chat gateway\"]}]"
+    },
+    { "id": "featured", "type": "number", "label": "Featured plan (1 = first, 0 for none)", "default": 2 },
+    { "id": "badge", "type": "string", "label": "Featured badge (empty for none)", "default": "Most popular" },
+    { "id": "period", "type": "string", "label": "Price period (empty for none)", "default": "/ month" },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

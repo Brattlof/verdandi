@@ -1,0 +1,61 @@
+<template>
+  <div
+    id="browser-frame-root"
+    data-composition-id="browser-frame"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"url","type":"string","label":"Address","default":"verdandi.dev/video"},{"id":"image","type":"image","label":"Screenshot (16:10 fills the window)","default":""},{"id":"zoom","type":"number","label":"Push-in scale","default":1.08}]'
+  >
+    <style>
+      .wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+      .window {
+        width: 1440px; border-radius: 16px; overflow: hidden; background: #ffffff;
+        box-shadow: 0 50px 140px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.12);
+      }
+      .chrome { height: 72px; display: flex; align-items: center; gap: 28px; padding: 0 28px; background: #ecebe8; border-bottom: 1px solid #d6d3cd; }
+      .dots { display: flex; gap: 10px; }
+      .dot { width: 16px; height: 16px; border-radius: 50%; }
+      .nav { display: flex; gap: 18px; color: #8b877f; }
+      .nav svg { width: 22px; height: 22px; display: block; }
+      .address {
+        flex: 1; height: 44px; margin-right: 128px; display: flex; align-items: center; justify-content: center; gap: 10px;
+        border-radius: 12px; background: #ffffff; box-shadow: inset 0 0 0 1px #dcd9d3;
+        font-family: system-ui, sans-serif; font-size: 22px; color: #3a3733;
+      }
+      .address svg { width: 16px; height: 16px; color: #6f6b64; flex: none; }
+      .url { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 900px; }
+      .view { position: relative; height: 810px; overflow: hidden; background: #f4f2ee; }
+      .shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top center; transform-origin: 50% 30%; }
+    </style>
+    <div class="wrap">
+      <div class="window">
+        <div class="chrome">
+          <div class="dots">
+            <div class="dot" style="background: #ff5f57"></div>
+            <div class="dot" style="background: #febc2e"></div>
+            <div class="dot" style="background: #28c840"></div>
+          </div>
+          <div class="nav">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.45"><path d="M9 5l7 7-7 7" /></svg>
+          </div>
+          <div class="address">
+            <svg aria-hidden="true" viewBox="0 0 16 16" fill="currentColor"><path d="M4 7V5a4 4 0 1 1 8 0v2h.5A1.5 1.5 0 0 1 14 8.5v5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 13.5v-5A1.5 1.5 0 0 1 3.5 7H4zm2 0h4V5a2 2 0 1 0-4 0v2z" /></svg>
+            <p class="url" data-var-text="url">verdandi.dev/video</p>
+          </div>
+        </div>
+        <div class="view">
+          <img class="shot" data-var-src="image" src="../assets/browser-frame/placeholder.svg" alt="" />
+        </div>
+      </div>
+    </div>
+    <script>
+      const zoom = Number(__verdandi.getVariables().zoom) || 1.08;
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".window", { opacity: 0, y: 80, scale: 0.94 }, { opacity: 1, y: 0, scale: 1, duration: 0.8, ease: "power3.out" }, 0)
+        .fromTo(".shot", { scale: 1 }, { scale: zoom, duration: 5.2, ease: "sine.inOut" }, 0.3)
+        .to(".window", { opacity: 0, y: -30, duration: 0.5, ease: "power2.in" }, 5.5);
+      window.__timelines["browser-frame"] = tl;
+    </script>
+  </div>
+</template>

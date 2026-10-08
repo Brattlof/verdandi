@@ -1,0 +1,55 @@
+<template>
+  <div
+    id="donut-stat-root"
+    data-composition-id="donut-stat"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"percent","type":"number","label":"Percent","default":73},{"id":"label","type":"string","label":"Label","default":"of tasks finished on the first route"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 160px; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); text-align: center; }
+      .ring { position: relative; width: 600px; height: 600px; }
+      .ring svg { position: absolute; inset: 0; }
+      .track { fill: none; stroke: var(--ink, #f4f1ea); stroke-opacity: 0.12; stroke-width: 52; }
+      .arc { fill: none; stroke: var(--accent, #e0a458); stroke-width: 52; stroke-linecap: round; }
+      .figure { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 168px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1; }
+      .value { display: flex; align-items: flex-start; }
+      .pct { font-size: 0.5em; font-weight: 700; margin: 0.12em 0 0 0.04em; color: var(--accent, #e0a458); }
+      .label { margin: 64px 0 0; max-width: 1300px; font-size: 52px; font-weight: 500; letter-spacing: 0.005em; line-height: 1.2; opacity: 0.8; text-wrap: balance; }
+    </style>
+    <div class="stage">
+      <div class="ring">
+        <svg aria-hidden="true" width="600" height="600" viewBox="0 0 600 600">
+          <circle class="track" cx="300" cy="300" r="250" />
+          <circle class="arc" cx="300" cy="300" r="250" transform="rotate(-90 300 300)" />
+        </svg>
+        <div class="figure"><div class="value"><span class="num">0</span><span class="pct">%</span></div></div>
+      </div>
+      <p class="label" data-var-text="label">of tasks finished on the first route</p>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      const percent = Math.min(Math.max(Number(vars.percent) || 0, 0), 100);
+      // One decimal if the value has one, in a fixed locale.
+      const decimals = Number.isInteger(percent) ? 0 : 1;
+      const format = new Intl.NumberFormat("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+      const num = document.querySelector(".num");
+      const arc = document.querySelector(".arc");
+      const len = arc.getTotalLength();
+      const counter = { v: 0 };
+      const show = () => { num.textContent = format.format(Number(counter.v.toFixed(decimals))); };
+      show();
+
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".ring", { opacity: 0, scale: 0.88 }, { opacity: 1, scale: 1, duration: 0.7, ease: "power3.out" }, 0.1)
+        // The round cap would show a dot at 0 %, so the arc fades in as it starts to move.
+        .fromTo(arc, { strokeDasharray: len, strokeDashoffset: len }, { strokeDashoffset: len * (1 - percent / 100), duration: 2, ease: "power3.out" }, 0.35)
+        .fromTo(arc, { opacity: 0 }, { opacity: 1, duration: 0.15, ease: "none" }, 0.35)
+        .fromTo(counter, { v: 0 }, { v: percent, duration: 2, ease: "power3.out", onUpdate: show }, 0.35)
+        .fromTo(".figure", { scale: 1 }, { scale: 1.05, duration: 0.18, ease: "power2.out", yoyo: true, repeat: 1 }, 2.2)
+        .fromTo(".label", { opacity: 0, y: 24 }, { opacity: 0.8, y: 0, duration: 0.6, ease: "power3.out" }, 0.7)
+        .to(".stage", { opacity: 0, duration: 0.45, ease: "power1.in" }, 4.5);
+      window.__timelines["donut-stat"] = tl;
+    </script>
+  </div>
+</template>

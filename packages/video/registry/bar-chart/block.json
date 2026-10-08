@@ -1,0 +1,23 @@
+{
+  "name": "bar-chart",
+  "title": "Bar chart",
+  "description": "A titled horizontal bar chart of four to six labelled values whose bars grow in one after another while their numbers count up, held, then faded out. Data is a JSON list of {\"label\", \"value\"}; extra rows past six are dropped. Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["chart", "bar", "bars", "data", "graph", "statistics", "comparison", "infographic"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "title", "type": "string", "label": "Title", "default": "Cost per completed task" },
+    {
+      "id": "data",
+      "type": "string",
+      "label": "Data (JSON)",
+      "default": "[{\"label\":\"Always Opus\",\"value\":0.84},{\"label\":\"Always Sonnet\",\"value\":0.41},{\"label\":\"Routed\",\"value\":0.23},{\"label\":\"Routed + memory\",\"value\":0.19}]"
+    },
+    { "id": "prefix", "type": "string", "label": "Value prefix", "default": "$" },
+    { "id": "suffix", "type": "string", "label": "Value suffix", "default": "" },
+    { "id": "decimals", "type": "number", "label": "Decimals", "default": 2 },
+    { "id": "accent", "type": "color", "label": "Bar colour", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

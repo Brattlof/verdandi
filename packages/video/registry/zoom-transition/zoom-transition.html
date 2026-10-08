@@ -1,0 +1,56 @@
+<template>
+  <div
+    id="zoom-transition-root"
+    data-composition-id="zoom-transition"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"color","type":"color","label":"Panel","default":"#e0a458"}]'
+  >
+    <style>
+      .zoom { position: absolute; inset: 0; pointer-events: none; }
+      .layer { position: absolute; inset: 0; width: 1920px; height: 1080px; }
+      .rim { background: color-mix(in srgb, var(--color, #e0a458) 55%, #f4f1ea); }
+      .fill { background: var(--color, #e0a458); }
+    </style>
+    <div class="zoom">
+      <div class="layer rim"></div>
+      <div class="layer fill"></div>
+    </div>
+    <script>
+      // The cut between scenes belongs at 0.4 s; the panel covers the whole frame from 0.36 s to 0.44 s.
+      // Each layer is drawn as a clip path: a rounded rectangle that grows to beyond the frame, then the same frame
+      // with a rounded hole that grows from the centre until nothing is left. The lighter rim leads on the way in
+      // and trails on the way out, so the moving edge reads against any picture.
+      const [rim, fill] = document.querySelectorAll(".layer");
+      const rect = (w, h, r) => {
+        const x = 960 - w / 2;
+        const y = 540 - h / 2;
+        const k = Math.min(r, w / 2, h / 2);
+        return `M${x + k} ${y}H${x + w - k}a${k} ${k} 0 0 1 ${k} ${k}V${y + h - k}a${k} ${k} 0 0 1 ${-k} ${k}H${x + k}a${k} ${k} 0 0 1 ${-k} ${-k}V${y + k}a${k} ${k} 0 0 1 ${k} ${-k}Z`;
+      };
+      // grow: 0 is a 240 × 135 card, 1 is past the frame's edges. open: 0 is no hole, 1 is a hole past the corners.
+      const z = { grow: 0, open: 0 };
+      const shape = (pad, holePad) => {
+        const g = z.grow;
+        const w = 240 + (1960 - 240) * g + pad;
+        const h = 135 + (1110 - 135) * g + pad * 0.5625;
+        const outer = rect(w, h, 28 * (1 - g) + pad * 0.5);
+        const o = z.open;
+        if (o <= 0) return `path("${outer}")`;
+        const hw = Math.max(0, 2240 * o - holePad);
+        const hh = Math.max(0, 1260 * o - holePad * 0.5625);
+        return `path(evenodd, "${outer} ${rect(hw, hh, 36 * o)}")`;
+      };
+      const draw = () => {
+        rim.style.clipPath = shape(36, 48);
+        fill.style.clipPath = shape(0, 0);
+      };
+      draw();
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".zoom", { opacity: 0 }, { opacity: 1, duration: 0.08, ease: "none" }, 0)
+        .fromTo(z, { grow: 0 }, { grow: 1, duration: 0.36, ease: "power3.in", onUpdate: draw }, 0)
+        .fromTo(z, { open: 0 }, { open: 1, duration: 0.36, ease: "power2.out", onUpdate: draw, immediateRender: false }, 0.44);
+      window.__timelines["zoom-transition"] = tl;
+    </script>
+  </div>
+</template>

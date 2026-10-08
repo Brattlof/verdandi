@@ -73,6 +73,16 @@ export const serveWeb = (agent: Agent, port = 0) => {
           ? fetch(`http://${agentUrl}${path}`, { headers: { authorization: page ? `Bearer ${agent.token}` : authorization } })
           : new Response("Missing or wrong token.", { status: 401 });
       if (url.pathname === "/auth" && request.method === "GET") return page ? Response.json({ kind: "page" }) : forward("/auth");
+      // A video project's preview: the id in its path is the capability (an iframe can't send a token), and verdandid
+      // sandboxes every response, so it is relayed as is, Range and fetch metadata included, for media seeking.
+      if (/^\/video\/[0-9a-f]{64}(?:\/|$)/.test(url.pathname) && request.method === "GET") {
+        const headers = new Headers();
+        for (const name of ["range", "accept", "sec-fetch-dest", "if-none-match"]) {
+          const value = request.headers.get(name);
+          if (value !== null) headers.set(name, value);
+        }
+        return fetch(`http://${agentUrl}${url.pathname}`, { headers });
+      }
       const attachment = /^\/attachments\/([^/]+)$/.exec(url.pathname)?.[1];
       if (attachment !== undefined && request.method === "GET") return forward(`/attachments/${attachment}`);
       return new Response("Not found.", { status: 404 });

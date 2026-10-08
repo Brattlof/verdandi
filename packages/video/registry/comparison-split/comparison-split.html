@@ -1,0 +1,88 @@
+<template>
+  <div
+    id="comparison-split-root"
+    data-composition-id="comparison-split"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"left_title","type":"string","label":"Left title","default":"One model for everything"},{"id":"left_items","type":"string","label":"Left points (JSON list)","default":"[\"Opus for a typo fix\",\"Pays full price per task\",\"Same effort every turn\"]"},{"id":"right_title","type":"string","label":"Right title","default":"Routed per task"},{"id":"right_items","type":"string","label":"Right points (JSON list)","default":"[\"Haiku for the small stuff\",\"A third of the cost per task\",\"Escalates when a check fails\"]"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .stage { position: absolute; inset: 0; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); }
+      .col { position: absolute; top: 0; width: 680px; }
+      .left { right: calc(50% + 120px); text-align: right; }
+      .right { left: calc(50% + 120px); }
+      .head { margin: 0 0 56px; font-size: 60px; font-weight: 750; letter-spacing: -0.015em; line-height: 1.1; text-wrap: balance; }
+      .left .head { opacity: 0.72; }
+      .rule { display: block; height: 6px; width: 120px; margin-top: 24px; border-radius: 3px; }
+      .left .rule { margin-left: auto; background: color-mix(in srgb, var(--ink, #f4f1ea) 35%, transparent); }
+      .right .rule { background: var(--accent, #e0a458); }
+      .items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 32px; }
+      .item { display: flex; align-items: baseline; gap: 24px; font-size: 42px; font-weight: 500; line-height: 1.25; }
+      .left .item { flex-direction: row-reverse; opacity: 0.72; }
+      .mark { flex: none; width: 18px; height: 18px; border-radius: 50%; transform: translateY(-4px); }
+      .left .mark { border: 3px solid color-mix(in srgb, var(--ink, #f4f1ea) 60%, transparent); }
+      .right .mark { background: var(--accent, #e0a458); }
+      .divider { position: absolute; left: 50%; width: 3px; margin-left: -1.5px; background: color-mix(in srgb, var(--ink, #f4f1ea) 30%, transparent); }
+      .badge { position: absolute; left: 50%; top: 50%; width: 132px; height: 132px; margin: -66px 0 0 -66px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--accent, #e0a458); color: #0b0b0c; font-size: 50px; font-weight: 800; font-style: italic; letter-spacing: -0.02em; }
+    </style>
+    <div class="stage">
+      <div class="divider"></div>
+      <div class="col left">
+        <h2 class="head"><span data-var-text="left_title">One model for everything</span><span class="rule"></span></h2>
+        <ul class="items"></ul>
+      </div>
+      <div class="col right">
+        <h2 class="head"><span data-var-text="right_title">Routed per task</span><span class="rule"></span></h2>
+        <ul class="items"></ul>
+      </div>
+      <div class="badge">vs</div>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      const list = (id) => {
+        try {
+          const v = JSON.parse(String(vars[id]));
+          if (Array.isArray(v)) return v.slice(0, 6).map(String);
+        } catch {}
+        console.warn(`[comparison-split] ${id} isn't a JSON list; expected ["First point", "Second point"]`);
+        return [];
+      };
+      const fill = (side, items) =>
+        items.map((text) => {
+          const li = document.createElement("li");
+          li.className = "item";
+          const mark = document.createElement("span");
+          mark.className = "mark";
+          const label = document.createElement("span");
+          label.textContent = text;
+          li.append(mark, label);
+          document.querySelector(`.${side} .items`).append(li);
+          return li;
+        });
+      const left = fill("left", list("left_items"));
+      const right = fill("right", list("right_items"));
+      // Centre the taller column on the frame, and run the divider a little past both ends.
+      const cols = document.querySelectorAll(".col");
+      const h = Math.max(...cols.map((c) => c.offsetHeight));
+      const top = Math.round(540 - h / 2);
+      for (const c of cols) c.style.top = `${top}px`;
+      const divider = document.querySelector(".divider");
+      divider.style.top = `${Math.max(top - 80, 40)}px`;
+      divider.style.bottom = `${Math.max(1080 - top - h - 80, 40)}px`;
+
+      const tl = gsap.timeline({ paused: true, defaults: { ease: "power3.out" } });
+      tl.fromTo(".divider", { scaleY: 0, transformOrigin: "50% 0%" }, { scaleY: 1, duration: 0.8, ease: "power3.inOut" }, 0.1)
+        .fromTo(".left .head", { opacity: 0, x: -48 }, { opacity: 0.72, x: 0, duration: 0.6 }, 0.3)
+        .fromTo(".right .head", { opacity: 0, x: 48 }, { opacity: 1, x: 0, duration: 0.6 }, 0.4)
+        .fromTo(".rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6 }, 0.55)
+        .fromTo(".badge", { scale: 0, rotation: -20 }, { scale: 1, rotation: 0, duration: 0.55, ease: "back.out(2.2)" }, 0.6);
+      // Left points first, then the right ones, so the eye reads across.
+      const step = 0.14;
+      const rightAt = 1.0 + left.length * step + 0.2;
+      if (left.length) tl.fromTo(left, { opacity: 0, x: -32 }, { opacity: 0.72, x: 0, duration: 0.5, stagger: step }, 1.0);
+      if (right.length) tl.fromTo(right, { opacity: 0, x: 32 }, { opacity: 1, x: 0, duration: 0.5, stagger: step }, rightAt);
+      tl.to(".stage", { opacity: 0, duration: 0.45, ease: "power1.in" }, 5.5);
+      window.__timelines["comparison-split"] = tl;
+    </script>
+  </div>
+</template>

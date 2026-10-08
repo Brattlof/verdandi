@@ -1,0 +1,52 @@
+<template>
+  <div
+    id="title-card-root"
+    data-composition-id="title-card"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"title","type":"string","label":"Title","default":"The Weaving of Fate"},{"id":"subtitle","type":"string","label":"Subtitle","default":"Chapter one · What is coming"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 160px; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); text-align: center; }
+      .title { margin: 0; max-width: 1600px; font-size: 136px; font-weight: 800; line-height: 1.05; letter-spacing: -0.025em; text-wrap: balance; }
+      .word { display: inline-block; white-space: nowrap; }
+      .char { display: inline-block; will-change: transform, opacity; }
+      .rule { width: 160px; height: 6px; margin: 48px 0 40px; border-radius: 3px; background: var(--accent, #e0a458); transform-origin: center; }
+      .subtitle { margin: 0; max-width: 1400px; font-size: 44px; font-weight: 500; letter-spacing: 0.04em; opacity: 0.78; }
+    </style>
+    <div class="stage">
+      <h1 class="title" data-var-text="title">The Weaving of Fate</h1>
+      <div class="rule"></div>
+      <p class="subtitle" data-var-text="subtitle">Chapter one · What is coming</p>
+    </div>
+    <script>
+      // Split the title into words (which wrap as units) of letters (which animate).
+      const title = document.querySelector(".title");
+      const text = String(__verdandi.getVariables().title ?? title.textContent).trim();
+      title.textContent = "";
+      text.split(/\s+/).forEach((w, i) => {
+        if (i) title.append(" ");
+        const word = document.createElement("span");
+        word.className = "word";
+        for (const c of w) {
+          const ch = document.createElement("span");
+          ch.className = "char";
+          ch.textContent = c;
+          word.append(ch);
+        }
+        title.append(word);
+      });
+      const chars = title.querySelectorAll(".char");
+      const stagger = Math.min(0.045, 0.9 / Math.max(chars.length, 1));
+
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(chars, { opacity: 0, y: 70, rotation: 4 }, { opacity: 1, y: 0, rotation: 0, duration: 0.7, ease: "power4.out", stagger }, 0.2)
+        .fromTo(".rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "power3.inOut" }, 0.8)
+        .fromTo(".subtitle", { opacity: 0, y: 24 }, { opacity: 0.78, y: 0, duration: 0.7, ease: "power3.out" }, 1.05)
+        .to(chars, { opacity: 0, y: -40, duration: 0.4, ease: "power2.in", stagger: Math.min(stagger / 2, 0.35 / Math.max(chars.length, 1)) }, 5.1)
+        .to(".rule", { scaleX: 0, duration: 0.4, ease: "power2.in" }, 5.15)
+        .to(".subtitle", { opacity: 0, y: -16, duration: 0.4, ease: "power2.in" }, 5.15);
+      window.__timelines["title-card"] = tl;
+    </script>
+  </div>
+</template>

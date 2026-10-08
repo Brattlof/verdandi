@@ -1,0 +1,48 @@
+<template>
+  <div
+    id="kinetic-headline-root"
+    data-composition-id="kinetic-headline"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"text","type":"string","label":"Headline","default":"Every task routed to the model that finishes it for less"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 0 180px; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); }
+      .block { display: flex; flex-direction: column; align-items: flex-start; max-width: 1560px; }
+      .headline { margin: 0; font-size: 104px; font-weight: 750; line-height: 1.12; letter-spacing: -0.02em; text-wrap: balance; }
+      .word { display: inline-block; will-change: transform, opacity; }
+      .bar { width: 100%; height: 10px; margin-top: 44px; border-radius: 5px; background: var(--accent, #e0a458); transform-origin: left center; }
+    </style>
+    <div class="stage">
+      <div class="block">
+        <h2 class="headline">Every task routed to the model that finishes it for less</h2>
+        <div class="bar"></div>
+      </div>
+    </div>
+    <script>
+      const headline = document.querySelector(".headline");
+      const words = String(__verdandi.getVariables().text ?? headline.textContent).trim().split(/\s+/).filter(Boolean);
+      headline.textContent = "";
+      words.forEach((w, i) => {
+        if (i) headline.append(" ");
+        const span = document.createElement("span");
+        span.className = "word";
+        span.textContent = w;
+        headline.append(span);
+      });
+      const spans = headline.querySelectorAll(".word");
+      // Shrink the block to its longest line, so it sits centred and the bar underlines just the text.
+      const longest = Math.max(0, ...[...spans].map((w) => w.offsetLeft - headline.offsetLeft + w.offsetWidth));
+      if (longest) headline.style.width = `${Math.ceil(longest) + 2}px`;
+      // The whole reveal fits in about 2 s however long the headline is.
+      const stagger = Math.min(0.14, 1.8 / Math.max(spans.length, 1));
+      const revealed = 0.3 + stagger * Math.max(spans.length - 1, 0) + 0.6;
+
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(spans, { opacity: 0, y: 56 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out", stagger }, 0.3)
+        .fromTo(".bar", { scaleX: 0 }, { scaleX: 1, duration: 0.8, ease: "expo.inOut" }, revealed - 0.3)
+        .to(".block", { opacity: 0, y: -24, duration: 0.5, ease: "power2.in" }, 4.4);
+      window.__timelines["kinetic-headline"] = tl;
+    </script>
+  </div>
+</template>

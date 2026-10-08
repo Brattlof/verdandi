@@ -1,0 +1,15 @@
+{
+  "name": "browser-frame",
+  "title": "Browser frame",
+  "description": "A browser window with an address bar that frames a screenshot and slowly pushes in on it.",
+  "tags": ["browser", "screenshot", "website", "mockup", "product", "web"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "url", "type": "string", "label": "Address", "default": "verdandi.dev/video" },
+    { "id": "image", "type": "image", "label": "Screenshot (16:10 fills the window)", "default": "" },
+    { "id": "zoom", "type": "number", "label": "Push-in scale", "default": 1.08 }
+  ],
+  "assets": ["placeholder.svg"]
+}

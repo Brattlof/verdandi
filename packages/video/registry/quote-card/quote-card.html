@@ -1,0 +1,50 @@
+<template>
+  <div
+    id="quote-card-root"
+    data-composition-id="quote-card"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"quote","type":"string","label":"Quote","default":"The best way to predict the future is to invent it."},{"id":"author","type":"string","label":"Author","default":"Alan Kay"},{"id":"source","type":"string","label":"Source","default":"Xerox PARC, 1971"},{"id":"accent","type":"color","label":"Accent","default":"#b5651d"},{"id":"background","type":"color","label":"Card","default":"#f4efe6"},{"id":"ink","type":"color","label":"Text","default":"#1d1b18"}]'
+  >
+    <style>
+      .wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+      .card {
+        position: relative; width: 1320px; padding: 176px 140px 104px; border-radius: 28px;
+        background: var(--background, #f4efe6); color: var(--ink, #1d1b18);
+        box-shadow: 0 40px 120px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.2);
+      }
+      .mark {
+        position: absolute; left: 128px; top: 8px; font-family: Georgia, serif; font-size: 260px; line-height: 1;
+        color: var(--accent, #b5651d); transform-origin: 50% 70%;
+      }
+      .quote { margin: 0; font-family: Georgia, serif; font-size: 72px; line-height: 1.22; font-weight: 400; letter-spacing: -0.01em; }
+      .by { display: flex; align-items: center; gap: 28px; margin-top: 56px; font-family: system-ui, sans-serif; }
+      .rule { width: 72px; height: 4px; border-radius: 2px; background: var(--accent, #b5651d); transform-origin: left; }
+      .author { margin: 0; font-size: 36px; font-weight: 700; letter-spacing: 0.01em; }
+      .source { margin: 4px 0 0; font-size: 28px; opacity: 0.6; }
+    </style>
+    <div class="wrap">
+      <div class="card">
+        <div class="mark">&ldquo;</div>
+        <p class="quote" data-var-text="quote">The best way to predict the future is to invent it.</p>
+        <div class="by">
+          <div class="rule"></div>
+          <div>
+            <p class="author" data-var-text="author">Alan Kay</p>
+            <p class="source" data-var-text="source">Xerox PARC, 1971</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".card", { opacity: 0, y: 60, scale: 0.97 }, { opacity: 1, y: 0, scale: 1, duration: 0.7, ease: "power3.out" })
+        .fromTo(".mark", { opacity: 0, scale: 0.6, rotation: -8 }, { opacity: 1, scale: 1, rotation: 0, duration: 0.6, ease: "back.out(1.8)" }, 0.25)
+        .fromTo(".quote", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.7, ease: "power2.out" }, 0.4)
+        .fromTo(".rule", { scaleX: 0 }, { scaleX: 1, duration: 0.45, ease: "power2.out" }, 0.9)
+        .fromTo(".author, .source", { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.5, stagger: 0.1, ease: "power2.out" }, 1)
+        .to(".card", { opacity: 0, y: -30, duration: 0.5, ease: "power2.in" }, 5.5);
+      window.__timelines["quote-card"] = tl;
+    </script>
+  </div>
+</template>

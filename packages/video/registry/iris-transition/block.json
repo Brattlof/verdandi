@@ -1,0 +1,10 @@
+{
+  "name": "iris-transition",
+  "title": "Iris transition",
+  "description": "A circular iris that closes the picture down to a point in a full-frame colour, holds it shut around 0.5 s and opens again from the centre, in 1 s; put it over the cut between two scenes.",
+  "tags": ["transition", "iris", "circle", "cut", "scene", "retro"],
+  "duration": 1,
+  "width": 1920,
+  "height": 1080,
+  "variables": [{ "id": "color", "type": "color", "label": "Iris", "default": "#0b0b0c" }]
+}

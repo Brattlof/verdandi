@@ -1,0 +1,109 @@
+<template>
+  <div
+    id="pricing-card-root"
+    data-composition-id="pricing-card"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"title","type":"string","label":"Heading (empty for none)","default":"Pick your plan"},{"id":"plans","type":"string","label":"Plans (JSON list of {name, price, features})","default":"[{\"name\":\"Starter\",\"price\":\"$0\",\"features\":[\"Local models\",\"One profile\",\"Community skills\"]},{\"name\":\"Pro\",\"price\":\"$20\",\"features\":[\"Every harness\",\"Smart routing\",\"Spend caps\",\"Session search\"]},{\"name\":\"Team\",\"price\":\"$60\",\"features\":[\"Shared skills\",\"Five profiles\",\"Chat gateway\"]}]"},{"id":"featured","type":"number","label":"Featured plan (1 = first, 0 for none)","default":2},{"id":"badge","type":"string","label":"Featured badge (empty for none)","default":"Most popular"},{"id":"period","type":"string","label":"Price period (empty for none)","default":"/ month"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .wrap { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 104px; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); }
+      .title { margin: 0; font-size: 72px; font-weight: 750; letter-spacing: -0.015em; line-height: 1.1; }
+      .cards { display: flex; align-items: stretch; gap: 40px; }
+      .card {
+        position: relative; display: flex; flex-direction: column; width: 500px; padding: 56px 56px 60px; border-radius: 28px;
+        background: color-mix(in srgb, var(--ink, #f4f1ea) 6%, transparent);
+        box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink, #f4f1ea) 12%, transparent);
+      }
+      .ring { position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 3px var(--accent, #e0a458), 0 30px 80px -20px color-mix(in srgb, var(--accent, #e0a458) 35%, transparent); pointer-events: none; }
+      .badge { position: absolute; top: 0; left: 50%; padding: 12px 26px; border-radius: 999px; background: var(--accent, #e0a458); color: #16161a; font-size: 24px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+      .name { margin: 0; font-size: 34px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.72; }
+      .price { display: flex; align-items: baseline; gap: 14px; margin: 18px 0 0; white-space: nowrap; }
+      .amount { font-size: 116px; font-weight: 800; line-height: 1; letter-spacing: -0.035em; font-variant-numeric: tabular-nums; }
+      .period { font-size: 30px; font-weight: 500; opacity: 0.6; }
+      .divider { height: 1.5px; margin: 40px 0 36px; background: color-mix(in srgb, var(--ink, #f4f1ea) 16%, transparent); transform-origin: left center; }
+      .features { display: flex; flex-direction: column; gap: 22px; margin: 0; padding: 0; list-style: none; }
+      .feature { display: flex; align-items: center; gap: 18px; font-size: 32px; font-weight: 500; line-height: 1.2; }
+      .feature svg { flex: none; width: 34px; height: 34px; }
+      .feature circle { fill: color-mix(in srgb, var(--accent, #e0a458) 18%, transparent); }
+      .feature path { fill: none; stroke: var(--accent, #e0a458); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+    <div class="wrap">
+      <p class="title" data-var-text="title">Pick your plan</p>
+      <div class="cards"></div>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      const title = document.querySelector(".title");
+      if (!String(vars.title ?? "").trim()) title.remove();
+      let plans = vars.plans;
+      if (typeof plans === "string") {
+        try { plans = JSON.parse(plans); } catch { console.warn("[pricing-card] plans isn't valid JSON; expected [{\"name\":\"Pro\",\"price\":\"$20\",\"features\":[\"…\"]}, …]"); plans = []; }
+      }
+      plans = (Array.isArray(plans) ? plans : [])
+        .filter((p) => p && typeof p === "object")
+        .map((p) => ({ name: String(p.name ?? ""), price: String(p.price ?? ""), features: (Array.isArray(p.features) ? p.features : []).map(String).slice(0, 6) }))
+        .slice(0, 3);
+      if (!plans.length) plans = [{ name: "Plan", price: "$0", features: ["Add plans as a JSON list"] }];
+      const featured = Math.round(Number(vars.featured)) - 1;
+      const period = String(vars.period ?? "").trim();
+      const badgeText = String(vars.badge ?? "").trim();
+
+      const el = (tag, cls, text) => {
+        const e = document.createElement(tag);
+        if (cls) e.className = cls;
+        if (text !== undefined) e.textContent = text;
+        return e;
+      };
+      const check = '<svg aria-hidden="true" viewBox="0 0 34 34"><circle cx="17" cy="17" r="17"/><path d="M10.5 17.5l4.5 4.5 8.5-9"/></svg>';
+      const cards = document.querySelector(".cards");
+      const built = plans.map((p, i) => {
+        const card = el("div", "card");
+        const price = el("p", "price");
+        price.append(el("span", "amount", p.price));
+        if (period) price.append(el("span", "period", period));
+        const list = el("ul", "features");
+        const items = p.features.map((f) => {
+          const li = el("li", "feature");
+          li.innerHTML = check;
+          li.append(el("span", "", f));
+          list.append(li);
+          return li;
+        });
+        card.append(el("p", "name", p.name), price, el("div", "divider"), list);
+        cards.append(card);
+        return { card, items, divider: card.querySelector(".divider"), featured: i === featured };
+      });
+
+      const end = __verdandi.duration();
+      const tl = gsap.timeline({ paused: true });
+      if (document.querySelector(".title")) tl.fromTo(".title", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0);
+      built.forEach(({ card, items, divider }, i) => {
+        const at = 0.3 + i * 0.12;
+        tl.fromTo(card, { opacity: 0, y: 60 }, { opacity: 1, y: 0, duration: 0.75, ease: "power3.out" }, at)
+          .fromTo(divider, { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "power3.out" }, at + 0.3)
+          .fromTo(items, { opacity: 0, x: -16 }, { opacity: 1, x: 0, duration: 0.45, ease: "power2.out", stagger: 0.07 }, at + 0.4);
+      });
+
+      // The featured plan steps forward once every card has settled; the others dim behind it.
+      const lift = 0.3 + built.length * 0.12 + 1;
+      const pick = built.find((b) => b.featured);
+      if (pick) {
+        const ring = el("div", "ring");
+        pick.card.append(ring);
+        tl.fromTo(pick.card, { scale: 1 }, { y: -28, scale: 1.05, duration: 0.7, ease: "power3.inOut", immediateRender: false }, lift)
+          .fromTo(ring, { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power2.out" }, lift + 0.1);
+        if (badgeText) {
+          const badge = el("div", "badge", badgeText);
+          pick.card.append(badge);
+          tl.fromTo(badge, { opacity: 0, xPercent: -50, yPercent: -50, scale: 0.6 }, { opacity: 1, xPercent: -50, yPercent: -50, scale: 1, duration: 0.5, ease: "back.out(2)" }, lift + 0.3);
+        }
+        built.filter((b) => !b.featured).forEach((b) => {
+          tl.to(b.card, { opacity: 0.55, scale: 0.97, duration: 0.7, ease: "power3.inOut" }, lift);
+        });
+      }
+      tl.to(".wrap", { opacity: 0, y: -20, duration: 0.45, ease: "power2.in" }, Math.max(end - 0.5, lift + 1.2));
+      window.__timelines["pricing-card"] = tl;
+    </script>
+  </div>
+</template>

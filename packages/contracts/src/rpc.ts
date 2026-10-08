@@ -27,6 +27,17 @@ import { SpendCap } from "./spend.ts";
 import { RouteCost, TaskRating } from "./task.ts";
 import { TerminalFeed, TerminalId, TerminalSize, TerminalUnavailable, TerminalView } from "./terminal.ts";
 import { TrustedCommands } from "./trust.ts";
+import {
+  VideoCheckResult,
+  VideoFeed,
+  VideoFile,
+  VideoFormat,
+  VideoProjectId,
+  VideoQuality,
+  VideoRenderJob,
+  VideoUnavailable,
+  VideoView,
+} from "./video.ts";
 import { WorktreeView } from "./worktree.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
@@ -457,6 +468,57 @@ export class Api extends RpcGroup.make(
     payload: { terminalId: TerminalId, subscriptionId: Schema.String },
     success: TerminalFeed,
     error: TerminalUnavailable,
+    stream: true,
+  }),
+  /** Opens a video project (a folder with an index.html) for the Studio; opening it again returns the same id. */
+  Rpc.make("VideoOpen", { payload: { path: Schema.String }, success: VideoView, error: VideoUnavailable }),
+  Rpc.make("VideoFileRead", { payload: { projectId: VideoProjectId, path: Schema.String }, success: VideoFile, error: VideoUnavailable }),
+  /**
+   * Writes a text file in the project. `expectedVersion` is the version the client read (null: the file must not exist);
+   * a file changed since fails with `Conflict`, carrying it as it is now, and nothing is written.
+   */
+  Rpc.make("VideoFileWrite", {
+    payload: {
+      projectId: VideoProjectId,
+      path: Schema.String,
+      content: Schema.String.check(Schema.isMaxLength(5 * 1024 * 1024)),
+      expectedVersion: Schema.NullOr(Schema.String),
+    },
+    success: Schema.Struct({ version: Schema.String }),
+    error: VideoUnavailable,
+  }),
+  /** Starts a render into the project's renders/ folder; its progress comes on the project's feed. */
+  Rpc.make("VideoRenderStart", {
+    payload: {
+      projectId: VideoProjectId,
+      format: VideoFormat,
+      quality: VideoQuality,
+      fps: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 120 })),
+    },
+    success: VideoRenderJob,
+    error: VideoUnavailable,
+  }),
+  Rpc.make("VideoRenderCancel", { payload: { jobId: Schema.String }, error: VideoUnavailable }),
+  /** Lints the project and runs it in Chrome, as `verdandi video check` does. */
+  Rpc.make("VideoCheck", { payload: { projectId: VideoProjectId }, success: VideoCheckResult, error: VideoUnavailable }),
+  /**
+   * Saves a media file into the project's `assets/` under `name` (a new name if it's taken), returning its path. At most
+   * about 14 MB, base64 in one message; larger files are copied into `assets/` directly.
+   */
+  Rpc.make("VideoAssetUpload", {
+    payload: {
+      projectId: VideoProjectId,
+      name: Schema.String.check(Schema.isMaxLength(200)),
+      data: Schema.String.check(Schema.isMaxLength(19 * 1024 * 1024)),
+    },
+    success: Schema.Struct({ path: Schema.String }),
+    error: VideoUnavailable,
+  }),
+  /** The project's view, then each file change and render update. */
+  Rpc.make("VideoSubscribe", {
+    payload: { projectId: VideoProjectId, subscriptionId: Schema.String },
+    success: VideoFeed,
+    error: VideoUnavailable,
     stream: true,
   }),
 ) {}

@@ -1,0 +1,15 @@
+{
+  "name": "phone-frame",
+  "title": "Phone frame",
+  "description": "A modern phone with a rounded body and a camera island that frames a screenshot, floats in on a tilt, settles and drifts, then fades out. Transparent, for any background.",
+  "tags": ["phone", "mobile", "app", "screenshot", "mockup", "device", "product"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "screen", "type": "image", "label": "Screenshot (9:19.5 fills the screen)", "default": "" },
+    { "id": "tilt", "type": "number", "label": "Resting tilt (degrees)", "default": 12 },
+    { "id": "body", "type": "color", "label": "Body colour", "default": "#1c1c1f" }
+  ],
+  "assets": ["placeholder.svg"]
+}

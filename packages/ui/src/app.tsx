@@ -22,12 +22,13 @@ import { TrustedCommandsList } from "./trust/trusted.tsx";
 import { Engraving, Plait, Raven } from "./ui/art.tsx";
 import { BranchIcon, CloseIcon, FolderIcon, MenuIcon } from "./ui/icons.tsx";
 import { Rune, RuneMark, type RuneName, RuneText } from "./ui/runes.tsx";
+import { StudioPage } from "./video/studio.tsx";
 
 /** The open thread lives in the URL hash (`#thread=<id>`), so links, Back and reloads just work. */
 const hashThread = () => new URLSearchParams(location.hash.slice(1)).get("thread") as ThreadId | null;
 /**
  * `#view=spend` opens the spend dashboard instead of a thread, `#view=search` the search page, `#view=devices` the paired
- * devices; `#view=projects`, or no thread and no view, the projects page.
+ * devices, `#view=video` the video Studio; `#view=projects`, or no thread and no view, the projects page.
  */
 const hashView = () => new URLSearchParams(location.hash.slice(1)).get("view");
 const onHashChange = (listener: () => void) => {
@@ -54,14 +55,14 @@ const startThread = async (connection: Connection, projectPath: string, worktree
   return result;
 };
 
-type Page = "home" | "thread" | "spend" | "search" | "devices";
+type Page = "home" | "thread" | "spend" | "search" | "devices" | "video";
 
 export const App = ({ connection }: { connection: Connection }) => {
   const [sidebar] = useState(() => createStore<SidebarData | undefined>(undefined));
   const threadId = useSyncExternalStore(onHashChange, hashThread);
   const view = useSyncExternalStore(onHashChange, hashView);
   const turn = useSyncExternalStore(onHashChange, hashTurn);
-  const page: Page = view === "spend" || view === "search" || view === "devices" ? view : threadId ? "thread" : "home";
+  const page: Page = view === "spend" || view === "search" || view === "devices" || view === "video" ? view : threadId ? "thread" : "home";
   const data = useStore(sidebar);
   const lost = useStore(connection.lost);
   const devices = useDevices(connection);
@@ -155,6 +156,8 @@ export const App = ({ connection }: { connection: Connection }) => {
           <Dashboard connection={connection} projects={data?.projects ?? []} />
         ) : page === "search" ? (
           <SearchPage connection={connection} />
+        ) : page === "video" ? (
+          <StudioPage connection={connection} />
         ) : threadId ? (
           <ThreadPane key={threadId} connection={connection} threadId={threadId} focusTurn={turn} />
         ) : (
@@ -209,6 +212,15 @@ const Rail = ({ page }: { page: Page }) => (
       className={railItem}
     >
       <RailLabel rune="kenaz" label="Search" />
+    </a>
+    <a
+      href="#view=video"
+      aria-label="Video"
+      title="Video Studio (dagaz: daylight, what makes a picture)"
+      aria-current={page === "video" ? "page" : undefined}
+      className={railItem}
+    >
+      <RailLabel rune="dagaz" label="Video" />
     </a>
     <a
       href="#view=spend"
@@ -307,6 +319,7 @@ const Sidebar = ({
 const pages = [
   { page: "home", view: "projects", rune: "ingwaz", label: "Projects" },
   { page: "search", view: "search", rune: "kenaz", label: "Search past sessions" },
+  { page: "video", view: "video", rune: "dagaz", label: "Video" },
   { page: "spend", view: "spend", rune: "fehu", label: "Spend dashboard" },
   { page: "devices", view: "devices", rune: "ehwaz", label: "Devices" },
 ] as const satisfies readonly { page: Page; view: string; rune: RuneName; label: string }[];

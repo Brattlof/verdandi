@@ -1,0 +1,53 @@
+{
+  "name": "news-ticker",
+  "title": "News ticker",
+  "description": "A band along the bottom with a label tab, scrolling a list of headlines to the left without a seam, that slides up, runs for its length and slides away. Headlines are a JSON list of strings; set Length to the clip's data-duration.",
+  "tags": ["ticker", "news", "headlines", "crawl", "scroll", "breaking", "band", "overlay"],
+  "duration": 10,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    {
+      "id": "label",
+      "type": "string",
+      "label": "Label",
+      "default": "Latest"
+    },
+    {
+      "id": "items",
+      "type": "string",
+      "label": "Headlines (JSON list of strings)",
+      "default": "[\"Verdandi routes every task to the cheapest model that finishes it\",\"Cost per completed task down 61% since routing shipped\",\"New: render videos from plain HTML in one command\",\"Checkpoints let you revert any turn without touching your branch\"]"
+    },
+    {
+      "id": "speed",
+      "type": "number",
+      "label": "Speed (pixels per second)",
+      "default": 160
+    },
+    {
+      "id": "length",
+      "type": "number",
+      "label": "Length in seconds (0: match the clip)",
+      "default": 0
+    },
+    {
+      "id": "accent",
+      "type": "color",
+      "label": "Label colour",
+      "default": "#e0a458"
+    },
+    {
+      "id": "band",
+      "type": "color",
+      "label": "Band",
+      "default": "#15161a"
+    },
+    {
+      "id": "ink",
+      "type": "color",
+      "label": "Text",
+      "default": "#f4f1ea"
+    }
+  ]
+}

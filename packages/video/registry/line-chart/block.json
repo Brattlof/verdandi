@@ -1,0 +1,22 @@
+{
+  "name": "line-chart",
+  "title": "Line chart",
+  "description": "A line chart from a JSON list of numbers or {label, value} points: the gridlines and baseline appear, the line draws on left to right, a dot pops at each point as the line reaches it, and the last value lands in a label; held, then faded out. Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["chart", "line", "graph", "data", "trend", "growth", "time-series"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "title", "type": "string", "label": "Title", "default": "Tasks completed per week" },
+    {
+      "id": "data",
+      "type": "string",
+      "label": "Data (JSON)",
+      "default": "[{\"label\":\"W1\",\"value\":42},{\"label\":\"W2\",\"value\":58},{\"label\":\"W3\",\"value\":51},{\"label\":\"W4\",\"value\":77},{\"label\":\"W5\",\"value\":93},{\"label\":\"W6\",\"value\":88},{\"label\":\"W7\",\"value\":121}]"
+    },
+    { "id": "prefix", "type": "string", "label": "Value prefix", "default": "" },
+    { "id": "suffix", "type": "string", "label": "Value suffix", "default": "" },
+    { "id": "accent", "type": "color", "label": "Line colour", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

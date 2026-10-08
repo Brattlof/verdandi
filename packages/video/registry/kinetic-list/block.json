@@ -1,0 +1,20 @@
+{
+  "name": "kinetic-list",
+  "title": "Kinetic list",
+  "description": "A numbered list from a JSON list of strings (up to eight): each item slides in behind a big number in turn, a highlight moves to the newest one and the earlier ones dim; the last stays lit, then the list fades out. An optional title sits above. Transparent, with light text for dark backgrounds.",
+  "tags": ["list", "steps", "numbered", "agenda", "points", "kinetic", "typography", "countdown"],
+  "duration": 7,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "title", "type": "string", "label": "Title (empty hides it)", "default": "From idea to video" },
+    {
+      "id": "items",
+      "type": "string",
+      "label": "Items (JSON list)",
+      "default": "[\"Write the scene in plain HTML\",\"Preview it in the Studio\",\"Render every frame in Chrome\",\"Ship the finished video\"]"
+    },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

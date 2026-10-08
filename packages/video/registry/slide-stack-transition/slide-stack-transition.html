@@ -1,0 +1,39 @@
+<template>
+  <div
+    id="slide-stack-transition-root"
+    data-composition-id="slide-stack-transition"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"colors","type":"string","label":"Colours (JSON list of 3, bottom first)","default":"[\"#e0a458\",\"#c8553d\",\"#16161a\"]"}]'
+  >
+    <style>
+      .stack { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+      .band { position: absolute; top: -40px; bottom: -40px; left: -300px; width: 2520px; transform: skewX(-12deg); }
+    </style>
+    <div class="stack">
+      <div class="band" style="background: #e0a458"></div>
+      <div class="band" style="background: #c8553d"></div>
+      <div class="band" style="background: #16161a"></div>
+    </div>
+    <script>
+      // The cut between scenes belongs at 0.45 s: the first band covers the frame from 0.31 s, the top one lands at
+      // 0.45 s, and the frame stays covered until the bottom band starts to leave at 0.61 s.
+      let colors = __verdandi.getVariables().colors;
+      if (typeof colors === "string") {
+        try { colors = JSON.parse(colors); } catch { console.warn("[slide-stack-transition] colors isn't valid JSON; expected [\"#e0a458\",\"#c8553d\",\"#16161a\"]"); colors = []; }
+      }
+      const bands = document.querySelectorAll(".band");
+      if (Array.isArray(colors)) colors.slice(0, 3).forEach((c, i) => { if (typeof c === "string" && c.trim()) bands[i].style.background = c; });
+
+      // Each band travels its full width plus the skew's overhang; they enter bottom first and leave top first.
+      const off = 2620;
+      const step = 0.07;
+      const tl = gsap.timeline({ paused: true });
+      bands.forEach((band, i) => {
+        tl.fromTo(band, { x: -off }, { x: 0, duration: 0.31, ease: "power3.out" }, i * step)
+          .to(band, { x: off, duration: 0.29, ease: "power3.in" }, 0.47 + (2 - i) * step);
+      });
+      window.__timelines["slide-stack-transition"] = tl;
+    </script>
+  </div>
+</template>

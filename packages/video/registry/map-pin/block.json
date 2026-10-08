@@ -1,0 +1,15 @@
+{
+  "name": "map-pin",
+  "title": "Map pin",
+  "description": "A stylised dark street map drawn from a seed (blocks, avenues, a river and parks; no tiles, no network) that settles in while a pin drops onto the centre with a ripple and a label card names the place. Full frame; change Seed for a different street plan.",
+  "tags": ["map", "pin", "location", "place", "address", "city", "office", "venue"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "place", "type": "string", "label": "Place", "default": "Verdandi HQ" },
+    { "id": "detail", "type": "string", "label": "Detail", "default": "Storgatan 12, Stockholm" },
+    { "id": "accent", "type": "color", "label": "Pin colour", "default": "#e0a458" },
+    { "id": "seed", "type": "number", "label": "Street plan seed", "default": 7 }
+  ]
+}

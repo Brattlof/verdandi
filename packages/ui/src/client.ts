@@ -25,6 +25,7 @@ import {
   type TurnId,
   type UsageFilter,
   type UsageReport,
+  VideoUnavailable,
 } from "@verdandi/contracts";
 import { Cause, Context, Effect, Exit, Layer, ManagedRuntime, Stream } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
@@ -322,6 +323,31 @@ export const connect = (endpoint: Endpoint) => {
     };
   };
 
+  /** A video call's answer; a failure carries `VideoUnavailable`'s reason, and for a `Conflict` the file as it is now. */
+  const video = async <A>(
+    call: (rpc: Rpc) => Effect.Effect<A, unknown>,
+  ): Promise<
+    | { readonly ok: true; readonly value: A }
+    | {
+        readonly ok: false;
+        readonly reason: VideoUnavailable["reason"] | "Disconnected";
+        readonly message: string;
+        readonly current?: VideoUnavailable["current"];
+      }
+  > => {
+    const exit = await run(call);
+    if (Exit.isSuccess(exit)) return { ok: true, value: exit.value };
+    const unavailable = failure(exit.cause, VideoUnavailable);
+    return unavailable
+      ? {
+          ok: false,
+          reason: unavailable.reason,
+          message: unavailable.message,
+          ...(unavailable.current && { current: unavailable.current }),
+        }
+      : disconnected;
+  };
+
   /** Pairs the device that raised `requestId`, or denies it; a `DevicesUnavailable` message says why not. */
   const answerPairing = async (requestId: string, approve: boolean): Promise<Dispatched> => {
     const exit = await run((rpc) => (approve ? Effect.asVoid(rpc.DeviceApprove({ requestId })) : rpc.DeviceDeny({ requestId })));
@@ -359,6 +385,7 @@ export const connect = (endpoint: Endpoint) => {
     installSkill,
     trusted,
     terminals,
+    video,
     follow,
     answerPairing,
     models,

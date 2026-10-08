@@ -1,0 +1,31 @@
+<template>
+  <div
+    id="lower-third-root"
+    data-composition-id="lower-third"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"name","type":"string","label":"Name","default":"Ada Lovelace"},{"id":"role","type":"string","label":"Role","default":"Mathematician"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"}]'
+  >
+    <style>
+      .lt { position: absolute; left: 96px; bottom: 128px; display: flex; gap: 24px; align-items: stretch; font-family: system-ui, sans-serif; }
+      .bar { width: 10px; background: var(--accent, #e0a458); transform-origin: bottom; }
+      .name { margin: 0; font-size: 64px; font-weight: 700; color: #f4f1ea; line-height: 1.1; }
+      .role { margin: 6px 0 0; font-size: 36px; color: #c9c4b8; }
+    </style>
+    <div class="lt">
+      <div class="bar"></div>
+      <div>
+        <p class="name" data-var-text="name">Ada Lovelace</p>
+        <p class="role" data-var-text="role">Mathematician</p>
+      </div>
+    </div>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".bar", { scaleY: 0 }, { scaleY: 1, duration: 0.45, ease: "power3.out" })
+        .fromTo(".name", { opacity: 0, x: -32 }, { opacity: 1, x: 0, duration: 0.5, ease: "power3.out" }, 0.15)
+        .fromTo(".role", { opacity: 0, x: -32 }, { opacity: 1, x: 0, duration: 0.5, ease: "power3.out" }, 0.3)
+        .to(".lt", { opacity: 0, duration: 0.4, ease: "power1.in" }, 4.5);
+      window.__timelines["lower-third"] = tl;
+    </script>
+  </div>
+</template>

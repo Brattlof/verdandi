@@ -1,0 +1,20 @@
+{
+  "name": "code-typing",
+  "title": "Code typing",
+  "description": "A dark editor window that types code character by character with light syntax colours and line numbers, then blinks its caret.",
+  "tags": ["code", "typing", "editor", "terminal", "developer", "snippet"],
+  "duration": 8,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    {
+      "id": "code",
+      "type": "string",
+      "label": "Code",
+      "default": "// Render a composition to video\nimport { render } from \"verdandi/video\";\n\nconst video = await render({\n  project: \"./launch\",\n  format: \"mp4\",\n  fps: 30,\n});\nconsole.log(`Saved ${video.path}`);"
+    },
+    { "id": "title", "type": "string", "label": "File name", "default": "render.ts" },
+    { "id": "speed", "type": "number", "label": "Characters per second (sped up to fit the block)", "default": 40 },
+    { "id": "accent", "type": "color", "label": "Caret", "default": "#e0a458" }
+  ]
+}

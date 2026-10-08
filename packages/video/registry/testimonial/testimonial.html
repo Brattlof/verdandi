@@ -1,0 +1,77 @@
+<template>
+  <div
+    id="testimonial-root"
+    data-composition-id="testimonial"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"quote","type":"string","label":"Quote","default":"We cut our agent bill in half in the first month, and nobody on the team had to change how they work."},{"id":"name","type":"string","label":"Name","default":"Maya Lindqvist"},{"id":"role","type":"string","label":"Role","default":"Head of Platform, Northwind"},{"id":"photo","type":"image","label":"Photo (square; from compositions/, e.g. ../assets/face.jpg; initials when empty)","default":""},{"id":"stars","type":"number","label":"Stars (1 to 5)","default":5},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"background","type":"color","label":"Card","default":"#f6f2ea"},{"id":"ink","type":"color","label":"Text","default":"#1d1b18"}]'
+  >
+    <style>
+      .wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; }
+      .card {
+        position: relative; width: 1280px; padding: 96px 120px 88px; border-radius: 32px;
+        background: var(--background, #f6f2ea); color: var(--ink, #1d1b18);
+        box-shadow: 0 40px 120px rgba(0, 0, 0, 0.42), 0 8px 24px rgba(0, 0, 0, 0.18);
+      }
+      .stars { display: flex; gap: 14px; margin-bottom: 44px; }
+      .star { width: 52px; height: 52px; transform-origin: 50% 60%; }
+      .star path { fill: var(--accent, #e0a458); }
+      .star.off path { fill: color-mix(in srgb, var(--ink, #1d1b18) 14%, transparent); }
+      .quote { margin: 0; font-family: Georgia, serif; font-size: 60px; line-height: 1.28; letter-spacing: -0.005em; text-wrap: pretty; }
+      .who { display: flex; align-items: center; gap: 32px; margin-top: 64px; padding-top: 48px; position: relative; }
+      .rule { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: color-mix(in srgb, var(--ink, #1d1b18) 12%, transparent); transform-origin: left center; }
+      .avatar {
+        position: relative; flex: none; width: 112px; height: 112px; border-radius: 50%; overflow: hidden;
+        display: flex; align-items: center; justify-content: center; background: var(--accent, #e0a458);
+        box-shadow: 0 0 0 6px var(--background, #f6f2ea), 0 0 0 8px color-mix(in srgb, var(--accent, #e0a458) 55%, transparent);
+      }
+      .initials { font-size: 42px; font-weight: 750; letter-spacing: 0.02em; color: #17140f; }
+      .photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .name { margin: 0; font-size: 38px; font-weight: 700; }
+      .role { margin: 6px 0 0; font-size: 30px; opacity: 0.62; }
+    </style>
+    <div class="wrap">
+      <div class="card">
+        <div class="stars"></div>
+        <p class="quote" data-var-text="quote">We cut our agent bill in half in the first month, and nobody on the team had to change how they work.</p>
+        <div class="who">
+          <div class="rule"></div>
+          <div class="avatar">
+            <span class="initials"></span>
+            <img class="photo" data-var-src="photo" alt="" />
+          </div>
+          <div class="person">
+            <p class="name" data-var-text="name">Maya Lindqvist</p>
+            <p class="role" data-var-text="role">Head of Platform, Northwind</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      const photo = typeof vars.photo === "string" ? vars.photo : vars.photo?.url;
+      if (!photo) document.querySelector(".photo").remove();
+      const words = String(vars.name ?? "").trim().split(/\s+/).filter(Boolean);
+      const initials = words.length > 1 ? words[0][0] + words[words.length - 1][0] : (words[0] ?? "?").slice(0, 2);
+      document.querySelector(".initials").textContent = initials.toUpperCase();
+
+      const count = Math.min(Math.max(Math.round(Number(vars.stars) || 5), 1), 5);
+      const shape = "M12 1.8l3.1 6.6 7.2.9-5.3 5 1.4 7.1L12 17.9l-6.4 3.5L7 14.3l-5.3-5 7.2-.9z";
+      const stars = document.querySelector(".stars");
+      for (let i = 0; i < 5; i++) {
+        stars.insertAdjacentHTML("beforeend", `<svg class="star${i < count ? "" : " off"}" viewBox="0 0 24 24" aria-hidden="true"><path d="${shape}" /></svg>`);
+      }
+
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".card", { opacity: 0, y: 60, scale: 0.97 }, { opacity: 1, y: 0, scale: 1, duration: 0.7, ease: "power3.out" }, 0)
+        .fromTo(".star", { opacity: 0, scale: 0.2, rotation: -40 }, { opacity: 1, scale: 1, rotation: 0, duration: 0.5, stagger: 0.09, ease: "back.out(2.6)" }, 0.35)
+        .fromTo(".quote", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.7, ease: "power2.out" }, 0.55)
+        .fromTo(".rule", { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "power2.out" }, 1)
+        .fromTo(".avatar", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.55, ease: "back.out(1.8)" }, 1.1)
+        .fromTo(".name", { opacity: 0, x: -20 }, { opacity: 1, x: 0, duration: 0.5, ease: "power2.out" }, 1.25)
+        .fromTo(".role", { opacity: 0, x: -20 }, { opacity: 0.62, x: 0, duration: 0.5, ease: "power2.out" }, 1.35)
+        .to(".card", { opacity: 0, y: -30, duration: 0.5, ease: "power2.in" }, 6.5);
+      window.__timelines.testimonial = tl;
+    </script>
+  </div>
+</template>

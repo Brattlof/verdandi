@@ -1,0 +1,35 @@
+<template>
+  <div
+    id="wipe-transition-root"
+    data-composition-id="wipe-transition"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"color","type":"color","label":"Panel","default":"#e0a458"},{"id":"edge","type":"color","label":"Leading edge","default":"#f4f1ea"},{"id":"direction","type":"enum","label":"Direction","default":"left-to-right","options":["left-to-right","right-to-left"]}]'
+  >
+    <style>
+      .sweep { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+      .panel { position: absolute; top: -40px; bottom: -40px; left: -300px; width: 2520px; transform: skewX(-12deg); }
+      .edge { background: var(--edge, #f4f1ea); }
+      .fill { background: var(--color, #e0a458); }
+    </style>
+    <div class="sweep">
+      <div class="panel edge"></div>
+      <div class="panel fill"></div>
+    </div>
+    <script>
+      // The cut between scenes belongs at 0.4 s, when the panel covers the whole frame.
+      if (__verdandi.getVariables().direction === "right-to-left") document.querySelector(".sweep").style.transform = "scaleX(-1)";
+      // The panel speeds up to cover the frame at 0.4 s and leaves at that same speed. The edge band leads it in and
+      // trails it out, swapping sides while the panel covers it.
+      const off = 2620;
+      const band = 150;
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".edge", { x: -off + band }, { x: band, duration: 0.4, ease: "power2.in" }, 0)
+        .fromTo(".fill", { x: -off }, { x: 0, duration: 0.4, ease: "power2.in" }, 0)
+        .set(".edge", { x: -band }, 0.4)
+        .to(".edge", { x: off - band, duration: 0.4, ease: "power2.out" }, 0.4)
+        .to(".fill", { x: off, duration: 0.4, ease: "power2.out" }, 0.4);
+      window.__timelines["wipe-transition"] = tl;
+    </script>
+  </div>
+</template>

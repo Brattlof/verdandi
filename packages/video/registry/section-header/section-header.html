@@ -1,0 +1,60 @@
+<template>
+  <div
+    id="section-header-root"
+    data-composition-id="section-header"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"index","type":"string","label":"Number","default":"01"},{"id":"kicker","type":"string","label":"Kicker (empty for none)","default":"Part one"},{"id":"title","type":"string","label":"Title","default":"Routing every task"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .stage { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 200px; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); }
+      .mask { display: inline-block; clip-path: inset(-0.1em -0.1em -0.12em -0.1em); }
+      .mask > span { display: inline-block; }
+      .index { margin: 0 0 0 -0.04em; font-size: 300px; font-weight: 800; line-height: 0.9; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; color: var(--accent, #e0a458); }
+      .rule { width: 1520px; height: 3px; margin: 56px 0 52px; border-radius: 2px; background: color-mix(in srgb, var(--ink, #f4f1ea) 32%, transparent); transform-origin: left center; }
+      .kicker { margin: 0 0 22px; font-size: 32px; font-weight: 650; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent, #e0a458); }
+      .title { margin: 0; max-width: 1520px; font-size: 112px; font-weight: 750; line-height: 1.08; letter-spacing: -0.02em; text-wrap: balance; }
+    </style>
+    <div class="stage">
+      <p class="index"><span class="mask"><span data-var-text="index">01</span></span></p>
+      <div class="rule"></div>
+      <p class="kicker" data-var-text="kicker">Part one</p>
+      <h1 class="title" data-var-text="title">Routing every task</h1>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      const kicker = document.querySelector(".kicker");
+      if (!String(vars.kicker ?? "").trim()) kicker.remove();
+      // Each title word rises inside its own mask, so a title that wraps still reveals cleanly.
+      const title = document.querySelector(".title");
+      const text = String(vars.title ?? title.textContent).trim();
+      title.textContent = "";
+      const words = text.split(/\s+/).map((w, i) => {
+        if (i) title.append(" ");
+        const mask = document.createElement("span");
+        mask.className = "mask";
+        const word = document.createElement("span");
+        word.textContent = w;
+        mask.append(word);
+        title.append(mask);
+        return word;
+      });
+
+      const end = __verdandi.duration();
+      const out = Math.max(end - 0.65, 2.2);
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".index .mask > span", { yPercent: 115 }, { yPercent: 0, duration: 0.85, ease: "power4.out" }, 0.1)
+        .fromTo(".rule", { scaleX: 0 }, { scaleX: 1, duration: 0.9, ease: "power3.inOut" }, 0.25)
+        .fromTo(words, { yPercent: 130 }, { yPercent: 0, duration: 0.7, ease: "power4.out", stagger: 0.07 }, 0.6)
+        .fromTo(".stage", { x: 0 }, { x: -24, duration: end, ease: "none" }, 0)
+        .to(".index .mask > span", { yPercent: 115, duration: 0.45, ease: "power3.in" }, out)
+        .to(words, { yPercent: 130, duration: 0.4, ease: "power3.in", stagger: 0.03 }, out + 0.05)
+        .to(".rule", { scaleX: 0, transformOrigin: "right center", duration: 0.45, ease: "power3.in" }, out + 0.1);
+      if (kicker) {
+        tl.fromTo(kicker, { opacity: 0, x: -24 }, { opacity: 1, x: 0, duration: 0.6, ease: "power3.out" }, 0.5)
+          .to(kicker, { opacity: 0, x: 24, duration: 0.35, ease: "power2.in" }, out + 0.05);
+      }
+      window.__timelines["section-header"] = tl;
+    </script>
+  </div>
+</template>

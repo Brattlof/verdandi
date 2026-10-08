@@ -1,0 +1,19 @@
+{
+  "name": "push-transition",
+  "title": "Push transition",
+  "description": "A full-frame coloured panel that pushes in from one side, covers the picture at 0.4 s and pushes out the other side in 0.8 s, with a lighter band inside it moving faster for depth; put it over the cut between two scenes.",
+  "tags": ["transition", "push", "slide", "cut", "scene", "parallax"],
+  "duration": 0.8,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "color", "type": "color", "label": "Panel", "default": "#e0a458" },
+    {
+      "id": "direction",
+      "type": "enum",
+      "label": "Direction",
+      "default": "right-to-left",
+      "options": ["right-to-left", "left-to-right", "bottom-to-top", "top-to-bottom"]
+    }
+  ]
+}

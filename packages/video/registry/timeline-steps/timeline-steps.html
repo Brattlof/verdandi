@@ -1,0 +1,130 @@
+<template>
+  <div
+    id="timeline-steps-root"
+    data-composition-id="timeline-steps"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"title","type":"string","label":"Heading","default":"How we got here"},{"id":"events","type":"string","label":"Events (JSON list of {date, title})","default":"[{\"date\":\"2023\",\"title\":\"First prototype on a laptop\"},{\"date\":\"2024\",\"title\":\"Open beta with 2,000 teams\"},{\"date\":\"2025\",\"title\":\"Routing cuts cost per task in half\"},{\"date\":\"2026\",\"title\":\"Videos from plain HTML\"}]"},{"id":"layout","type":"enum","label":"Layout","default":"horizontal","options":["horizontal","vertical"]},{"id":"accent","type":"color","label":"Line and dates","default":"#e0a458"},{"id":"color","type":"color","label":"Text","default":"#f4f1ea"}]'
+  >
+    <style>
+      .wrap { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 72px; font-family: system-ui, sans-serif; color: var(--color, #f4f1ea); }
+      .title { margin: 0; font-size: 72px; font-weight: 750; letter-spacing: -0.015em; line-height: 1.1; }
+      .stage { position: relative; width: 1600px; }
+      .rail, .fill { position: absolute; border-radius: 3px; }
+      .rail { background: color-mix(in srgb, var(--color, #f4f1ea) 16%, transparent); }
+      .fill { background: var(--accent, #e0a458); }
+      .dot, .lit { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border-radius: 50%; }
+      .dot { box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--color, #f4f1ea) 30%, transparent); }
+      .lit { background: var(--accent, #e0a458); box-shadow: 0 0 0 9px color-mix(in srgb, var(--accent, #e0a458) 22%, transparent); }
+      .stem { position: absolute; background: color-mix(in srgb, var(--accent, #e0a458) 60%, transparent); }
+      .card {
+        position: absolute; padding: 26px 32px 28px; border-radius: 18px;
+        background: color-mix(in srgb, var(--color, #f4f1ea) 6%, transparent);
+        box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color, #f4f1ea) 12%, transparent);
+      }
+      .date { margin: 0; font-size: 50px; font-weight: 800; letter-spacing: -0.01em; color: var(--accent, #e0a458); font-variant-numeric: tabular-nums; }
+      .what { margin: 8px 0 0; font-size: 36px; font-weight: 500; line-height: 1.25; text-wrap: balance; }
+      .vertical .date { position: absolute; width: 380px; text-align: right; font-size: 52px; }
+      .vertical .what { margin: 0; }
+      .vertical .card { width: max-content; max-width: 860px; padding: 18px 32px; }
+    </style>
+    <div class="wrap">
+      <p class="title" data-var-text="title">How we got here</p>
+      <div class="stage">
+        <div class="rail"></div>
+        <div class="fill"></div>
+      </div>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      let events = vars.events;
+      if (typeof events === "string") {
+        try { events = JSON.parse(events); } catch { console.warn("[timeline-steps] events isn't valid JSON; expected [{\"date\":\"2024\",\"title\":\"…\"}, …]"); events = []; }
+      }
+      events = (Array.isArray(events) ? events : [])
+        .filter((e) => e && typeof e === "object")
+        .map((e) => ({ date: String(e.date ?? ""), title: String(e.title ?? "") }))
+        .filter((e) => e.date || e.title)
+        .slice(0, 6);
+      if (events.length < 2) events = [{ date: "Then", title: "Add events" }, { date: "Now", title: "as a JSON list" }];
+      const vertical = vars.layout === "vertical";
+      const n = events.length;
+
+      const stage = document.querySelector(".stage");
+      stage.classList.toggle("vertical", vertical);
+      const W = 1600;
+      const H = vertical ? Math.min(140 * n, 760) : 560;
+      stage.style.height = `${H}px`;
+      const el = (cls, tag = "div") => { const e = document.createElement(tag); e.className = cls; stage.append(e); return e; };
+      const px = (e, props) => { for (const [k, v] of Object.entries(props)) e.style[k] = `${v}px`; };
+
+      // Where the line runs, and each dot's share of the way along it (the line draws at a constant speed).
+      const lineX = 600;
+      const lineY = H / 2;
+      const inset = vertical ? 50 : 130;
+      const span = (vertical ? H : W) - 2 * inset;
+      const along = (i) => inset + (span * i) / (n - 1);
+      for (const line of document.querySelectorAll(".rail, .fill")) {
+        if (vertical) px(line, { left: lineX - 3, top: 0, width: 6, height: H });
+        else px(line, { left: 0, top: lineY - 3, width: W, height: 6 });
+      }
+
+      const gap = 2 * span / (n - 1);
+      const cardWidth = Math.min(540, gap - 48);
+      const nodes = events.map((ev, i) => {
+        const pos = along(i);
+        const [x, y] = vertical ? [lineX, pos] : [pos, lineY];
+        const dot = el("dot");
+        const lit = el("lit");
+        px(dot, { left: x, top: y });
+        px(lit, { left: x, top: y });
+        const stem = el("stem");
+        const card = el("card");
+        if (!vertical) card.style.width = `${cardWidth}px`;
+        const date = el("date", "p");
+        date.textContent = ev.date;
+        const what = document.createElement("p");
+        what.className = "what";
+        what.textContent = ev.title;
+        let from;
+        if (vertical) {
+          // The date sits left of the line, the title in a card to the right, both centred on the dot.
+          card.append(what);
+          px(card, { left: lineX + 64, top: y });
+          px(date, { left: lineX - 48 - 380, top: y });
+          px(stem, { left: lineX + 15, top: y - 1, width: 49, height: 2 });
+          gsap.set([card, date], { yPercent: -50 });
+          from = { x: -24 };
+        } else {
+          // Cards alternate above and below the line, kept inside the stage.
+          card.append(date, what);
+          const above = i % 2 === 0;
+          const left = Math.min(Math.max(x - cardWidth / 2, 0), W - cardWidth);
+          px(card, { left, top: above ? lineY - 60 : lineY + 60 });
+          px(stem, { left: x - 1, top: above ? lineY - 60 : lineY + 15, width: 2, height: 45 });
+          if (above) gsap.set(card, { yPercent: -100 });
+          from = { y: above ? 24 : -24 };
+        }
+        return { dot, lit, stem, card, date, share: pos / (vertical ? H : W), from };
+      });
+
+      const drawAt = 0.7;
+      const drawFor = 3.4;
+      const axis = vertical ? "scaleY" : "scaleX";
+      const origin = vertical ? "center top" : "left center";
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".title", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0)
+        .fromTo(".rail", { [axis]: 0, transformOrigin: origin }, { [axis]: 1, duration: 0.8, ease: "power2.inOut" }, 0.15)
+        .fromTo(".dot", { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.4, stagger: 0.06, ease: "power2.out" }, 0.35)
+        .fromTo(".fill", { [axis]: 0, transformOrigin: origin }, { [axis]: 1, duration: drawFor, ease: "none" }, drawAt);
+      for (const node of nodes) {
+        const at = drawAt + drawFor * node.share;
+        tl.fromTo(node.lit, { opacity: 0, scale: 0.3 }, { opacity: 1, scale: 1, duration: 0.45, ease: "back.out(2.4)" }, at)
+          .fromTo(node.stem, { opacity: 0 }, { opacity: 1, duration: 0.25, ease: "power1.out" }, at + 0.05)
+          .fromTo(vertical ? [node.card, node.date] : node.card, { opacity: 0, ...node.from }, { opacity: 1, x: 0, y: 0, duration: 0.55, ease: "power3.out" }, at + 0.08);
+      }
+      tl.to(".wrap", { opacity: 0, duration: 0.5, ease: "power2.in" }, 6.5);
+      window.__timelines["timeline-steps"] = tl;
+    </script>
+  </div>
+</template>

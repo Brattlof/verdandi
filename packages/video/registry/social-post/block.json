@@ -1,0 +1,23 @@
+{
+  "name": "social-post",
+  "title": "Social post",
+  "description": "A generic social media post card (initials avatar, name, handle, text) that rises in while its like and repost counts tick up and the heart pops; held, then faded out. No brand marks. Transparent around a light card.",
+  "tags": ["social", "post", "tweet", "testimonial", "quote", "likes", "card", "overlay"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "name", "type": "string", "label": "Display name", "default": "Ada Lovelace" },
+    { "id": "handle", "type": "string", "label": "Handle", "default": "@ada" },
+    { "id": "time", "type": "string", "label": "Posted", "default": "2h" },
+    {
+      "id": "text",
+      "type": "string",
+      "label": "Post text",
+      "default": "Rendered our whole launch video from one HTML file. Every frame lands exactly where the timeline says it should."
+    },
+    { "id": "likes", "type": "number", "label": "Likes", "default": 12480 },
+    { "id": "reposts", "type": "number", "label": "Reposts", "default": 1893 },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0565b" }
+  ]
+}

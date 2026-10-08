@@ -1,0 +1,29 @@
+{
+  "name": "testimonial",
+  "title": "Testimonial",
+  "description": "A customer quote on a card with a star rating that pops in, and the customer's avatar (their photo, or initials from their name), name and role, held, then faded out.",
+  "tags": ["testimonial", "review", "customer", "quote", "rating", "stars", "social-proof", "card"],
+  "duration": 7,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    {
+      "id": "quote",
+      "type": "string",
+      "label": "Quote",
+      "default": "We cut our agent bill in half in the first month, and nobody on the team had to change how they work."
+    },
+    { "id": "name", "type": "string", "label": "Name", "default": "Maya Lindqvist" },
+    { "id": "role", "type": "string", "label": "Role", "default": "Head of Platform, Northwind" },
+    {
+      "id": "photo",
+      "type": "image",
+      "label": "Photo (square; from compositions/, e.g. ../assets/face.jpg; initials when empty)",
+      "default": ""
+    },
+    { "id": "stars", "type": "number", "label": "Stars (1 to 5)", "default": 5 },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "background", "type": "color", "label": "Card", "default": "#f6f2ea" },
+    { "id": "ink", "type": "color", "label": "Text", "default": "#1d1b18" }
+  ]
+}

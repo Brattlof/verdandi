@@ -1,0 +1,19 @@
+{
+  "name": "caption-pop",
+  "title": "Pop captions",
+  "description": "One word at a time, big and centred low in the frame: each word pops in on a coloured box with a scale bounce at its start time and gives way to the next, from timed words. Transparent, for over footage.",
+  "tags": ["captions", "subtitles", "words", "pop", "shorts", "reels", "transcript", "overlay"],
+  "duration": 8,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    {
+      "id": "words",
+      "type": "string",
+      "label": "Words (JSON [{text,start,end}] in seconds)",
+      "default": "[{\"text\":\"Say\",\"start\":0.3,\"end\":0.65},{\"text\":\"it\",\"start\":0.7,\"end\":1.01},{\"text\":\"one\",\"start\":1.07,\"end\":1.42},{\"text\":\"word\",\"start\":1.48,\"end\":1.86},{\"text\":\"at\",\"start\":1.92,\"end\":2.23},{\"text\":\"a\",\"start\":2.29,\"end\":2.56},{\"text\":\"time.\",\"start\":2.62,\"end\":3.0},{\"text\":\"Each\",\"start\":3.52,\"end\":3.9},{\"text\":\"word\",\"start\":3.96,\"end\":4.33},{\"text\":\"lands\",\"start\":4.4,\"end\":4.81},{\"text\":\"on\",\"start\":4.87,\"end\":5.18},{\"text\":\"its\",\"start\":5.24,\"end\":5.58},{\"text\":\"beat,\",\"start\":5.65,\"end\":6.03},{\"text\":\"big\",\"start\":6.09,\"end\":6.43},{\"text\":\"and\",\"start\":6.49,\"end\":6.84},{\"text\":\"bold.\",\"start\":6.9,\"end\":7.28}]"
+    },
+    { "id": "color", "type": "color", "label": "Text", "default": "#15130f" },
+    { "id": "box", "type": "color", "label": "Box", "default": "#ffd166" }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "split-reveal",
+  "title": "Split reveal",
+  "description": "A before and after compared full frame: the before shows, then a divider with a handle sweeps in from the right, past the middle and back, revealing the after behind it and settling on a half-and-half split. Each side is a line of text, or an image when one is set (use two shots of the same framing). Full frame.",
+  "tags": ["before-after", "comparison", "split", "reveal", "wipe", "divider", "versus", "slider"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "before_label", "type": "string", "label": "Before label", "default": "Before" },
+    { "id": "before_text", "type": "string", "label": "Before text", "default": "Hand-keyed in a timeline editor" },
+    { "id": "before_image", "type": "image", "label": "Before image (replaces the text)", "default": "" },
+    { "id": "after_label", "type": "string", "label": "After label", "default": "After" },
+    { "id": "after_text", "type": "string", "label": "After text", "default": "Written once in plain HTML" },
+    { "id": "after_image", "type": "image", "label": "After image (replaces the text)", "default": "" },
+    { "id": "accent", "type": "color", "label": "After colour", "default": "#e0a458" }
+  ]
+}

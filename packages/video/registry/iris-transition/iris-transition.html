@@ -1,0 +1,41 @@
+<template>
+  <div
+    id="iris-transition-root"
+    data-composition-id="iris-transition"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"color","type":"color","label":"Iris","default":"#0b0b0c"}]'
+  >
+    <style>
+      .iris { position: absolute; inset: 0; pointer-events: none; }
+      .shade { position: absolute; inset: 0; width: 1920px; height: 1080px; }
+      .rim { background: color-mix(in srgb, var(--color, #0b0b0c) 70%, #f4f1ea); }
+      .fill { background: var(--color, #0b0b0c); }
+    </style>
+    <div class="iris">
+      <div class="shade rim"></div>
+      <div class="shade fill"></div>
+    </div>
+    <script>
+      // The cut between scenes belongs at 0.5 s; the iris is fully shut from 0.44 s to 0.56 s.
+      // Each shade is the frame with a circular hole in its centre (an even-odd clip path), so the picture shows
+      // only through the hole. A lighter rim sits just outside the hole's edge.
+      const [rim, fill] = document.querySelectorAll(".shade");
+      const open = Math.ceil(Math.hypot(960, 540)) + 24;
+      const hole = (r) => {
+        if (r <= 0) return "none";
+        return `path(evenodd, "M0 0H1920V1080H0Z M${960 - r} 540a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0Z")`;
+      };
+      const iris = { r: open };
+      const draw = () => {
+        rim.style.clipPath = hole(iris.r);
+        fill.style.clipPath = hole(iris.r + Math.min(12, iris.r * 0.2));
+      };
+      draw();
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(iris, { r: open }, { r: 0, duration: 0.44, ease: "power2.in", onUpdate: draw }, 0)
+        .fromTo(iris, { r: 0 }, { r: open, duration: 0.44, ease: "power2.out", onUpdate: draw, immediateRender: false }, 0.56);
+      window.__timelines["iris-transition"] = tl;
+    </script>
+  </div>
+</template>

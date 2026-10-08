@@ -1,0 +1,20 @@
+{
+  "name": "highlight-text",
+  "title": "Highlight text",
+  "description": "A paragraph that fades in word by word, then a marker sweeps behind each phrase written between *asterisks*, one after another, turning it dark on the accent; held, then faded out. The asterisks are not shown. Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["highlight", "marker", "emphasis", "text", "paragraph", "quote", "statement", "typography"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    {
+      "id": "text",
+      "type": "string",
+      "label": "Text (*asterisks* mark highlights)",
+      "default": "Verdandi sends every task to the *cheapest model* that can *finish it*, and remembers *what worked* for next time."
+    },
+    { "id": "accent", "type": "color", "label": "Marker", "default": "#e0a458" },
+    { "id": "markInk", "type": "color", "label": "Text on the marker", "default": "#16161a" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

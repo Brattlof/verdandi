@@ -1,0 +1,15 @@
+{
+  "name": "countdown",
+  "title": "Countdown",
+  "description": "A big countdown, one number a second from From (at most 10) down to 1, each punching in while a ring sweeps round once and a pulse rings out, then the Go text lands and holds. Set the clip to From + 1.5 s or longer. Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["countdown", "timer", "count", "numbers", "intro", "launch", "ring", "go"],
+  "duration": 4.5,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "from", "type": "number", "label": "Count from (1 to 10)", "default": 3 },
+    { "id": "go", "type": "string", "label": "Go text", "default": "Go" },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "lower-third",
+  "title": "Lower third",
+  "description": "A name and role that slide in beside an accent bar in the lower left, hold, and fade out.",
+  "tags": ["lower-third", "title", "name", "interview", "overlay"],
+  "duration": 5,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "name", "type": "string", "label": "Name", "default": "Ada Lovelace" },
+    { "id": "role", "type": "string", "label": "Role", "default": "Mathematician" },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" }
+  ]
+}
