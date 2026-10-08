@@ -134,6 +134,8 @@ export const App = ({ connection }: { connection: Connection }) => {
         onArchived={setArchived}
         open={navOpen}
         onClose={closeNav}
+        // The Video page keeps its own project's threads beside the preview: there the list is only the phone's drawer.
+        drawerOnly={page === "video"}
       />
       <main id="main" tabIndex={-1} className="flex min-h-0 min-w-0 flex-1 flex-col outline-none">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line bg-panel px-2 md:hidden">
@@ -157,7 +159,7 @@ export const App = ({ connection }: { connection: Connection }) => {
         ) : page === "search" ? (
           <SearchPage connection={connection} />
         ) : page === "video" ? (
-          <StudioPage connection={connection} />
+          <StudioPage connection={connection} data={data} />
         ) : threadId ? (
           <ThreadPane key={threadId} connection={connection} threadId={threadId} focusTurn={turn} />
         ) : (
@@ -253,6 +255,7 @@ const Sidebar = ({
   onArchived,
   open,
   onClose,
+  drawerOnly = false,
 }: {
   connection: Connection;
   data: SidebarData | undefined;
@@ -265,6 +268,8 @@ const Sidebar = ({
   /** Whether the drawer is open, on screens too narrow to show the sidebar beside the page. */
   open: boolean;
   onClose: () => void;
+  /** Hidden on wide screens, where the page shows its own list; still the drawer on a phone. */
+  drawerOnly?: boolean;
 }) => {
   const nav = useRef<HTMLElement>(null);
   // Focus moves into the drawer when it opens, so keyboard users land in it.
@@ -278,7 +283,7 @@ const Sidebar = ({
       tabIndex={-1}
       // A dialog opened from the sidebar renders outside it, but React still bubbles its keys here.
       onKeyDown={(e) => open && e.key === "Escape" && nav.current?.contains(e.target as Node) && onClose()}
-      className={`${open ? "fixed inset-y-0 left-0 z-40 flex shadow-2xl" : "hidden"} w-72 max-w-[85vw] shrink-0 flex-col border-r border-line bg-panel outline-none md:static md:flex md:w-64 md:max-w-none md:shadow-none`}
+      className={`${open ? "fixed inset-y-0 left-0 z-40 flex shadow-2xl" : "hidden"} w-72 max-w-[85vw] shrink-0 flex-col border-r border-line bg-panel outline-none md:static ${drawerOnly ? "" : "md:flex"} md:w-64 md:max-w-none md:shadow-none`}
     >
       <div className="flex h-16 shrink-0 items-center justify-between gap-2 pr-2 pl-4">
         <Wordmark rail />

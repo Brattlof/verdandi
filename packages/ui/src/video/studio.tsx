@@ -12,7 +12,9 @@ import type {
 } from "@verdandi/contracts";
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import type { Connection } from "../client.ts";
+import type { Sidebar } from "../state.ts";
 import { RuneText } from "../ui/runes.tsx";
+import { ProjectChat } from "./chat.tsx";
 import { CodeEditor } from "./editor.tsx";
 import { emptyHistory, type History, record, redoStep, undoStep } from "./history.ts";
 import { Inspector } from "./inspector.tsx";
@@ -49,7 +51,7 @@ type Open = { readonly path: string; readonly saved: string; readonly draft: str
  * H to hide one), its files in a code editor, and renders with their progress. Edits from anywhere (an agent, another
  * editor) reload the preview at the same time; an unsaved edit to a file that changed on disk asks which one to keep.
  */
-export const StudioPage = ({ connection }: { connection: Connection }) => {
+export const StudioPage = ({ connection, data }: { connection: Connection; data: Sidebar | undefined }) => {
   const [path, setPath] = useState(hashProject);
   // `verdandi video present` opens straight into presenting; read before opening the project rewrites the hash.
   const [present] = useState(() => new URLSearchParams(location.hash.slice(1)).get("present") === "1");
@@ -168,6 +170,7 @@ export const StudioPage = ({ connection }: { connection: Connection }) => {
     <Studio
       key={view.projectId}
       connection={connection}
+      data={data}
       initial={view}
       present={present}
       onClose={() => {
@@ -180,11 +183,13 @@ export const StudioPage = ({ connection }: { connection: Connection }) => {
 
 const Studio = ({
   connection,
+  data,
   initial,
   present,
   onClose,
 }: {
   connection: Connection;
+  data: Sidebar | undefined;
   initial: VideoView;
   present: boolean;
   onClose: () => void;
@@ -193,6 +198,7 @@ const Studio = ({
   const [files, setFiles] = useState(initial.files);
   const [assets, setAssets] = useState(initial.assets);
   const [selected, setSelected] = useState<string>();
+  const [side, setSide] = useState<"chat" | "code">("chat");
   const [checked, setChecked] = useState<VideoCheckResult | "running">();
   const [presenting, setPresenting] = useState(present);
   const [jobs, setJobs] = useState<ReadonlyMap<string, VideoRenderJob>>(new Map(initial.renders.map((j) => [j.jobId, j])));
@@ -478,54 +484,72 @@ const Studio = ({
             connection={connection}
           />
         </section>
-        <section aria-label="Files" className="flex min-h-[50vh] flex-col border-t border-line lg:border-t-0 lg:border-l">
-          <div className="flex items-center gap-2 border-b border-line bg-panel px-3 py-1.5">
-            <label htmlFor="video-file" className="sr-only">
-              File
-            </label>
-            <select id="video-file" value={file?.path ?? ""} onChange={(e) => void read(e.target.value)} className="min-w-0 flex-1">
-              {files.map((f) => (
-                <option key={f}>{f}</option>
-              ))}
-            </select>
-            <button type="button" onClick={() => void save()} disabled={!file || file.draft === file.saved}>
-              {file && file.draft !== file.saved ? "Save" : "Saved"}
-            </button>
+        <section aria-label="Agent and files" className="flex min-h-[50vh] flex-col border-t border-line lg:border-t-0 lg:border-l">
+          <div role="tablist" aria-label="Side panel" className="flex border-b border-line bg-panel">
+            {(["chat", "code"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={side === tab}
+                onClick={() => setSide(tab)}
+                className={`rounded-none border-0 border-b-2 px-4 py-2 ${side === tab ? "border-accent font-medium" : "border-transparent bg-transparent text-muted"}`}
+              >
+                {tab === "chat" ? "Agent" : "Code"}
+              </button>
+            ))}
           </div>
-          {conflict && file && (
-            <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-line bg-card px-3 py-2 text-warn">
-              <span className="flex-1">{file.path} changed on disk while you were editing it.</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setFile({ path: file.path, saved: conflict.content, draft: conflict.content, version: conflict.version });
-                  setConflict(undefined);
-                }}
-              >
-                Use theirs
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  // Saving next writes over theirs, on purpose.
-                  setFile({ ...file, version: conflict.version });
-                  setConflict(undefined);
-                }}
-              >
-                Keep mine
+          {side === "chat" && <ProjectChat connection={connection} data={data} path={initial.path} />}
+          {/* Hidden, not unmounted: the editor keeps its undo history and unsaved text while the agent tab is open. */}
+          <div hidden={side !== "code"} className="flex min-h-0 flex-1 flex-col">
+            <div className="flex items-center gap-2 border-b border-line bg-panel px-3 py-1.5">
+              <label htmlFor="video-file" className="sr-only">
+                File
+              </label>
+              <select id="video-file" value={file?.path ?? ""} onChange={(e) => void read(e.target.value)} className="min-w-0 flex-1">
+                {files.map((f) => (
+                  <option key={f}>{f}</option>
+                ))}
+              </select>
+              <button type="button" onClick={() => void save()} disabled={!file || file.draft === file.saved}>
+                {file && file.draft !== file.saved ? "Save" : "Saved"}
               </button>
             </div>
-          )}
-          {file && (
-            <div className="min-h-0 flex-1">
-              <CodeEditor
-                path={file.path}
-                doc={file.draft}
-                onChange={(draft) => setFile((f) => f && { ...f, draft })}
-                onSave={() => void save()}
-              />
-            </div>
-          )}
+            {conflict && file && (
+              <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-line bg-card px-3 py-2 text-warn">
+                <span className="flex-1">{file.path} changed on disk while you were editing it.</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFile({ path: file.path, saved: conflict.content, draft: conflict.content, version: conflict.version });
+                    setConflict(undefined);
+                  }}
+                >
+                  Use theirs
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Saving next writes over theirs, on purpose.
+                    setFile({ ...file, version: conflict.version });
+                    setConflict(undefined);
+                  }}
+                >
+                  Keep mine
+                </button>
+              </div>
+            )}
+            {file && (
+              <div className="min-h-0 flex-1">
+                <CodeEditor
+                  path={file.path}
+                  doc={file.draft}
+                  onChange={(draft) => setFile((f) => f && { ...f, draft })}
+                  onSave={() => void save()}
+                />
+              </div>
+            )}
+          </div>
         </section>
       </div>
     </div>
