@@ -20,7 +20,7 @@ import { HandedSource, Item, Quota, UsageFields, VerifierRun } from "./items.ts"
 import { MemoryScope } from "./memory.ts";
 import { ProviderHealth } from "./provider-health.ts";
 import { Question, Resolution } from "./requests.ts";
-import { Effort, HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
+import { AccessLevel, Effort, HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
 import { BudgetMode, EscalationStep, EscalationTrigger, RouteDecision, RouteInputs, RouteInputsV1, UntrustedInput } from "./routing.ts";
 import { HubAdvice, HubKept, HubPin, SkillAction, SkillChange, SkillState } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
@@ -91,6 +91,13 @@ export const ThreadBudgetChanged = Schema.Struct({
   v: v1,
   threadId: ThreadId,
   mode: Schema.NullOr(BudgetMode),
+});
+/** The user set the thread's access level (DESIGN §17), or cleared it back to the profile's default (`null`). */
+export const ThreadAccessChanged = Schema.Struct({
+  type: Schema.Literal("thread.access.changed"),
+  v: v1,
+  threadId: ThreadId,
+  access: Schema.NullOr(AccessLevel),
 });
 /** The user cleared the routing memory of `threadId`'s project: outcomes of tasks started before this no longer move routes. */
 export const RoutingMemoryCleared = Schema.Struct({
@@ -252,7 +259,10 @@ export const TaskDelegated = Schema.Struct({
   to: Route,
   decision: RouteDecision,
 });
-/** On `profileStream`: the user turned smart approvals on or off (DESIGN §17); the latest holds while `approvals.yaml` enables them. */
+/**
+ * On `profileStream`: the user turned smart approvals on or off. Retired when they became the `auto` access level
+ * (`thread.access.changed`); kept so the log stays readable, and changes nothing.
+ */
 export const ApprovalsSmartChanged = Schema.Struct({
   type: Schema.Literal("approvals.smart.changed"),
   v: v1,
@@ -898,6 +908,7 @@ export const Event = Schema.Union([
   ThreadRouteChanged,
   ThreadRouteUnpinned,
   ThreadBudgetChanged,
+  ThreadAccessChanged,
   RoutingMemoryCleared,
   TaskRated,
   ThreadArchived,
@@ -1026,6 +1037,7 @@ const byTypeAndVersion: Record<string, Schema.Codec<Event, unknown>> = {
   "thread.route.changed@1": ThreadRouteChanged,
   "thread.route.unpinned@1": ThreadRouteUnpinned,
   "thread.budget.changed@1": ThreadBudgetChanged,
+  "thread.access.changed@1": ThreadAccessChanged,
   "routing.memory.cleared@1": RoutingMemoryCleared,
   "task.rated@1": TaskRated,
   "thread.archived@1": ThreadArchived,

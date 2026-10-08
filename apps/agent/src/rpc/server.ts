@@ -19,7 +19,6 @@ import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "e
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import { Socket } from "effect/unstable/socket";
 import { SqlClient, type SqlError } from "effect/unstable/sql";
-import { loadSmartApprovals } from "../approvals/smart-approvals.ts";
 import { AttachmentSweepLive, attachmentPath, attachmentsDir, storeAttachments } from "../attachments/attachments.ts";
 import { Devices, DevicesLive } from "../devices/devices.ts";
 import { threadDiff } from "../diffs/diff.ts";
@@ -121,11 +120,7 @@ const Handlers = (home: string) =>
         FolderPick: () => pickFolder,
         DiffGet: ({ threadId, turnId }) =>
           threadDiff(threadId, turnId).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.catchTag("SqlError", Effect.die)),
-        ApprovalsGet: () =>
-          loadSmartApprovals(approvals.smart).pipe(
-            Effect.provideService(SqlClient.SqlClient, sql),
-            Effect.catchTag("SqlError", Effect.die),
-          ),
+        ApprovalsGet: () => Effect.succeed({ access: approvals.access }),
         SpendCapsGet: ({ threadId }) =>
           Effect.gen(function* () {
             const { thread } = yield* loadDeciderState(threadId);

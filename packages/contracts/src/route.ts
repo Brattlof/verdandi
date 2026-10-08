@@ -10,6 +10,20 @@ export type Effort = typeof Effort.Type;
 export const InteractionMode = Schema.Literals(["ask", "plan", "build"]);
 export type InteractionMode = typeof InteractionMode.Type;
 
+/**
+ * How much a thread's agent may do without asking (DESIGN §17, ADR 0025): `ask` asks before every action its harness
+ * gates, `auto` lets a guard approve what it rates safe and asks about the rest, `full` asks about nothing. A thread
+ * someone other than the owner can write in always asks, and `full` holds at `auto` once the session has read untrusted input.
+ */
+export const AccessLevel = Schema.Literals(["ask", "auto", "full"]);
+export type AccessLevel = typeof AccessLevel.Type;
+/** What each access level lets the agent do, for every surface that offers the choice. */
+export const accessHelp: Record<AccessLevel, string> = {
+  ask: "the agent asks before running commands or working outside the thread's folder",
+  auto: "a guard approves commands it rates safe and asks about the rest",
+  full: "the agent asks about nothing, until it reads untrusted input, when it goes on at auto",
+};
+
 export const HarnessId = Schema.Literals(["claude-code", "native", "fake"]);
 export type HarnessId = typeof HarnessId.Type;
 

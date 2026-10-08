@@ -1,4 +1,5 @@
 import type {
+  AccessLevel,
   AttachmentRef,
   BudgetMode,
   ChannelBinding,
@@ -170,6 +171,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     withSql(
       (sql) => sql`update threads set budget_mode = ${e.mode}, task_id = case when pinned = 1 then task_id end where id = ${e.threadId}`,
     ),
+  "thread.access.changed": (e) => withSql((sql) => sql`update threads set access = ${e.access} where id = ${e.threadId}`),
   "turn.started": (e, at) =>
     Effect.andThen(
       withSql((sql) =>
@@ -300,7 +302,7 @@ const projections: { [T in Event["type"]]: Projection<T> } = {
     withSql((sql) => sql`delete from provider_health where provider = ${e.provider} and model in ('', ${e.model})`),
   // The turn goes on at `to`; the thread keeps its route, which the next turn starts on.
   "turn.rerouted": (e) => addItem(e.turnId, { kind: "route.switch", from: e.from, to: e.to, reason: e.reason }),
-  // Read from the log when it's needed (`loadSmartApprovals`).
+  // Retired: smart approvals became the `auto` access level.
   "approvals.smart.changed": () => Effect.void,
   "turn.effort.set": (e) => addItem(e.turnId, { kind: "effort", from: e.from, to: e.to, reason: e.reason }),
   "task.delegated": (e) => addItem(e.turnId, { kind: "delegation", route: e.to, reason: e.decision.reason, parentToolUseId: e.toolUseId }),
@@ -581,6 +583,8 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
         pinned: number;
         archived: number;
         budget_mode: BudgetMode | null;
+        access: AccessLevel | null;
+        confined: number;
         turns: number;
         last_turn_id: TurnId | null;
         task_escalations: number;
@@ -598,6 +602,7 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
       }>`
         select t.project_id, p.path, t.route, t.running_turn_id, t.session_id, t.review,
           (select verifying from turns where id = t.running_turn_id) as verifying, t.task_id, t.pinned, t.budget_mode, t.worktree,
+          t.access, t.confined,
           t.pending_fork is not null as pending_fork, t.session_first_turn, t.revert,
           t.archived_at is not null as archived,
           (select count(*) from turns n where n.thread_id = t.id) as turns,
@@ -676,6 +681,8 @@ export const loadDeciderState = (threadId: ThreadId): Effect.Effect<DeciderState
           archived: row.archived === 1,
           worktree: row.worktree === null ? null : (JSON.parse(row.worktree) as WorktreeView),
           budgetMode: row.budget_mode,
+          access: row.access,
+          confined: row.confined === 1,
           taskDecision: row.task_decision === null ? null : (JSON.parse(row.task_decision) as RouteDecision),
           taskPlanned: row.task_mode === "plan",
           cachedTokens: row.cached_tokens,
@@ -716,9 +723,11 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         worktree: string | null;
         revert: string | null;
         binding: string | null;
+        access: AccessLevel | null;
+        confined: number;
       }>`
         select p.path, t.route, t.session_id, t.running_turn_id, t.pinned, t.archived_at is not null as archived, t.budget_mode, t.worktree,
-          t.revert,
+          t.revert, t.access, t.confined,
           t.task_id, d.source, d.reason, (select b.binding from channel_bindings b where b.thread_id = t.id) as binding
         from threads t join projects p on p.id = t.project_id left join route_decisions d on d.task_id = t.task_id
         where t.id = ${threadId}`;
@@ -766,6 +775,8 @@ export const loadThreadView = (threadId: ThreadId): Effect.Effect<ThreadView | n
         pinned: thread.pinned === 1,
         archived: thread.archived === 1,
         budgetMode: thread.budget_mode,
+        access: thread.access,
+        confined: thread.confined === 1,
         task:
           thread.task_id === null
             ? null

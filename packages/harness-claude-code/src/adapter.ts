@@ -13,6 +13,7 @@ import {
   tool,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
+  type AccessLevel,
   formatBytes,
   type HarnessAdapter,
   HarnessError,
@@ -66,8 +67,10 @@ type Session = {
   rerouting: Promise<void>;
   /** Whether Claude Code is in its read-only plan mode, which ask and plan turns run in. */
   planning: boolean;
-  /** The permission mode Claude Code last reported outside plan mode: the user's own default, which build restores. */
+  /** The permission mode Claude Code last reported outside plan mode at `ask`: the user's own default, which build restores. */
   buildMode: PermissionMode | undefined;
+  /** The thread's access level, which sets the mode build runs in (DESIGN §17). */
+  access: AccessLevel;
   /** Claude Code's session id, once its init message arrives. */
   sessionId: string | undefined;
   /** The session's transcript file, as Claude Code's hooks report it. */
@@ -263,8 +266,12 @@ const openSession = (
         if (!waiting.delete(requestId)) return;
         void session.rerouting.then(() => {
           resolve(toPermission(toolInput, resolution));
-          // Allowing ExitPlanMode makes Claude Code leave plan mode for the mode it was in before.
-          if (toolName === "ExitPlanMode" && resolution.decision === "allow") session.planning = false;
+          // Allowing ExitPlanMode makes Claude Code leave plan mode for the mode it was in before, which the access level
+          // then replaces.
+          if (toolName === "ExitPlanMode" && resolution.decision === "allow") {
+            session.planning = false;
+            if (session.access !== "ask") void session.query.setPermissionMode(buildModes[session.access](session)).catch(() => undefined);
+          }
           if (resolution.decision === "deny" && resolution.feedback) say(session, resolution.feedback, "next");
         });
       };
@@ -298,7 +305,13 @@ const openSession = (
         resumeSessionAt: fork.resumeSessionAt,
         ...(fork.dropTurnId && { resumeDropsTurn: fork.dropTurnId }),
       }),
-      ...(input.mode === "build" ? {} : { permissionMode: "plan" as const }),
+      ...(input.mode !== "build"
+        ? { permissionMode: "plan" as const }
+        : input.access === "auto" || input.access === "full"
+          ? { permissionMode: input.access === "full" ? ("bypassPermissions" as const) : ("auto" as const) }
+          : {}),
+      // Lets a later turn's access level switch the session to `bypassPermissions` (DESIGN §17): only Verdandi switches it.
+      allowDangerouslySkipPermissions: true,
       // Spawn-time only, and counted over the process's life: `run` opens a process per task with limits.
       // A process opened mid-task (after an interrupt or restart) gets what the task has left; `run` stops a task with no turns left.
       ...(input.limits?.maxCost === undefined ? {} : { maxBudgetUsd: Math.max(input.limits.maxCost - input.limits.spentUsd, 0.01) }),
@@ -354,6 +367,7 @@ const openSession = (
     rerouting: Promise.resolve(),
     planning: input.mode !== "build",
     buildMode: undefined,
+    access: input.access ?? "ask",
     sessionId: undefined,
     transcriptPath: undefined,
     reportsState: false,
@@ -409,11 +423,25 @@ const applyRoute = async (session: Session, route: Route) => {
   session.route = route;
 };
 
-/** Moves a live session into the turn's mode, between turns. Ask and plan both run in Claude Code's read-only plan mode. */
-const applyMode = async (session: Session, mode: InteractionMode) => {
+/** The permission mode build runs in at `access` (DESIGN §17): `ask` keeps the user's own default. */
+const buildModes: Record<AccessLevel, (session: Session) => PermissionMode> = {
+  ask: (session) => session.buildMode ?? "default",
+  auto: () => "auto",
+  full: () => "bypassPermissions",
+};
+
+/**
+ * Moves a live session into the turn's mode and access level, between turns. Ask and plan both run in Claude Code's
+ * read-only plan mode, and build in the access level's mode.
+ */
+const applyMode = async (session: Session, mode: InteractionMode, access: AccessLevel) => {
   const planning = mode !== "build";
-  if (session.planning === planning) return;
-  await session.query.setPermissionMode(planning ? "plan" : (session.buildMode ?? "default"));
+  if (session.planning === planning && (planning || session.access === access)) {
+    session.access = access;
+    return;
+  }
+  session.access = access;
+  await session.query.setPermissionMode(planning ? "plan" : buildModes[access](session));
   session.planning = planning;
 };
 
@@ -511,7 +539,8 @@ export const makeClaudeCodeAdapter = (options: {
         }
         continue;
       }
-      if (msg.type === "system" && msg.subtype === "init" && msg.permissionMode !== "plan") session.buildMode = msg.permissionMode;
+      if (msg.type === "system" && msg.subtype === "init" && msg.permissionMode !== "plan" && session.access === "ask")
+        session.buildMode = msg.permissionMode;
       // A new reply of the main agent is a model call, what `maxTurns` counts; reported for the task to count across processes.
       if (session.countsTurns && msg.type === "assistant" && msg.parent_tool_use_id === null && msg.message.id !== session.lastMessageId) {
         session.lastMessageId = msg.message.id;
@@ -613,7 +642,7 @@ export const makeClaudeCodeAdapter = (options: {
           yield* Effect.tryPromise({
             try: async () => {
               await applyRoute(session, input.route);
-              await applyMode(session, input.mode);
+              await applyMode(session, input.mode, input.access ?? "ask");
             },
             catch: (error) => {
               end(input.threadId);
@@ -676,6 +705,14 @@ export const makeClaudeCodeAdapter = (options: {
         // ponytail: a failed switch leaves the build on the plan's model, which its usage still records by model.
         // Upgrade: report it, once a harness event can say the route didn't change.
         session.rerouting = session.rerouting.then(() => applyRoute(session, route)).catch(() => undefined);
+      }),
+    access: (threadId, level) =>
+      Effect.sync(() => {
+        const session = sessions.get(threadId);
+        if (!session?.live) return;
+        session.access = level;
+        // ponytail: a failed switch leaves the turn at its level, unreported. Upgrade: report it, as for reroute.
+        if (!session.planning) void session.query.setPermissionMode(buildModes[level](session)).catch(() => undefined);
       }),
     close: (threadId) =>
       Effect.sync(() => {

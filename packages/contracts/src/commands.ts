@@ -19,7 +19,7 @@ import { CommandId, profileStream, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { HandedSource, VerifierRun } from "./items.ts";
 import { MemoryScope } from "./memory.ts";
 import { Resolution } from "./requests.ts";
-import { HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
+import { AccessLevel, HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
 import { BudgetMode } from "./routing.ts";
 import { HubKept, HubPin, SkillAction, SkillChange } from "./skills.ts";
 import { CapPeriod, CapScope } from "./spend.ts";
@@ -88,6 +88,17 @@ export const ThreadRouteUnpin = Schema.Struct({
   type: Schema.Literal("thread.route.unpin"),
   commandId: CommandId,
   threadId: ThreadId,
+});
+
+/**
+ * The user choosing how much the thread's agent may do without asking (DESIGN §17), from its next action; `null` goes
+ * back to the profile's default (`approvals.yaml`). Rejected for `auto` or `full` on a thread someone else can write in.
+ */
+export const ThreadAccessSet = Schema.Struct({
+  type: Schema.Literal("thread.access.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  access: Schema.NullOr(AccessLevel),
 });
 
 /**
@@ -255,12 +266,6 @@ export const ApprovalGuard = Schema.Struct({
   state: Schema.String,
   answer: DecisionAnswer,
 });
-
-/**
- * Turns smart approvals (DESIGN §17) on or off for the profile, where `approvals.yaml` enables them: the composer's one
- * click, and `/smart` in `verdandi chat`. Without `smart: true` in that file it changes nothing.
- */
-export const ApprovalsSmartSet = Schema.Struct({ type: Schema.Literal("approvals.smart.set"), commandId: CommandId, on: Schema.Boolean });
 
 /**
  * Internal: tool `tool` failed with the same error `count` times in the task of running turn `turnId` since it last
@@ -574,6 +579,7 @@ export const ClientCommand = Schema.Union([
   ThreadRouteSet,
   ThreadRouteUnpin,
   ThreadBudgetSet,
+  ThreadAccessSet,
   SpendCapRaise,
   RoutingMemoryClear,
   TaskRate,
@@ -594,7 +600,6 @@ export const ClientCommand = Schema.Union([
   ApprovalRespond,
   CommandsTrustRevoke,
   DeviceRevoke,
-  ApprovalsSmartSet,
   PairingApprove,
   PairingDeny,
   SenderRevoke,
@@ -611,6 +616,7 @@ export const Command = Schema.Union([
   ThreadRouteSet,
   ThreadRouteUnpin,
   ThreadBudgetSet,
+  ThreadAccessSet,
   SpendCapRaise,
   RoutingMemoryClear,
   TaskRate,
@@ -636,7 +642,6 @@ export const Command = Schema.Union([
   TaskBlock,
   TaskErrorRepeat,
   ApprovalGuard,
-  ApprovalsSmartSet,
   TaskDelegate,
   WorktreeReported,
   VerifiersStart,

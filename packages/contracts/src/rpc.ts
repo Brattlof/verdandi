@@ -19,7 +19,7 @@ import { GcReport, GcUnavailable } from "./gc.ts";
 import { CommandId, ProjectId, TaskId, ThreadId, TurnId } from "./ids.ts";
 import { AccessMode, Item, Quota, Usage } from "./items.ts";
 import { MemoryView } from "./memory.ts";
-import { HarnessId, InteractionMode, Route } from "./route.ts";
+import { AccessLevel, HarnessId, InteractionMode, Route } from "./route.ts";
 import { BudgetMode, CatalogModel, RouteDecision, TaskClass } from "./routing.ts";
 import { SessionHit, SessionQuery } from "./search.ts";
 import { SkillHistoryEntry, SkillsView } from "./skills.ts";
@@ -84,6 +84,7 @@ export class CommandRejected extends Schema.TaggedError<CommandRejected>()("Comm
     "SenderNotFound",
     "ChannelBound",
     "ChannelNotBound",
+    "AccessConfined",
   ]),
   message: Schema.String,
 }) {}
@@ -166,6 +167,10 @@ export const ThreadView = Schema.Struct({
   archived: Schema.Boolean,
   /** The budget mode the user set for this thread's tasks; null when the policy's applies. */
   budgetMode: Schema.NullOr(BudgetMode),
+  /** The access level the user set for this thread; null when the profile's default (`ApprovalsGet`) applies. */
+  access: Schema.NullOr(AccessLevel),
+  /** Someone other than the owner can write in it from a chat app, so it always asks (ADR 0036). */
+  confined: Schema.Boolean,
   /**
    * The task the next turn continues, and why it runs on `route`; null when the next turn starts a new
    * one. `source` and `reason` are absent on tasks from before routing.
@@ -388,11 +393,8 @@ export class Api extends RpcGroup.make(
   Rpc.make("UsageQuery", { payload: UsageFilter, success: UsageReport }),
   /** The spend caps over the thread's project and profile, with what they've spent this period; empty when none are set. */
   Rpc.make("SpendCapsGet", { payload: { threadId: ThreadId }, success: Schema.Array(SpendCap), error: SpendCapsUnavailable }),
-  /**
-   * Smart approvals of native terminal commands (DESIGN §17): `enabled` when the profile's `approvals.yaml` turns them
-   * on, and `on` while the user hasn't turned them off since (`approvals.smart.set`). Only both together rate commands.
-   */
-  Rpc.make("ApprovalsGet", { success: Schema.Struct({ enabled: Schema.Boolean, on: Schema.Boolean }) }),
+  /** The profile's default access level (`approvals.yaml`, DESIGN §17), for threads that don't set their own. */
+  Rpc.make("ApprovalsGet", { success: Schema.Struct({ access: AccessLevel }) }),
   /** A task's routing decision: its reason, trace and the classification behind it. */
   Rpc.make("RoutingExplain", { payload: { taskId: TaskId }, success: RouteDecision, error: RoutingUnavailable }),
   /**

@@ -127,6 +127,17 @@ const heldBack = (turn: Turn, mode: InteractionMode) =>
       : undefined;
 
 /**
+ * Whether the thread's access level lets tool call `use`, which would ask the user, run unasked (`full`, DESIGN §17),
+ * reported as an `approval.auto` item when it does.
+ */
+async function* allowedUnasked(use: Anthropic.ToolUseBlock, input: HarnessRunInput): AsyncGenerator<HarnessEvent, boolean> {
+  const rated = input.guard ? await input.guard({ tool: use.name }) : undefined;
+  if (rated?.verdict !== "allow") return false;
+  yield { type: "item", item: { kind: "approval.auto", toolUseId: use.id, decision: "allow", reason: rated.reason } };
+  return true;
+}
+
+/**
  * Runs one tool call: the plan tool raises `plan.requested`, a file tool checks its path (asking outside the thread's
  * reach, ADR 0025), the terminal asks before every command, `delegate_task` runs a child session, and a Verdandi tool
  * that `ask`s raises `approval.requested` first. A file tool, the terminal or `delegate_task` runs only in a session
@@ -188,9 +199,9 @@ async function* runTool(
     const held = heldBack(turn, input.mode);
     if (held) return { text: held, isError: true };
     if (typeof args.command !== "string" || args.command.trim() === "") return { text: "`command` is required.", isError: true };
-    // Smart approvals, when on, rate it first (DESIGN §17): an allowed command runs unasked, a denied one never runs, and
-    // anything else asks the user, as every command does while they're off.
-    const rated = input.guard ? await input.guard(args.command) : undefined;
+    // The thread's access level rates it first (DESIGN §17): an allowed command runs unasked, a denied one never runs,
+    // and anything else asks the user.
+    const rated = input.guard ? await input.guard({ tool: use.name, command: args.command }) : undefined;
     if (rated && rated.verdict !== "ask")
       yield { type: "item", item: { kind: "approval.auto", toolUseId: use.id, decision: rated.verdict, reason: rated.reason } };
     const denied = (why: string) => {
@@ -225,7 +236,7 @@ async function* runTool(
     if (path === "") return { text: "`path` is required.", isError: true };
     const allowed = access(path, input.cwd, local.reach, file.writes);
     if (allowed.kind === "refuse") return { text: allowed.why, isError: true };
-    if (allowed.kind === "ask") {
+    if (allowed.kind === "ask" && !(yield* allowedUnasked(use, input))) {
       const note = allowed.note;
       const r = yield* request(turn, (requestId) => ({
         type: "approval.requested",
@@ -240,7 +251,8 @@ async function* runTool(
   const mcp = has ? session.mcp?.byName.get(use.name) : undefined;
   if (mcp) {
     // In ask and plan mode every MCP tool asks, since Verdandi can't tell which ones change things.
-    if (mcp.ask || heldBack(turn, input.mode)) {
+    const held = heldBack(turn, input.mode);
+    if (held || (mcp.ask && !(yield* allowedUnasked(use, input)))) {
       const r = yield* request(turn, (requestId) => ({ type: "approval.requested", requestId, toolName: use.name, input: args }));
       if (r.decision !== "allow") return { text: `The user denied this.${feedback(r)}`, isError: true };
     }

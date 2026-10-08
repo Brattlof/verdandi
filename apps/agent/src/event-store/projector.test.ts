@@ -76,6 +76,8 @@ test("projects a full turn into the thread view", async () => {
     worktree: null,
     revert: null,
     budgetMode: null,
+    access: null,
+    confined: false,
     task: null,
     tasks: [],
     sessionId: "s1",
