@@ -7,6 +7,7 @@
     { "path": "packages/router" },
     { "path": "packages/decisions" },
     { "path": "packages/tools" },
+    { "path": "packages/video" },
     { "path": "packages/harness-claude-code" },
     { "path": "packages/harness-native" },
     { "path": "packages/ui" },

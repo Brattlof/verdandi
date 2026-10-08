@@ -15,6 +15,7 @@
     "@verdandi/testkit": "workspace:*",
     "@verdandi/tools": "workspace:*",
     "@verdandi/trajectories": "workspace:*",
+    "@verdandi/video": "workspace:*",
     "@verdandi/web": "workspace:*",
     "effect": "4.0.0-rc.115",
     "react": "19.3.0"

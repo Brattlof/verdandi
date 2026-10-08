@@ -56,6 +56,7 @@ Verdandi starts with Claude Code, because that's what the owner uses every day. 
 | G5 | **Many harnesses and providers** | Adding a harness or provider needs no change to the router or the orchestration core. |
 | G6 | **Always on, reachable anywhere** | Scheduled jobs run without you. Tasks can be started and approved from a chat app. |
 | G7 | **Local-first and private** | State lives in local SQLite. Nothing leaves the machine except calls to the providers you've configured. |
+| G8 | **Make videos from HTML** | An agent writes a composition, checks it and renders it to MP4 offline, with a Studio to review and adjust it (§24). |
 
 ### Non-goals for now
 
@@ -1115,6 +1116,8 @@ verdandi/
 │  ├─ decisions/                 # decision layer: Decide service + backends
 │  │                             #   (rules, laya, ollaya, jev, llm)
 │  ├─ trajectories/              # trajectory builder, redaction, exporters, batch runner core
+│  ├─ video/                     # video maker: in-page runtime, render engine (Chrome +
+│  │                             #   ffmpeg), lint and check, project templates (§24)
 │  ├─ exec/                      # execution backends: local, docker, ssh
 │  └─ testkit/                   # FAKE harness + fake provider, fixtures, helpers
 ├─ plugins/                      # first-party: platform-telegram, platform-discord,
@@ -1189,6 +1192,29 @@ Bun's isolated installs enforce these rules at the package level: an import fail
 9. **Jev:** keep it off until TypeSafe publishes data-retention terms (recommended), or turn it on now for selected projects?
 10. **Gateway turns and `workspace.yaml`'s folders:** decided. A turn a gateway sender other than the owner starts doesn't get them: it works only in the workspace, and any path outside it is a request the owner answers (§13, §15).
 
+
+---
+
+## 24. Video maker
+
+Verdandi makes videos the way HeyGen's HyperFrames does, with its own code (owner decision, ADR 0038): a video is an
+HTML **composition**, and an agent writes, checks and renders it like any other code.
+
+- **Contract.** The root element carries `data-composition-id`, `data-width`, `data-height` and `data-duration`.
+  Timed elements carry `data-start` (seconds, or `<id> + n`) and `data-duration`, and show only inside their window.
+  Each composition registers one paused GSAP timeline as `window.__timelines["<id>"]`; CSS animations, Web
+  Animations, Lottie, anime.js and anything listening for `vd-seek` are seeked too. `<video>` and `<audio>` are owned
+  by the runtime. Sub-compositions mount with `data-composition-src`, each with its own variables, scoped styles and
+  scripts. The attributes match HyperFrames', so its compositions and know-how carry over.
+- **One runtime, in the page.** `packages/video/src/runtime` assembles, times and seeks the composition in the
+  browser, for preview and render alike, and publishes `window.__vd` (`ready`, `seek`, `manifest`, …).
+- **Render.** Headless Chrome (puppeteer-core) seeks each frame on a frozen clock and screenshots it; ffmpeg decodes
+  the videos into frames painted over each `<video>`, mixes the audio, and encodes MP4, WebM, MOV (alpha), GIF or a
+  PNG sequence. Offline: GSAP is vendored into each project.
+- **Checks.** `verdandi video lint` checks the source; `check` also runs the page and reports runtime errors, failed
+  loads, clips past the end, text off the canvas and compositions where nothing moves.
+- **Surfaces.** `verdandi video init|lint|check|timeline|snapshot|render` today; the player, Studio (timeline,
+  code editor, preview, render queue) in `packages/ui`, and the video skills come next.
 ---
 
 ## Appendix A — Prior art

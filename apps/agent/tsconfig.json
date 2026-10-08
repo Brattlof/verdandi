@@ -4,7 +4,9 @@
     "jsx": "react-jsx",
     "jsxImportSource": "@opentui/react"
   },
-  "include": ["src"],
+  "include": [
+    "src"
+  ],
   "references": [
     {
       "path": "../../packages/contracts"
@@ -29,6 +31,9 @@
     },
     {
       "path": "../../packages/tools"
+    },
+    {
+      "path": "../../packages/video"
     }
   ]
 }
