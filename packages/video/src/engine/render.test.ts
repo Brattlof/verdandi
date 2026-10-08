@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gsapPath } from "./bundle.ts";
@@ -55,4 +55,25 @@ test("video frames are painted over the video only inside its window", async () 
   expect(r).toBeLessThan(20);
   expect(g).toBeLessThan(20);
   expect(b).toBeGreaterThan(230);
+}, 60_000);
+
+// Puppeteer's default capture resizes the page for each screenshot, so Chrome lays it out and paints it again mid-capture,
+// and a heavy frame came out with whole layers missing.
+test("capturing a frame never resizes the page, so each frame is captured as painted", async () => {
+  const still = join(dir, "still");
+  mkdirSync(still, { recursive: true });
+  writeFileSync(
+    join(still, "index.html"),
+    `<!doctype html><html><head><style>body { background: #000 }</style></head><body>
+<div id="root" data-composition-id="main" data-width="320" data-height="180" data-duration="1"></div>
+<script>
+  // Armed by the second frame's seek, once the page has long had its size: a resize from then on comes from a capture.
+  let armed = false;
+  addEventListener("vd-seek", (e) => (armed ||= e.detail.time >= 0.5));
+  addEventListener("resize", () => armed && (document.body.style.background = "#f00"));
+</script>
+</body></html>`,
+  );
+  const { files } = await snapshot({ projectDir: still, times: [0.25, 0.5, 0.75], outDir: join(still, "snaps"), env });
+  expect(await pixel(files[2] ?? "", 160, 90)).toEqual([0, 0, 0]);
 }, 60_000);

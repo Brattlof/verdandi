@@ -179,7 +179,7 @@ export const checkProject = async (options: {
               seen.times.push(t);
               failing.set(key, seen);
             }
-        frames.add(Bun.hash(await opened.screenshot({ type: "jpeg", quality: 50 })).toString());
+        frames.add(Bun.hash(await opened.screenshot({ type: "jpeg", quality: 50, captureBeyondViewport: false })).toString());
       }
       for (const { sample: c, times } of failing.values())
         issues.push({
