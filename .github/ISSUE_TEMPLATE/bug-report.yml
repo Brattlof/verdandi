@@ -1,0 +1,68 @@
+name: Bug report
+description: Something in Verdandi doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Found a vulnerability? Don't file it here. Report it privately, as [SECURITY.md](https://github.com/Brattlof/verdandi/blob/main/SECURITY.md) says.
+
+        Issues are public. Before you submit, remove tokens, API keys and any paths, project names or text you'd rather not share. `verdandi doctor` never prints the token, but it does print your Verdandi home's path.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, step by step, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The commit you run, from `git rev-parse --short HEAD` in your checkout.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: harness
+    attributes:
+      label: Harness
+      options:
+        - Claude Code
+        - Native (Verdandi's own loop)
+        - Not harness-specific
+    validations:
+      required: true
+  - type: dropdown
+    id: access-mode
+    attributes:
+      label: Access mode
+      options:
+        - Subscription
+        - Metered (API key)
+        - Local
+        - Not access-specific
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`verdandi doctor` output"
+      description: Run `bun run verdandi doctor` with the same `--home` you use, and paste what it prints.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Logs, screenshots, the surface you used (terminal chat, web UI, `verdandi run`), or anything else that helps.
