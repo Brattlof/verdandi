@@ -120,7 +120,12 @@ export const contrastNow = async (page: Page, width: number, height: number): Pr
   const items = await page.evaluate(hideText);
   if (!items.length) return [];
   try {
-    const png = await page.screenshot({ type: "png", encoding: "base64", clip: { x: 0, y: 0, width, height } });
+    const png = await page.screenshot({
+      type: "png",
+      encoding: "base64",
+      clip: { x: 0, y: 0, width, height },
+      captureBeyondViewport: false,
+    });
     return await page.evaluate(measure, png, items);
   } finally {
     await page.evaluate(restoreText);

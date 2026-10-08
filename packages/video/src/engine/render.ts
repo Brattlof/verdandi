@@ -93,7 +93,10 @@ type Shot = Parameters<Page["screenshot"]>[0] & { readonly type: "png" | "jpeg" 
  * hidden, and blended on the page's WebGL canvas before the final capture.
  */
 // ponytail: one shader transition per frame (the first); two overlapping ones would need a blend per pair.
-const captureAt = async (page: Page, t: number, videos: ReadonlyMap<string, ExtractedVideo>, base: string, shot: Shot) => {
+const captureAt = async (page: Page, t: number, videos: ReadonlyMap<string, ExtractedVideo>, base: string, options: Shot) => {
+  // Puppeteer captures beyond the viewport by default, which resizes the page for each screenshot: Chrome lays it out
+  // and paints it again mid-capture, and a heavy frame comes out with whole layers missing. Frames are the viewport.
+  const shot = { ...options, captureBeyondViewport: false };
   await drawAt(page, t, videos, base);
   const [active] = await page.evaluate((time) => window.__vd?.transitionsAt(time) ?? [], t);
   if (!active) return page.screenshot(shot);
