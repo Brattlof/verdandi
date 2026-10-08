@@ -15,6 +15,7 @@ import {
   qualities,
   type RenderProgress,
   type Resolution,
+  removeSkills,
   render,
   resolutions,
   searchBlocks,
@@ -219,6 +220,16 @@ const subcommands: Record<string, (argv: readonly string[]) => Promise<void>> = 
 
   async skills(argv) {
     const target = join(resolveHome(argv), "skills");
+    if (argv.includes("--remove")) {
+      const { removed, kept } = removeSkills(target, { force: argv.includes("--force") });
+      console.log(
+        [
+          removed.length ? `Removed ${removed.join(", ")} from ${target}.` : "No video skills to remove.",
+          ...(kept.length ? [`Kept your edited ${kept.join(", ")}; pass --force to remove ${kept.length === 1 ? "it" : "them"} too.`] : []),
+        ].join("\n"),
+      );
+      return;
+    }
     const { added, updated, kept } = installSkills(target, { force: argv.includes("--force") });
     const lines = [
       ...(added.length ? [`Installed ${added.join(", ")}.`] : []),

@@ -8,5 +8,5 @@ export { findingsText, type LintResult, lintProject } from "./lint/lint.ts";
 export type { Finding, Severity } from "./lint/rules.ts";
 export { initProject, type Resolution, resolutions } from "./project/init.ts";
 export { addBlock, type Block, listBlocks, mountSnippet, searchBlocks } from "./project/registry.ts";
-export { bundledSkills, installSkills } from "./project/skills.ts";
+export { bundledSkills, installSkills, removeSkills, skillDigest } from "./project/skills.ts";
 export type { ClipInfo, Manifest, MediaClip } from "./runtime/player.ts";

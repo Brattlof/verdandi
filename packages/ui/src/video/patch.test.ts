@@ -40,3 +40,8 @@ test("an inserted asset becomes the composition's first child, with a free id an
   expect(assetMarkup("assets/song.mp3", 0, 0, new Set()).markup).toStartWith(`<audio id="song"`);
   expect(assetMarkup("assets/1.png", 0, 0, new Set()).id).toBe("asset-1");
 });
+
+test("an insert into a CRLF file keeps CRLF", () => {
+  const page = "<body>\r\n  <div id=\"root\" data-composition-id=\"main\">\r\n  </div>\r\n</body>";
+  expect(insertIntoComposition(page, "main", "<p></p>")).toBe(page.replace('id="main">', 'id="main">\r\n    <p></p>'));
+});

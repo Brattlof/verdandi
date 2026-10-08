@@ -21,7 +21,8 @@ export const lintProject = async (projectDir: string, entry = "index.html"): Pro
   const root = resolve(projectDir);
   if (!existsSync(join(root, entry)))
     throw new Error(`${join(root, entry)} doesn't exist. Run verdandi video lint in a project folder (made with verdandi video init).`);
-  const subs = [...new Bun.Glob("compositions/**/*.html").scanSync({ cwd: root })].sort();
+  // Forward slashes on every OS, so findings name files the same way everywhere.
+  const subs = [...new Bun.Glob("compositions/**/*.html").scanSync({ cwd: root })].map((f) => f.replaceAll("\\", "/")).sort();
   const files = [entry, ...subs];
   const findings: Finding[] = [];
   const parsedFiles = await Promise.all(

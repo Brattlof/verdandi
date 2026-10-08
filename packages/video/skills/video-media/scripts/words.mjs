@@ -79,7 +79,8 @@ try {
   if (mode === "whisper") words = tidy(fromWhisper(JSON.parse(raw)));
   else {
     const duration = opt("--duration");
-    if (!(duration > 0)) throw new Error("script mode needs --duration <s>: the voiceover's length (ffprobe), or the reading time you want.");
+    if (!(duration > 0))
+      throw new Error("script mode needs --duration <s>: the voiceover's length (ffprobe), or the reading time you want.");
     words = fromScript(raw, duration);
   }
   console.log(JSON.stringify(words.map((w) => ({ text: w.text, start: round(w.start + offset), end: round(w.end + offset) }))));

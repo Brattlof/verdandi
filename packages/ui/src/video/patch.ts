@@ -43,7 +43,9 @@ export const insertIntoComposition = (source: string, compositionId: string, mar
   if (!open) return undefined;
   const at = open.index + open[0].length;
   const indent = /\n([ \t]*)[^\n]*$/.exec(source.slice(0, open.index))?.[1] ?? "";
-  return `${source.slice(0, at)}\n${indent}  ${markup}${source.slice(at)}`;
+  // The file's own line ending: a Windows checkout's CRLF stays CRLF.
+  const eol = source.includes("\r\n") ? "\r\n" : "\n";
+  return `${source.slice(0, at)}${eol}${indent}  ${markup}${source.slice(at)}`;
 };
 
 const kinds = { video: /\.(?:mp4|webm|mov|m4v)$/i, audio: /\.(?:mp3|wav|m4a|aac|ogg)$/i } as const;
