@@ -13,6 +13,7 @@ import type { Connection } from "../client.ts";
 import { RuneText } from "../ui/runes.tsx";
 import { CodeEditor } from "./editor.tsx";
 import { emptyHistory, type History, record, redoStep, undoStep } from "./history.ts";
+import { Inspector } from "./inspector.tsx";
 import { assetMarkup, insertIntoComposition, seconds, setAttribute } from "./patch.ts";
 import type { VerdandiPlayer } from "./player.ts";
 import "./player.ts";
@@ -145,6 +146,7 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
   const projectId = initial.projectId as VideoProjectId;
   const [files, setFiles] = useState(initial.files);
   const [assets, setAssets] = useState(initial.assets);
+  const [selected, setSelected] = useState<string>();
   const [jobs, setJobs] = useState<ReadonlyMap<string, VideoRenderJob>>(new Map(initial.renders.map((j) => [j.jobId, j])));
   const [manifest, setManifest] = useState<VideoManifest>();
   const [time, setTime] = useState(0);
@@ -356,6 +358,8 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
               onSeek={(t) => player.current?.seek(t)}
               onMove={(clip, start) => void patchClip(clip, "data-start", seconds(start), `Move ${clip.id}`)}
               onTrim={(clip, d) => void patchClip(clip, "data-duration", seconds(d), `Trim ${clip.id}`)}
+              selected={selected}
+              onSelect={(clip) => setSelected(clip.id)}
               onToggleHidden={(clip) =>
                 void patchClip(clip, "data-hidden", clip.hidden ? null : "", `${clip.hidden ? "Show" : "Hide"} ${clip.id}`)
               }
@@ -365,6 +369,13 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
               Loading the composition…
             </p>
           )}
+          {manifest &&
+            (() => {
+              const clip = manifest.clips.find((c) => c.id && c.id === selected);
+              return clip ? (
+                <Inspector clip={clip} manifest={manifest} onChange={(name, value, label) => void patchClip(clip, name, value, label)} />
+              ) : null;
+            })()}
           {manifest && (
             <Assets
               assets={assets}

@@ -20,6 +20,8 @@ export const Timeline = ({
   onMove,
   onTrim,
   onToggleHidden,
+  selected,
+  onSelect,
 }: {
   manifest: VideoManifest;
   time: number;
@@ -27,6 +29,9 @@ export const Timeline = ({
   onMove: (clip: VideoClip, start: number) => void;
   onTrim: (clip: VideoClip, duration: number) => void;
   onToggleHidden: (clip: VideoClip) => void;
+  /** The id of the clip the inspector shows. */
+  selected: string | undefined;
+  onSelect: (clip: VideoClip) => void;
 }) => {
   const lane = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<Drag>();
@@ -105,11 +110,15 @@ export const Timeline = ({
                         type="button"
                         aria-label={`${name}, ${clip.kind}, ${label(clip.start)} to ${clip.end === null ? "the end" : label(clip.end)}${clip.hidden ? ", hidden" : ""}`}
                         title={clip.id ? "Drag to move, drag the right edge to trim, H to hide" : "Give this element an id to edit it here"}
-                        className={`flex h-full w-full items-center overflow-hidden rounded-sm border px-1.5 text-left text-[11px] ${clip.hidden ? "border-dashed border-line-strong bg-transparent text-muted" : "border-line-strong bg-user"} ${clip.id ? "cursor-grab" : "cursor-default"}`}
+                        className={`flex h-full w-full items-center overflow-hidden rounded-sm border px-1.5 text-left text-[11px] ${clip.hidden ? "border-dashed border-line-strong bg-transparent text-muted" : "border-line-strong bg-user"} ${clip.id ? "cursor-grab" : "cursor-default"} ${clip.id && clip.id === selected ? "outline-2 outline-accent" : ""}`}
                         onPointerDown={(e) => begin(e, clip, "move")}
                         onPointerMove={moveDrag}
                         onPointerUp={end}
-                        onClick={() => onSeek(clip.start)}
+                        aria-pressed={!!clip.id && clip.id === selected}
+                        onClick={() => {
+                          onSeek(clip.start);
+                          onSelect(clip);
+                        }}
                         onKeyDown={(e) => {
                           if (!clip.id) return;
                           const step = (e.shiftKey ? 10 : 1) * frame;
