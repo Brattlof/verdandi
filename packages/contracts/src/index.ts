@@ -27,4 +27,5 @@ export * from "./terminal.ts";
 export * from "./text.ts";
 export * from "./trajectory.ts";
 export * from "./trust.ts";
+export * from "./video.ts";
 export * from "./worktree.ts";

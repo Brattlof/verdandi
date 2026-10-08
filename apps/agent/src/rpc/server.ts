@@ -45,6 +45,7 @@ import { loadUsageReport } from "../spend/usage.ts";
 import { loadTaskCosts } from "../tasks/task-outcome.ts";
 import { Terminals, TerminalsLive } from "../terminals/terminals.ts";
 import { listTrusted } from "../trust/trust.ts";
+import { VideoStudio, VideoStudioLive } from "../video/studio.ts";
 import { loadThreadFolder } from "../worktrees/worktree.ts";
 
 /** Where the running server listens, and the token clients must present. */
@@ -62,6 +63,7 @@ const Handlers = (home: string) =>
       const approvals = yield* ApprovalSettings;
       const devices = yield* Devices;
       const gateway = yield* Gateway;
+      const studio = yield* VideoStudio;
       const harnesses = Object.keys(registry) as HarnessId[];
       const routing = routingFor(registry);
       const subscriptions = new Map<string, Deferred.Deferred<void>>();
@@ -235,9 +237,30 @@ const Handlers = (home: string) =>
         GatewayList: () => gateway.view,
         GatewayPair: ({ code, owner }) => gateway.pair(code, owner),
         TerminalSubscribe: ({ terminalId, subscriptionId }) => untilUnsubscribed(subscriptionId, terminals.feed(terminalId)),
+        VideoOpen: ({ path }) => studio.open(path),
+        VideoFileRead: ({ projectId, path }) => studio.read(projectId, path),
+        VideoFileWrite: ({ projectId, path, content, expectedVersion }) => studio.write(projectId, path, content, expectedVersion),
+        VideoRenderStart: ({ projectId, format, quality, fps }) => studio.renderStart(projectId, { format, quality, fps }),
+        VideoRenderCancel: ({ jobId }) => studio.renderCancel(jobId),
+        VideoSubscribe: ({ projectId, subscriptionId }) => untilUnsubscribed(subscriptionId, studio.feed(projectId)),
       };
     }),
   );
+
+/**
+ * A video project's preview (DESIGN §24): `/video/<project id>/<path>`, where the id, 256 random bits handed only to
+ * clients that opened the project, is the capability, since an iframe can't send a token. Every response is sandboxed
+ * by its own Content-Security-Policy, so a composition's scripts run in an opaque origin, never as the web UI.
+ */
+const servePreview = (studio: VideoStudio["Service"]) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const match = /^\/video\/([0-9a-f]{64})(\/.*)?$/.exec(new URL(request.url, "http://localhost").pathname);
+    const headers = new Headers(Object.entries(request.headers).filter((e): e is [string, string] => typeof e[1] === "string"));
+    const response = match ? studio.serve(match[1] ?? "", decodeURIComponent(match[2] ?? "/"), headers) : undefined;
+    if (!response) return HttpServerResponse.text("No such video project open: open it in the Studio again.", { status: 404 });
+    return HttpServerResponse.fromWeb(yield* Effect.promise(() => response));
+  });
 
 const sameToken = (given: string | null, token: string) =>
   given !== null && given.length === token.length && timingSafeEqual(Buffer.from(given), Buffer.from(token));
@@ -353,6 +376,7 @@ const ProtocolWithToken = (home: string, token: string) =>
       yield* Effect.addFinalizer(() => devices.refuseAll);
       yield* router.add("GET", "/attachments/:id", withDevices(serveAttachment(home, token)));
       yield* router.add("GET", "/pair", withDevices(pair));
+      yield* router.add("GET", "/video/*", servePreview(yield* VideoStudio));
       yield* router.add(
         "GET",
         "/auth",
@@ -421,6 +445,7 @@ export const ServerLayer = (
   return Layer.mergeAll(info, AttachmentSweepLive(home), GcScheduleLive, SkillCurationScheduleLive).pipe(
     Layer.provideMerge(http),
     Layer.provideMerge(TerminalsLive),
+    Layer.provideMerge(VideoStudioLive),
     Layer.provideMerge(GcLive(home)),
     Layer.provideMerge(DevicesLive),
     Layer.provideMerge(GatewayLive(home, options.gateway)),

@@ -6,6 +6,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@verdandi/contracts": "workspace:*",
     "gsap": "3.15.0",
     "puppeteer-core": "25.12.0"
   }

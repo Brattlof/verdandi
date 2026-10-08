@@ -68,34 +68,62 @@ const fileResponse = (path: string, range: string | null) => {
   });
 };
 
-/** Starts the server; `url` is its origin, `stop` shuts it down. */
-export const serveProject = async (projectDir: string, options: ServeOptions = {}) => {
+/**
+ * Answers a request for `path` (URL path, decoded, from the project's root) with `headers`. With `preview`, every
+ * response is sandboxed (`Content-Security-Policy: sandbox allow-scripts`: an opaque origin, even opened in a tab) and
+ * readable from that opaque origin (`Access-Control-Allow-Origin: *`), so a composition's scripts never run as the page
+ * that embeds it.
+ */
+export const projectHandler = async (projectDir: string, options: ServeOptions & { readonly preview?: boolean } = {}) => {
   const root = realpathSync(resolve(projectDir));
   const head = await prelude(options);
   const mounts = Object.entries(options.mounts ?? {});
+  const extra: Record<string, string> = options.preview
+    ? {
+        "content-security-policy": "sandbox allow-scripts",
+        "access-control-allow-origin": "*",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+      }
+    : { "cache-control": "no-store" };
+  const respond = (body: BodyInit | null, init: ResponseInit = {}) => {
+    const response = new Response(body, init);
+    for (const [k, v] of Object.entries(extra)) response.headers.set(k, v);
+    return response;
+  };
+  return async (path: string, headers: Headers) => {
+    const mount = mounts.find(([name]) => path.startsWith(`/__vd/${name}/`));
+    const base = mount ? mount[1] : root;
+    const target = inside(
+      base,
+      join(base, mount ? path.slice(`/__vd/${mount[0]}/`.length) : path === "/" || path === "" ? "index.html" : path),
+    );
+    if (!target) return respond("Forbidden", { status: 403 });
+    let real: string;
+    try {
+      real = realpathSync(target);
+    } catch {
+      return respond("Not found", { status: 404 });
+    }
+    if (!inside(realpathSync(base), real)) return respond("Forbidden", { status: 403 });
+    if (!(await Bun.file(real).exists())) return respond("Not found", { status: 404 });
+    // Only a page (or a player's iframe) gets the runtime: sub-composition files are fetched and mounted by it.
+    const dest = headers.get("sec-fetch-dest");
+    const page = dest ? dest === "document" || dest === "iframe" : (headers.get("accept") ?? "").includes("text/html");
+    if (extname(real).toLowerCase() === ".html" && page)
+      return respond(inject(await Bun.file(real).text(), head), { headers: { "content-type": types[".html"] ?? "text/html" } });
+    const file = fileResponse(real, headers.get("range"));
+    return respond(file.body, { status: file.status, headers: file.headers });
+  };
+};
+
+/** Starts a server for the project on 127.0.0.1; `url` is its origin, `stop` shuts it down. */
+export const serveProject = async (projectDir: string, options: ServeOptions = {}) => {
+  const handle = await projectHandler(projectDir, options);
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    async fetch(req) {
-      const path = decodeURIComponent(new URL(req.url).pathname);
-      const mount = mounts.find(([name]) => path.startsWith(`/__vd/${name}/`));
-      const base = mount ? mount[1] : root;
-      const target = inside(base, join(base, mount ? path.slice(`/__vd/${mount[0]}/`.length) : path === "/" ? "index.html" : path));
-      if (!target) return new Response("Forbidden", { status: 403 });
-      let real: string;
-      try {
-        real = realpathSync(target);
-      } catch {
-        return new Response("Not found", { status: 404 });
-      }
-      if (!inside(realpathSync(base), real)) return new Response("Forbidden", { status: 403 });
-      if (!(await Bun.file(real).exists())) return new Response("Not found", { status: 404 });
-      // Only a page (or a player's iframe) gets the runtime: sub-composition files are fetched and mounted by it.
-      const dest = req.headers.get("sec-fetch-dest");
-      if (extname(real).toLowerCase() === ".html" && (dest === "document" || dest === "iframe"))
-        return new Response(inject(await Bun.file(real).text(), head), { headers: { "content-type": types[".html"] ?? "text/html" } });
-      return fileResponse(real, req.headers.get("range"));
-    },
+    fetch: (req) => handle(decodeURIComponent(new URL(req.url).pathname), req.headers),
   });
   return { url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) };
 };

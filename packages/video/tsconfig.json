@@ -3,5 +3,10 @@
   "compilerOptions": {
     "lib": ["esnext", "dom", "dom.iterable"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [
+    {
+      "path": "../contracts"
+    }
+  ]
 }

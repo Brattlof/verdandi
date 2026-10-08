@@ -49,7 +49,7 @@ afterAll(async () => {
   await browser?.close();
   server?.stop();
   rmSync(dir, { recursive: true, force: true });
-});
+}, 60_000);
 
 const at = (t: number) =>
   page.evaluate(async (time) => {

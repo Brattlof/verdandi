@@ -3,49 +3,14 @@
  * window, and owns `<video>`/`<audio>` playback. Preview plays it on a real clock; a render seeks it frame by frame
  * through `window.__vd`.
  */
+import type { VideoClip, VideoManifest, VideoMedia } from "@verdandi/contracts";
 import { type Adapter, animationsAdapter, animeAdapter, lottieAdapter, seekEventAdapter, timelinesAdapter } from "./adapters.ts";
 import { Clips, compositionRoot } from "./clips.ts";
 import { playbackRate, positive, quantize, sourceTime, visibleAt } from "./timing.ts";
 
-/** A media element's place on the timeline: what the renderer extracts frames from and mixes audio from. */
-export type MediaClip = {
-  readonly renderId: string;
-  readonly kind: "video" | "audio";
-  /** Absolute URL of the source. */
-  readonly src: string;
-  readonly start: number;
-  readonly end: number;
-  /** Offset into the source where the clip starts (`data-playback-start`, or legacy `data-media-start`). */
-  readonly mediaStart: number;
-  readonly rate: number;
-  readonly loop: boolean;
-  readonly volume: number;
-  /** Whether its sound goes into the mix: audio always, video unless `muted` or `data-has-audio="false"`. */
-  readonly audible: boolean;
-  /** Hidden with `data-hidden` (or inside a hidden element): neither seen nor heard. */
-  readonly hidden: boolean;
-};
-
-/** A timed element as the Studio timeline shows it. */
-export type ClipInfo = {
-  readonly id: string | undefined;
-  readonly label: string;
-  readonly kind: "video" | "audio" | "image" | "composition" | "element";
-  readonly start: number;
-  readonly end: number | null;
-  readonly track: number;
-  readonly hidden: boolean;
-  readonly compositionId: string | undefined;
-};
-
-export type Manifest = {
-  readonly id: string;
-  readonly width: number;
-  readonly height: number;
-  readonly duration: number;
-  readonly clips: readonly ClipInfo[];
-  readonly media: readonly MediaClip[];
-};
+export type MediaClip = VideoMedia;
+export type ClipInfo = VideoClip;
+export type Manifest = VideoManifest;
 
 /** A video frame the renderer must paint at a seek: the source time it shows. */
 export type FrameTarget = { readonly renderId: string; readonly src: string; readonly sourceTime: number };
