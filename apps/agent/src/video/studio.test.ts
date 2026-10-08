@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { VideoFeed, VideoProjectId } from "@verdandi/contracts";
 import { makeFakeHarness, makeTempHome, removeTempHome } from "@verdandi/testkit";
@@ -93,6 +93,31 @@ test("the preview is served sandboxed with the runtime, and the feed reports out
         );
         const last = messages.at(-1);
         expect(last?.kind === "changed" && last.files).toContain("compositions/intro.html");
+      }),
+    ),
+  );
+});
+
+test("the Studio creates a project in a new folder, and refuses one that already has files", async () => {
+  const { info } = await start();
+  const parent = makeTempHome();
+  cleanups.push(() => removeTempHome(parent));
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const client = yield* connect(info);
+        const fresh = join(parent, "new-film");
+        const view = yield* client.VideoCreate({ path: fresh, resolution: "portrait" });
+        expect(view.files).toContain("index.html");
+        const index = yield* client.VideoFileRead({ projectId: view.projectId, path: "index.html" });
+        expect(index.content).toContain(`data-width="1080" data-height="1920"`);
+
+        const busy = join(parent, "busy");
+        mkdirSync(busy);
+        writeFileSync(join(busy, "notes.txt"), "mine");
+        const refused = yield* Effect.flip(client.VideoCreate({ path: busy, resolution: "landscape" }));
+        expect(refused).toMatchObject({ reason: "NotEmpty" });
+        expect(readdirSync(busy)).toEqual(["notes.txt"]);
       }),
     ),
   );

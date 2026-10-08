@@ -238,6 +238,7 @@ const Handlers = (home: string) =>
         GatewayPair: ({ code, owner }) => gateway.pair(code, owner),
         TerminalSubscribe: ({ terminalId, subscriptionId }) => untilUnsubscribed(subscriptionId, terminals.feed(terminalId)),
         VideoOpen: ({ path }) => studio.open(path),
+        VideoCreate: ({ path, resolution }) => studio.create(path, resolution),
         VideoFileRead: ({ projectId, path }) => studio.read(projectId, path),
         VideoFileWrite: ({ projectId, path, content, expectedVersion }) => studio.write(projectId, path, content, expectedVersion),
         VideoRenderStart: ({ projectId, format, quality, fps }) => studio.renderStart(projectId, { format, quality, fps }),

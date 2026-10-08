@@ -9,6 +9,9 @@ export type VideoProjectId = typeof VideoProjectId.Type;
 
 export const VideoFormat = Schema.Literals(["mp4", "webm", "mov", "gif", "png-sequence"]);
 export type VideoFormat = typeof VideoFormat.Type;
+/** A new project's canvas: 1920×1080, 1080×1920, 1080×1080, or the same at 4K. */
+export const VideoResolution = Schema.Literals(["landscape", "portrait", "square", "landscape-4k", "portrait-4k", "square-4k"]);
+export type VideoResolution = typeof VideoResolution.Type;
 export const VideoQuality = Schema.Literals(["draft", "standard", "high"]);
 export type VideoQuality = typeof VideoQuality.Type;
 
@@ -58,7 +61,7 @@ export type VideoFeed = typeof VideoFeed.Type;
 
 /** Why a video request failed. The message names the cause and the fix; a `Conflict` carries the file as it is now. */
 export class VideoUnavailable extends Schema.TaggedError<VideoUnavailable>()("VideoUnavailable", {
-  reason: Schema.Literals(["NotAProject", "ProjectNotOpen", "InvalidPath", "FileNotFound", "Conflict", "RenderNotFound"]),
+  reason: Schema.Literals(["NotAProject", "NotEmpty", "ProjectNotOpen", "InvalidPath", "FileNotFound", "Conflict", "RenderNotFound"]),
   message: Schema.String,
   current: Schema.optionalKey(VideoFile),
 }) {}

@@ -7,6 +7,7 @@ import type {
   VideoProjectId,
   VideoQuality,
   VideoRenderJob,
+  VideoResolution,
   VideoView,
 } from "@verdandi/contracts";
 import { createElement, useCallback, useEffect, useRef, useState } from "react";
@@ -20,6 +21,15 @@ import type { VerdandiPlayer } from "./player.ts";
 import { Present } from "./present.tsx";
 import "./player.ts";
 import { Timeline } from "./timeline.tsx";
+
+const sizes: Record<VideoResolution, string> = {
+  landscape: "Landscape 1920×1080",
+  portrait: "Portrait 1080×1920",
+  square: "Square 1080×1080",
+  "landscape-4k": "Landscape 4K",
+  "portrait-4k": "Portrait 4K",
+  "square-4k": "Square 4K",
+};
 
 /** The open project lives in the hash (`#view=video&project=<path>`), so a reload reopens it. */
 const hashProject = () => new URLSearchParams(location.hash.slice(1)).get("project") ?? "";
@@ -45,10 +55,13 @@ export const StudioPage = ({ connection }: { connection: Connection }) => {
   const [present] = useState(() => new URLSearchParams(location.hash.slice(1)).get("present") === "1");
   const [view, setView] = useState<VideoView>();
   const [error, setError] = useState<string>();
+  const [size, setSize] = useState<VideoResolution>("landscape");
   const open = useCallback(
-    async (target: string) => {
+    async (target: string, create?: VideoResolution) => {
       setError(undefined);
-      const result = await connection.video((rpc) => rpc.VideoOpen({ path: target }));
+      const result = await connection.video((rpc) =>
+        create ? rpc.VideoCreate({ path: target, resolution: create }) : rpc.VideoOpen({ path: target }),
+      );
       if (!result.ok) return setError(result.message);
       setView(result.value);
       localStorage.setItem(recentKey, JSON.stringify([result.value.path, ...recent().filter((p) => p !== result.value.path)].slice(0, 8)));
@@ -87,7 +100,7 @@ export const StudioPage = ({ connection }: { connection: Connection }) => {
                 id="video-project"
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
-                placeholder="/path/to/project (made with verdandi video init)"
+                placeholder="/path/to/project"
                 className="flex-1"
                 spellCheck={false}
                 aria-describedby="video-project-error"
@@ -97,8 +110,10 @@ export const StudioPage = ({ connection }: { connection: Connection }) => {
                   type="button"
                   onClick={async () => {
                     const picked = await connection.pickFolder();
-                    if (picked.ok && picked.path) void open(picked.path);
-                    else if (!picked.ok) setError(picked.message);
+                    if (picked.ok && picked.path) {
+                      setPath(picked.path);
+                      void open(picked.path);
+                    } else if (!picked.ok) setError(picked.message);
                   }}
                 >
                   Browse
@@ -111,6 +126,22 @@ export const StudioPage = ({ connection }: { connection: Connection }) => {
             <p id="video-project-error" role="alert" className="text-error empty:hidden">
               {error}
             </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-muted">Or start a new project in that folder (a new or empty one):</span>
+              <label className="sr-only" htmlFor="video-size">
+                Size
+              </label>
+              <select id="video-size" value={size} onChange={(e) => setSize(e.target.value as VideoResolution)}>
+                {(Object.keys(sizes) as VideoResolution[]).map((r) => (
+                  <option key={r} value={r}>
+                    {sizes[r]}
+                  </option>
+                ))}
+              </select>
+              <button type="button" disabled={!path.trim()} onClick={() => void open(path, size)}>
+                Create project
+              </button>
+            </div>
           </form>
           {recent().length > 0 && (
             <section className="mt-8 max-w-2xl">
