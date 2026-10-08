@@ -100,3 +100,16 @@ test("references, timeline methods, module scripts and absolute paths are judged
     ].sort(),
   );
 });
+
+test("a shader transition needs a known shader, both scenes and a window", async () => {
+  const dir = project({
+    "index.html": `<!doctype html><html><head></head><body>
+<div id="root" data-composition-id="main" data-width="10" data-height="10" data-duration="2">
+  <div id="one" data-start="0"></div>
+  <div data-transition="ripple" data-from="one" data-to="two" data-start="0" data-duration="1"></div>
+  <div data-transition="sparkle" data-from="one" data-to="one"></div>
+</div></body></html>`,
+  });
+  const codes = (await lintProject(dir)).findings.map((f) => `${f.code}@${f.line}`).sort();
+  expect(codes).toEqual(["transition_scene_missing@4", "transition_untimed@5", "unknown_shader@5"]);
+});

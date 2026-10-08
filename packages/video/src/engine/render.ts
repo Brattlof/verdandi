@@ -86,6 +86,40 @@ const drawAt = async (page: Page, t: number, videos: ReadonlyMap<string, Extract
   await page.evaluate((list) => window.__vd?.paintFrames(list), paint);
 };
 
+type Shot = Parameters<Page["screenshot"]>[0] & { readonly type: "png" | "jpeg" };
+
+/**
+ * One frame's picture at `t`: drawn, then for a shader transition captured twice more, once per side with the other
+ * hidden, and blended on the page's WebGL canvas before the final capture.
+ */
+// ponytail: one shader transition per frame (the first); two overlapping ones would need a blend per pair.
+const captureAt = async (page: Page, t: number, videos: ReadonlyMap<string, ExtractedVideo>, base: string, shot: Shot) => {
+  await drawAt(page, t, videos, base);
+  const [active] = await page.evaluate((time) => window.__vd?.transitionsAt(time) ?? [], t);
+  if (!active) return page.screenshot(shot);
+  const side = async (hide: string) => {
+    await page.evaluate((id) => window.__vd?.isolate([id]), hide);
+    try {
+      return await page.screenshot({ ...shot, encoding: "base64" });
+    } finally {
+      await page.evaluate(() => window.__vd?.restore());
+    }
+  };
+  const mime = shot.type === "png" ? "image/png" : "image/jpeg";
+  const [from, to] = [await side(active.to), await side(active.from)];
+  await page.evaluate((o) => window.__vd?.composite(o), {
+    shader: active.shader,
+    progress: active.progress,
+    from: `data:${mime};base64,${from}`,
+    to: `data:${mime};base64,${to}`,
+  });
+  try {
+    return await page.screenshot(shot);
+  } finally {
+    await page.evaluate(() => window.__vd?.clearComposite());
+  }
+};
+
 /**
  * How many Chrome processes capture at once: one per three cores, at most four (separate browsers scale; tabs in one
  * barely do), and one for a short render, where starting browsers costs more than it saves.
@@ -235,8 +269,7 @@ export const render = async (options: RenderOptions): Promise<RenderResult> => {
       pages.map(async (p, w) => {
         for (let i = w; i < frames; i += pages.length) {
           signal?.throwIfAborted();
-          await drawAt(p, i / fps, videos, server.url);
-          await writer.put(i, await p.screenshot(shotOptions));
+          await writer.put(i, await captureAt(p, i / fps, videos, server.url, shotOptions));
         }
       }),
     );
@@ -292,9 +325,12 @@ export const snapshot = async (options: {
     const files: string[] = [];
     for (const [i, raw] of options.times.entries()) {
       const t = Math.min(Math.max(0, raw), manifest.duration);
-      await drawAt(page, t, videos, server.url);
+      const shot = await captureAt(page, t, videos, server.url, {
+        type: "png",
+        clip: { x: 0, y: 0, width: manifest.width, height: manifest.height },
+      });
       const file = join(options.outDir, `frame-${String(i + 1).padStart(2, "0")}-at-${t.toFixed(2)}s.png`);
-      await Bun.write(file, await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: manifest.width, height: manifest.height } }));
+      await Bun.write(file, shot);
       files.push(file);
     }
     return { files, manifest };

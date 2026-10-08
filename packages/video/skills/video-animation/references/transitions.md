@@ -97,6 +97,23 @@ whose first frame is empty or transparent shows bare background for a moment. Th
 a block that starts transparent (`logo-sting` starts at opacity 0): overlap it with the previous scene, or start
 it about 0.3 s earlier, so it has faded in by the cut. Snapshot the frame just after each cover lifts.
 
+## Shader transitions
+
+For a blend no tween can draw (the picture burning away, rippling, warping), put a transition element between two
+overlapping scenes:
+
+```html
+<div data-transition="burn" data-from="intro" data-to="outro" data-start="intro - 0.4" data-duration="0.8"></div>
+```
+
+- Shaders: dissolve, ripple, swirl, zoom-blur, chromatic-split, glitch, iris, burn, whip-pan, flash, light-leak, lens, warp.
+- `data-from` and `data-to` are the scenes' ids (or composition ids); both must show for the whole window, so overlap
+  them by the transition's length, as above. Lint checks the name, both ids and the window.
+- A render captures each scene alone at every frame of the window and blends the two pictures with the shader. The
+  Studio preview can't do that (a page can't read its own pixels), so it shows a crossfade there: check the real
+  effect with `verdandi video snapshot <dir> --at <a time inside the window>`.
+- One shader transition at a time: two overlapping windows blend only the first.
+
 ## In a single composition
 
 When the scenes are sections of one file rather than sub-compositions, the same tweens go on the one timeline at

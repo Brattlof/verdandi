@@ -7,6 +7,7 @@ import type { VideoClip, VideoManifest, VideoMedia } from "@verdandi/contracts";
 import { type Adapter, animationsAdapter, animeAdapter, lottieAdapter, seekEventAdapter, timelinesAdapter } from "./adapters.ts";
 import { Clips, compositionRoot } from "./clips.ts";
 import { playbackRate, positive, quantize, sourceTime, visibleAt } from "./timing.ts";
+import { crossfade, transitionsAt } from "./transitions.ts";
 
 export type MediaClip = VideoMedia;
 export type ClipInfo = VideoClip;
@@ -282,6 +283,8 @@ export class Player {
       }
     }
     this.applyVisibility(time);
+    // A render blends shader transitions from captured pictures; the preview can only crossfade.
+    if (!this.render) crossfade(transitionsAt(this.clips, time));
     this.syncMedia(time);
     window.__VD_VIRTUAL_TIME__?.seekToTime(time * 1000);
     await Promise.all(pending);

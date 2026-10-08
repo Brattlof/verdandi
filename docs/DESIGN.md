@@ -1211,6 +1211,9 @@ HTML **composition**, and an agent writes, checks and renders it like any other 
 - **Render.** Headless Chrome (puppeteer-core) seeks each frame on a frozen clock and screenshots it; ffmpeg decodes
   the videos into frames painted over each `<video>`, mixes the audio, and encodes MP4, WebM, MOV (alpha), GIF or a
   PNG sequence. Offline: GSAP is vendored into each project.
+- **Shader transitions.** `data-transition="burn"` between two overlapping scenes blends them with one of 13 WebGL
+  shaders. A render captures each scene alone per frame and blends the pictures in the page; the preview, which can't
+  read its own pixels, crossfades instead.
 - **Checks.** `verdandi video lint` checks the source; `check` also runs the page and reports runtime errors, failed
   loads, clips past the end, text off the canvas and compositions where nothing moves.
 - **Blocks and skills.** Ready-made blocks (lower thirds, titles, charts, captions, transitions…) ship in

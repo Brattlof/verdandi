@@ -22,6 +22,7 @@ Everything the runtime reads. Anything else you add is ordinary HTML.
 | `data-end` | An alternative to `data-duration` when `data-start` is a number: the end in seconds. |
 | `data-track-index` | Integer lane in the Studio's timeline, and nothing else. (`data-layer` is an old name; lint warns about it.) |
 | `data-hidden` | Hidden in preview and render (`display: none`), whatever its window. Also works on elements without `data-start`. |
+| `data-transition`, `data-from`, `data-to` | A shader transition from one scene to another over the element's window: shader name (dissolve, ripple, swirl, zoom-blur, chromatic-split, glitch, iris, burn, whip-pan, flash, light-leak, lens, warp) and the two scenes' ids. Rendered with WebGL; previewed as a crossfade. See video-animation's transitions reference. |
 | `data-label` | The clip's name in `verdandi video timeline` and the Studio, when the `id` isn't descriptive enough. |
 | `data-layout-ignore` | `check` doesn't report text in this subtree as off the canvas or clipped. Use it for text that leaves the frame on purpose. |
 | `class="clip"` | Convention only. |

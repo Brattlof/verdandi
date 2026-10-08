@@ -45,6 +45,8 @@ acorn, and keeps its own GSAP parser.
 - Rendering needs Chrome and ffmpeg on the machine; `verdandi video` names the fix when either is missing.
 - A composition that loads scripts or fonts from the network renders only online; lint warns about it.
 - The render protocol is internal and may change; the authoring contract is the stable surface.
+- Shader transitions are the one place preview and render differ: a render captures each scene alone and blends the
+  pictures with WebGL; the preview, which can't read the page's pixels, crossfades. Each transition frame costs two more
+  screenshots.
 - Capture uses separate Chrome processes, not tabs: on a 12-core M-series Mac one page captures about 24 frames per second
-  at 1080p, four tabs in one browser 35, and four browsers 56. Linux BeginFrame capture, shader transitions and HDR are
-  later work.
+  at 1080p, four tabs in one browser 35, and four browsers 56. Linux BeginFrame capture and HDR are later work.

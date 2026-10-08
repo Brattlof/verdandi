@@ -3,6 +3,7 @@
  * the cause and the fix. `check` adds the rules only a running page can answer.
  */
 
+import { shaderNames } from "../runtime/shaders.ts";
 import { ancestors, codeOnly, type ParsedFile, type Tag } from "./parse.ts";
 import { declaredVariablesProblem } from "./variables.ts";
 
@@ -465,6 +466,40 @@ const rules: Record<string, Rule> = {
             fix: `Make it relative to this file, e.g. ${name}="${v.slice(1)}"${ctx.isRoot ? "" : " (or ../ from compositions/)"}.`,
           });
       }
+  },
+
+  transitions(ctx, report) {
+    for (const t of ctx.parsed.tags) {
+      const shader = attr(t, "data-transition");
+      if (shader === undefined) continue;
+      if (!(shaderNames as readonly string[]).includes(shader))
+        report({
+          code: "unknown_shader",
+          severity: "error",
+          line: t.line,
+          message: `data-transition="${shader}" isn't a shader Verdandi has.`,
+          fix: `Use one of ${shaderNames.join(", ")}.`,
+        });
+      for (const side of ["data-from", "data-to"]) {
+        const id = attr(t, side);
+        if (!id || !ctx.ids.has(id))
+          report({
+            code: "transition_scene_missing",
+            severity: "error",
+            line: t.line,
+            message: id ? `The transition's ${side}="${id}" names no element in the project.` : `The transition has no ${side}.`,
+            fix: `Set ${side} to the id of the scene it ${side === "data-from" ? "leaves" : "enters"}.`,
+          });
+      }
+      if (!has(t, "data-start") || !has(t, "data-duration"))
+        report({
+          code: "transition_untimed",
+          severity: "error",
+          line: t.line,
+          message: "A transition needs data-start and data-duration: its window is when the scenes blend.",
+          fix: 'Center it on the cut, e.g. data-start="intro - 0.4" data-duration="0.8".',
+        });
+    }
   },
 
   variables(ctx, report) {

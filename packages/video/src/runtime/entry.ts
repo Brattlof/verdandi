@@ -6,6 +6,7 @@
 import { applyVariables, compositionApi, declaredDefaults, mountCompositions, variablesByComposition } from "./assemble.ts";
 import { compositionRoot } from "./clips.ts";
 import { type FrameTarget, type Manifest, Player } from "./player.ts";
+import { type ActiveTransition, clearComposite, composite, isolate, restore, transitionsAt } from "./transitions.ts";
 
 window.__timelines ??= {};
 
@@ -21,6 +22,14 @@ export type VdProtocol = {
   play: () => void;
   pause: () => void;
   currentTime: () => number;
+  /** Shader transitions running at `t` (render). */
+  transitionsAt: (t: number) => ActiveTransition[];
+  /** Hides the scenes `ids` until `restore`, to capture the other side of a transition alone. */
+  isolate: (ids: readonly string[]) => void;
+  restore: () => void;
+  /** Covers the composition with `shader` blending two captured pictures (data URLs) at `progress`. */
+  composite: (opts: { shader: string; from: string; to: string; progress: number }) => Promise<void>;
+  clearComposite: () => void;
 };
 
 const fps = window.__vdRender?.fps ?? 30;
@@ -36,6 +45,14 @@ const vd: VdProtocol = {
   play: () => player.play(),
   pause: () => player.pause(),
   currentTime: () => player.currentTime,
+  transitionsAt: (t) => transitionsAt(player.clips, t),
+  isolate,
+  restore,
+  composite: async (opts) => {
+    const root = player.root;
+    if (root instanceof HTMLElement) await composite(root, opts);
+  },
+  clearComposite,
 };
 window.__vd = vd;
 window.__vdBuildReady ??= [];
