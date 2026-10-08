@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  type AccessLevel,
   atPin,
   type CapPeriod,
   type CapScope,
@@ -97,6 +98,10 @@ export type DeciderState = {
         readonly verifying: boolean;
         /** Put away by the user: it takes no turns until unarchived. */
         readonly archived: boolean;
+        /** The access level the user set (DESIGN §17); null for the profile's default. */
+        readonly access: AccessLevel | null;
+        /** Someone other than the owner can write in it from a chat app (ADR 0036): it never runs at `auto` or `full`. */
+        readonly confined: boolean;
         /** The git worktree the thread runs in; null when it runs in the project folder. */
         readonly worktree: WorktreeView | null;
         /** The task the next turn continues; null before the first turn and after a route change. */
@@ -697,6 +702,18 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
       ? accept()
       : accept({ type: "thread.budget.changed", v: 1, threadId: c.threadId, mode: c.mode });
   },
+  // A thread someone else can write in always asks (DESIGN §17): their messages are untrusted input from the first turn.
+  "thread.access.set": (state, c) => {
+    if (!state.thread) return reject("ThreadNotFound", `Thread ${c.threadId} does not exist. Create it first.`);
+    if (state.thread.confined && c.access !== null && c.access !== "ask")
+      return reject(
+        "AccessConfined",
+        "Someone other than you can write in this thread from a chat app, so its agent always asks. Use a thread only you write in for auto or full access.",
+      );
+    return state.thread.access === c.access
+      ? accept()
+      : accept({ type: "thread.access.changed", v: 1, threadId: c.threadId, access: c.access });
+  },
   "routing.memory.clear": (state, c) =>
     state.thread
       ? accept({ type: "routing.memory.cleared", v: 1, threadId: c.threadId, projectId: state.thread.projectId })
@@ -844,8 +861,6 @@ const handlers: { [T in Command["type"]]: Handler<T> } = {
           state: c.state,
         })
       : accept(),
-  // The user's switch for the profile's smart approvals, which only `approvals.yaml` enables (DESIGN §17).
-  "approvals.smart.set": (_state, c) => accept({ type: "approvals.smart.changed", v: 1, threadId: profileStream, on: c.on }),
   "task.error.repeat": (state, c) => {
     if (state.thread?.runningTurnId !== c.turnId || !state.thread.taskId) {
       return reject("TurnNotRunning", `Turn ${c.turnId} isn't running, so there's no task whose tool error repeated.`);

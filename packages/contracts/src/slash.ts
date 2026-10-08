@@ -1,4 +1,5 @@
 import type { ClientCommand } from "./commands.ts";
+import type { AccessLevel } from "./route.ts";
 import type { TaskRating } from "./task.ts";
 
 /** Where a slash command can be typed: the terminal chat (the terminal UI and `--plain`), the web composer, a chat app. */
@@ -151,12 +152,12 @@ export const slashCommands = {
     dispatches: ["thread.revert.undo"],
     whileBusy: { refuse: "A turn has started since the latest revert, so there's no revert to undo." },
   },
-  smart: {
-    args: [{ name: "on|off", choices: ["on", "off"] }],
-    help: "turns smart approvals of native terminal commands off, or back on, where approvals.yaml enables them",
+  access: {
+    args: [{ name: "level", optional: true, choices: ["ask", "auto", "full", "default"] }],
+    help: "shows or sets how much the agent may do without asking: ask, auto (a guard approves what's safe), full, or the profile's default",
     surfaces: ["chat"],
     ownerOnly: true,
-    dispatches: ["approvals.smart.set"],
+    dispatches: ["thread.access.set"],
     whileBusy: "run",
   },
   trusted: {
@@ -206,6 +207,14 @@ export const ratingWords = new Map<string, TaskRating | null>([
   ["up", 1],
   ["down", -1],
   ["clear", null],
+]);
+
+/** `/access`'s words; `default` goes back to the profile's level. */
+export const accessWords = new Map<string, AccessLevel | null>([
+  ["ask", "ask"],
+  ["auto", "auto"],
+  ["full", "full"],
+  ["default", null],
 ]);
 
 export type SlashName = keyof typeof slashCommands;

@@ -226,7 +226,7 @@ export const connect = (endpoint: Endpoint) => {
     return undefined;
   };
 
-  /** Whether the profile's smart approvals are enabled and on (DESIGN §17); undefined when the connection is lost. */
+  /** The profile's default access level (DESIGN §17); undefined when the connection is lost. */
   const approvals = async () => {
     const exit = await run((rpc) => rpc.ApprovalsGet());
     if (Exit.isSuccess(exit)) return exit.value;

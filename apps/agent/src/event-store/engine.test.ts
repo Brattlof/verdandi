@@ -513,7 +513,7 @@ describe("engine", () => {
       Layer.provideMerge(Layer.succeed(Decide, rulesDecide)),
       Layer.provideMerge(Layer.succeed(ProfileSkills, { profile: "unused", archive: "unused", extra: [] })),
       Layer.provideMerge(Layer.succeed(ReviewSettings, { enabled: false, allowMetered: false })),
-      Layer.provideMerge(Layer.succeed(ApprovalSettings, { smart: false })),
+      Layer.provideMerge(Layer.succeed(ApprovalSettings, { access: "ask" })),
       Layer.provideMerge(SqlLive(newHome())),
     );
     const runtime = ManagedRuntime.make(layer);

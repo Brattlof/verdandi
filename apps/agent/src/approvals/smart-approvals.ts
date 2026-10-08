@@ -1,7 +1,6 @@
 import type { DecisionAnswer } from "@verdandi/contracts";
 import { type Decide, guardQuestion, guardState, guardVerdict } from "@verdandi/decisions";
 import { Effect, Exit, Option } from "effect";
-import { SqlClient } from "effect/unstable/sql";
 
 /** The shell a terminal command runs in: `runShell`'s `/bin/sh -c`, or `cmd /d /s /c` on Windows. */
 export type Shell = "sh" | "cmd";
@@ -149,16 +148,4 @@ export const rateCommand = (
     const [answer] = asked.value.value.answers;
     if (answer) yield* record(state, answer);
     return guardVerdict(answer);
-  });
-
-/**
- * Whether smart approvals rate commands now: `enabled` by the profile's `approvals.yaml`, and `on` while enabled unless
- * the user turned them off since (the latest `approvals.smart.changed`).
- */
-export const loadSmartApprovals = (enabled: boolean) =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const [latest] = yield* sql<{ turned: number }>`
-      select json_extract(payload, '$.on') as turned from events where type = 'approvals.smart.changed' order by seq desc limit 1`;
-    return { enabled, on: enabled && (latest === undefined || latest.turned === 1) };
   });

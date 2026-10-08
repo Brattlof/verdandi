@@ -172,7 +172,8 @@ const apply: { [T in Event["type"]]: Apply<T> } = {
   "provider.failed": (thread) => thread,
   "provider.recovered": (thread) => thread,
   "turn.rerouted": (thread, e) => addItem(thread, e.turnId, { kind: "route.switch", from: e.from, to: e.to, reason: e.reason }),
-  "approvals.smart.changed": (thread) => thread, // the composer fetches it with ApprovalsGet
+  "approvals.smart.changed": (thread) => thread, // retired
+  "thread.access.changed": (thread, e) => ({ ...thread, access: e.access }),
   "turn.effort.set": (thread, e) => addItem(thread, e.turnId, { kind: "effort", from: e.from, to: e.to, reason: e.reason }),
   "task.delegated": (thread, e) =>
     addItem(thread, e.turnId, { kind: "delegation", route: e.to, reason: e.decision.reason, parentToolUseId: e.toolUseId }),

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type {
+  AccessLevel,
   AttachmentRef,
   Command,
   CommandId,
@@ -29,7 +30,8 @@ import { Decide, flagged, injectionQuestion, injectionWarning } from "@verdandi/
 import { type Screen, ToolFailed, verdandiTools } from "@verdandi/tools";
 import { Cause, Context, Deferred, Effect, Fiber, FiberSet, Layer, Queue, Result, Stream } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { loadSmartApprovals, platformShell, rateCommand } from "../approvals/smart-approvals.ts";
+import { loadAccess } from "../approvals/access.ts";
+import { platformShell, rateCommand } from "../approvals/smart-approvals.ts";
 import { changedByTurns, changedSince, checkpoint, checkpointRef, restore, revertRef } from "../checkpoints/checkpoint.ts";
 import { compressionBlock, compressionPrompt, compressionSummary } from "../compression/compression.ts";
 import { editedFiles } from "../diffs/diff.ts";
@@ -38,6 +40,7 @@ import { memoryNudge } from "../memory/memory.ts";
 import type { loadMcp } from "../native/mcp-config.ts";
 import { loadFreshOutcome, loadTaskDigest, parseReview, reviewPrompt, skillsRefused } from "../review/review.ts";
 import { repeatedError } from "../routing/repeated-error.ts";
+import { untrustedSource } from "../routing/untrusted.ts";
 import { searchSessions } from "../search/search.ts";
 import {
   applyChange,
@@ -80,8 +83,8 @@ export class ReviewSettings extends Context.Service<ReviewSettings, { readonly e
   "verdandi/ReviewSettings",
 ) {}
 
-/** Smart approvals in this profile (`approvals.yaml`, DESIGN §17): whether they're enabled, which the user can then turn off. */
-export class ApprovalSettings extends Context.Service<ApprovalSettings, { readonly smart: boolean }>()("verdandi/ApprovalSettings") {}
+/** The profile's default access level (`approvals.yaml`, DESIGN §17), for threads that don't set their own. */
+export class ApprovalSettings extends Context.Service<ApprovalSettings, { readonly access: AccessLevel }>()("verdandi/ApprovalSettings") {}
 
 /** The profile's skills folder, which approved skill proposals are written to, and the read-only extra folders (DESIGN §14.4). */
 export class ProfileSkills extends Context.Service<ProfileSkills, SkillFolders>()("verdandi/ProfileSkills") {}
@@ -307,30 +310,42 @@ export const ReactorLive = Layer.effect(
       );
 
     /**
-     * Smart approvals for turn `turnId` (DESIGN §17): rates each terminal command its agent wants to run, recording the
-     * guard's answer, or answers undefined while the user has them turned off, read at each command so a click applies at once.
+     * The access level for turn `turnId`'s native agent (DESIGN §17), read at each call that would ask, so a change
+     * applies at once: `full` allows it, `auto` has smart approvals rate a terminal command (recording the guard's
+     * answer) and asks about anything else, and `ask` asks.
      */
     const guardFor =
       (threadId: ThreadId, turnId: TurnId): NonNullable<HarnessRunInput["guard"]> =>
-      (command) =>
+      (call) =>
         Effect.runPromise(
           Effect.gen(function* () {
-            if (!(yield* loadSmartApprovals(approvals.smart)).on) return undefined;
-            return yield* rateCommand(command, platformShell, decide, (state, answer) =>
+            const access = yield* loadAccess(threadId, approvals.access);
+            if (access.level === "full") return { verdict: "allow", reason: "full access" } as const;
+            if (access.level === "ask" || call.command === undefined) return undefined;
+            const rated = yield* rateCommand(call.command, platformShell, decide, (state, answer) =>
               engine
                 .dispatch({ type: "approval.guard", commandId: randomUUID() as CommandId, threadId, turnId, state, answer })
                 .pipe(Effect.catchCause((cause) => Effect.logWarning(`Could not record the guard's verdict on turn ${turnId}.`, cause))),
             );
+            return access.held && rated.verdict === "ask" ? { ...rated, reason: `${rated.reason}; ${access.held}` } : rated;
           }).pipe(
             Effect.provideService(SqlClient.SqlClient, sql),
             Effect.catchCause((cause) =>
-              Effect.as(Effect.logWarning(`Smart approvals failed on turn ${turnId}.`, cause), {
+              Effect.as(Effect.logWarning(`The access guard failed on turn ${turnId}.`, cause), {
                 verdict: "ask" as const,
-                reason: "smart approvals failed",
+                reason: "the access guard failed",
               }),
             ),
           ),
         );
+    /** Turns that started at `full` on a harness that takes its level once (Claude Code), until untrusted input lowers them. */
+    const fullTurns = new Map<TurnId, ThreadId>();
+    /** Untrusted input reached turn `turnId`: a `full` one goes on at `auto` (DESIGN §17). */
+    const holdAtAuto = (turnId: TurnId) => {
+      const threadId = fullTurns.get(turnId);
+      if (!threadId || !fullTurns.delete(turnId)) return Effect.void;
+      return live.get(threadId)?.access?.(threadId, "auto") ?? Effect.void;
+    };
 
     /**
      * Delegation for the native agent of turn `turnId` (DESIGN §9.4): `task.delegate` routes each subtask as a task of its
@@ -850,11 +865,17 @@ export const ReactorLive = Layer.effect(
               Effect.andThen(adapter.respond(threadId, event.requestId, { decision: "deny" }), Effect.failCause(cause)),
             ),
           );
+        // The thread's access level as the turn starts; untrusted input lowers a `full` turn on a harness that takes it once.
+        const access = aux
+          ? undefined
+          : (yield* loadAccess(threadId, approvals.access).pipe(Effect.provideService(SqlClient.SqlClient, sql))).level;
+        if (access === "full") fullTurns.set(turnId, threadId);
         yield* adapter
           .run({
             threadId,
             cwd,
             route,
+            ...(access && { access }),
             resumeSessionId: thread.session_id ?? undefined,
             turnId,
             text,
@@ -873,7 +894,7 @@ export const ReactorLive = Layer.effect(
                   ...(delegate && { delegate }),
                   mcp: mcpFor(threadId, turnId, cwd),
                   screen: (text: string) => Effect.runPromise(screen("mcp", text, { threadId, turnId })),
-                  ...(approvals.smart && { guard: guardFor(threadId, turnId) }),
+                  guard: guardFor(threadId, turnId),
                   summarize: summarizeFor(threadId, turnId, thread.task_id, thread.path, cwd),
                 }),
             // The snapshot a new session starts with goes to its first turn only (DESIGN §14.2), and so does a handoff's summary.
@@ -898,6 +919,8 @@ export const ReactorLive = Layer.effect(
               if (event.type === "item" && event.item.kind === "tool.call") calls.push(event.item);
               if (event.type === "item" && event.item.kind === "tool.result" && event.item.isError) toolFailed = true;
               if (event.type === "provider.failed") return answerFailure(event);
+              if (event.type === "item" && untrustedSource(event.item))
+                return Effect.andThen(holdAtAuto(turnId), report(threadId, turnId, event));
               if (event.type !== "turn.finished") return report(threadId, turnId, event);
               finished = true;
               return Effect.gen(function* () {
@@ -955,7 +978,12 @@ export const ReactorLive = Layer.effect(
         if (!finished) yield* fail("The harness stopped without finishing the turn.");
       }).pipe(
         Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) || finished ? Effect.failCause(cause) : fail(errorMessage(cause)))),
-        Effect.ensuring(Effect.sync(() => live.delete(threadId))),
+        Effect.ensuring(
+          Effect.sync(() => {
+            live.delete(threadId);
+            fullTurns.delete(turnId);
+          }),
+        ),
         Effect.ignore,
       );
     };
@@ -1105,6 +1133,7 @@ export const ReactorLive = Layer.effect(
       if (e.type === "turn.started") return startTurn(e.threadId, e.turnId, e.text, e.mode ?? "build", e.attachments ?? []);
       // In `turns`, so `drain` waits for the review it starts.
       if (e.type === "review.requested") return FiberSet.run(turns, startReview(e)).pipe(Effect.asVoid);
+      if (e.type === "injection.flagged" && !e.withheld) return holdAtAuto(e.turnId);
       if (e.type === "turn.steered") {
         const queue = steerQueues.get(e.turnId);
         return queue ? Queue.offer(queue, e.text).pipe(Effect.asVoid) : Effect.void;

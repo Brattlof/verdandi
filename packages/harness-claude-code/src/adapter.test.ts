@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { HarnessRunInput, HarnessTool, InteractionMode, Route, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
+import type { AccessLevel, HarnessRunInput, HarnessTool, InteractionMode, Route, TaskId, ThreadId, TurnId } from "@verdandi/contracts";
 import { makeTempHome, removeTempHome } from "@verdandi/testkit";
 import { Effect, Fiber, Stream } from "effect";
 import { makeClaudeCodeAdapter, promptContent, type QueryFn } from "./adapter.ts";
@@ -267,6 +267,25 @@ describe("Claude Code adapter", () => {
       // Without subagent routes Claude Code keeps its own agents.
       await Effect.runPromise(Stream.runCollect(adapter.run(input(home, "three", U3))));
       expect(spawns[1]?.options.agents).toBeUndefined();
+    } finally {
+      removeTempHome(home);
+    }
+  });
+
+  test("build runs in the access level's mode: auto, full's bypass, and the user's own mode back at ask", async () => {
+    const home = makeTempHome();
+    try {
+      const { query, spawns } = stubQuery(undefined, { ...init, permissionMode: "acceptEdits" } as SDKMessage);
+      const adapter = makeClaudeCodeAdapter({ claudePath: "claude.exe", query });
+      const turn = (text: string, turnId: string, access: AccessLevel) =>
+        Effect.runPromise(Stream.runCollect(adapter.run({ ...input(home, text, turnId, "sess-1"), access })));
+      await turn("one", U1, "full");
+      await turn("two", U2, "auto");
+      await turn("three", U3, "ask");
+      expect(spawns).toHaveLength(1);
+      expect(spawns[0]?.options).toMatchObject({ permissionMode: "bypassPermissions", allowDangerouslySkipPermissions: true });
+      // Opened at full, the session never saw the user's own mode, so ask falls back to Claude Code's default.
+      expect(spawns[0]?.log).toEqual(["prompt one", "setPermissionMode auto", "prompt two", "setPermissionMode default", "prompt three"]);
     } finally {
       removeTempHome(home);
     }

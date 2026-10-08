@@ -4,7 +4,7 @@ import type { TaskId, ThreadId, TurnId } from "./ids.ts";
 import { Item, Quota, UsageFields } from "./items.ts";
 import { ProviderFailure } from "./provider-health.ts";
 import { Question, type Resolution } from "./requests.ts";
-import type { Effort, HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
+import type { AccessLevel, Effort, HarnessId, InteractionMode, Route, SubagentProfile } from "./route.ts";
 import type { TaskLimits } from "./routing.ts";
 
 /** What every harness adapter reports, normalized. */
@@ -206,14 +206,22 @@ export type HarnessRunInput = {
    * subagents through `route.subagents`, ADR 0014; fake: none). Absent when Verdandi doesn't delegate, e.g. a background review.
    */
   /**
-   * Smart approvals (DESIGN §17): rates terminal command `command` before the harness asks the user about it. `allow`
-   * runs it unasked, `deny` refuses it with `reason` for the agent, `ask` asks the user as without it, with `reason` as the
-   * request's `note`, which tells an unattended run to deny it.
-   * Hard rules, errors and timeouts all come back as `ask`; undefined while the user has turned smart approvals off, so the
-   * command asks as without them. Native only, for its `terminal`; Claude Code keeps its own permission settings (fake:
-   * none). Absent unless the profile's `approvals.yaml` turns smart approvals on.
+   * The thread's access level (DESIGN §17), read at each tool call that would ask the user, so a change applies at
+   * once. For a `terminal` command (`command`): `allow` runs it unasked, `deny` refuses it with `reason` for the agent,
+   * `ask` asks the user with `reason` as the request's `note`, which tells an unattended run to deny it. For another
+   * call that would ask (a file tool outside the thread's reach, an MCP tool): only `allow` skips asking. Undefined asks
+   * as without it. Native only (Claude Code gets `access`; fake: none). Absent for Verdandi's own hidden threads.
    */
-  readonly guard?: (command: string) => Promise<{ readonly verdict: "allow" | "deny" | "ask"; readonly reason: string } | undefined>;
+  readonly guard?: (call: {
+    readonly tool: string;
+    readonly command?: string;
+  }) => Promise<{ readonly verdict: "allow" | "deny" | "ask"; readonly reason: string } | undefined>;
+  /**
+   * The thread's access level as the turn starts (DESIGN §17), applied before its prompt like `mode` (Claude Code: its
+   * build permission mode, `auto` or `bypassPermissions`, and the user's own default for `ask`; native reads `guard` at
+   * each call instead; fake: ignores it). Absent: `ask`.
+   */
+  readonly access?: AccessLevel;
   readonly delegate?: {
     readonly route: (call: {
       readonly toolUseId: string;
@@ -287,6 +295,12 @@ export interface HarnessAdapter {
    * the decider must not reroute its threads. A thread with no running turn is ignored.
    */
   reroute(threadId: ThreadId, route: Route): Effect.Effect<void>;
+  /**
+   * Lowers the running turn's access level for the rest of its steps: Verdandi calls it when a `full` session takes in
+   * untrusted input (DESIGN §17). Claude Code: `setPermissionMode`, unless it's planning; absent for the native harness,
+   * which reads `guard` at each call, and the fake. A thread with no running turn is ignored.
+   */
+  access?(threadId: ThreadId, level: AccessLevel): Effect.Effect<void>;
   /**
    * Closes the session the harness keeps warm between a thread's turns (Claude Code: its CLI process), or every one
    * without `threadId`; the thread's next turn resumes it in a fresh one. Verdandi calls it when it's done with a

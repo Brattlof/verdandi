@@ -48,6 +48,8 @@ const idle: DeciderState = {
     taskEscalations: 0,
     turnFellBack: false,
     lastTurnVerifierFailed: false,
+    access: null,
+    confined: false,
     lastTurnVerified: false,
     tasks: [],
     runningTurnId: null,
@@ -80,6 +82,8 @@ const running: DeciderState = {
     taskEscalations: 0,
     turnFellBack: false,
     lastTurnVerifierFailed: false,
+    access: null,
+    confined: false,
     lastTurnVerified: false,
     tasks: [],
     runningTurnId: turnId,
@@ -112,6 +116,8 @@ const waiting: DeciderState = {
     taskEscalations: 0,
     turnFellBack: false,
     lastTurnVerifierFailed: false,
+    access: null,
+    confined: false,
     lastTurnVerified: false,
     tasks: [],
     runningTurnId: turnId,
@@ -275,6 +281,8 @@ describe("decide", () => {
         taskEscalations: 0,
         turnFellBack: false,
         lastTurnVerifierFailed: false,
+        access: null,
+        confined: false,
         lastTurnVerified: false,
         tasks: [],
         runningTurnId: turnId,
@@ -360,6 +368,14 @@ describe("decide", () => {
     const withMax = { thread: running.thread && { ...running.thread, budgetMode: "max" as const } };
     expect(events(decide(withMax, set(null)))).toEqual([{ type: "thread.budget.changed", v: 1, threadId, mode: null }]);
     expect(reason(decide(none, set("max")))).toBe("ThreadNotFound");
+  });
+
+  test("a thread someone else can write in from a chat app is never set to auto or full access", () => {
+    const set = (access: "ask" | "full" | null) => ({ type: "thread.access.set", commandId, threadId, access }) as const;
+    expect(events(decide(running, set("full")))).toEqual([{ type: "thread.access.changed", v: 1, threadId, access: "full" }]);
+    const confined = { thread: running.thread && { ...running.thread, confined: true } };
+    expect(reason(decide(confined, set("full")))).toBe("AccessConfined");
+    expect(events(decide(confined, set("ask")))).toEqual([{ type: "thread.access.changed", v: 1, threadId, access: "ask" }]);
   });
 
   test("a pin keeps the session's subagents on its harness, ignores ones the client sent, and a new harness starts without", () => {

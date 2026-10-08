@@ -1,5 +1,8 @@
 import {
+  type AccessLevel,
   type AttachmentUpload,
+  accessHelp,
+  accessWords,
   type BudgetMode,
   type ClientCommand,
   type CommandId,
@@ -244,7 +247,7 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
             addRequest(e);
           if (e.type === "turn.item.added" && e.item.kind === "notice") io.write(`\n[${e.item.text}]\n`);
           if (e.type === "turn.item.added" && e.item.kind === "approval.auto")
-            io.write(`\n[${e.item.decision === "allow" ? "auto-approved" : "refused"} by smart approvals: ${e.item.reason}]\n`);
+            io.write(`\n[${e.item.decision === "allow" ? "ran without asking" : "refused"}: ${e.item.reason}]\n`);
           if (e.type === "turn.item.added" && e.item.kind === "compression") io.write(`\n[${describeCompression(e.item)}]\n`);
           if (e.type === "turn.item.added" && e.item.kind === "handoff")
             io.write(
@@ -366,15 +369,12 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
     }
   };
 
-  /** Whether smart approvals rate the native agent's commands (DESIGN §17), when `approvals.yaml` enables them, and how to switch. */
-  const showSmartApprovals = async () => {
-    const smart = await runtime.runPromise(client.ApprovalsGet());
-    if (smart.enabled)
-      io.write(
-        smart.on
-          ? "Smart approvals: on, so commands they rate safe run without asking (/smart off turns them off).\n"
-          : "Smart approvals: off, so every command asks (/smart on turns them back on).\n",
-      );
+  /** The thread's access level (DESIGN §17): the one it set, else the profile's, and how to change it. */
+  const showAccess = async (set: AccessLevel | null, confined: boolean) => {
+    const { access: profile } = await runtime.runPromise(client.ApprovalsGet());
+    const level = confined ? "ask" : (set ?? profile);
+    const whose = confined ? "; someone else can write in this thread, so it always asks" : set === null ? " (the profile's default)" : "";
+    io.write(`Access: ${level}${whose}: ${accessHelp[level]}. /access ask|auto|full|default changes it.\n`);
   };
 
   // A device asking to pair gets a notice once, with the code it shows and how to answer (ADR 0028).
@@ -454,7 +454,8 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
     );
   }
   await showSpendCaps(argv.includes("--raise-cap"));
-  await showSmartApprovals();
+  let access = thread.access;
+  await showAccess(access, thread.confined);
   if (thread.binding) io.write(`${bindingLine(thread.binding)}; /unbind stops that.\n`);
   if (running) io.write("A turn is running; lines you type steer it.\n");
   else prompt();
@@ -537,10 +538,15 @@ export const openSession = async (setup: SessionSetup, io: Io, notes: readonly s
       if (await dispatch({ type: "channel.unbind", commandId: uuid<CommandId>(), threadId }))
         io.write("[unbound: this thread no longer replies to its chat, and the chat's next message starts a new thread]\n");
     },
-    smart: async (args) => {
-      const on = args[0] === "on" ? true : args[0] === "off" ? false : undefined;
-      if (on === undefined) io.write("[usage: /smart on|off]\n");
-      else if (await dispatch({ type: "approvals.smart.set", commandId: uuid<CommandId>(), on })) await showSmartApprovals();
+    access: async (args) => {
+      const word = args[0];
+      if (word === undefined) return showAccess(access, thread.confined);
+      const level = accessWords.get(word);
+      if (level === undefined) io.write("[usage: /access ask|auto|full|default]\n");
+      else if (await dispatch({ type: "thread.access.set", commandId: uuid<CommandId>(), threadId, access: level })) {
+        access = level;
+        await showAccess(access, thread.confined);
+      }
     },
     trusted: () => trusted(undefined),
     untrust: (args) => trusted(args[0] ?? ""),

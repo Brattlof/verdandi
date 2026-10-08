@@ -550,6 +550,12 @@ const channels = Effect.gen(function* () {
   )`;
 });
 
+/** `threads.access`: the access level the user set for a thread (DESIGN §17); null, the profile's default, for every thread before. */
+const threadAccess = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`alter table threads add column access text`;
+});
+
 export const migrations = {
   "1_init": init,
   "2_requests": requests,
@@ -584,4 +590,5 @@ export const migrations = {
   "31_gateway": gateway,
   "32_skill_hub": skillHub,
   "33_channels": channels,
+  "34_thread_access": threadAccess,
 };
