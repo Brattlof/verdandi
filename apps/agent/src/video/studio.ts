@@ -7,6 +7,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, type FSWatcher, mkdirSync, readFileSync, realpathSync, renameSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+  type VideoCheckResult,
   type VideoFeed,
   type VideoFile,
   type VideoFormat,
@@ -16,7 +17,7 @@ import {
   VideoUnavailable,
   type VideoView,
 } from "@verdandi/contracts";
-import { projectHandler, render } from "@verdandi/video";
+import { checkProject, projectHandler, render } from "@verdandi/video";
 import { Context, Effect, Layer, PubSub, Stream } from "effect";
 import { childEnv } from "../home/child-env.ts";
 
@@ -50,6 +51,7 @@ export class VideoStudio extends Context.Service<
       options: { readonly format: VideoFormat; readonly quality: VideoQuality; readonly fps: number },
     ) => Effect.Effect<VideoRenderJob, VideoUnavailable>;
     readonly renderCancel: (jobId: string) => Effect.Effect<void, VideoUnavailable>;
+    readonly check: (projectId: VideoProjectId) => Effect.Effect<VideoCheckResult, VideoUnavailable>;
     readonly upload: (
       projectId: VideoProjectId,
       name: string,
@@ -292,6 +294,16 @@ export const VideoStudioLive = Layer.effect(
           mkdirSync(join(p.path, "assets"), { recursive: true });
           writeFileSync(join(p.path, path), Buffer.from(base64, "base64"));
           return { path };
+        }),
+
+      check: (projectId) =>
+        Effect.gen(function* () {
+          const p = yield* project(projectId);
+          const { files: _, ...result } = yield* Effect.tryPromise({
+            try: () => checkProject({ projectDir: p.path, env: childEnv() }),
+            catch: (e) => new VideoUnavailable({ reason: "NotAProject", message: e instanceof Error ? e.message : String(e) }),
+          });
+          return result;
         }),
 
       renderCancel: (jobId) => {

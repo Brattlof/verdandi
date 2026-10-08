@@ -242,6 +242,7 @@ const Handlers = (home: string) =>
         VideoFileWrite: ({ projectId, path, content, expectedVersion }) => studio.write(projectId, path, content, expectedVersion),
         VideoRenderStart: ({ projectId, format, quality, fps }) => studio.renderStart(projectId, { format, quality, fps }),
         VideoRenderCancel: ({ jobId }) => studio.renderCancel(jobId),
+        VideoCheck: ({ projectId }) => studio.check(projectId),
         VideoAssetUpload: ({ projectId, name, data }) => studio.upload(projectId, name, data),
         VideoSubscribe: ({ projectId, subscriptionId }) => untilUnsubscribed(subscriptionId, studio.feed(projectId)),
       };

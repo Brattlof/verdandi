@@ -1,4 +1,5 @@
 import type {
+  VideoCheckResult,
   VideoClip,
   VideoFeed,
   VideoFormat,
@@ -147,6 +148,7 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
   const [files, setFiles] = useState(initial.files);
   const [assets, setAssets] = useState(initial.assets);
   const [selected, setSelected] = useState<string>();
+  const [checked, setChecked] = useState<VideoCheckResult | "running">();
   const [jobs, setJobs] = useState<ReadonlyMap<string, VideoRenderJob>>(new Map(initial.renders.map((j) => [j.jobId, j])));
   const [manifest, setManifest] = useState<VideoManifest>();
   const [time, setTime] = useState(0);
@@ -299,6 +301,21 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
         </span>
         <button
           type="button"
+          disabled={checked === "running"}
+          onClick={async () => {
+            setChecked("running");
+            const result = await connection.video((rpc) => rpc.VideoCheck({ projectId }));
+            if (result.ok) setChecked(result.value);
+            else {
+              setChecked(undefined);
+              setNotice(result.message);
+            }
+          }}
+        >
+          {checked === "running" ? "Checking…" : "Check"}
+        </button>
+        <button
+          type="button"
           onClick={() => void step("undo")}
           disabled={!history.undo.length}
           title={history.undo.at(-1) ? `Undo ${history.undo.at(-1)?.label} (⌘Z)` : "Nothing to undo"}
@@ -376,6 +393,9 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
                 <Inspector clip={clip} manifest={manifest} onChange={(name, value, label) => void patchClip(clip, name, value, label)} />
               ) : null;
             })()}
+          {checked && checked !== "running" && (
+            <CheckReport result={checked} onOpen={(file) => void read(file)} onClose={() => setChecked(undefined)} />
+          )}
           {manifest && (
             <Assets
               assets={assets}
@@ -659,6 +679,51 @@ const Assets = ({
               <button type="button" className="text-xs" onClick={() => void onInsert(a)} title="Put it on a new track at the playhead">
                 Insert
               </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+};
+
+const icon = { error: "✗", warning: "⚠", info: "ℹ" } as const;
+const order = { error: 0, warning: 1, info: 2 } as const;
+
+/** What `check` found, errors first, each with its fix; a finding in a file opens that file in the editor. */
+const CheckReport = ({ result, onOpen, onClose }: { result: VideoCheckResult; onOpen: (file: string) => void; onClose: () => void }) => {
+  const findings = [...result.findings].sort((a, b) => order[a.severity] - order[b.severity]);
+  return (
+    <section aria-label="Check" className="rounded-md border border-line bg-card p-3">
+      <div className="mb-1 flex items-center gap-2">
+        <h2 className="eyebrow flex-1 text-muted">Check</h2>
+        <button type="button" className="border-0 bg-transparent text-xs" onClick={onClose}>
+          Dismiss
+        </button>
+      </div>
+      <p role="status" className={result.ok ? "text-ok" : "text-error"}>
+        {findings.length === 0
+          ? "No problems."
+          : `${result.errors} error${result.errors === 1 ? "" : "s"}, ${result.warnings} warning${result.warnings === 1 ? "" : "s"}.`}{" "}
+        <span className="text-muted">
+          {result.browserSkipped
+            ? "Fix the errors to run it in Chrome."
+            : `Ran in Chrome at ${result.samples.map((t) => `${t}s`).join(", ")}.`}
+        </span>
+      </p>
+      {findings.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-2">
+          {findings.map((f) => (
+            <li key={`${f.code}-${f.file}-${f.line ?? ""}-${f.message}`} className="text-sm">
+              <span className={f.severity === "error" ? "text-error" : f.severity === "warning" ? "text-warn" : "text-muted"}>
+                {icon[f.severity]} {f.code}
+              </span>{" "}
+              <button type="button" className="border-0 bg-transparent p-0 text-xs text-accent underline" onClick={() => onOpen(f.file)}>
+                {f.file}
+                {f.line ? `:${f.line}` : ""}
+              </button>
+              <p>{f.message}</p>
+              {f.fix && <p className="text-muted">Fix: {f.fix}</p>}
             </li>
           ))}
         </ul>

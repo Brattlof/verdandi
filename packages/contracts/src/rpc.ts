@@ -27,7 +27,17 @@ import { SpendCap } from "./spend.ts";
 import { RouteCost, TaskRating } from "./task.ts";
 import { TerminalFeed, TerminalId, TerminalSize, TerminalUnavailable, TerminalView } from "./terminal.ts";
 import { TrustedCommands } from "./trust.ts";
-import { VideoFeed, VideoFile, VideoFormat, VideoProjectId, VideoQuality, VideoRenderJob, VideoUnavailable, VideoView } from "./video.ts";
+import {
+  VideoCheckResult,
+  VideoFeed,
+  VideoFile,
+  VideoFormat,
+  VideoProjectId,
+  VideoQuality,
+  VideoRenderJob,
+  VideoUnavailable,
+  VideoView,
+} from "./video.ts";
 import { WorktreeView } from "./worktree.ts";
 
 export class CommandRejected extends Schema.TaggedError<CommandRejected>()("CommandRejected", {
@@ -489,6 +499,8 @@ export class Api extends RpcGroup.make(
     error: VideoUnavailable,
   }),
   Rpc.make("VideoRenderCancel", { payload: { jobId: Schema.String }, error: VideoUnavailable }),
+  /** Lints the project and runs it in Chrome, as `verdandi video check` does. */
+  Rpc.make("VideoCheck", { payload: { projectId: VideoProjectId }, success: VideoCheckResult, error: VideoUnavailable }),
   /**
    * Saves a media file into the project's `assets/` under `name` (a new name if it's taken), returning its path. At most
    * about 14 MB, base64 in one message; larger files are copied into `assets/` directly.

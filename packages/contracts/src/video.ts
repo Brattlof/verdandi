@@ -106,3 +106,25 @@ export const VideoManifest = Schema.Struct({
   media: Schema.Array(VideoMedia),
 });
 export type VideoManifest = typeof VideoManifest.Type;
+
+/** One lint or check finding: the cause and how to fix it, where it is when known. */
+export const VideoFinding = Schema.Struct({
+  code: Schema.String,
+  severity: Schema.Literals(["error", "warning", "info"]),
+  message: Schema.String,
+  file: Schema.String,
+  line: Schema.optionalKey(Schema.Int),
+  fix: Schema.optionalKey(Schema.String),
+});
+export type VideoFinding = typeof VideoFinding.Type;
+
+/** What `verdandi video check` reports: lint, then (unless lint found errors) the page run in Chrome at `samples`. */
+export const VideoCheckResult = Schema.Struct({
+  ok: Schema.Boolean,
+  errors: Schema.Int,
+  warnings: Schema.Int,
+  findings: Schema.Array(VideoFinding),
+  browserSkipped: Schema.Boolean,
+  samples: Schema.Array(Schema.Number),
+});
+export type VideoCheckResult = typeof VideoCheckResult.Type;
