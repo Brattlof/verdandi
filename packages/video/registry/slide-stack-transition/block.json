@@ -1,0 +1,17 @@
+{
+  "name": "slide-stack-transition",
+  "title": "Slide stack transition",
+  "description": "Three coloured bands slide across the frame one after another, the last covering the picture at 0.45 s, then leave the other side top band first, in 0.9 s; put it over the cut between two scenes. Colours are a JSON list of three, bottom band first.",
+  "tags": ["transition", "slide", "stack", "bands", "stagger", "cut", "scene"],
+  "duration": 0.9,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    {
+      "id": "colors",
+      "type": "string",
+      "label": "Colours (JSON list of 3, bottom first)",
+      "default": "[\"#e0a458\",\"#c8553d\",\"#16161a\"]"
+    }
+  ]
+}

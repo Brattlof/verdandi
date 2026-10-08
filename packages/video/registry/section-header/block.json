@@ -1,0 +1,16 @@
+{
+  "name": "section-header",
+  "title": "Section header",
+  "description": "A chapter card: a big index number rises from behind a mask, a thin rule draws across, then a small kicker and the title word by word; held, then it leaves in the same order. Left-aligned and transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["section", "chapter", "header", "divider", "number", "title", "text", "agenda"],
+  "duration": 4,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "index", "type": "string", "label": "Number", "default": "01" },
+    { "id": "kicker", "type": "string", "label": "Kicker (empty for none)", "default": "Part one" },
+    { "id": "title", "type": "string", "label": "Title", "default": "Routing every task" },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

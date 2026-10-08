@@ -1,0 +1,10 @@
+{
+  "name": "zoom-transition",
+  "title": "Zoom transition",
+  "description": "A coloured panel zooms up from a small rounded rectangle in the centre to cover the frame at 0.4 s, then opens from its centre outwards as if the camera flew through it, in 0.8 s; put it over the cut between two scenes.",
+  "tags": ["transition", "zoom", "zoom-through", "punch", "cut", "scene"],
+  "duration": 0.8,
+  "width": 1920,
+  "height": 1080,
+  "variables": [{ "id": "color", "type": "color", "label": "Panel", "default": "#e0a458" }]
+}

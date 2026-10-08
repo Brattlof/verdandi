@@ -1,0 +1,81 @@
+<template>
+  <div
+    id="split-reveal-root"
+    data-composition-id="split-reveal"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"before_label","type":"string","label":"Before label","default":"Before"},{"id":"before_text","type":"string","label":"Before text","default":"Hand-keyed in a timeline editor"},{"id":"before_image","type":"image","label":"Before image (replaces the text)","default":""},{"id":"after_label","type":"string","label":"After label","default":"After"},{"id":"after_text","type":"string","label":"After text","default":"Written once in plain HTML"},{"id":"after_image","type":"image","label":"After image (replaces the text)","default":""},{"id":"accent","type":"color","label":"After colour","default":"#e0a458"}]'
+  >
+    <style>
+      .scene { position: absolute; inset: 0; overflow: hidden; font-family: system-ui, sans-serif; }
+      .panel { position: absolute; inset: 0; }
+      .before { background: #1b1c20; color: #c9c4b8; }
+      .after { background: var(--accent, #e0a458); color: #15130f; }
+      .shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .copy { position: absolute; top: 0; bottom: 0; width: 960px; display: flex; align-items: center; justify-content: center; padding: 0 120px; }
+      .before .copy { left: 0; }
+      .after .copy { right: 0; }
+      .copy p { margin: 0; font-size: 84px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.08; text-align: center; text-wrap: balance; }
+      .before .copy p { font-weight: 500; }
+      .chip {
+        position: absolute; top: 72px; padding: 14px 30px; border-radius: 40px; font-size: 32px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+        white-space: nowrap; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+      }
+      .before .chip { left: 72px; background: #2c2d33; color: #e7e3da; }
+      .after .chip { right: 72px; background: #15130f; color: #f4f1ea; }
+      .divider { position: absolute; top: 0; bottom: 0; left: -3px; width: 6px; background: #f4f1ea; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18), 0 0 30px rgba(0, 0, 0, 0.45); }
+      .handle {
+        position: absolute; top: 50%; left: 50%; width: 92px; height: 92px; margin: -46px 0 0 -46px; border-radius: 50%;
+        background: #f4f1ea; color: #15130f; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center;
+      }
+      .handle svg { width: 52px; height: 52px; }
+    </style>
+    <div class="scene">
+      <div class="panel before">
+        <img class="shot" data-var-src="before_image" alt="" />
+        <div class="copy"><p data-var-text="before_text">Hand-keyed in a timeline editor</p></div>
+        <div class="chip" data-var-text="before_label">Before</div>
+      </div>
+      <div class="panel after">
+        <img class="shot" data-var-src="after_image" alt="" />
+        <div class="copy"><p data-var-text="after_text">Written once in plain HTML</p></div>
+        <div class="chip" data-var-text="after_label">After</div>
+      </div>
+      <div class="divider">
+        <div class="handle">
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5" /></svg>
+        </div>
+      </div>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      // A side with an image shows it in place of its text; one without drops the empty img.
+      for (const side of ["before", "after"]) {
+        const panel = document.querySelector(`.${side}`);
+        if (String(vars[`${side}_image`] ?? "").trim()) panel.querySelector(".copy").remove();
+        else panel.querySelector(".shot").remove();
+      }
+
+      // The divider's place, in percent of the width from the left, drives the after panel's clip and the line.
+      const split = { p: 100 };
+      const after = document.querySelector(".after");
+      const divider = document.querySelector(".divider");
+      const draw = () => {
+        after.style.clipPath = `inset(0 0 0 ${split.p}%)`;
+        divider.style.transform = `translateX(${(split.p / 100) * 1920}px)`;
+      };
+      draw();
+
+      const tl = gsap.timeline({ paused: true, defaults: { ease: "power3.out" } });
+      tl.fromTo(".before .copy, .before .shot", { opacity: 0, scale: 1.04 }, { opacity: 1, scale: 1, duration: 0.8 }, 0)
+        .fromTo(".before .chip", { opacity: 0, y: -20 }, { opacity: 1, y: 0, duration: 0.5 }, 0.3)
+        .fromTo(".handle", { scale: 0 }, { scale: 1, duration: 0.5, ease: "back.out(2)" }, 0.8)
+        .fromTo(split, { p: 100 }, { p: 28, duration: 1.2, ease: "power3.inOut", onUpdate: draw }, 1.0)
+        .to(split, { p: 50, duration: 0.9, ease: "power2.inOut", onUpdate: draw }, 2.2)
+        .fromTo(".after .chip", { opacity: 0, y: -20 }, { opacity: 1, y: 0, duration: 0.5 }, 1.6);
+      // Text on the after side trails the divider a little; an image stays put, like the shot it is.
+      if (document.querySelector(".after .copy")) tl.fromTo(".after .copy", { x: 80 }, { x: 0, duration: 1.4, ease: "power2.out" }, 1.1);
+      window.__timelines["split-reveal"] = tl;
+    </script>
+  </div>
+</template>

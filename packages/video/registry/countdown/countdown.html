@@ -1,0 +1,70 @@
+<template>
+  <div
+    id="countdown-root"
+    data-composition-id="countdown"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"from","type":"number","label":"Count from (1 to 10)","default":3},{"id":"go","type":"string","label":"Go text","default":"Go"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .stage { position: absolute; inset: 0; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); }
+      .dial { position: absolute; left: 640px; top: 220px; width: 640px; height: 640px; }
+      .dial svg { position: absolute; inset: 0; overflow: visible; }
+      .track { fill: none; stroke: var(--ink, #f4f1ea); stroke-opacity: 0.12; stroke-width: 14; }
+      .arc { fill: none; stroke: var(--accent, #e0a458); stroke-width: 14; }
+      .pulse { fill: none; stroke: var(--accent, #e0a458); stroke-width: 4; transform-origin: 320px 320px; }
+      .slot { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+      .num { font-size: 360px; font-weight: 800; line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+      .go { position: absolute; left: 0; right: 0; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-weight: 850; line-height: 1; letter-spacing: -0.03em; white-space: nowrap; color: var(--accent, #e0a458); }
+    </style>
+    <div class="stage">
+      <div class="dial">
+        <svg aria-hidden="true" width="640" height="640" viewBox="0 0 640 640">
+          <circle class="pulse" cx="320" cy="320" r="300" />
+          <circle class="track" cx="320" cy="320" r="300" />
+          <circle class="arc" cx="320" cy="320" r="300" transform="rotate(-90 320 320)" />
+        </svg>
+      </div>
+      <p class="go" data-var-text="go">Go</p>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      const from = Math.min(Math.max(Math.round(Number(vars.from)) || 3, 1), 10);
+      const goText = String(vars.go ?? "").trim();
+      const go = document.querySelector(".go");
+      go.textContent = goText;
+      // The Go text is as big as fits across the frame, up to 300 px.
+      go.style.fontSize = `${Math.min(300, Math.floor(1700 / Math.max(goText.length * 0.62, 1)))}px`;
+
+      const dial = document.querySelector(".dial");
+      const slots = [];
+      for (let n = from; n >= 1; n--) {
+        const slot = document.createElement("div");
+        slot.className = "slot";
+        const num = document.createElement("span");
+        num.className = "num";
+        num.textContent = String(n);
+        slot.append(num);
+        dial.append(slot);
+        slots.push(slot);
+      }
+      const arc = document.querySelector(".arc");
+      const len = arc.getTotalLength();
+
+      // Second k shows the number from - k: it punches in, the ring sweeps once round, and it drops away just
+      // before the next one lands. Go lands at from seconds.
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".dial svg", { opacity: 0, scale: 0.9 }, { opacity: 1, scale: 1, duration: 0.4, ease: "power3.out" }, 0);
+      slots.forEach((slot, k) => {
+        tl.fromTo(slot, { opacity: 0, scale: 1.6 }, { opacity: 1, scale: 1, duration: 0.45, ease: "expo.out" }, k)
+          .to(slot, { opacity: 0, scale: 0.6, duration: 0.18, ease: "power2.in" }, k + 0.82)
+          .fromTo(arc, { strokeDasharray: len, strokeDashoffset: len }, { strokeDashoffset: 0, duration: 1, ease: "power1.inOut", immediateRender: k === 0 }, k)
+          .fromTo(".pulse", { scale: 1, opacity: 0.6 }, { scale: 1.22, opacity: 0, duration: 0.6, ease: "power2.out", immediateRender: k === 0 }, k);
+      });
+      tl.fromTo(go, { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.55, ease: "back.out(1.8)" }, from)
+        .to(".dial svg", { scale: 1.6, opacity: 0, duration: 0.5, ease: "power3.out" }, from)
+        .fromTo(go, { scale: 1 }, { scale: 1.04, duration: 1.5, ease: "none", immediateRender: false }, from + 0.55);
+      window.__timelines.countdown = tl;
+    </script>
+  </div>
+</template>

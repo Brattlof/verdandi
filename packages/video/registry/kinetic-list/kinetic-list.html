@@ -1,0 +1,90 @@
+<template>
+  <div
+    id="kinetic-list-root"
+    data-composition-id="kinetic-list"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"title","type":"string","label":"Title (empty hides it)","default":"From idea to video"},{"id":"items","type":"string","label":"Items (JSON list)","default":"[\"Write the scene in plain HTML\",\"Preview it in the Studio\",\"Render every frame in Chrome\",\"Ship the finished video\"]"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .stage { position: absolute; inset: 0; display: flex; align-items: center; padding-left: 220px; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); }
+      .block { width: 1480px; }
+      .title { margin: 0 0 44px 28px; font-size: 40px; font-weight: 650; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent, #e0a458); }
+      .list { position: relative; }
+      .glow {
+        position: absolute; left: 0; top: 0; width: 100%; border-radius: 22px;
+        background: linear-gradient(90deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02) 75%, rgba(255, 255, 255, 0));
+      }
+      .glow::before { content: ""; position: absolute; left: 0; top: 18%; bottom: 18%; width: 8px; border-radius: 4px; background: var(--accent, #e0a458); }
+      .row { position: relative; display: flex; align-items: center; gap: 44px; height: var(--row, 150px); padding-left: 44px; }
+      .num {
+        flex: none; width: 1.3em; font-size: var(--num, 112px); font-weight: 850; line-height: 1; letter-spacing: -0.04em;
+        font-variant-numeric: tabular-nums; color: var(--accent, #e0a458);
+      }
+      .text { margin: 0; font-size: var(--text, 64px); font-weight: 650; letter-spacing: -0.01em; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    </style>
+    <div class="stage">
+      <div class="block">
+        <p class="title" data-var-text="title">From idea to video</p>
+        <div class="list"><div class="glow"></div></div>
+      </div>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      const len = Math.max(Number(__verdandi.duration()) || 7, 2);
+      let raw = [];
+      try {
+        raw = JSON.parse(String(vars.items));
+      } catch {
+        console.warn("[kinetic-list] items isn't valid JSON; expected [\"First\", \"Second\", …]");
+      }
+      const items = (Array.isArray(raw) ? raw : []).map((s) => String(s ?? "")).filter(Boolean).slice(0, 8);
+      if (!String(vars.title ?? "").trim()) document.querySelector(".title").remove();
+
+      // Longer lists get smaller rows so up to eight fit the frame.
+      const sizes = items.length <= 4 ? [150, 112, 64] : items.length <= 6 ? [124, 90, 52] : [100, 72, 42];
+      const list = document.querySelector(".list");
+      list.style.setProperty("--row", `${sizes[0]}px`);
+      list.style.setProperty("--num", `${sizes[1]}px`);
+      list.style.setProperty("--text", `${sizes[2]}px`);
+      const rows = items.map((item, i) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        const num = document.createElement("span");
+        num.className = "num";
+        num.textContent = String(i + 1).padStart(2, "0");
+        const text = document.createElement("p");
+        text.className = "text";
+        text.textContent = item;
+        row.append(num, text);
+        list.append(row);
+        return { row, num, text };
+      });
+      const glow = document.querySelector(".glow");
+      glow.style.height = `${sizes[0]}px`;
+
+      const tl = gsap.timeline({ paused: true, defaults: { ease: "power3.out" } });
+      if (document.querySelector(".title")) tl.fromTo(".title", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6 }, 0.1);
+
+      // Items share the clip evenly after the entrance, leaving about a second and a half for the last to be read.
+      const first = 0.45;
+      const step = items.length ? Math.min(Math.max((len - first - 1.6) / items.length, 0.5), 2.2) : 0;
+      const ink = vars.ink || "#f4f1ea";
+      const accent = vars.accent || "#e0a458";
+      rows.forEach(({ row, num, text }, i) => {
+        const at = first + i * step;
+        tl.fromTo(num, { opacity: 0, x: -120, scale: 1.25, transformOrigin: "0% 50%" }, { opacity: 1, x: 0, scale: 1, duration: 0.6 }, at)
+          .fromTo(text, { opacity: 0, x: -60 }, { opacity: 1, x: 0, duration: 0.6 }, at + 0.08);
+        if (i === 0) tl.fromTo(glow, { opacity: 0, y: row.offsetTop, scaleX: 0.6, transformOrigin: "0% 50%" }, { opacity: 1, scaleX: 1, duration: 0.6 }, at);
+        else {
+          tl.to(glow, { y: row.offsetTop, duration: 0.5, ease: "power3.inOut" }, at - 0.05);
+          const prev = rows[i - 1];
+          tl.fromTo(prev.row, { opacity: 1 }, { opacity: 0.34, duration: 0.45, ease: "power2.out" }, at)
+            .fromTo(prev.num, { color: accent }, { color: ink, duration: 0.45, ease: "power2.out" }, at);
+        }
+      });
+      tl.to(".block", { opacity: 0, y: -24, duration: 0.5, ease: "power2.in" }, len - 0.6);
+      window.__timelines["kinetic-list"] = tl;
+    </script>
+  </div>
+</template>

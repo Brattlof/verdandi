@@ -200,11 +200,18 @@ export const checkProject = async (options: {
         });
     }
     // GSAP only warns when a selector matches nothing: a typo'd target, or an element a later edit removed.
-    for (const message of new Set(opened?.problems.warnings.filter((w) => /GSAP target .* not found/i.test(w))))
+    // GSAP's own text is "GSAP target <selector> not found. https://gsap.com"; an element or null target has no name.
+    const targets = (opened?.problems.warnings ?? []).flatMap((w) => {
+      const m = /GSAP target (.*?) not found/i.exec(w);
+      return m ? [m[1]?.trim() ?? ""] : [];
+    });
+    for (const target of new Set(targets))
       issues.push({
         code: "gsap_target_not_found",
         severity: "warning",
-        message: `${message}: a tween animates nothing.`,
+        message: target
+          ? `A tween's target "${target}" matches nothing (in index.html or one of its scenes), so it animates nothing.`
+          : "A tween's target is an element that doesn't exist (null), so it animates nothing; the script may have removed or never found it.",
         fix: "Fix the selector, or remove the tween for an element that's gone.",
       });
     for (const message of new Set(opened?.problems.errors))

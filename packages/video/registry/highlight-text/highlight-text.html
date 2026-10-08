@@ -1,0 +1,115 @@
+<template>
+  <div
+    id="highlight-text-root"
+    data-composition-id="highlight-text"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"text","type":"string","label":"Text (*asterisks* mark highlights)","default":"Verdandi sends every task to the *cheapest model* that can *finish it*, and remembers *what worked* for next time."},{"id":"accent","type":"color","label":"Marker","default":"#e0a458"},{"id":"markInk","type":"color","label":"Text on the marker","default":"#16161a"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 0 200px; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); }
+      .para { margin: 0; max-width: 1480px; font-size: 80px; font-weight: 650; line-height: 1.32; letter-spacing: -0.015em; text-align: center; text-wrap: balance; }
+      .word { display: inline-block; white-space: nowrap; }
+      .hl { position: relative; display: inline-block; }
+      /* The marker is a copy of the word in the marker's colours, laid exactly over it and uncovered left to right. */
+      .mark {
+        position: absolute; top: 0; bottom: 0; left: -0.1em; right: -0.1em; padding-left: 0.1em; white-space: nowrap; text-align: left; color: var(--markInk, #16161a);
+        background: linear-gradient(transparent 12%, var(--accent, #e0a458) 12%, var(--accent, #e0a458) 96%, transparent 96%);
+      }
+      .mark.join { right: -0.38em; }
+      .mark.tight { right: -0.04em; }
+    </style>
+    <div class="stage">
+      <p class="para" data-var-text="text">Verdandi sends every task to the cheapest model that can finish it, and remembers what worked for next time.</p>
+    </div>
+    <script>
+      // Words are split on whitespace; each word is a list of runs, plain (-1) or in the nth *phrase*.
+      const para = document.querySelector(".para");
+      const raw = String(__verdandi.getVariables().text ?? para.textContent);
+      const words = [];
+      let cur = null;
+      let inside = false;
+      let phrases = 0;
+      for (const ch of raw) {
+        if (ch === "*") {
+          inside = !inside;
+          if (inside) phrases++;
+          continue;
+        }
+        if (/\s/.test(ch)) {
+          cur = null;
+          continue;
+        }
+        if (!cur) {
+          cur = [];
+          words.push(cur);
+        }
+        const phrase = inside ? phrases - 1 : -1;
+        const last = cur.at(-1);
+        if (last && last.phrase === phrase) last.text += ch;
+        else cur.push({ text: ch, phrase });
+      }
+
+      para.textContent = "";
+      const marks = Array.from({ length: phrases }, () => []);
+      const joins = [];
+      const spans = words.map((runs, i) => {
+        if (i) para.append(" ");
+        const word = document.createElement("span");
+        word.className = "word";
+        runs.forEach((run, j) => {
+          if (run.phrase < 0) {
+            const plain = document.createElement("span");
+            plain.textContent = run.text;
+            word.append(plain);
+            return;
+          }
+          const hl = document.createElement("span");
+          hl.className = "hl";
+          const base = document.createElement("span");
+          base.textContent = run.text;
+          const mark = document.createElement("span");
+          mark.className = "mark";
+          mark.setAttribute("aria-hidden", "true");
+          mark.textContent = run.text;
+          // The marker runs on across the space when the phrase goes on in the next word.
+          // It stops at the glyph when punctuation follows in the same word.
+          if (j === runs.length - 1 && words[i + 1]?.[0].phrase === run.phrase) joins.push({ mark, i });
+          if (j < runs.length - 1) mark.classList.add("tight");
+          hl.append(base, mark);
+          word.append(hl);
+          marks[run.phrase].push({ base, mark });
+        });
+        para.append(word);
+        return word;
+      });
+
+      // A phrase that wraps doesn't run on past the end of the line.
+      for (const { mark, i } of joins) if (spans[i + 1].offsetTop === spans[i].offsetTop) mark.classList.add("join");
+
+      const end = __verdandi.duration();
+      const tl = gsap.timeline({ paused: true });
+      const stagger = Math.min(0.05, 1 / Math.max(spans.length, 1));
+      tl.fromTo(spans, { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.55, ease: "power3.out", stagger }, 0.15);
+
+      // Phrases are marked in order at a steady hand speed, each word's share of the sweep matching its width.
+      let at = 0.15 + stagger * spans.length + 0.35;
+      for (const list of marks) {
+        if (!list.length) continue;
+        const widths = list.map((m) => m.mark.offsetWidth);
+        const total = widths.reduce((a, b) => a + b, 0);
+        const sweep = Math.min(Math.max(total / 1500, 0.3), 0.9);
+        list.forEach(({ base, mark }, i) => {
+          const d = (sweep * widths[i]) / total;
+          // Once covered, the light word underneath is hidden, so only the marked copy is read.
+          tl.fromTo(mark, { clipPath: "inset(0% 100% 0% 0%)" }, { clipPath: "inset(0% 0% 0% 0%)", duration: d, ease: "none" }, at)
+            .fromTo(base, { opacity: 1 }, { opacity: 0, duration: 0.01, ease: "none" }, at + d);
+          at += d;
+        });
+        at += 0.22;
+      }
+      tl.to(".stage", { opacity: 0, y: -20, duration: 0.45, ease: "power2.in" }, Math.max(end - 0.5, at + 0.8));
+      window.__timelines["highlight-text"] = tl;
+    </script>
+  </div>
+</template>

@@ -75,4 +75,5 @@ test("seeking media isn't a failed load, and a tween whose selector matches noth
   );
   const result = await checkProject({ projectDir: dir, env: process.env, samples: 3 });
   expect(result.findings.map((f) => f.code)).toEqual(["gsap_target_not_found"]);
+  expect(result.findings[0]?.message).toContain(`target "#clipp" matches nothing`);
 }, 60_000);
