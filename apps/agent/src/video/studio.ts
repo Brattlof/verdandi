@@ -14,10 +14,11 @@ import {
   type VideoProjectId,
   type VideoQuality,
   type VideoRenderJob,
+  type VideoResolution,
   VideoUnavailable,
   type VideoView,
 } from "@verdandi/contracts";
-import { checkProject, projectHandler, render } from "@verdandi/video";
+import { checkProject, initProject, projectHandler, render } from "@verdandi/video";
 import { Context, Effect, Layer, PubSub, Stream } from "effect";
 import { childEnv } from "../home/child-env.ts";
 
@@ -39,6 +40,8 @@ export class VideoStudio extends Context.Service<
   VideoStudio,
   {
     readonly open: (path: string) => Effect.Effect<VideoView, VideoUnavailable>;
+    /** Makes a new project in an empty or new folder, then opens it. */
+    readonly create: (path: string, resolution: VideoResolution) => Effect.Effect<VideoView, VideoUnavailable>;
     readonly read: (projectId: VideoProjectId, path: string) => Effect.Effect<VideoFile, VideoUnavailable>;
     readonly write: (
       projectId: VideoProjectId,
@@ -150,18 +153,18 @@ export const VideoStudioLive = Layer.effect(
       publish(p, { kind: "render", job: entry.job });
     };
 
-    return VideoStudio.of({
+    const service: VideoStudio["Service"] = {
       open: (path) =>
         Effect.gen(function* () {
           const real = yield* Effect.try({
             try: () => realpathSync(resolve(path.replace(/^~(?=$|[\\/])/, process.env.HOME ?? "~"))),
             catch: () =>
-              new VideoUnavailable({ reason: "NotAProject", message: `${path} doesn't exist. Create one with verdandi video init <dir>.` }),
+              new VideoUnavailable({ reason: "NotAProject", message: `${path} doesn't exist. Make one there with Create project.` }),
           });
           if (!existsSync(join(real, "index.html")))
             return yield* new VideoUnavailable({
               reason: "NotAProject",
-              message: `${real} has no index.html, so it isn't a video project. Create one with verdandi video init <dir>.`,
+              message: `${real} has no index.html, so it isn't a video project. Make one in an empty or new folder with Create project.`,
             });
           const known = byPath.get(real);
           const existing = known && projects.get(known);
@@ -194,6 +197,17 @@ export const VideoStudioLive = Layer.effect(
           projects.set(id, p);
           byPath.set(real, id);
           return view(p);
+        }),
+
+      create: (path, resolution) =>
+        Effect.gen(function* () {
+          const target = resolve(path.replace(/^~(?=$|[\\/])/, process.env.HOME ?? "~"));
+          // Refuses a folder that has anything in it, so nothing of the user's is ever overwritten.
+          yield* Effect.try({
+            try: () => initProject(target, { resolution }),
+            catch: (e) => new VideoUnavailable({ reason: "NotEmpty", message: e instanceof Error ? e.message : String(e) }),
+          });
+          return yield* service.open(target);
         }),
 
       read: (projectId, path) =>
@@ -324,6 +338,7 @@ export const VideoStudioLive = Layer.effect(
         ),
 
       serve: (projectId, path, headers) => projects.get(projectId)?.handle(path, headers),
-    });
+    };
+    return VideoStudio.of(service);
   }),
 );

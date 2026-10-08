@@ -35,6 +35,7 @@ import {
   VideoProjectId,
   VideoQuality,
   VideoRenderJob,
+  VideoResolution,
   VideoUnavailable,
   VideoView,
 } from "./video.ts";
@@ -472,6 +473,8 @@ export class Api extends RpcGroup.make(
   }),
   /** Opens a video project (a folder with an index.html) for the Studio; opening it again returns the same id. */
   Rpc.make("VideoOpen", { payload: { path: Schema.String }, success: VideoView, error: VideoUnavailable }),
+  /** Makes a new video project in an empty or new folder (`NotEmpty` for one with files in it), then opens it. */
+  Rpc.make("VideoCreate", { payload: { path: Schema.String, resolution: VideoResolution }, success: VideoView, error: VideoUnavailable }),
   Rpc.make("VideoFileRead", { payload: { projectId: VideoProjectId, path: Schema.String }, success: VideoFile, error: VideoUnavailable }),
   /**
    * Writes a text file in the project. `expectedVersion` is the version the client read (null: the file must not exist);
