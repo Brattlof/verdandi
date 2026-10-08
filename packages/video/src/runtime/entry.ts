@@ -101,6 +101,7 @@ window.addEventListener("message", (event: MessageEvent<{ source?: string; actio
   if (data?.source !== "vd-host" || !vd.ready) return;
   if (data.action === "play") player.play();
   else if (data.action === "pause") player.pause();
+  else if (data.action === "playTo" && typeof data.time === "number") player.playTo(data.time);
   else if (data.action === "seek" && typeof data.time === "number") {
     player.pause();
     void player.seek(data.time);

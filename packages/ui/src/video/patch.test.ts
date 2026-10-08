@@ -42,6 +42,6 @@ test("an inserted asset becomes the composition's first child, with a free id an
 });
 
 test("an insert into a CRLF file keeps CRLF", () => {
-  const page = "<body>\r\n  <div id=\"root\" data-composition-id=\"main\">\r\n  </div>\r\n</body>";
+  const page = '<body>\r\n  <div id="root" data-composition-id="main">\r\n  </div>\r\n</body>';
   expect(insertIntoComposition(page, "main", "<p></p>")).toBe(page.replace('id="main">', 'id="main">\r\n    <p></p>'));
 });

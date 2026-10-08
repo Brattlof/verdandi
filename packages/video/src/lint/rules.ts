@@ -469,6 +469,15 @@ const rules: Record<string, Rule> = {
   },
 
   transitions(ctx, report) {
+    for (const t of ctx.parsed.tags)
+      if (has(t, "data-slide") && !has(t, "data-start"))
+        report({
+          code: "slide_untimed",
+          severity: "warning",
+          line: t.line,
+          message: `${where(t)} is a slide but has no data-start, so presenting can't find where it begins.`,
+          fix: "Give the slide's scene data-start and data-duration.",
+        });
     for (const t of ctx.parsed.tags) {
       const shader = attr(t, "data-transition");
       if (shader === undefined) continue;

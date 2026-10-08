@@ -256,6 +256,17 @@ const subcommands: Record<string, (argv: readonly string[]) => Promise<void>> = 
     );
   },
 
+  async present(argv) {
+    const valued = ["--home", "--port", "--host"];
+    const at = argv.findIndex((a, i) => !a.startsWith("--") && !valued.includes(argv[i - 1] ?? ""));
+    const dir = resolve(at === -1 ? "." : (argv[at] ?? "."));
+    await lintProject(dir);
+    await web(
+      argv.filter((_, i) => i !== at),
+      new URLSearchParams({ view: "video", project: dir, present: "1" }).toString(),
+    );
+  },
+
   async timeline(argv) {
     const dir = resolve(positional(argv, ["--entry"]) ?? ".");
     const entry = flag(argv, "--entry");

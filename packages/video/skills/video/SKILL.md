@@ -21,6 +21,7 @@ installed (video-media).
 | A video of a pull request, change or release note | **video-pr** |
 | A short unnarrated piece: kinetic type, a number hit, logo sting, title card, lower third, overlay | **video-motion-graphics** |
 | Captions or subtitles on an existing video | **video-captions** |
+| Slides to present and talk over (a deck), not a video that plays on its own | **video-slideshow** |
 
 The workflows above pull in the craft skills as they go; load these directly for anything else:
 **video-creative** (design.md, STORYBOARD.md, type, contrast, pacing), **video-animation** (motion, transitions,

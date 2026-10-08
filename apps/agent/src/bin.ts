@@ -50,6 +50,7 @@ const usage = `Usage:
   verdandi video catalog [query] [--json]   list the blocks, or those matching every word of the query
   verdandi video skills [--remove] [--force] [--home <dir>]   install the video skills into the profile, for every harness (--remove takes them out); edited copies are kept unless --force
   verdandi video preview [dir] [--home <dir>] [--port <n>] [--no-open]   open the project in the web UI's video Studio (preview, timeline, editor, renders) until Ctrl+C
+  verdandi video present [dir] [--home <dir>] [--port <n>] [--no-open]   present a slideshow (scenes marked data-slide) in the browser: → next, ← back, P presenter notes, F full screen
   verdandi video timeline [dir] [--json]   the composition's tracks and clips with their resolved start and end
   verdandi decisions eval [--candidate <module>] [--home <dir>]   replay logged decisions through a candidate backend (a module default-exporting a decision Backend; default: today's rules) and print, per question kind, its agreement with the logged answers and, where the task's outcome is known, accuracy and Brier score; reads the database read-only`;
 

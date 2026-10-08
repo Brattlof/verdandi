@@ -65,12 +65,17 @@ export class VerdandiPlayer extends HTMLElement {
     this.post({ action: "pause" });
   }
 
+  /** Plays on to `time` and stops there (a slideshow's next step); a time behind it jumps back instead. */
+  playTo(time: number) {
+    this.post({ action: "playTo", time });
+  }
+
   seek(time: number) {
     this.currentTime = time;
     this.post({ action: "seek", time });
   }
 
-  private post(message: { action: "play" | "pause" | "seek"; time?: number }) {
+  private post(message: { action: "play" | "pause" | "seek" | "playTo"; time?: number }) {
     // The frame's origin is opaque, so "*" is the only target that reaches it; the message carries nothing secret.
     this.frame.contentWindow?.postMessage({ source: "vd-host", ...message }, "*");
   }

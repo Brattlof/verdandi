@@ -96,6 +96,19 @@ export const VideoMedia = Schema.Struct({
 });
 export type VideoMedia = typeof VideoMedia.Type;
 
+/**
+ * A slide, for presenting: a scene marked `data-slide`. Presenting plays up to `rest` (its `data-hold` seconds after its
+ * start, else just before its end) and waits there for the next step.
+ */
+export const VideoSlide = Schema.Struct({
+  id: Schema.UndefinedOr(Schema.String),
+  title: Schema.String,
+  start: Schema.Number,
+  rest: Schema.Number,
+  notes: Schema.String,
+});
+export type VideoSlide = typeof VideoSlide.Type;
+
 /** A composition's resolved timeline, read from the running page (`window.__vd.manifest()`). */
 export const VideoManifest = Schema.Struct({
   id: Schema.String,
@@ -104,6 +117,8 @@ export const VideoManifest = Schema.Struct({
   duration: Schema.Number,
   clips: Schema.Array(VideoClip),
   media: Schema.Array(VideoMedia),
+  /** Scenes marked `data-slide`, in order; empty for a composition that isn't a slideshow. */
+  slides: Schema.Array(VideoSlide),
 });
 export type VideoManifest = typeof VideoManifest.Type;
 

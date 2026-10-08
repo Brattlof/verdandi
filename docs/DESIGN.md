@@ -1214,6 +1214,8 @@ HTML **composition**, and an agent writes, checks and renders it like any other 
 - **Shader transitions.** `data-transition="burn"` between two overlapping scenes blends them with one of 13 WebGL
   shaders. A render captures each scene alone per frame and blends the pictures in the page; the preview, which can't
   read its own pixels, crossfades instead.
+- **Slideshows.** Scenes marked `data-slide` make a deck: `verdandi video present` plays each slide's entrance and
+  holds until the presenter moves on, with notes in a presenter window. The same project still renders to video.
 - **Checks.** `verdandi video lint` checks the source; `check` also runs the page and reports runtime errors, failed
   loads, clips past the end, text off the canvas and compositions where nothing moves.
 - **Blocks and skills.** Ready-made blocks (lower thirds, titles, charts, captions, transitions…) ship in

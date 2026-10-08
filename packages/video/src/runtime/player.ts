@@ -152,7 +152,51 @@ export class Player {
       duration: this.duration(),
       clips,
       media: this.media(),
+      slides: this.slides(),
     };
+  }
+
+  /** Scenes marked `data-slide`, in time order, each with where presenting rests on it. */
+  slides() {
+    return [...document.querySelectorAll("[data-slide]")]
+      .map((el) => {
+        const start = this.clips.start(el);
+        const end = this.clips.end(el);
+        const hold = positive(el.getAttribute("data-hold"));
+        // Just before the end, so the next slide's transition hasn't begun; a slide with no end rests where it starts.
+        const rest = hold !== undefined ? start + hold : Number.isFinite(end) ? Math.max(start, end - 1 / this.fps) : start;
+        return {
+          id: el.id || el.getAttribute("data-composition-id") || undefined,
+          title: el.getAttribute("data-slide") || el.getAttribute("data-label") || el.id || "",
+          start,
+          rest,
+          notes: el.getAttribute("data-notes") ?? "",
+        };
+      })
+      .sort((a, b) => a.start - b.start);
+  }
+
+  /** Plays from where it is up to `t`, then pauses there (presenting a slideshow's next step). */
+  playTo(t: number) {
+    this.pause();
+    if (t <= this.time) {
+      void this.seek(t);
+      return;
+    }
+    this.playing = true;
+    this.origin = performance.now() - this.time * 1000;
+    const tick = () => {
+      if (!this.playing) return;
+      const now = (performance.now() - this.origin) / 1000;
+      if (now >= t) {
+        void this.seek(t);
+        this.pause();
+        return;
+      }
+      void this.seek(now);
+      this.frame = requestAnimationFrame(tick);
+    };
+    this.frame = requestAnimationFrame(tick);
   }
 
   /** Shows each timed element only inside its window (and its timed ancestors'); `data-hidden` hides it outright. */

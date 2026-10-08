@@ -17,6 +17,7 @@ import { emptyHistory, type History, record, redoStep, undoStep } from "./histor
 import { Inspector } from "./inspector.tsx";
 import { assetMarkup, insertIntoComposition, seconds, setAttribute } from "./patch.ts";
 import type { VerdandiPlayer } from "./player.ts";
+import { Present } from "./present.tsx";
 import "./player.ts";
 import { Timeline } from "./timeline.tsx";
 
@@ -40,6 +41,8 @@ type Open = { readonly path: string; readonly saved: string; readonly draft: str
  */
 export const StudioPage = ({ connection }: { connection: Connection }) => {
   const [path, setPath] = useState(hashProject);
+  // `verdandi video present` opens straight into presenting; read before opening the project rewrites the hash.
+  const [present] = useState(() => new URLSearchParams(location.hash.slice(1)).get("present") === "1");
   const [view, setView] = useState<VideoView>();
   const [error, setError] = useState<string>();
   const open = useCallback(
@@ -135,6 +138,7 @@ export const StudioPage = ({ connection }: { connection: Connection }) => {
       key={view.projectId}
       connection={connection}
       initial={view}
+      present={present}
       onClose={() => {
         setView(undefined);
         history.replaceState(null, "", "#view=video");
@@ -143,12 +147,23 @@ export const StudioPage = ({ connection }: { connection: Connection }) => {
   );
 };
 
-const Studio = ({ connection, initial, onClose }: { connection: Connection; initial: VideoView; onClose: () => void }) => {
+const Studio = ({
+  connection,
+  initial,
+  present,
+  onClose,
+}: {
+  connection: Connection;
+  initial: VideoView;
+  present: boolean;
+  onClose: () => void;
+}) => {
   const projectId = initial.projectId as VideoProjectId;
   const [files, setFiles] = useState(initial.files);
   const [assets, setAssets] = useState(initial.assets);
   const [selected, setSelected] = useState<string>();
   const [checked, setChecked] = useState<VideoCheckResult | "running">();
+  const [presenting, setPresenting] = useState(present);
   const [jobs, setJobs] = useState<ReadonlyMap<string, VideoRenderJob>>(new Map(initial.renders.map((j) => [j.jobId, j])));
   const [manifest, setManifest] = useState<VideoManifest>();
   const [time, setTime] = useState(0);
@@ -299,6 +314,9 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
         <span className="min-w-0 flex-1 truncate font-medium" title={initial.path}>
           {initial.path}
         </span>
+        <button type="button" onClick={() => setPresenting(true)} title="Present the slides (scenes marked data-slide)">
+          Present
+        </button>
         <button
           type="button"
           disabled={checked === "running"}
@@ -332,6 +350,7 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
         </button>
         <RenderControls connection={connection} projectId={projectId} onError={setNotice} />
       </header>
+      {presenting && <Present src={`${connection.endpoint.base}/video/${projectId}/index.html`} onExit={() => setPresenting(false)} />}
       {notice && (
         <p role="alert" className="flex items-center gap-2 border-b border-line bg-card px-4 py-2 text-error">
           <span className="flex-1">{notice}</span>
