@@ -1,5 +1,5 @@
 {
-  "name": "crossfade-transition",
+  "name": "wipe-transition",
   "title": "Wipe transition",
   "description": "A full-frame coloured wipe that sweeps in to cover the picture and sweeps out the other side in 0.8 s; put it over the cut between two scenes.",
   "tags": ["transition", "wipe", "swipe", "cut", "scene", "crossfade"],

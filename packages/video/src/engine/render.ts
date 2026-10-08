@@ -163,12 +163,13 @@ export const render = async (options: RenderOptions): Promise<RenderResult> => {
 
     const sources = sourceResolver(server.url, projectDir, work);
     await sources.fetchRemote(manifest.media.map((m) => m.src));
-    onProgress?.({ stage: "extract", done: 0, total: manifest.media.length });
+    // Media stages report only when there is media, so a text-only render never says it decodes or mixes anything.
+    if (manifest.media.some((m) => m.kind === "video")) onProgress?.({ stage: "extract", done: 0, total: manifest.media.length });
     const videos = new Map<string, ExtractedVideo>(
       (await extractVideos(env, manifest.media, sources.local, fps, join(work, "frames"), signal)).map((v) => [v.renderId, v]),
     );
     lap("extract");
-    onProgress?.({ stage: "audio", done: 0, total: 1 });
+    if (manifest.media.some((m) => m.audible)) onProgress?.({ stage: "audio", done: 0, total: 1 });
     const audioFile = join(work, "audio.wav");
     const hasAudio =
       format !== "gif" && format !== "png-sequence" && (await mixAudio(env, manifest.media, sources.local, duration, audioFile, signal));

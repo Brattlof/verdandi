@@ -114,4 +114,6 @@ Stack the options in one slot and move one out as the next comes in:
 </script>
 ```
 
-The slot is as wide as its widest word, so the line doesn't jump.
+The slot is as wide as its widest word, so the line doesn't jump. In a scene file, `gsap.utils.toArray(".opt")`
+finds only this scene's options; in `index.html` it would match every scene's, so prefix an id there
+(`"#hero .opt"`).

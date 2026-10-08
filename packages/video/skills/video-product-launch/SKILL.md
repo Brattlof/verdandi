@@ -24,6 +24,11 @@ Only a URL and no screenshots? Ask whether you may capture the site. If yes, Chr
 headless (`<chrome> --headless --screenshot=assets/screens/home.png --window-size=1440,900 <url>`), but logged-in
 screens and real data must come from the user. Never invent UI or customer names; build only from what they gave.
 
+**No screenshots and no logo?** Make it anyway, without faking the product: set the name as a type-set wordmark
+(the brand's font, or a strong system one, with the accent on one letter or an underline), and carry the
+features with diagrams, icons built from simple shapes, numbers and kinetic type, as video-explainer does. Never
+draw a mock app screen or fake UI; the first real screenshot can replace a diagram later.
+
 Copy everything into `assets/screens/`, `assets/footage/` and `assets/brand/`, and prepare footage per
 video-media.
 
@@ -40,8 +45,15 @@ A shape that works for most launches (30 s):
 | Proof | 24–27 s | A number, a quote or a logo row, only if the user supplied it |
 | Call to action | 27–30 s | Logo, URL or "Available today"; holds to the end |
 
-Cut it to 15 s by keeping hook, product, one feature and the call to action. Write `STORYBOARD.md` and
-`design.md` (video-creative), using the brand's colours and fonts, and wait for the user's yes.
+By length:
+
+- **15 s** (social cut): hook 2 s, product 3 s, one feature 6 s, call to action 4 s. No problem beat.
+- **20–25 s**: hook, product, 2 features of about 5 s each, call to action; fold the problem into the hook.
+- **30 s and over**: the full shape above. Past 30 s add features (one scene each, 4–6 s) or a short flow from a
+  screen recording, not longer holds; a 60 s demo is about 8–10 scenes.
+
+Write `STORYBOARD.md` and `design.md` (video-creative), using the brand's colours and fonts, and wait for the
+user's yes.
 
 ## 3. Show screenshots well
 

@@ -31,10 +31,11 @@ This skill is how to make the motion good and keep it seekable.
    `setTimeout` loops or CSS `transition`. Use a seeded generator (video-core) and compute values while building.
 7. **No state that accumulates across frames.** A `vd-seek` handler or `onUpdate` must draw from the time alone,
    never "add a bit more than last frame".
-8. **Don't measure layout during the build** unless you wait for fonts: scripts run before web fonts load, so
-   widths come from the fallback font. Prefer `xPercent`/`yPercent` and CSS layout. If you must measure, build
-   inside `document.fonts.ready.then(…)`, push that promise to `window.__vdBuildReady`, and register the
-   timeline at the end of the callback.
+8. **Measure text only once fonts have loaded.** A scene file's script runs after its fonts load (up to 5 s),
+   so measuring there is safe. Scripts in `index.html` run before web fonts load, so widths come from the
+   fallback font: build inside `document.fonts.ready.then(…)`, push that promise to `window.__vdBuildReady`, and
+   register the timeline at the end of the callback. Either way, `xPercent`/`yPercent` and CSS layout need no
+   measuring.
 9. **In a scene file, the scene's root keeps its id for your script and CSS** (`tl.to("#scene-root", …)` works), even
    though the runtime renames it in the page so two mounts don't clash. A misspelled selector animates nothing:
    `check` reports it as `gsap_target_not_found`.
@@ -83,10 +84,17 @@ Copy a recipe, then change its numbers to your layout and beats; snapshot the re
    ```
 
 4. To prove a move is seekable, snapshot out of order into another folder
-   (`verdandi video snapshot <dir> --at 4,1,3 -o <dir>/snap-check`) and compare with the in-order frames. They
-   should look identical; byte-for-byte checks are too strict, since edges of scaled text can differ by one
-   level in a few pixels. Anything you can see is a seek bug: a `to()` that depends on an earlier state, or
-   state kept outside the timeline.
+   (`verdandi video snapshot <dir> --at 4,1,3 -o <dir>/snap-check`) and compare each frame with the in-order one
+   at the same time (the file names end `-at-4.00s.png`; the numbers before differ):
+
+   ```bash
+   ffmpeg -hide_banner -i <dir>/snapshots/frame-03-at-4.00s.png -i <dir>/snap-check/frame-01-at-4.00s.png \
+     -lavfi psnr -f null - 2>&1 | grep PSNR
+   ```
+
+   Identical frames print `average:inf`, and above 60 dB is a match too (edges of scaled text can differ by one
+   level in a few pixels, so don't compare bytes). Lower than that, look at both: a visible difference is a seek
+   bug, a `to()` that depends on an earlier state, or state kept outside the timeline.
 5. A move that looks right in snapshots but wrong in motion (too fast, jittery): render a draft
    (`verdandi video render <dir> --quality draft`) and ask the user to watch it.
 
@@ -96,7 +104,6 @@ Copy a recipe, then change its numbers to your layout and beats; snapshot the re
 |---|---|---|
 | Element never appears | `from()` with CSS `opacity: 0`, or a selector that matches nothing (GSAP only warns in the console) | `fromTo`; check the selector exists inside this composition |
 | Element pops in at full size, then animates | CSS start state differs from the tween's `from` | Let the tween own the start state; keep CSS at rest |
-| Scene root doesn't move | Script targets the scene root by its id | Animate an inner `.stage` wrapper |
 | Second tween on a property jumps | Both tweens render their start immediately | `immediateRender: false` on the later one |
 | Text cut off mid-reveal is reported as `clipped_text` | Mask built with `overflow: hidden` | Mask with `clip-path: inset(…)` (see `references/text.md`) |
 | Different frames on each render | Randomness, clocks or accumulating state | Seeded values, computed at build; draw from time only |

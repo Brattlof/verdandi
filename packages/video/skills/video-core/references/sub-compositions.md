@@ -45,8 +45,9 @@
   redirected to the host's id.
 - The host must be empty. Whatever it contains is replaced by the mounted scene.
 - `data-composition-src` is relative to the file the host is in: for a host in `index.html`, the project root;
-  for a host nested in `compositions/card.html`, `compositions/`. Relative `src`, `href`, `poster` and CSS
-  `url()`s inside a scene file are likewise relative to that file.
+  for a host nested in `compositions/card.html`, `compositions/`. Relative `src`, `href`, `poster`,
+  `data-var-src` values and CSS `url()`s inside a scene file are likewise relative to that file
+  (`../assets/x.png` from `compositions/`).
 - Without `data-duration`, the host lasts as long as the scene's registered timeline. Set it explicitly anyway,
   so the root's length and the following `data-start` references are what you planned.
 - Inside the scene, `data-start` values are relative to the host's start.
@@ -57,14 +58,14 @@ The runtime runs each scene script inside a function whose globals are scoped to
 
 | Name | Scoped behaviour |
 |---|---|
-| `document.querySelector`, `querySelectorAll`, `getElementById` | Search only inside this mount. `getElementById("<inner root id>")` finds the inner root. `querySelectorAll` returns an array. |
-| `gsap.to/from/fromTo/set`, `tl.to/from/fromTo/set` | A **string** selector resolves inside this mount. Elements and arrays are passed through unchanged. |
+| `document.querySelector`, `querySelectorAll`, `getElementById` | Search only inside this mount. The inner root's id as written in the file finds it (`"#<name>-root"`). `querySelectorAll` returns an array. |
+| `gsap.to/from/fromTo/set`, `tl.to/from/fromTo/set`, `gsap.utils.toArray` | A string selector, or an array of them, resolves inside this mount (`"#<name>-root"` included). Elements pass through unchanged. |
 | `window.__timelines` | Writing the file's own id writes the mount's id. |
 | `__verdandi` | This mount's variables and asset URLs. |
 
-**Not scoped:** `gsap.utils.toArray(".x")`, `gsap.utils.selector`, other tween methods given a string
-selector, and anything reached through `document.body` or `document.documentElement`. Resolve elements with the
-scoped `document.querySelectorAll` and pass them in. Top-level `const` and `let` are local to the script, so
+**Not scoped:** `gsap.utils.selector`, other tween methods given a string selector, and anything reached
+through `document.body` or `document.documentElement`. Resolve elements with the scoped
+`document.querySelectorAll` and pass them in. Top-level `const` and `let` are local to the script, so
 every scene can declare its own `tl`.
 
 Scripts in `index.html` itself are ordinary page scripts, with nothing scoped. Their selectors match elements in

@@ -73,7 +73,9 @@ References, to read when you need them:
 - `data-hidden` (no value needed) removes an element from both preview and render, whatever its window. The
   Studio's H key toggles it. Remove the attribute to bring the element back.
 - The root's direct children that have `data-start` get `position: absolute` with no size. Give every clip an
-  explicit box: for a scene, `position: absolute; inset: 0`.
+  explicit box: `inset: 0` for a full-frame scene or overlay (the host `verdandi video add` prints already has
+  `style="inset: 0"`), or a size and position of its own. Put full-frame scenes on track 0 and overlays on higher
+  tracks.
 
 ## Sub-compositions, in short
 
@@ -99,9 +101,13 @@ its `<style>` and `<script>` go **inside** the template:
 The host in `index.html` sets the timing: `data-composition-id`, `data-composition-src` (the path from the
 project root), `data-start` and `data-duration`. Prefer mounting every scene from `index.html`; a host inside a
 scene file names its file relative to that scene file (`parts/badge.html` from `compositions/card.html`). Only
-classic scripts run in a scene: lint rejects a `<script type="module">` there. Inside a scene, CSS is scoped to it, and so are `document.querySelector*` and
-`getElementById`, and the string selectors given to `gsap.to/from/fromTo/set` and `tl.to/from/fromTo/set`.
-Class names can therefore repeat across scenes. Scripts in `index.html` are **not** scoped: there, a selector
+classic scripts run in a scene: lint rejects a `<script type="module">` there. Relative URLs in a scene file
+(`src`, `href`, `poster`, `data-composition-src`, `data-var-src` values, CSS `url()`) resolve against that file,
+so assets are `../assets/…` from `compositions/`. Inside a scene, CSS is scoped to it, and so are
+`document.querySelector*` and `getElementById`, the selectors (strings, or arrays of strings) given to
+`gsap.to/from/fromTo/set` and `tl.to/from/fromTo/set`, and `gsap.utils.toArray`. The scene's root keeps the id
+written in the file for these (`tl.to("#intro-root", …)` works). Class names can therefore repeat across scenes.
+Scene scripts run after the scene is laid out and its fonts have loaded (up to 5 s), so measuring text is safe. Scripts in `index.html` are **not** scoped: there, a selector
 like `.title` also matches every scene's `.title`, so target root-level elements by `id`. To mount the same
 file twice, see `references/sub-compositions.md`.
 
@@ -158,6 +164,6 @@ Scripts read them with `__verdandi.getVariables()`.
 - No `repeat: -1` unless the root has a `data-duration`.
 - Nothing from the network: put scripts in `vendor/`, and fonts and media in `assets/`. Load fonts with
   `@font-face` and a relative `url()`.
-- Use relative paths (`assets/x.png`), not `/assets/x.png`. The Studio serves the project under its own path
-  prefix, so a leading `/` points outside the project there.
+- Use relative paths (`assets/x.png`, or `../assets/x.png` in a scene file), not `/assets/x.png`. The Studio
+  serves the project under its own path prefix, so a leading `/` points outside the project there.
 - Don't depend on input, hover, scroll position or the window size.

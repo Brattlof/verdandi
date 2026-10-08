@@ -94,8 +94,12 @@ const authoredSelector = (root: Element, selector: string) =>
       : match,
   );
 
-/** Targets resolved inside `root`: a selector string matches only that subtree (the root itself included). */
+/**
+ * Targets resolved inside `root`: a selector string matches only that subtree (the root itself included), and so does
+ * each string in an array of targets.
+ */
 const scopeTargets = (root: Element, targets: unknown): unknown => {
+  if (Array.isArray(targets)) return targets.flatMap((t) => (typeof t === "string" ? (scopeTargets(root, t) as Element[]) : [t]));
   if (typeof targets !== "string") return targets;
   const selector = authoredSelector(root, targets);
   return [...(root.matches(selector) ? [root] : []), ...root.querySelectorAll(selector)];
@@ -112,6 +116,15 @@ const scopedGsap = (root: Element, gsap: Gsapish | undefined) => {
     const original = gsap[m];
     if (typeof original === "function")
       scoped[m] = (targets: unknown, ...rest: unknown[]) => original.call(gsap, scopeTargets(root, targets), ...rest);
+  }
+  const utils = gsap.utils as Record<string, unknown> | undefined;
+  if (utils && typeof utils.toArray === "function") {
+    const toArray = utils.toArray;
+    const scopedUtils: Record<string, unknown> = Object.create(utils);
+    // A string or an array of strings resolves inside the composition, like a tween's targets.
+    scopedUtils.toArray = (targets: unknown, ...rest: unknown[]) =>
+      typeof targets === "string" || Array.isArray(targets) ? scopeTargets(root, targets) : toArray.call(utils, targets, ...rest);
+    scoped.utils = scopedUtils;
   }
   const timeline = gsap.timeline;
   if (typeof timeline === "function")

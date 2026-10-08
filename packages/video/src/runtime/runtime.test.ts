@@ -14,7 +14,7 @@ const index = `<!doctype html><html><head><script src="gsap.min.js"></script>
   <div id="b" class="clip box" data-start="a + 0.5" data-duration="1"></div>
   <div id="card" data-composition-id="card" data-composition-src="card.html" data-start="2" data-duration="2"></div>
   <div id="card2" data-composition-id="card" data-composition-src="card.html" data-start="1" data-duration="1" data-variable-values='{"title":"Two"}'></div>
-  <p id="outside">outside</p>
+  <p id="outside" class="t v">outside</p>
 </div>
 <script>const tl = gsap.timeline({ paused: true }); tl.fromTo("#a", { opacity: 0 }, { opacity: 1, duration: 1, ease: "none" }); window.__timelines.main = tl;</script>
 </body></html>`;
@@ -28,6 +28,9 @@ const card = `<template><div id="card-root" data-composition-id="card" data-comp
   const tl = gsap.timeline({ paused: true });
   tl.to(".t", { x: 100, duration: 1, ease: "none" });
   gsap.set("#card-root", { attr: { "data-hit": "yes" } });
+  // Arrays of selectors and gsap.utils.toArray stay inside this mount too.
+  gsap.set([".t", ".v"], { attr: { "data-arr": "1" } });
+  for (const el of gsap.utils.toArray(".v")) el.setAttribute("data-util", "1");
   window.__timelines.card = tl;
 </script>
 </div></template>`;
@@ -81,6 +84,8 @@ const at = (t: number) =>
         x: new DOMMatrix(getComputedStyle(h.querySelector(".t") as Element).transform).m41,
       })),
       outsideColor: style("#outside").color,
+      outsideTouched: ["data-arr", "data-util"].some((a) => document.getElementById("outside")?.hasAttribute(a)),
+      leaked: document.querySelectorAll("[data-util]").length,
     };
   }, t);
 
@@ -109,6 +114,9 @@ test("each mount of a sub-composition gets its own id, variables, scoped styles 
   expect(second?.x).toBeCloseTo(50);
   expect(first?.visibility).toBe("hidden");
   expect(s.outsideColor).not.toBe("rgb(0, 128, 0)");
+  // Each mount's script touched only its own .t and .v: two mounts, one .v each.
+  expect(s.outsideTouched).toBe(false);
+  expect(s.leaked).toBe(2);
   expect((await at(2.5)).cards[0]?.x).toBeCloseTo(50);
 });
 

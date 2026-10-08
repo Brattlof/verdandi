@@ -87,7 +87,7 @@ const subcommands: Record<string, (argv: readonly string[]) => Promise<void>> = 
     const resolution = oneOf("--resolution", flag(argv, "--resolution"), Object.keys(resolutions) as Resolution[], "landscape");
     const project = initProject(dir, { resolution });
     console.log(
-      `Created ${project.dir} (${project.width}×${project.height}).\nNext: edit index.html, then verdandi video snapshot ${dir} --at 1 and verdandi video render ${dir}`,
+      `Created ${project.dir} (${project.width}×${project.height}).\nNext: edit index.html, then verdandi video check ${dir} and verdandi video snapshot ${dir} --at 1 to look at it; render (verdandi video render ${dir}) once it's right.`,
     );
   },
 
@@ -182,7 +182,11 @@ const subcommands: Record<string, (argv: readonly string[]) => Promise<void>> = 
     if (argv.includes("--json")) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     else {
       process.stdout.write(findingsText(result, argv.includes("--verbose")));
-      if (result.browserSkipped) process.stdout.write("Skipped the browser pass: fix the lint errors first.\n");
+      process.stdout.write(
+        result.browserSkipped
+          ? "Skipped the browser pass: fix the lint errors first.\n"
+          : `Ran it in Chrome at ${result.samples.map((t) => `${t}s`).join(", ")}.\n`,
+      );
     }
     const strict = argv.includes("--strict");
     if (!result.ok || (strict && result.warnings > 0)) process.exitCode = 1;
@@ -208,7 +212,9 @@ const subcommands: Record<string, (argv: readonly string[]) => Promise<void>> = 
     if (argv.includes("--json")) return void process.stdout.write(`${JSON.stringify(blocks, null, 2)}\n`);
     if (!blocks.length) return void console.log(query ? `No block matches "${query}".` : "No blocks.");
     for (const b of blocks)
-      console.log(`${b.name.padEnd(24)} ${`${b.duration}s`.padStart(5)}  ${b.title}: ${b.description} [${b.tags.join(", ")}]`);
+      console.log(
+        `${b.name.padEnd(24)} ${`${b.duration}s`.padStart(5)}  ${b.title}: ${b.description} [${b.tags.join(", ")}]${b.variables?.length ? `\n${" ".repeat(32)}variables (--vars): ${b.variables.map((v) => `${v.id}=${JSON.stringify(v.default)}`).join(", ")}` : ""}`,
+      );
   },
 
   async skills(argv) {

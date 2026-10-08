@@ -52,7 +52,22 @@ test("lint errors skip the browser pass", async () => {
 });
 
 test("seeking media isn't a failed load, and a tween whose selector matches nothing is reported", async () => {
-  await runFfmpeg(process.env, ["-f", "lavfi", "-i", "testsrc=s=1280x720:d=4:r=30", "-f", "lavfi", "-i", "sine=d=4", "-b:v", "4M", "-pix_fmt", "yuv420p", "-shortest", join(dir, "clip.mp4")]);
+  await runFfmpeg(process.env, [
+    "-f",
+    "lavfi",
+    "-i",
+    "testsrc=s=1280x720:d=4:r=30",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=d=4",
+    "-b:v",
+    "4M",
+    "-pix_fmt",
+    "yuv420p",
+    "-shortest",
+    join(dir, "clip.mp4"),
+  ]);
   write(
     "index.html",
     `<video id="clip" src="clip.mp4" data-has-audio="true" data-start="0" data-duration="4" style="width: 200px; height: 100px"></video>`,

@@ -156,7 +156,7 @@ export const checkProject = async (options: {
           });
       issues.push(...(await opened.evaluate(clipTweens)));
       await opened.evaluate(`window.__vdLayout = ${layoutAt.toString()}`);
-      samples = Array.from({ length: n }, (_, i) => ((i + 0.5) / n) * manifest.duration);
+      samples = Array.from({ length: n }, (_, i) => Math.round(((i + 0.5) / n) * manifest.duration * 1000) / 1000);
       const frames = new Set<string>();
       // Contrast at up to three of the sample times: enough to catch a scene, cheap enough for every check.
       const contrastTimes = new Set(samples.filter((_, i) => i % Math.ceil(samples.length / 3) === 0));

@@ -55,7 +55,7 @@ export const searchBlocks = (query: string) => {
 /** The host element that mounts `block`, to paste into a composition and time with `data-start`. */
 export const mountSnippet = (block: Block, values?: Record<string, unknown>) => {
   const vars = values && Object.keys(values).length ? ` data-variable-values='${JSON.stringify(values).replaceAll("'", "&#39;")}'` : "";
-  return `<div id="${block.name}" class="clip" data-composition-id="${block.name}" data-composition-src="compositions/${block.name}.html" data-start="0" data-duration="${block.duration}" data-track-index="1"${vars}></div>`;
+  return `<div id="${block.name}" class="clip" data-composition-id="${block.name}" data-composition-src="compositions/${block.name}.html" data-start="0" data-duration="${block.duration}" data-track-index="1" style="inset: 0"${vars}></div>`;
 };
 
 /**

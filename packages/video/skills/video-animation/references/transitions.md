@@ -28,7 +28,7 @@ ends, by the transition's length:
 
 ## Animate inside each scene
 
-Animate the scene's `.stage` wrapper (not the scene's root, which a scene script can't select by id). The incoming
+Animate the scene's `.stage` wrapper (or the scene's root by the id written in the file; both work). The incoming
 scene does its part at the start of its own timeline, so it never needs retiming. The outgoing scene's part sits
 at its end (`D - T`, its duration minus the transition length).
 
@@ -74,6 +74,28 @@ A CSS animation on the block follows its own `data-start`, so it moves with the 
 ```
 
 Put it after the scenes in the document so it's on top.
+
+## The `wipe-transition` block
+
+A ready-made wipe: a coloured panel sweeps in, covers the whole frame at 0.4 s, and sweeps out the other side
+(0.8 s; variables `color`, `edge`, `direction`). Like a dip, the scenes don't overlap: mount it after them,
+centred on the cut, so it covers the frame at the cut point:
+
+```html
+<div id="wipe-1" class="clip" data-composition-id="wipe-1" data-composition-src="compositions/wipe-transition.html"
+     data-start="one - 0.4" data-duration="0.8" data-track-index="9" style="inset: 0"></div>
+```
+
+To mount it at several cuts, give each host its own `id` and `data-composition-id` (video-core's
+`references/sub-compositions.md`).
+
+## What shows when the cover lifts
+
+A wipe, push or dip only hides the cut while it covers the frame. When it lifts, the incoming scene must already
+show its content: start its entrance at or before the cut, or hold its first state visible. An incoming scene
+whose first frame is empty or transparent shows bare background for a moment. The same goes for a hard cut into
+a block that starts transparent (`logo-sting` starts at opacity 0): overlap it with the previous scene, or start
+it about 0.3 s earlier, so it has faded in by the cut. Snapshot the frame just after each cover lifts.
 
 ## In a single composition
 

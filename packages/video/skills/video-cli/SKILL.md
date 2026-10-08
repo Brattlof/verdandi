@@ -13,8 +13,8 @@ the cause and the fix.
 | Command | Use it to |
 |---|---|
 | `init <dir> [--resolution R]` | Start a project. `R` is `landscape` (1920×1080, the default), `portrait` (1080×1920), `square` (1080×1080), or `landscape-4k`, `portrait-4k`, `square-4k`. It refuses a folder that isn't empty. |
-| `catalog [words…] [--json]` | List the ready-made blocks, or only those matching every word. Each line shows the name, length, title, description and tags. |
-| `add <block> [--project <dir>] [--vars '<json>'] [--force]` | Copy a block to `compositions/<block>.html` (its assets to `assets/<block>/`) and print the host element to paste. `--vars` puts `data-variable-values` on that host. It refuses to overwrite a file unless `--force`, which discards your edits to it. |
+| `catalog [words…] [--json]` | List the ready-made blocks, or only those matching every word. Each shows the name, length, title, description and tags, then its variables with their defaults (`variables (--vars): id=default, …`). `--json` has the full declarations (type, label, options). |
+| `add <block> [--project <dir>] [--vars '<json>'] [--force]` | Copy a block to `compositions/<block>.html` (its assets to `assets/<block>/`) and print the host element to paste (`style="inset: 0"`, `data-track-index="1"`; use track 0 for a full-frame scene such as `end-card`). `--vars` puts `data-variable-values` on that host. It refuses to overwrite a file unless `--force`, which discards your edits to it. |
 | `lint [dir] [--json] [--verbose]` | Check the source without a browser. It's fast, so run it after every edit. `--verbose` also shows info findings. Exits 1 on errors. |
 | `check [dir] [--samples N] [--strict] [--json]` | Lint, then load the page in Chrome and sample it at N times (default 9). Use it as the gate before showing the user. `--strict` also fails on warnings. |
 | `timeline [dir] [--json]` | Print the resolved tracks and clips, each with its absolute start and end. Use it to understand an existing project, or to confirm that `data-start` references resolved as you meant. |
@@ -34,8 +34,9 @@ lint, so don't run both in a row.
 Each finding is printed as `✗ file:line code: message`, followed by `Fix: …`. `✗` is an error, `⚠` a warning
 and `ℹ` info. Apply the fix the finding gives. `references/lint-codes.md` explains every code. Two things to know:
 
-- `check` **skips the browser pass while lint has errors**: it prints "Skipped the browser pass". A short,
-  error-only report doesn't mean the page was tested.
+- `check` **skips the browser pass while lint has errors**: it prints "Skipped the browser pass: fix the lint
+  errors first." When the pass ran, it prints "Ran it in Chrome at <times>." No such line means the page wasn't
+  tested.
 - `check` reports page findings (`console_error`, `request_failed`, layout findings) against `index.html`, with no
   line number, even when a scene file caused them. The message names the element or URL. Find it with
   `timeline`, or by searching for that id in `compositions/`.
@@ -44,8 +45,8 @@ and `ℹ` info. Apply the fix the finding gives. `references/lint-codes.md` expl
 
 | Format | Pick it for | Notes |
 |---|---|---|
-| `mp4` (default) | Anything that's watched: sharing, upload, embedding | H.264 with AAC audio. No transparency. |
-| `webm` | A transparent overlay for the web, or a smaller file | VP9 with alpha, and Opus audio. |
+| `mp4` (default) | Anything that's watched: sharing, upload, embedding | H.264, plus an AAC audio stream only when something is audible (no audio stream for a silent video). No transparency. |
+| `webm` | A transparent overlay for the web, or a smaller file | VP9 with alpha, and Opus audio when something is audible. |
 | `mov` | A transparent overlay for an editor (Premiere, Final Cut, Resolve) | ProRes 4444 with alpha. Large files. `--quality` and `--crf` don't apply. |
 | `gif` | A short silent loop for a README or chat | Two-pass palette. No audio. Keep it short and small. |
 | `png-sequence` | Frames for another tool | A folder of `frame_000001.png`, … with alpha. No audio. |

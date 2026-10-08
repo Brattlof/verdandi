@@ -87,4 +87,6 @@ Compute every random value once, while you build the timeline, never while seeki
 
 Use system fonts, or ship the font files in `assets/` with `@font-face { src: url("assets/x.woff2") }` in
 `index.html`. In a scene file, a relative `url()` in CSS is relative to the scene file. The
-runtime waits for `document.fonts.ready` (up to 15 s) before the first frame.
+runtime waits for a scene's fonts (up to 5 s) before running its scripts, and for `document.fonts.ready` (up to
+15 s) before the first frame. Scripts in `index.html` run before fonts load: measure text there only inside
+`document.fonts.ready.then(…)`, with that promise pushed to `window.__vdBuildReady`.

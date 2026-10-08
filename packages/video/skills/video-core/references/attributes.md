@@ -17,7 +17,7 @@ Everything the runtime reads. Anything else you add is ordinary HTML.
 
 | Attribute | Meaning |
 |---|---|
-| `data-start` | Seconds, or `<id>`, `<id> + n`, `<id> - n`: the end of the element with that `id` (or `data-composition-id`), shifted. Relative to the enclosing composition. A missing or circular reference resolves to 0, with no warning. |
+| `data-start` | Seconds, or `<id>`, `<id> + n`, `<id> - n`: the end of the element with that `id` (or `data-composition-id`), shifted. Relative to the enclosing composition. A reference to an id no file has is a lint error (`unknown_start_reference`). |
 | `data-duration` | Positive seconds. |
 | `data-end` | An alternative to `data-duration` when `data-start` is a number: the end in seconds. |
 | `data-track-index` | Integer lane in the Studio's timeline, and nothing else. (`data-layer` is an old name; lint warns about it.) |

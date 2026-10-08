@@ -1,6 +1,6 @@
 ---
 name: video
-description: Entry point for making videos with Verdandi's video maker, where a video is an HTML composition rendered in headless Chrome and ffmpeg. Use whenever the user asks to make, edit, animate, preview or render a video, animation, motion graphic, title card, lower third, explainer, promo or social clip, or works in a folder made by `verdandi video init`. Covers the brief, the scene plan and the build-check-review-render loop, and says when to load video-core and video-cli.
+description: Entry point for making videos with Verdandi's video maker, where a video is an HTML composition rendered in headless Chrome and ffmpeg. Use whenever the user asks to make, edit, animate, preview or render a video, animation, motion graphic, title card, lower third, explainer, promo or social clip, or works in a folder made by `verdandi video init`. Covers the brief, the scene plan and the build-check-review-render loop, and routes to the workflow skills (explainer, product launch, PR, motion graphics, captions) and the craft skills.
 ---
 
 # Making a video
@@ -12,10 +12,21 @@ frame by frame in headless Chrome and encodes the screenshots with ffmpeg. Every
 render and no stock-media service. Speech (voiceover, transcription) comes only from local tools the user has
 installed (video-media).
 
-Before you write any composition HTML, load the **video-core** skill (the contract: attributes, timing,
-sub-compositions, variables, media, animation and determinism). Load **video-animation** for motion craft:
-rhythm, transitions, text reveals and GSAP recipes. Load **video-cli** for command flags, render formats and what
-each lint or check finding means.
+## Which skill
+
+| The request | Load |
+|---|---|
+| Explain or teach a topic from text, notes or an article | **video-explainer** |
+| Promote, announce or demo a product, app or website | **video-product-launch** |
+| A video of a pull request, change or release note | **video-pr** |
+| A short unnarrated piece: kinetic type, a number hit, logo sting, title card, lower third, overlay | **video-motion-graphics** |
+| Captions or subtitles on an existing video | **video-captions** |
+
+The workflows above pull in the craft skills as they go; load these directly for anything else:
+**video-creative** (design.md, STORYBOARD.md, type, contrast, pacing), **video-animation** (motion, transitions,
+text reveals), **video-media** (footage, audio, voiceover, caption words), **video-core** (the composition
+contract; load it before writing any composition HTML) and **video-cli** (command flags, render formats, what
+each lint or check finding means).
 
 ## 1. Where are we?
 
@@ -44,23 +55,27 @@ network without asking. A render must work offline, so anything you use goes int
 
 ## 3. Plan the scenes
 
-Before writing code, give the user the scene list as a short table: scene id, start, length, what's on screen,
-and how it moves. Rules of thumb:
+Before writing code, write `STORYBOARD.md` and `design.md` in the project (formats in video-creative), and show
+the user the scene list as a short table in chat: scene id, start, length, what's on screen, and how it moves.
+Rules of thumb:
 
 - One idea per scene, usually 2 to 6 seconds. Hold text long enough to read it twice (about 3 words a second).
 - Scene lengths add up to the root's `data-duration`. Scenes follow each other with `data-start="<previous id>"`,
   so retiming one scene moves the ones after it.
 - Overlays (lower thirds, captions, a logo bug) are separate clips on their own track, timed against the scenes.
-- At 1080p, body text is at least 40px and titles 80px or more. Keep a 5% safe margin from the edges.
+- At 1080p, body text is at least 40px and titles 96px or more. Keep text inside the title-safe area
+  (video-creative).
 
 ## 4. Build
 
 1. `verdandi video init <dir> [--resolution landscape|portrait|square]`. This creates `index.html`,
    `vendor/gsap.min.js`, `assets/`, `compositions/` and `AGENTS.md`. It refuses a folder that isn't empty.
-2. **Reuse before you build.** Run `verdandi video catalog [words]` for ready-made blocks, then
+2. **Reuse before you build.** Run `verdandi video catalog [words]` for ready-made blocks; each lists its
+   variables with their defaults (`catalog --json` has the full declarations: types, labels, options). Then
    `verdandi video add <block> --project <dir> [--vars '<json>']`. This copies the block to
-   `compositions/<block>.html` and prints the host element. Paste that element into `index.html` and set its
-   `data-start`.
+   `compositions/<block>.html` and prints the host element (`style="inset: 0"`, `data-track-index="1"`). Paste
+   that element into `index.html`, set its `data-start`, and pick its track: 0 for a full-frame scene such as
+   `title-card` or `end-card`, higher for an overlay.
 3. **Write one file per scene** (`compositions/<scene>.html`, wrapped in `<template>`), each with its own
    paused GSAP timeline. Mount each scene in `index.html` with a host element. The skeletons are in video-core.
 4. Set the root's `data-duration` to the end of the last scene.
@@ -70,8 +85,9 @@ and how it moves. Rules of thumb:
 ## 5. Check and look
 
 1. Run `verdandi video check <dir>`. It runs lint, then plays the page in Chrome: script errors, failed loads,
-   clips past the end, text off the canvas or clipped, and a video where nothing moves. It skips the browser
-   pass while lint has errors, so a short report can mean that nothing ran. Clear the errors first.
+   clips past the end, text off the canvas or clipped, low contrast, and a video where nothing moves. It prints
+   "Ran it in Chrome at <times>." when the browser pass ran; while lint has errors it skips it and says so.
+   Clear the errors first.
 2. Run `verdandi video snapshot <dir> --at <t1,t2,…>` with the middle of each scene and the moments just after
    each entrance. **Open the PNGs and look at them.** Check overlaps, cropped text, contrast, empty frames and
    whether the frame says what the plan said it would. Lint can't judge any of this.
@@ -95,6 +111,6 @@ and how it moves. Rules of thumb:
 ## Rendering needs Chrome and ffmpeg
 
 `check`, `snapshot`, `timeline` and `render` start headless Chrome: Google Chrome, or the binary set in
-`VERDANDI_CHROME`. `render` and `snapshot` also need ffmpeg and ffprobe on `PATH`, or the binaries set in
-`VERDANDI_FFMPEG` and `VERDANDI_FFPROBE`. When one is missing, the command's error names the fix. Pass that fix
+`VERDANDI_CHROME`. `render` also needs ffmpeg and ffprobe on `PATH`, or the binaries set in `VERDANDI_FFMPEG`
+and `VERDANDI_FFPROBE`, and so does `snapshot` when the project plays video files. When one is missing, the command's error names the fix. Pass that fix
 on to the user rather than working around it.

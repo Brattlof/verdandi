@@ -39,7 +39,8 @@ user needs two ratios, build the 16:9 one first, then copy the project and re-la
 
 - **Sizes at 1080 p**: body text ≥ 40 px, captions 48–64 px, titles ≥ 96 px. At 1080×1920 the width is smaller,
   so keep the same pixel sizes and use fewer words per line.
-- **Contrast**: at least 4.5:1 between text and what's behind it, 3:1 for titles over 96 px. Over photos or
+- **Contrast**: at least 4.5:1 between text and what's behind it, 3:1 for large text (24 px and up, or 19 px
+  bold), the WCAG AA thresholds `check` reports against. Over photos or
   video, put a scrim (a dark gradient behind the text) rather than hoping the footage cooperates.
 - **Video compression smears colour**: an MP4 stores colour at half the resolution of brightness. Thin coloured
   text on a coloured background goes blurry; make the text differ from its background in lightness, not only in
@@ -58,8 +59,8 @@ A render runs in the machine's own Chrome with no network, so a font must be ins
    @font-face { font-family: "Display"; src: url("assets/fonts/Display-Bold.woff2") format("woff2"); font-weight: 700; }
    ```
 
-   Declare fonts in `index.html`, not in a scene file: a relative `url()` in a scene's CSS resolves against the
-   page.
+   Declaring fonts once in `index.html` makes them reach every scene. A relative `url()` resolves against the
+   file it's in, so in a scene file the same font is `url("../assets/fonts/Display-Bold.woff2")`.
 2. **Use an installed font**: list them with `fc-list : family | sort -u` (Linux, or macOS with fontconfig), or
    `ls /System/Library/Fonts /Library/Fonts ~/Library/Fonts` on macOS, or `Get-ChildItem C:\Windows\Fonts` on
    Windows. A system font renders on this machine only; another machine falls back silently.
