@@ -82,6 +82,7 @@ These apply only within the composition's own elements, not inside compositions 
 | `window.__timelines["<id>"] = tl` | Register the composition's paused GSAP timeline. Created by the runtime before your scripts run. |
 | `__verdandi.getVariables()` | Variable values for this composition. |
 | `__verdandi.assetUrl("assets/x.png")` | An absolute URL for a path relative to this composition's own file. |
+| `__verdandi.duration()` | This mount's clip length in seconds (its host's `data-duration`, or the root's), or `undefined` without one: for a block that must fill its clip, like a ticker. |
 | `window.__vdBuildReady.push(promise)` | Holds the first frame until the promise settles, for example while you fetch Lottie JSON or build a scene. Capped at 15 s. |
 | `window.__vdLottie.push(anim)` | Registers a lottie-web animation that `lottie.getRegisteredAnimations()` doesn't already list. Create the array if it's missing: `(window.__vdLottie ??= []).push(anim)`. |
 | `window.__vdAnime.push(instance)` | Registers an anime.js instance. Create the array if it's missing. |

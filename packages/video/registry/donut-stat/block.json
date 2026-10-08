@@ -1,0 +1,15 @@
+{
+  "name": "donut-stat",
+  "title": "Donut stat",
+  "description": "A donut ring that fills to a percentage while the number counts up in its centre, with a label beneath; held, then faded out. Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["donut", "ring", "percent", "percentage", "stat", "kpi", "progress", "data", "chart"],
+  "duration": 5,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "percent", "type": "number", "label": "Percent", "default": 73 },
+    { "id": "label", "type": "string", "label": "Label", "default": "of tasks finished on the first route" },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

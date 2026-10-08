@@ -1,0 +1,49 @@
+<template>
+  <div
+    id="push-transition-root"
+    data-composition-id="push-transition"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"color","type":"color","label":"Panel","default":"#e0a458"},{"id":"direction","type":"enum","label":"Direction","default":"right-to-left","options":["right-to-left","left-to-right","bottom-to-top","top-to-bottom"]}]'
+  >
+    <style>
+      .push { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+      .panel { position: absolute; inset: 0; overflow: hidden; background: var(--color, #e0a458); box-shadow: 0 0 120px rgba(0, 0, 0, 0.45); }
+      .band { position: absolute; background: color-mix(in srgb, var(--color, #e0a458) 72%, #ffffff); }
+      .line { position: absolute; background: color-mix(in srgb, var(--color, #e0a458) 70%, #000000); }
+      .horizontal .band { top: 0; bottom: 0; left: 30%; width: 22%; }
+      .horizontal .line { top: 0; bottom: 0; left: 58%; width: 2.5%; }
+      .vertical .band { left: 0; right: 0; top: 30%; height: 22%; }
+      .vertical .line { left: 0; right: 0; top: 58%; height: 2.5%; }
+    </style>
+    <div class="push horizontal">
+      <div class="panel">
+        <div class="band"></div>
+        <div class="line"></div>
+      </div>
+    </div>
+    <script>
+      // The cut between scenes belongs at 0.4 s, when the panel covers the whole frame.
+      const direction = String(__verdandi.getVariables().direction || "right-to-left");
+      const vertical = direction === "bottom-to-top" || direction === "top-to-bottom";
+      if (vertical) document.querySelector(".push").className = "push vertical";
+      const axis = vertical ? "y" : "x";
+      const size = vertical ? 1080 : 1920;
+      // +1 enters from the right (or bottom) and leaves to the left (or top).
+      const sign = direction === "left-to-right" || direction === "top-to-bottom" ? -1 : 1;
+
+      // The panel speeds up to cover the frame at 0.4 s and leaves at that same speed. Inside it, the band and the
+      // line travel half again and a quarter again as fast, so they slide across the panel for depth.
+      const tl = gsap.timeline({ paused: true });
+      const move = (target, from, to, at, ease) =>
+        tl.fromTo(target, { [axis]: from }, { [axis]: to, duration: 0.4, ease, immediateRender: at === 0 }, at);
+      move(".panel", sign * size, 0, 0, "power2.in");
+      move(".panel", 0, -sign * size, 0.4, "power2.out");
+      move(".band", sign * size * 0.5, 0, 0, "power2.in");
+      move(".band", 0, -sign * size * 0.5, 0.4, "power2.out");
+      move(".line", sign * size * 0.25, 0, 0, "power2.in");
+      move(".line", 0, -sign * size * 0.25, 0.4, "power2.out");
+      window.__timelines["push-transition"] = tl;
+    </script>
+  </div>
+</template>

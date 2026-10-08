@@ -1,0 +1,19 @@
+{
+  "name": "confetti-burst",
+  "title": "Confetti burst",
+  "description": "A celebratory burst of confetti from the centre of the frame: about 80 pieces fly up and out, tumble and drift down under gravity, and fade by the end. Transparent overlay for any scene; the pieces, colours and paths come from a fixed seed, so every render is the same. Colours are a JSON list.",
+  "tags": ["confetti", "celebration", "burst", "party", "success", "launch", "particles", "overlay"],
+  "duration": 3,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    {
+      "id": "colors",
+      "type": "string",
+      "label": "Colours (JSON list)",
+      "default": "[\"#e0a458\",\"#f4f1ea\",\"#d1495b\",\"#2e86ab\",\"#66a182\",\"#9b72cf\"]"
+    },
+    { "id": "count", "type": "number", "label": "Pieces (20 to 200)", "default": 80 },
+    { "id": "seed", "type": "number", "label": "Seed (another number, another burst)", "default": 7 }
+  ]
+}

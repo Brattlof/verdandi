@@ -7,7 +7,12 @@
   "width": 1920,
   "height": 1080,
   "variables": [
-    { "id": "words", "type": "string", "label": "Words (JSON [{text,start,end}] in seconds)", "default": "[{\"text\":\"Make\",\"start\":0.3,\"end\":0.6},{\"text\":\"videos\",\"start\":0.65,\"end\":1.02},{\"text\":\"from\",\"start\":1.07,\"end\":1.37},{\"text\":\"plain\",\"start\":1.42,\"end\":1.76},{\"text\":\"HTML.\",\"start\":1.81,\"end\":2.14},{\"text\":\"Every\",\"start\":2.44,\"end\":2.78},{\"text\":\"frame\",\"start\":2.83,\"end\":3.16},{\"text\":\"is\",\"start\":3.21,\"end\":3.44},{\"text\":\"seeked,\",\"start\":3.49,\"end\":3.9},{\"text\":\"so\",\"start\":4.2,\"end\":4.43},{\"text\":\"renders\",\"start\":4.48,\"end\":4.88},{\"text\":\"repeat\",\"start\":4.93,\"end\":5.3},{\"text\":\"exactly.\",\"start\":5.35,\"end\":5.79},{\"text\":\"Captions\",\"start\":6.09,\"end\":6.53},{\"text\":\"follow\",\"start\":6.58,\"end\":6.95},{\"text\":\"each\",\"start\":7,\"end\":7.3},{\"text\":\"word\",\"start\":7.35,\"end\":7.65},{\"text\":\"as\",\"start\":7.7,\"end\":7.93},{\"text\":\"it\",\"start\":7.98,\"end\":8.21},{\"text\":\"is\",\"start\":8.26,\"end\":8.49},{\"text\":\"spoken.\",\"start\":8.54,\"end\":8.94}]" },
+    {
+      "id": "words",
+      "type": "string",
+      "label": "Words (JSON [{text,start,end}] in seconds)",
+      "default": "[{\"text\":\"Make\",\"start\":0.3,\"end\":0.6},{\"text\":\"videos\",\"start\":0.65,\"end\":1.02},{\"text\":\"from\",\"start\":1.07,\"end\":1.37},{\"text\":\"plain\",\"start\":1.42,\"end\":1.76},{\"text\":\"HTML.\",\"start\":1.81,\"end\":2.14},{\"text\":\"Every\",\"start\":2.44,\"end\":2.78},{\"text\":\"frame\",\"start\":2.83,\"end\":3.16},{\"text\":\"is\",\"start\":3.21,\"end\":3.44},{\"text\":\"seeked,\",\"start\":3.49,\"end\":3.9},{\"text\":\"so\",\"start\":4.2,\"end\":4.43},{\"text\":\"renders\",\"start\":4.48,\"end\":4.88},{\"text\":\"repeat\",\"start\":4.93,\"end\":5.3},{\"text\":\"exactly.\",\"start\":5.35,\"end\":5.79},{\"text\":\"Captions\",\"start\":6.09,\"end\":6.53},{\"text\":\"follow\",\"start\":6.58,\"end\":6.95},{\"text\":\"each\",\"start\":7,\"end\":7.3},{\"text\":\"word\",\"start\":7.35,\"end\":7.65},{\"text\":\"as\",\"start\":7.7,\"end\":7.93},{\"text\":\"it\",\"start\":7.98,\"end\":8.21},{\"text\":\"is\",\"start\":8.26,\"end\":8.49},{\"text\":\"spoken.\",\"start\":8.54,\"end\":8.94}]"
+    },
     { "id": "color", "type": "color", "label": "Text", "default": "#f4f1ea" },
     { "id": "highlight", "type": "color", "label": "Spoken word", "default": "#ffd166" }
   ]

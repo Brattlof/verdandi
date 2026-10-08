@@ -1,0 +1,21 @@
+{
+  "name": "timeline-steps",
+  "title": "Timeline steps",
+  "description": "A titled milestone timeline, horizontal or vertical: a line draws through two to six dots, and each event's date and title reveal as the line reaches it, held, then faded out. Events are a JSON list of {\"date\", \"title\"}; extra ones past six are dropped. Transparent, with light text for dark backgrounds; set Text to a dark colour for bright ones.",
+  "tags": ["timeline", "milestones", "history", "roadmap", "steps", "dates", "events", "infographic"],
+  "duration": 7,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "title", "type": "string", "label": "Heading", "default": "How we got here" },
+    {
+      "id": "events",
+      "type": "string",
+      "label": "Events (JSON list of {date, title})",
+      "default": "[{\"date\":\"2023\",\"title\":\"First prototype on a laptop\"},{\"date\":\"2024\",\"title\":\"Open beta with 2,000 teams\"},{\"date\":\"2025\",\"title\":\"Routing cuts cost per task in half\"},{\"date\":\"2026\",\"title\":\"Videos from plain HTML\"}]"
+    },
+    { "id": "layout", "type": "enum", "label": "Layout", "default": "horizontal", "options": ["horizontal", "vertical"] },
+    { "id": "accent", "type": "color", "label": "Line and dates", "default": "#e0a458" },
+    { "id": "color", "type": "color", "label": "Text", "default": "#f4f1ea" }
+  ]
+}

@@ -39,6 +39,11 @@ jobs:
       # Reviews bun.lock against the base; does nothing unless bun.lock or package.json changed.
       - if: matrix.os == 'ubuntu-latest'
         run: bun scripts/lockfile-diff.ts HEAD^1
+      # The video tests render with ffmpeg, which no runner image ships (Chrome they all do). On arm64 macOS this
+      # installs the x64 build, which runs under Rosetta. Pinned past v3.1 for its Node 24 runtime.
+      - uses: FedericoCarboni/setup-ffmpeg@8073ccb51e517ed576e6871c7f2360c6de4ebb7c # v3.1 + node24 (main, 2026-06-01)
+        with:
+          github-token: ${{ github.token }}
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint

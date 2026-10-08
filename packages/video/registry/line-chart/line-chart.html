@@ -1,0 +1,139 @@
+<template>
+  <div
+    id="line-chart-root"
+    data-composition-id="line-chart"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"title","type":"string","label":"Title","default":"Tasks completed per week"},{"id":"data","type":"string","label":"Data (JSON)","default":"[{\"label\":\"W1\",\"value\":42},{\"label\":\"W2\",\"value\":58},{\"label\":\"W3\",\"value\":51},{\"label\":\"W4\",\"value\":77},{\"label\":\"W5\",\"value\":93},{\"label\":\"W6\",\"value\":88},{\"label\":\"W7\",\"value\":121}]"},{"id":"prefix","type":"string","label":"Value prefix","default":""},{"id":"suffix","type":"string","label":"Value suffix","default":""},{"id":"accent","type":"color","label":"Line colour","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); }
+      .chart { width: 1520px; }
+      .title { margin: 0 0 48px; font-size: 64px; font-weight: 750; letter-spacing: -0.015em; line-height: 1.1; }
+      .plot { position: relative; width: 1520px; height: 640px; }
+      .plot svg { position: absolute; inset: 0; overflow: visible; }
+      .grid { stroke: var(--ink, #f4f1ea); stroke-opacity: 0.14; stroke-width: 2; }
+      .axis { stroke: var(--ink, #f4f1ea); stroke-opacity: 0.45; stroke-width: 3; }
+      .tick { fill: var(--ink, #f4f1ea); fill-opacity: 0.55; font-size: 28px; font-variant-numeric: tabular-nums; }
+      .xlabel { fill: var(--ink, #f4f1ea); fill-opacity: 0.7; font-size: 30px; font-weight: 500; }
+      .area { fill: var(--accent, #e0a458); fill-opacity: 0.13; stroke: none; }
+      .line { fill: none; stroke: var(--accent, #e0a458); stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; }
+      .dot { fill: var(--accent, #e0a458); }
+      .dot.last { stroke: var(--ink, #f4f1ea); stroke-width: 5; }
+      .value { position: absolute; padding: 10px 24px; border-radius: 14px; background: var(--accent, #e0a458); color: #0b0b0c; font-size: 44px; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    </style>
+    <div class="stage">
+      <div class="chart">
+        <h2 class="title" data-var-text="title">Tasks completed per week</h2>
+        <div class="plot">
+          <svg aria-hidden="true" width="1520" height="640" viewBox="0 0 1520 640"></svg>
+          <div class="value"></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      let raw = [];
+      try {
+        raw = JSON.parse(String(vars.data));
+      } catch {
+        console.warn("[line-chart] data isn't valid JSON; expected [12, 18, 30] or [{\"label\":\"Jan\",\"value\":12}, …]");
+      }
+      if (!Array.isArray(raw)) raw = [];
+      const data = raw
+        .slice(0, 24)
+        .map((d) => (d && typeof d === "object" ? { label: String(d.label ?? ""), value: Number(d.value) } : { label: "", value: Number(d) }))
+        .filter((d) => Number.isFinite(d.value));
+
+      // Up to two decimals, without trailing zeros, in a fixed locale.
+      const format = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+      const text = (v) => `${vars.prefix ?? ""}${format.format(v)}${vars.suffix ?? ""}`;
+
+      // The value axis starts at zero (or the lowest value, if negative) and ends at a round number above the top.
+      const values = data.map((d) => d.value);
+      const lo0 = Math.min(0, ...values);
+      const hi0 = Math.max(...values, lo0 + 1);
+      const rough = (hi0 - lo0) / 4;
+      const mag = 10 ** Math.floor(Math.log10(rough));
+      const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= rough) ?? 10 * mag;
+      const lo = Math.floor(lo0 / step) * step;
+      const hi = Math.ceil(hi0 / step) * step;
+
+      // Plot box inside the 1520 × 640 svg: room on the left for tick labels, below for point labels, above for the value.
+      const left = 110, right = 1440, top = 90, bottom = 560;
+      const x = (i) => (data.length < 2 ? (left + right) / 2 : left + (i * (right - left)) / (data.length - 1));
+      const y = (v) => bottom - ((v - lo) / (hi - lo)) * (bottom - top);
+      const pts = data.map((d, i) => [x(i), y(d.value)]);
+
+      const svg = document.querySelector(".plot svg");
+      const NS = "http://www.w3.org/2000/svg";
+      const el = (tag, attrs, parent = svg) => {
+        const node = document.createElementNS(NS, tag);
+        for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+        parent.append(node);
+        return node;
+      };
+      const grid = el("g", {});
+      for (let v = lo; v <= hi + step / 2; v += step) {
+        if (v !== lo) el("line", { class: "grid", x1: left, x2: right + 30, y1: y(v), y2: y(v) }, grid);
+        const t = el("text", { class: "tick", x: left - 24, y: y(v) + 10, "text-anchor": "end" }, grid);
+        t.textContent = format.format(Number(v.toFixed(6)));
+      }
+      const axis = el("line", { class: "axis", x1: left, x2: right + 30, y1: y(lo), y2: y(lo) });
+      const d = pts.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)} ${py.toFixed(1)}`).join(" ");
+      const area = pts.length > 1 ? el("path", { class: "area", d: `${d} L${pts.at(-1)[0]} ${y(lo)} L${pts[0][0]} ${y(lo)} Z` }) : null;
+      const line = pts.length > 1 ? el("path", { class: "line", d }) : null;
+      const labels = data.map((p, i) => {
+        const t = el("text", { class: "xlabel", x: x(i), y: bottom + 58, "text-anchor": "middle" });
+        t.textContent = p.label;
+        return t;
+      });
+      const dots = pts.map(([px, py], i) => el("circle", { class: i === pts.length - 1 ? "dot last" : "dot", cx: px, cy: py, r: i === pts.length - 1 ? 13 : 10 }));
+
+      // The final value sits above the last point, kept inside the plot.
+      const value = document.querySelector(".value");
+      if (data.length) {
+        value.textContent = text(data.at(-1).value);
+        const [lx, ly] = pts.at(-1);
+        const w = value.offsetWidth;
+        value.style.left = `${Math.min(lx - w / 2, 1520 - w)}px`;
+        value.style.top = `${ly - value.offsetHeight - 30}px`;
+      } else value.remove();
+
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".title", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0.1)
+        .fromTo(grid, { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power1.out" }, 0.3)
+        .fromTo(axis, { scaleX: 0, transformOrigin: "0% 50%" }, { scaleX: 1, duration: 0.7, ease: "power3.out" }, 0.3);
+
+      // The line draws over `draw` seconds; each dot pops when the line reaches it, found by inverting the ease.
+      const start = 0.8, draw = 2.2;
+      const ease = gsap.parseEase("power1.inOut");
+      const when = (share) => {
+        let a = 0, b = 1;
+        for (let k = 0; k < 30; k++) {
+          const mid = (a + b) / 2;
+          if (ease(mid) < share) a = mid;
+          else b = mid;
+        }
+        return start + draw * a;
+      };
+      const seg = pts.map((p, i) => (i ? Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]) : 0));
+      const total = seg.reduce((s, n) => s + n, 0) || 1;
+      if (line) {
+        const len = line.getTotalLength();
+        tl.fromTo(line, { strokeDasharray: len, strokeDashoffset: len }, { strokeDashoffset: 0, duration: draw, ease }, start)
+          .fromTo(area, { opacity: 0 }, { opacity: 1, duration: 0.6, ease: "power1.out" }, start + draw - 0.2);
+      }
+      let run = 0;
+      dots.forEach((dot, i) => {
+        run += seg[i];
+        const at = when(run / total);
+        tl.fromTo(dot, { scale: 0, transformOrigin: "50% 50%" }, { scale: 1, duration: 0.4, ease: "back.out(3)" }, at)
+          .fromTo(labels[i], { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.4, ease: "power3.out" }, at);
+      });
+      if (data.length) tl.fromTo(value, { opacity: 0, y: 16, scale: 0.85 }, { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: "back.out(2)" }, start + draw + 0.05);
+      tl.to(".chart", { opacity: 0, y: -20, duration: 0.5, ease: "power2.in" }, 5.4);
+      window.__timelines["line-chart"] = tl;
+    </script>
+  </div>
+</template>

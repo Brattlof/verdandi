@@ -1,0 +1,27 @@
+{
+  "name": "comparison-split",
+  "title": "Comparison split",
+  "description": "Two columns side by side, each a title and a JSON list of points: a centre divider draws down, the titles slide in from their sides, a \"vs\" badge pops on the divider, and the points stagger in, left column first; held, then faded out. The right column carries the accent, for the option you favour. Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["comparison", "versus", "vs", "split", "before-after", "pros-cons", "list", "columns"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "left_title", "type": "string", "label": "Left title", "default": "One model for everything" },
+    {
+      "id": "left_items",
+      "type": "string",
+      "label": "Left points (JSON list)",
+      "default": "[\"Opus for a typo fix\",\"Pays full price per task\",\"Same effort every turn\"]"
+    },
+    { "id": "right_title", "type": "string", "label": "Right title", "default": "Routed per task" },
+    {
+      "id": "right_items",
+      "type": "string",
+      "label": "Right points (JSON list)",
+      "default": "[\"Haiku for the small stuff\",\"A third of the cost per task\",\"Escalates when a check fails\"]"
+    },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

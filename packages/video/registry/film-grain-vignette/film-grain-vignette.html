@@ -1,0 +1,55 @@
+<template>
+  <div
+    id="film-grain-vignette-root"
+    data-composition-id="film-grain-vignette"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"strength","type":"number","label":"Strength (0 to 1)","default":0.5},{"id":"length","type":"number","label":"Length in seconds (0: match the clip)","default":0}]'
+  >
+    <style>
+      .finish { position: absolute; inset: 0; pointer-events: none; }
+      .vignette { position: absolute; inset: 0; }
+      .grain { position: absolute; inset: 0; width: 100%; height: 100%; mix-blend-mode: overlay; }
+    </style>
+    <div class="finish" aria-hidden="true">
+      <div class="vignette"></div>
+      <svg aria-hidden="true" class="grain" viewBox="0 0 1920 1080" preserveAspectRatio="none">
+        <filter id="film-grain-noise" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+          <feTurbulence class="noise" type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="1" stitchTiles="stitch" />
+          <feColorMatrix type="matrix" values="0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0.33 0.33 0.33 0 0  0 0 0 0 1" />
+          <feComponentTransfer>
+            <feFuncR type="linear" slope="3.2" intercept="-1.1" />
+            <feFuncG type="linear" slope="3.2" intercept="-1.1" />
+            <feFuncB type="linear" slope="3.2" intercept="-1.1" />
+          </feComponentTransfer>
+        </filter>
+        <rect width="1920" height="1080" filter="url(#film-grain-noise)" />
+      </svg>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      const strength = Math.min(Math.max(Number(vars.strength ?? 0.5), 0), 1);
+      const length = Math.max(Number(vars.length) || __verdandi.duration() || 10, 0.1);
+      // Darkened edges only: the middle 55% of the frame stays untouched.
+      document.querySelector(".vignette").style.background =
+        `radial-gradient(ellipse 75% 75% at 50% 50%, transparent 55%, rgba(0, 0, 0, ${(0.62 * strength).toFixed(3)}) 100%)`;
+      const grain = document.querySelector(".grain");
+      grain.style.opacity = (0.6 * strength).toFixed(3);
+
+      // A new grain pattern 12 times a second, chosen by the time alone.
+      const rate = 12;
+      const noise = document.querySelector(".noise");
+      const clock = { t: 0 };
+      const draw = () => {
+        const step = Math.floor(clock.t * rate + 1e-6);
+        noise.setAttribute("seed", String(1 + step));
+        noise.setAttribute("baseFrequency", step % 2 ? "0.86" : "0.84");
+      };
+      draw();
+
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(clock, { t: 0 }, { t: length, duration: length, ease: "none", onUpdate: draw }, 0);
+      window.__timelines["film-grain-vignette"] = tl;
+    </script>
+  </div>
+</template>

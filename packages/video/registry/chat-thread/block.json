@@ -1,0 +1,19 @@
+{
+  "name": "chat-thread",
+  "title": "Chat thread",
+  "description": "A messaging conversation from a JSON list of {from, text} messages: bubbles appear one by one, yours on the right in the accent colour and theirs on the left, each of theirs after a typing indicator, and the thread scrolls up as it grows; the last message holds. The timing follows the text, about 10 s for the five default messages: lengthen the host's data-duration for more. Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["chat", "messages", "conversation", "texting", "sms", "dialogue", "typing", "bubbles"],
+  "duration": 11,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    {
+      "id": "messages",
+      "type": "string",
+      "label": "Messages (JSON)",
+      "default": "[{\"from\":\"me\",\"text\":\"Did the deploy go out?\"},{\"from\":\"them\",\"text\":\"Yes, about ten minutes ago.\"},{\"from\":\"me\",\"text\":\"Any errors?\"},{\"from\":\"them\",\"text\":\"None so far. Tests passed and the dashboards look clean.\"},{\"from\":\"me\",\"text\":\"Perfect, thanks!\"}]"
+    },
+    { "id": "accent", "type": "color", "label": "Your bubbles", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

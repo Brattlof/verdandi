@@ -1,0 +1,101 @@
+<template>
+  <div
+    id="stat-grid-root"
+    data-composition-id="stat-grid"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"title","type":"string","label":"Heading (empty for none)","default":"The quarter in numbers"},{"id":"stats","type":"string","label":"Stats (JSON list of {value, label})","default":"[{\"value\":\"98%\",\"label\":\"Tasks finished without a retry\"},{\"value\":\"$1.2M\",\"label\":\"Saved on model spend\"},{\"value\":\"12,400\",\"label\":\"Teams routing every day\"},{\"value\":\"4.9/5\",\"label\":\"Average rating\"}]"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"color","type":"color","label":"Text","default":"#f4f1ea"}]'
+  >
+    <style>
+      .wrap { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 64px; font-family: system-ui, sans-serif; color: var(--color, #f4f1ea); }
+      .title { margin: 0; font-size: 68px; font-weight: 750; letter-spacing: -0.015em; line-height: 1.1; }
+      .grid { display: grid; gap: 36px; }
+      .card {
+        position: relative; display: flex; flex-direction: column; justify-content: center; padding: 48px 56px 52px; border-radius: 24px; overflow: hidden;
+        background: color-mix(in srgb, var(--color, #f4f1ea) 6%, transparent);
+        box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--color, #f4f1ea) 11%, transparent);
+      }
+      .bar { position: absolute; left: 56px; top: 0; width: 72px; height: 6px; border-radius: 0 0 4px 4px; background: var(--accent, #e0a458); transform-origin: left center; }
+      .value { margin: 0; font-weight: 800; line-height: 1; letter-spacing: -0.03em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+      .affix { color: var(--accent, #e0a458); }
+      .label { margin: 22px 0 0; font-size: 34px; font-weight: 500; line-height: 1.25; opacity: 0.72; text-wrap: balance; }
+    </style>
+    <div class="wrap">
+      <p class="title" data-var-text="title">The quarter in numbers</p>
+      <div class="grid"></div>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      if (!String(vars.title ?? "").trim()) document.querySelector(".title").remove();
+      let stats = vars.stats;
+      if (typeof stats === "string") {
+        try { stats = JSON.parse(stats); } catch { console.warn("[stat-grid] stats isn't valid JSON; expected [{\"value\":\"98%\",\"label\":\"…\"}, …]"); stats = []; }
+      }
+      stats = (Array.isArray(stats) ? stats : [])
+        .filter((s) => s && typeof s === "object")
+        .map((s) => ({ value: String(s.value ?? ""), label: String(s.label ?? "") }))
+        .slice(0, 6);
+      if (!stats.length) stats = [{ value: "0", label: "Add stats as a JSON list" }];
+
+      // Three or fewer in one row, four as 2×2, five or six in rows of three.
+      const n = stats.length;
+      const cols = n === 4 ? 2 : Math.min(n, 3);
+      const cardWidth = cols === 2 ? 700 : n <= 2 ? 640 : 520;
+      const valueSize = cols === 2 ? 128 : n > 3 ? 104 : 120;
+      const grid = document.querySelector(".grid");
+      grid.style.gridTemplateColumns = `repeat(${cols}, ${cardWidth}px)`;
+
+      // "$1.2M" → "$", 1.2 with one decimal, "M"; a value with no number just appears.
+      const parse = (text) => {
+        const m = /^(.*?)(\d[\d,]*(?:\.\d+)?)(.*)$/s.exec(text);
+        if (!m) return null;
+        const digits = m[2];
+        const decimals = digits.includes(".") ? digits.split(".")[1].length : 0;
+        return { prefix: m[1], suffix: m[3], target: Number(digits.replaceAll(",", "")), decimals, grouped: digits.includes(",") };
+      };
+
+      const tl = gsap.timeline({ paused: true });
+      if (document.querySelector(".title")) tl.fromTo(".title", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0);
+      stats.forEach((s, i) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        const bar = document.createElement("div");
+        bar.className = "bar";
+        const value = document.createElement("p");
+        value.className = "value";
+        value.style.fontSize = `${valueSize}px`;
+        const label = document.createElement("p");
+        label.className = "label";
+        label.textContent = s.label;
+        card.append(bar, value, label);
+        grid.append(card);
+
+        const parts = parse(s.value);
+        const at = 0.35 + i * 0.12;
+        tl.fromTo(card, { opacity: 0, y: 48, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.7, ease: "power3.out" }, at)
+          .fromTo(bar, { scaleX: 0 }, { scaleX: 1, duration: 0.6, ease: "power3.out" }, at + 0.25)
+          .fromTo(label, { opacity: 0, y: 12 }, { opacity: 0.72, y: 0, duration: 0.5, ease: "power2.out" }, at + 0.35);
+        if (!parts) {
+          value.textContent = s.value;
+          return;
+        }
+        const number = document.createElement("span");
+        const affix = (text) => { const a = document.createElement("span"); a.className = "affix"; a.textContent = text; return a; };
+        if (parts.prefix) value.append(affix(parts.prefix));
+        value.append(number);
+        if (parts.suffix) value.append(affix(parts.suffix));
+        const format = new Intl.NumberFormat("en-US", { minimumFractionDigits: parts.decimals, maximumFractionDigits: parts.decimals, useGrouping: parts.grouped });
+        // Shrink a long value to fit its card, measured at the final value.
+        number.textContent = format.format(parts.target);
+        const room = cardWidth - 112;
+        if (value.scrollWidth > room) value.style.fontSize = `${Math.floor(valueSize * room / value.scrollWidth)}px`;
+        const counter = { v: 0 };
+        const show = () => { number.textContent = format.format(Number(counter.v.toFixed(parts.decimals))); };
+        show();
+        tl.fromTo(counter, { v: 0 }, { v: parts.target, duration: 1.6, ease: "power3.out", onUpdate: show }, at + 0.15);
+      });
+      tl.to(".wrap", { opacity: 0, y: -20, duration: 0.5, ease: "power2.in" }, 5.5);
+      window.__timelines["stat-grid"] = tl;
+    </script>
+  </div>
+</template>

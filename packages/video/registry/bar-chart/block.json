@@ -8,7 +8,12 @@
   "height": 1080,
   "variables": [
     { "id": "title", "type": "string", "label": "Title", "default": "Cost per completed task" },
-    { "id": "data", "type": "string", "label": "Data (JSON)", "default": "[{\"label\":\"Always Opus\",\"value\":0.84},{\"label\":\"Always Sonnet\",\"value\":0.41},{\"label\":\"Routed\",\"value\":0.23},{\"label\":\"Routed + memory\",\"value\":0.19}]" },
+    {
+      "id": "data",
+      "type": "string",
+      "label": "Data (JSON)",
+      "default": "[{\"label\":\"Always Opus\",\"value\":0.84},{\"label\":\"Always Sonnet\",\"value\":0.41},{\"label\":\"Routed\",\"value\":0.23},{\"label\":\"Routed + memory\",\"value\":0.19}]"
+    },
     { "id": "prefix", "type": "string", "label": "Value prefix", "default": "$" },
     { "id": "suffix", "type": "string", "label": "Value suffix", "default": "" },
     { "id": "decimals", "type": "number", "label": "Decimals", "default": 2 },

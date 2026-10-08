@@ -25,6 +25,7 @@ const card = `<template><div id="card-root" data-composition-id="card" data-comp
 <div class="nested" data-composition-id="badge" data-composition-src="parts/badge.html" data-start="0" data-duration="1"></div>
 <script>
   document.querySelector(".t").textContent = __verdandi.getVariables().title;
+  document.querySelector(".t").dataset.length = String(__verdandi.duration());
   const tl = gsap.timeline({ paused: true });
   tl.to(".t", { x: 100, duration: 1, ease: "none" });
   gsap.set("#card-root", { attr: { "data-hit": "yes" } });
@@ -77,6 +78,7 @@ const at = (t: number) =>
         bound: h.querySelector(".v")?.textContent,
         nested: h.querySelector(".badge")?.textContent,
         rootHit: h.querySelector("[data-vd-authored-id]")?.getAttribute("data-hit"),
+        length: h.querySelector<HTMLElement>(".t")?.dataset.length,
         pic: h.querySelector<HTMLImageElement>(".pic")?.getAttribute("src"),
         cssVar: getComputedStyle(h).getPropertyValue("--title"),
         color: getComputedStyle(h.querySelector(".t") as Element).color,
@@ -108,6 +110,8 @@ test("each mount of a sub-composition gets its own id, variables, scoped styles 
   expect([first?.nested, second?.nested]).toEqual(["ok", "ok"]);
   // The file's own root, by the id it was written with, in each mount.
   expect([first?.rootHit, second?.rootHit]).toEqual(["yes", "yes"]);
+  // Each mount knows its own clip's length.
+  expect([first?.length, second?.length]).toEqual(["2", "1"]);
   // A variable's path is relative to the file that declares it, like an authored src.
   expect(first?.pic).toEndWith("/parts/b.png");
   expect(second).toMatchObject({ visibility: "visible", color: "rgb(0, 128, 0)", background: "rgb(1, 2, 3)" });

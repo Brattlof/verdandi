@@ -1,0 +1,20 @@
+{
+  "name": "stat-grid",
+  "title": "Stat grid",
+  "description": "A titled grid of two to six KPI cards (three in a row, four as 2×2, more in rows of three) that stagger in while each number counts up to its value, held, then faded out. Stats are a JSON list of {\"value\", \"label\"}; a value keeps its prefix, suffix, decimals and digit grouping (\"$1.2M\", \"98%\", \"12,400\", \"4.9/5\"). Transparent, with light text for dark backgrounds; set Text to a dark colour for bright ones.",
+  "tags": ["stats", "kpi", "metrics", "numbers", "grid", "dashboard", "data", "count", "infographic"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "title", "type": "string", "label": "Heading (empty for none)", "default": "The quarter in numbers" },
+    {
+      "id": "stats",
+      "type": "string",
+      "label": "Stats (JSON list of {value, label})",
+      "default": "[{\"value\":\"98%\",\"label\":\"Tasks finished without a retry\"},{\"value\":\"$1.2M\",\"label\":\"Saved on model spend\"},{\"value\":\"12,400\",\"label\":\"Teams routing every day\"},{\"value\":\"4.9/5\",\"label\":\"Average rating\"}]"
+    },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "color", "type": "color", "label": "Text", "default": "#f4f1ea" }
+  ]
+}

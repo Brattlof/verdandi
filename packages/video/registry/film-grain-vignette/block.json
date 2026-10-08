@@ -1,0 +1,23 @@
+{
+  "name": "film-grain-vignette",
+  "title": "Film grain and vignette",
+  "description": "A full-frame finishing overlay: a soft dark vignette at the edges and fine animated film grain that changes 12 times a second, both faint enough to keep text readable. Put it on the top track over the whole video; set Length to the clip's data-duration and Strength between 0 and 1.",
+  "tags": ["grain", "film", "vignette", "noise", "texture", "cinematic", "finish", "look", "overlay"],
+  "duration": 10,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    {
+      "id": "strength",
+      "type": "number",
+      "label": "Strength (0 to 1)",
+      "default": 0.5
+    },
+    {
+      "id": "length",
+      "type": "number",
+      "label": "Length in seconds (0: match the clip)",
+      "default": 0
+    }
+  ]
+}

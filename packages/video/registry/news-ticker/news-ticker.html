@@ -1,0 +1,80 @@
+<template>
+  <div
+    id="news-ticker-root"
+    data-composition-id="news-ticker"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"label","type":"string","label":"Label","default":"Latest"},{"id":"items","type":"string","label":"Headlines (JSON list of strings)","default":"[\"Verdandi routes every task to the cheapest model that finishes it\",\"Cost per completed task down 61% since routing shipped\",\"New: render videos from plain HTML in one command\",\"Checkpoints let you revert any turn without touching your branch\"]"},{"id":"speed","type":"number","label":"Speed (pixels per second)","default":160},{"id":"length","type":"number","label":"Length in seconds (0: match the clip)","default":0},{"id":"accent","type":"color","label":"Label colour","default":"#e0a458"},{"id":"band","type":"color","label":"Band","default":"#15161a"},{"id":"ink","type":"color","label":"Text","default":"#f4f1ea"}]'
+  >
+    <style>
+      .ticker { position: absolute; left: 0; right: 0; bottom: 64px; height: 92px; display: flex; font-family: system-ui, sans-serif; }
+      .band { position: absolute; inset: 0; background: var(--band, #15161a); box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.08), 0 18px 48px rgba(0, 0, 0, 0.35); }
+      .edge { position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--accent, #e0a458); transform-origin: left center; }
+      .tab {
+        position: relative; z-index: 2; flex: none; display: flex; align-items: center; height: 100%; padding: 0 64px 0 72px;
+        background: var(--accent, #e0a458); color: #17140f; clip-path: polygon(0 0, 100% 0, calc(100% - 28px) 100%, 0 100%);
+      }
+      .label { margin: 0; font-size: 34px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; white-space: nowrap; }
+      .view { position: relative; z-index: 1; flex: 1; min-width: 0; height: 100%; margin-left: -28px; clip-path: inset(0); }
+      .view::before { content: ""; position: absolute; z-index: 1; left: 0; top: 0; bottom: 0; width: 72px; background: linear-gradient(90deg, var(--band, #15161a) 28px, transparent); }
+      .view::after { content: ""; position: absolute; z-index: 1; right: 0; top: 0; bottom: 0; width: 120px; background: linear-gradient(270deg, var(--band, #15161a), transparent); }
+      .track { position: absolute; left: 0; top: 0; height: 100%; display: flex; align-items: center; padding-left: 56px; }
+      .run { display: flex; align-items: center; flex: none; }
+      .item { margin: 0; font-size: 38px; font-weight: 500; color: var(--ink, #f4f1ea); white-space: nowrap; }
+      .sep { flex: none; width: 12px; height: 12px; margin: 0 44px; background: var(--accent, #e0a458); transform: rotate(45deg); }
+    </style>
+    <div class="ticker">
+      <div class="band"></div>
+      <div class="edge"></div>
+      <div class="tab"><p class="label" data-var-text="label">Latest</p></div>
+      <div class="view" data-layout-ignore><div class="track"></div></div>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      let items = vars.items;
+      if (typeof items === "string") {
+        try { items = JSON.parse(items); } catch { console.warn("[news-ticker] items isn't valid JSON; expected [\"Headline\", …]"); items = []; }
+      }
+      items = (Array.isArray(items) ? items : []).map((s) => (typeof s === "string" ? s : s && typeof s.title === "string" ? s.title : "")).filter(Boolean);
+      if (!items.length) items = ["Add headlines as a JSON list of strings"];
+      const speed = Math.max(Number(vars.speed) || 160, 1);
+      const length = Math.max(Number(vars.length) || __verdandi.duration() || 10, 1);
+
+      const track = document.querySelector(".track");
+      const view = document.querySelector(".view");
+      const makeRun = () => {
+        const run = document.createElement("div");
+        run.className = "run";
+        for (const text of items) {
+          const item = document.createElement("p");
+          item.className = "item";
+          item.textContent = text;
+          const sep = document.createElement("span");
+          sep.className = "sep";
+          run.append(item, sep);
+        }
+        return run;
+      };
+      // One run of headlines, repeated enough to cover the view while the first copy scrolls out of it; the offset wraps
+      // every run, so any length scrolls without a seam.
+      const first = makeRun();
+      track.append(first);
+      const runWidth = first.offsetWidth;
+      const copies = Math.ceil(view.offsetWidth / Math.max(runWidth, 1)) + 1;
+      for (let i = 1; i < copies; i++) track.append(makeRun());
+
+      const scroll = { px: 0 };
+      const draw = () => { track.style.transform = `translate3d(${-Math.round(scroll.px % runWidth)}px, 0, 0)`; };
+      draw();
+
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".ticker", { yPercent: 170 }, { yPercent: 0, duration: 0.6, ease: "power3.out" }, 0)
+        .fromTo(".edge", { scaleX: 0 }, { scaleX: 1, duration: 0.8, ease: "power3.out" }, 0.2)
+        .fromTo(".label", { opacity: 0, x: -24 }, { opacity: 1, x: 0, duration: 0.5, ease: "power3.out" }, 0.3)
+        .fromTo(".track", { opacity: 0 }, { opacity: 1, duration: 0.5, ease: "power1.out" }, 0.4)
+        .fromTo(scroll, { px: 0 }, { px: speed * length, duration: length, ease: "none", onUpdate: draw }, 0)
+        .to(".ticker", { yPercent: 170, duration: 0.45, ease: "power2.in" }, length - 0.45);
+      window.__timelines["news-ticker"] = tl;
+    </script>
+  </div>
+</template>

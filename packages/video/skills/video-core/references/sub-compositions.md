@@ -61,7 +61,7 @@ The runtime runs each scene script inside a function whose globals are scoped to
 | `document.querySelector`, `querySelectorAll`, `getElementById` | Search only inside this mount. The inner root's id as written in the file finds it (`"#<name>-root"`). `querySelectorAll` returns an array. |
 | `gsap.to/from/fromTo/set`, `tl.to/from/fromTo/set`, `gsap.utils.toArray` | A string selector, or an array of them, resolves inside this mount (`"#<name>-root"` included). Elements pass through unchanged. |
 | `window.__timelines` | Writing the file's own id writes the mount's id. |
-| `__verdandi` | This mount's variables and asset URLs. |
+| `__verdandi` | This mount's variables, asset URLs and clip length (`duration()`). |
 
 **Not scoped:** `gsap.utils.selector`, other tween methods given a string selector, and anything reached
 through `document.body` or `document.documentElement`. Resolve elements with the scoped

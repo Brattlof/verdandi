@@ -222,12 +222,22 @@ export const applyVariables = (root: Element, values: Record<string, unknown>, b
   }
 };
 
-export type CompositionApi = { readonly getVariables: () => Record<string, unknown>; readonly assetUrl: (path: string) => string };
+export type CompositionApi = {
+  readonly getVariables: () => Record<string, unknown>;
+  readonly assetUrl: (path: string) => string;
+  /** The composition's own clip length (its host's `data-duration`, or the root's), so a block can fit it. */
+  readonly duration: () => number | undefined;
+};
 
 /** The `__verdandi` helpers for one composition: its variables, and asset URLs relative to its own file. */
 export const compositionApi = (runtimeId: string, base: string): CompositionApi => ({
   getVariables: () => ({ ...(variablesByComposition.get(runtimeId) ?? {}) }),
   assetUrl: (path: string) => new URL(path, base).href,
+  duration: () => {
+    const host = document.querySelector(`[data-composition-id="${CSS.escape(runtimeId)}"]`);
+    const d = Number(host?.getAttribute("data-duration"));
+    return Number.isFinite(d) && d > 0 ? d : undefined;
+  },
 });
 
 /** Runs one script's source as a composition's: its globals scoped, its errors logged with the composition's id. */
