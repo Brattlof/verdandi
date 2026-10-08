@@ -1,0 +1,15 @@
+{
+  "name": "title-card",
+  "title": "Title card",
+  "description": "A big centred title whose letters rise into place, an accent rule and a subtitle, held, then lifted away. Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["title", "intro", "opener", "chapter", "heading", "text"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "title", "type": "string", "label": "Title", "default": "The Weaving of Fate" },
+    { "id": "subtitle", "type": "string", "label": "Subtitle", "default": "Chapter one · What is coming" },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

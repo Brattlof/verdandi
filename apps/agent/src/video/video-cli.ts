@@ -1,12 +1,15 @@
 import { join, resolve } from "node:path";
 import {
+  addBlock,
   checkProject,
   type Format,
   findingsText,
   formats,
   initProject,
   inspect,
+  installSkills,
   lintProject,
+  listBlocks,
   type Manifest,
   type Quality,
   qualities,
@@ -14,10 +17,12 @@ import {
   type Resolution,
   render,
   resolutions,
+  searchBlocks,
   snapshot,
 } from "@verdandi/video";
+import { web } from "../cli/web.ts";
 import { childEnv } from "../home/child-env.ts";
-import { flag } from "../home/home.ts";
+import { flag, resolveHome } from "../home/home.ts";
 
 const oneOf = <T extends string>(name: string, value: string | undefined, allowed: readonly T[], fallback: T): T => {
   if (value === undefined) return fallback;
@@ -87,7 +92,7 @@ const subcommands: Record<string, (argv: readonly string[]) => Promise<void>> = 
   },
 
   async render(argv) {
-    const valued = ["--output", "-o", "--format", "--quality", "--fps", "--crf", "--entry", "--variables"];
+    const valued = ["--output", "-o", "--format", "--quality", "--fps", "--crf", "--entry", "--variables", "--workers"];
     const dir = resolve(positional(argv, valued) ?? ".");
     const format = oneOf("--format", flag(argv, "--format"), formats, "mp4");
     const quality = oneOf("--quality", flag(argv, "--quality"), qualities, "standard");
@@ -98,6 +103,7 @@ const subcommands: Record<string, (argv: readonly string[]) => Promise<void>> = 
     );
     const fps = number("--fps", flag(argv, "--fps"));
     const crf = number("--crf", flag(argv, "--crf"));
+    const workers = number("--workers", flag(argv, "--workers"));
     const entry = flag(argv, "--entry");
     const started = performance.now();
     const controller = new AbortController();
@@ -112,21 +118,32 @@ const subcommands: Record<string, (argv: readonly string[]) => Promise<void>> = 
       onProgress: progressLine(),
       ...(fps !== undefined && { fps }),
       ...(crf !== undefined && { crf }),
+      ...(workers !== undefined && { workers }),
       ...(entry && { entry }),
       ...(variables && { variables: JSON.parse(variables) as Record<string, unknown> }),
     });
     const t = result.timings;
     const ms = (n: number) => `${(n / 1000).toFixed(1)}s`;
     console.log(
-      `${result.output}\n  ${result.width}×${result.height} · ${seconds(result.duration)} · ${result.frames} frames · rendered in ${ms(performance.now() - started)}\n  open ${ms(t.open)} · decode ${ms(t.extract)} · audio ${ms(t.audio)} · capture ${ms(t.capture)} · encode ${ms(t.encode)}`,
+      `${result.output}\n  ${result.width}×${result.height} · ${seconds(result.duration)} · ${result.frames} frames · rendered in ${ms(performance.now() - started)} · ${result.workers} worker${result.workers === 1 ? "" : "s"}\n  open ${ms(t.open)} · decode ${ms(t.extract)} · audio ${ms(t.audio)} · capture ${ms(t.capture)} · encode ${ms(t.encode)}`,
     );
   },
 
   async snapshot(argv) {
-    const dir = resolve(positional(argv, ["--at", "--frames", "--output", "-o", "--entry"]) ?? ".");
-    const at = flag(argv, "--at");
+    // `--at 1,2.5` or `--at 1 2.5`: the numbers right after --at are times, never the project folder.
+    const atIndex = argv.findIndex((a) => a === "--at" || a.startsWith("--at="));
+    const timeArgs: string[] = [];
+    if (atIndex !== -1) {
+      const first = argv[atIndex]?.startsWith("--at=") ? argv[atIndex]?.slice(5) : argv[atIndex + 1];
+      if (!first) throw new Error("--at needs times, e.g. --at 1,2.5");
+      timeArgs.push(first);
+      for (let i = atIndex + (argv[atIndex]?.startsWith("--at=") ? 1 : 2); /^\d*\.?\d+(?:,\d*\.?\d+)*$/.test(argv[i] ?? ""); i++)
+        timeArgs.push(argv[i] ?? "");
+    }
+    const rest = argv.filter((_, i) => i < atIndex || i > atIndex + timeArgs.length || atIndex === -1);
+    const dir = resolve(positional(rest, ["--frames", "--output", "-o", "--entry"]) ?? ".");
     const entry = flag(argv, "--entry");
-    let times = at?.split(",").map((s) => number("--at", s.trim()) ?? 0);
+    let times = timeArgs.length ? timeArgs.flatMap((a) => a.split(",")).map((s) => number("--at", s.trim()) ?? 0) : undefined;
     if (!times) {
       const n = number("--frames", flag(argv, "--frames")) ?? 5;
       const { duration } = await inspect({ projectDir: dir, env: childEnv(), ...(entry && { entry }) });
@@ -169,6 +186,57 @@ const subcommands: Record<string, (argv: readonly string[]) => Promise<void>> = 
     }
     const strict = argv.includes("--strict");
     if (!result.ok || (strict && result.warnings > 0)) process.exitCode = 1;
+  },
+
+  async add(argv) {
+    const valued = ["--project", "--vars"];
+    const name = positional(argv, valued);
+    if (!name) throw new Error("Name the block to add, e.g. verdandi video add lower-third (list them with verdandi video catalog).");
+    const vars = flag(argv, "--vars");
+    const result = addBlock(resolve(flag(argv, "--project") ?? "."), name, {
+      force: argv.includes("--force"),
+      ...(vars && { values: JSON.parse(vars) as Record<string, unknown> }),
+    });
+    console.log(
+      `Added ${result.block.title}:\n${result.files.map((f) => `  ${f}`).join("\n")}\nMount it in a composition, then set data-start:\n${result.snippet}`,
+    );
+  },
+
+  async catalog(argv) {
+    const query = argv.filter((a) => !a.startsWith("--")).join(" ");
+    const blocks = query ? searchBlocks(query) : listBlocks();
+    if (argv.includes("--json")) return void process.stdout.write(`${JSON.stringify(blocks, null, 2)}\n`);
+    if (!blocks.length) return void console.log(query ? `No block matches "${query}".` : "No blocks.");
+    for (const b of blocks)
+      console.log(`${b.name.padEnd(24)} ${`${b.duration}s`.padStart(5)}  ${b.title}: ${b.description} [${b.tags.join(", ")}]`);
+  },
+
+  async skills(argv) {
+    const target = join(resolveHome(argv), "skills");
+    const { added, updated, kept } = installSkills(target, { force: argv.includes("--force") });
+    const lines = [
+      ...(added.length ? [`Installed ${added.join(", ")}.`] : []),
+      ...(updated.length ? [`Replaced ${updated.join(", ")}.`] : []),
+      ...(kept.length
+        ? [`Kept your edited ${kept.join(", ")}; pass --force to replace ${kept.length === 1 ? "it" : "them"} with Verdandi's.`]
+        : []),
+    ];
+    console.log(
+      lines.length
+        ? `${lines.join("\n")}\nThey are in ${target}; agents in new sessions see them.`
+        : `The video skills in ${target} are up to date.`,
+    );
+  },
+
+  async preview(argv) {
+    const valued = ["--home", "--port", "--host"];
+    const at = argv.findIndex((a, i) => !a.startsWith("--") && !valued.includes(argv[i - 1] ?? ""));
+    const dir = resolve(at === -1 ? "." : (argv[at] ?? "."));
+    await lintProject(dir); // fails fast, naming the fix, when this isn't a project
+    await web(
+      argv.filter((_, i) => i !== at),
+      new URLSearchParams({ view: "video", project: dir }).toString(),
+    );
   },
 
   async timeline(argv) {

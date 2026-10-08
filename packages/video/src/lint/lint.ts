@@ -24,14 +24,23 @@ export const lintProject = async (projectDir: string, entry = "index.html"): Pro
   const subs = [...new Bun.Glob("compositions/**/*.html").scanSync({ cwd: root })].sort();
   const files = [entry, ...subs];
   const findings: Finding[] = [];
-  for (const file of files) {
+  const parsedFiles = await Promise.all(
+    files.map(async (file) => [file, await parseFile(readFileSync(join(root, file), "utf8"))] as const),
+  );
+  // A data-start reference may name a clip in any file of the project.
+  const ids = new Set(
+    parsedFiles.flatMap(([, p]) =>
+      p.tags.flatMap((t) => [t.attrs.get("id"), t.attrs.get("data-composition-id")].filter((v) => v !== undefined)),
+    ),
+  );
+  for (const [file, parsed] of parsedFiles) {
     const abs = join(root, file);
-    const parsed = await parseFile(readFileSync(abs, "utf8"));
     findings.push(
       ...lintFile({
         file,
         parsed,
         isRoot: file === entry,
+        ids,
         exists: (rel) => {
           const clean = decodeURIComponent(rel.split(/[?#]/)[0] ?? "");
           const target = clean.startsWith("/") ? join(root, clean) : resolve(dirname(abs), clean);

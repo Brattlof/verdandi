@@ -1,0 +1,14 @@
+{
+  "name": "kinetic-headline",
+  "title": "Kinetic headline",
+  "description": "A headline revealed word by word, each word rising and fading in on a stagger, underlined by a sweeping accent bar, held, then faded out. Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["headline", "kinetic", "typography", "text", "words", "quote", "statement"],
+  "duration": 5,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "text", "type": "string", "label": "Headline", "default": "Every task routed to the model that finishes it for less" },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

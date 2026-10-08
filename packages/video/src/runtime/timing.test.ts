@@ -24,6 +24,8 @@ describe("visibleAt", () => {
     expect(visibleAt(0.1 + 0.2, 0.3, 1, 10)).toBe(true);
     expect(visibleAt(10, 5, 10, 10)).toBe(true);
     expect(visibleAt(10, 5, 9, 10)).toBe(false);
+    // A clip without an end shows from its start onward.
+    expect(visibleAt(1, 0, Number.POSITIVE_INFINITY, 3)).toBe(true);
   });
 });
 

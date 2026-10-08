@@ -1,0 +1,14 @@
+{
+  "name": "logo-sting",
+  "title": "Logo sting",
+  "description": "A short wordmark sting: the name slams down from large into place with a flash and two expanding accent rings, settles, then shrinks away. Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["logo", "sting", "intro", "brand", "wordmark", "bumper", "reveal"],
+  "duration": 2.5,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "text", "type": "string", "label": "Wordmark", "default": "VERDANDI" },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

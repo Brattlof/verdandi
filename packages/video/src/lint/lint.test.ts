@@ -75,3 +75,28 @@ test("sub-compositions are linted too, and inherit gsap from the page", async ()
   const { findings } = await lintProject(dir);
   expect(findings.map((f) => `${f.file}:${f.code}`)).toEqual(["compositions/card.html:gsap_timeline_not_registered"]);
 });
+
+test("references, timeline methods, module scripts and absolute paths are judged like the runtime does", async () => {
+  const dir = project({
+    "index.html": `<!doctype html><html><head><script src="gsap.js"></script></head><body>
+<div id="root" data-composition-id="main" data-width="10" data-height="10">
+  <div id="a" data-start="scene + 1" data-duration="1"></div>
+  <div id="b" data-start="nowhere + 1" data-duration="1"></div>
+  <div id="scene" data-composition-id="scene" data-composition-src="compositions/scene.html" data-start="0" data-duration="2"></div>
+  <img id="logo" src="/assets/logo.png">
+</div>
+<script>const intro = gsap.timeline({ paused: true }); intro.pause(); document.querySelector("#a"); window.__timelines.main = intro;</script>
+</body></html>`,
+    "gsap.js": "",
+    "assets/logo.png": "",
+    "compositions/scene.html": `<template><div data-composition-id="scene"><script type="module">import "x";</script></div></template>`,
+  });
+  const codes = (await lintProject(dir)).findings.map((f) => `${f.file}:${f.code}`).sort();
+  expect(codes).toEqual(
+    [
+      "compositions/scene.html:module_script_in_sub_composition",
+      "index.html:absolute_project_path",
+      "index.html:unknown_start_reference",
+    ].sort(),
+  );
+});

@@ -1,4 +1,4 @@
-export type { Env } from "./engine/browser.ts";
+export { type Env, findChrome } from "./engine/browser.ts";
 export { type Format, formats, type Quality, qualities } from "./engine/encode.ts";
 export { probe } from "./engine/ffmpeg.ts";
 export { inspect, type RenderOptions, type RenderProgress, type RenderResult, render, snapshot } from "./engine/render.ts";
@@ -7,4 +7,6 @@ export { type CheckResult, checkProject } from "./lint/check.ts";
 export { findingsText, type LintResult, lintProject } from "./lint/lint.ts";
 export type { Finding, Severity } from "./lint/rules.ts";
 export { initProject, type Resolution, resolutions } from "./project/init.ts";
+export { addBlock, type Block, listBlocks, mountSnippet, searchBlocks } from "./project/registry.ts";
+export { bundledSkills, installSkills } from "./project/skills.ts";
 export type { ClipInfo, Manifest, MediaClip } from "./runtime/player.ts";

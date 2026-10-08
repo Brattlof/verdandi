@@ -30,8 +30,8 @@ const healthyHome = async () => {
   return { home, runtime };
 };
 
-// Bun stands in for `claude`: any binary that answers `--version` will do, on every OS.
-const tools = { claude: process.execPath, git: Bun.which("git") ?? undefined };
+// Bun stands in for `claude`, ffmpeg and Chrome: any binary that answers `--version` will do, on every OS.
+const tools = { claude: process.execPath, git: Bun.which("git") ?? undefined, ffmpeg: process.execPath, chrome: process.execPath };
 const check = (checks: readonly Check[], name: string) => checks.find((c) => c.name === name);
 
 test("passes on a healthy home, without printing the token", async () => {

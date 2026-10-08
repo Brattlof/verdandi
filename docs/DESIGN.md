@@ -1213,10 +1213,13 @@ HTML **composition**, and an agent writes, checks and renders it like any other 
   PNG sequence. Offline: GSAP is vendored into each project.
 - **Checks.** `verdandi video lint` checks the source; `check` also runs the page and reports runtime errors, failed
   loads, clips past the end, text off the canvas and compositions where nothing moves.
-- **Surfaces.** `verdandi video init|lint|check|timeline|snapshot|render`, and the Studio in `packages/ui`
+- **Blocks and skills.** Ready-made blocks (lower thirds, titles, charts, captions, transitions…) ship in
+  `packages/video/registry` and are copied into a project with `verdandi video add`; the video skills (the `video`
+  router, the contract, animation and design craft, and workflows such as an explainer or a PR video) ship in
+  `packages/video/skills` and are installed into the profile with `verdandi video skills`.
+- **Surfaces.** `verdandi video init|add|catalog|skills|lint|check|timeline|snapshot|render|preview`, and the Studio in `packages/ui`
   (`#view=video`): the preview in a sandboxed `<verdandi-player>`, a timeline that moves, trims and hides clips by
-  rewriting one attribute of the source, a CodeMirror editor with versioned saves, and a render queue. The video
-  skills come next.
+  rewriting one attribute of the source, a CodeMirror editor with versioned saves, and a render queue.
 ---
 
 ## Appendix A — Prior art

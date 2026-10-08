@@ -39,8 +39,9 @@ const pixel = async (png: string, x: number, y: number) => {
 
 test("a render is as long as the composition, at its size, with the mixed soundtrack", async () => {
   const output = join(dir, "out.mp4");
-  const result = await render({ projectDir: dir, output, env, fps: 30, quality: "draft" });
-  expect(result).toMatchObject({ frames: 60, width: 320, height: 180 });
+  // Two workers: frames captured out of order must still reach the encoder in order.
+  const result = await render({ projectDir: dir, output, env, fps: 30, quality: "draft", workers: 2 });
+  expect(result).toMatchObject({ frames: 60, width: 320, height: 180, workers: 2 });
   const info = await probe(env, output);
   expect(info.hasVideo && info.hasAudio).toBe(true);
   expect(info.duration).toBeCloseTo(2, 1);

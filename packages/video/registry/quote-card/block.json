@@ -1,0 +1,17 @@
+{
+  "name": "quote-card",
+  "title": "Quote card",
+  "description": "A pull quote with a large quotation mark, the quote and its attribution, that slides in, holds and fades out.",
+  "tags": ["quote", "pull-quote", "testimonial", "citation", "text", "card"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "quote", "type": "string", "label": "Quote", "default": "The best way to predict the future is to invent it." },
+    { "id": "author", "type": "string", "label": "Author", "default": "Alan Kay" },
+    { "id": "source", "type": "string", "label": "Source", "default": "Xerox PARC, 1971" },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#b5651d" },
+    { "id": "background", "type": "color", "label": "Card", "default": "#f4efe6" },
+    { "id": "ink", "type": "color", "label": "Text", "default": "#1d1b18" }
+  ]
+}

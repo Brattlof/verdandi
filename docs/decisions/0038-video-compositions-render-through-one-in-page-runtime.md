@@ -45,5 +45,6 @@ acorn, and keeps its own GSAP parser.
 - Rendering needs Chrome and ffmpeg on the machine; `verdandi video` names the fix when either is missing.
 - A composition that loads scripts or fonts from the network renders only online; lint warns about it.
 - The render protocol is internal and may change; the authoring contract is the stable surface.
-- Single-page capture runs at about 24 frames per second at 1080p on an M-series Mac; parallel pages, Linux BeginFrame
-  capture, shader transitions and HDR are later work.
+- Capture uses separate Chrome processes, not tabs: on a 12-core M-series Mac one page captures about 24 frames per second
+  at 1080p, four tabs in one browser 35, and four browsers 56. Linux BeginFrame capture, shader transitions and HDR are
+  later work.

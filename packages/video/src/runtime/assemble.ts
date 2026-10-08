@@ -83,11 +83,22 @@ export const scopeCss = (css: string, scopeSelector: string, innerRootId: string
   return [...imports, ...global, scoped.length ? `@scope (${scopeSelector}) { ${scoped.join("\n")} }` : ""].join("\n");
 };
 
+/**
+ * A selector as written in a composition's file, for its mounted DOM: `#<id>` of the file's inner root (whose id moved
+ * to `data-vd-authored-id`, so two mounts don't share an id) names that element again.
+ */
+const authoredSelector = (root: Element, selector: string) =>
+  selector.replace(/#([A-Za-z_][\w-]*)/g, (match, id: string) =>
+    !root.querySelector(`#${CSS.escape(id)}`) && root.querySelector(`[data-vd-authored-id="${id}"]`)
+      ? `[data-vd-authored-id="${id}"]`
+      : match,
+  );
+
 /** Targets resolved inside `root`: a selector string matches only that subtree (the root itself included). */
 const scopeTargets = (root: Element, targets: unknown): unknown => {
   if (typeof targets !== "string") return targets;
-  const found = [...(root.matches(targets) ? [root] : []), ...root.querySelectorAll(targets)];
-  return found;
+  const selector = authoredSelector(root, targets);
+  return [...(root.matches(selector) ? [root] : []), ...root.querySelectorAll(selector)];
 };
 
 type Gsapish = Record<string, unknown> & { timeline?: (...a: unknown[]) => Record<string, unknown> };
@@ -120,7 +131,11 @@ const scopedGsap = (root: Element, gsap: Gsapish | undefined) => {
 const scopedDocument = (root: Element) =>
   new Proxy(document, {
     get(target, key) {
-      if (key === "querySelector") return (s: string) => (root.matches(s) ? root : root.querySelector(s));
+      if (key === "querySelector")
+        return (s: string) => {
+          const selector = authoredSelector(root, s);
+          return root.matches(selector) ? root : root.querySelector(selector);
+        };
       if (key === "querySelectorAll") return (s: string) => scopeTargets(root, s);
       if (key === "getElementById")
         return (id: string) =>
@@ -154,6 +169,45 @@ const scopedWindow = (timelines: object, api: object) =>
       return Reflect.set(target, key, value, target);
     },
   });
+
+const safeUrl = (v: string) => !/^\s*(?:javascript|vbscript|data:text\/html)/i.test(v);
+
+/**
+ * Applies a composition's variables inside `root` (stopping at nested compositions, which get their own): each scalar
+ * as a `--<id>` custom property on `root`, `data-var-text="<id>"` as the element's own text, and
+ * `data-var-src="<id>"` (a URL relative to the composition's file `base`, or `{ url }`) as the `src` of an img, video,
+ * audio or source.
+ */
+export const applyVariables = (root: Element, values: Record<string, unknown>, base: string) => {
+  if (root instanceof HTMLElement || root instanceof SVGElement)
+    // Long or structured strings (a JSON list of words or bars) are data for scripts, not CSS values.
+    for (const [id, v] of Object.entries(values))
+      if (typeof v === "number" || typeof v === "boolean" || (typeof v === "string" && v.length <= 200 && !/^\s*[[{]/.test(v)))
+        root.style.setProperty(`--${id}`, String(v).replace(/[;{}<>\r\n]/g, ""));
+  const own = (el: Element) => el.parentElement?.closest("[data-composition-id]") === root || el.closest("[data-composition-id]") === root;
+  for (const el of root.querySelectorAll("[data-var-text]")) {
+    if (!own(el)) continue;
+    const v = values[el.getAttribute("data-var-text") ?? ""];
+    if (v === undefined || typeof v === "object") continue;
+    const texts = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE);
+    if (texts[0]) {
+      texts[0].textContent = String(v);
+      for (const t of texts.slice(1)) t.textContent = "";
+    } else el.prepend(String(v));
+  }
+  for (const el of root.querySelectorAll("img[data-var-src], video[data-var-src], audio[data-var-src], source[data-var-src]")) {
+    if (!own(el)) continue;
+    const v = values[el.getAttribute("data-var-src") ?? ""];
+    const url =
+      typeof v === "string"
+        ? v
+        : v && typeof v === "object" && typeof (v as { url?: unknown }).url === "string"
+          ? (v as { url: string }).url
+          : undefined;
+    // Relative to the composition's own file, like its authored src.
+    if (url && safeUrl(url)) el.setAttribute("src", new URL(url, base).href);
+  }
+};
 
 export type CompositionApi = { readonly getVariables: () => Record<string, unknown>; readonly assetUrl: (path: string) => string };
 
@@ -191,10 +245,19 @@ const loadScript = (src: string, loaded: Set<string>) => {
   });
 };
 
-/** Makes a mounted file's relative `src`, `href` and `poster` URLs relative to that file instead of the page. */
+/** A mounted file's CSS with its relative `url(…)`s made absolute against the file, since it is moved into the page. */
+export const rebaseCss = (css: string, base: string) =>
+  css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (match, _q: string, u: string) =>
+    /^(?:[a-z][a-z0-9+.-]*:|#|\/)/i.test(u.trim()) ? match : `url("${new URL(u.trim(), base).href}")`,
+  );
+
+/**
+ * Makes a mounted file's relative `src`, `href`, `poster` and `data-composition-src` URLs relative to that file instead
+ * of the page, so a nested host names its composition the way lint checks it.
+ */
 const rebase = (root: Element | DocumentFragment, base: string) => {
-  for (const node of [...(root instanceof Element ? [root] : []), ...root.querySelectorAll("[src],[href],[poster]")])
-    for (const attr of ["src", "href", "poster"]) {
+  for (const node of [...(root instanceof Element ? [root] : []), ...root.querySelectorAll("[src],[href],[poster],[data-composition-src]")])
+    for (const attr of ["src", "href", "poster", "data-composition-src"]) {
       const v = node.getAttribute(attr);
       if (v && !/^(?:[a-z]+:|#|\/)/i.test(v)) node.setAttribute(attr, new URL(v, base).href);
     }
@@ -247,8 +310,9 @@ export const mountCompositions = async () => {
   for (let item = queue.shift(); item; item = queue.shift()) {
     const { host, chain } = item;
     const src = host.getAttribute("data-composition-src");
-    if (src && (chain.includes(src) || chain.length >= maxDepth)) {
-      console.warn(`[verdandi] skipping ${src}: ${chain.includes(src) ? "it includes itself" : `nested over ${maxDepth} deep`}`);
+    const url = src ? new URL(src, document.baseURI).href : undefined;
+    if (url && (chain.includes(url) || chain.length >= maxDepth)) {
+      console.warn(`[verdandi] skipping ${src}: ${chain.includes(url) ? "it includes itself" : `nested over ${maxDepth} deep`}`);
       continue;
     }
     const source = src ? await fetchSource(src, texts) : inlineSource(host);
@@ -288,7 +352,7 @@ export const mountCompositions = async () => {
     if (styles.length) {
       const style = document.createElement("style");
       style.dataset.vdScope = runtimeId;
-      style.textContent = styles.map((s) => scopeCss(s.textContent ?? "", scope, innerId)).join("\n");
+      style.textContent = styles.map((s) => scopeCss(rebaseCss(s.textContent ?? "", base), scope, innerId)).join("\n");
       document.head.append(style);
     }
 
@@ -313,18 +377,26 @@ export const mountCompositions = async () => {
     }
     rebase(fragment, base);
     host.replaceChildren(fragment);
+    applyVariables(host, variablesByComposition.get(runtimeId) ?? {}, base);
     if (src) {
       host.setAttribute("data-vd-composition-file", src);
       host.removeAttribute("data-composition-src");
     }
 
+    if (scriptEls.length) {
+      // Laying the scene out starts loading its fonts; its scripts then measure text in them, not in a fallback.
+      host.getBoundingClientRect();
+      await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 5000))]);
+    }
     for (const script of scriptEls) {
       const external = script.getAttribute("src");
       if (external) await loadScript(new URL(external, base).href, scripts);
       else if (!script.type || script.type === "text/javascript") runScoped(script.textContent ?? "", host, declaredId, runtimeId, base);
+      else if (script.type === "module")
+        console.error(`[verdandi] ${runtimeId}: <script type="module"> doesn't run in a sub-composition; use a classic <script>.`);
     }
     for (const nested of host.querySelectorAll("[data-composition-src]"))
-      queue.push({ host: nested, chain: src ? [...chain, src] : chain });
+      queue.push({ host: nested, chain: url ? [...chain, url] : chain });
   }
 };
 

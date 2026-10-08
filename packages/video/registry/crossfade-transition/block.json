@@ -1,0 +1,14 @@
+{
+  "name": "crossfade-transition",
+  "title": "Wipe transition",
+  "description": "A full-frame coloured wipe that sweeps in to cover the picture and sweeps out the other side in 0.8 s; put it over the cut between two scenes.",
+  "tags": ["transition", "wipe", "swipe", "cut", "scene", "crossfade"],
+  "duration": 0.8,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "color", "type": "color", "label": "Panel", "default": "#e0a458" },
+    { "id": "edge", "type": "color", "label": "Leading edge", "default": "#f4f1ea" },
+    { "id": "direction", "type": "enum", "label": "Direction", "default": "left-to-right", "options": ["left-to-right", "right-to-left"] }
+  ]
+}

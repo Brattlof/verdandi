@@ -3,7 +3,7 @@
  * It boots once the document parsed: mounts sub-compositions, waits for fonts, images, media metadata and any
  * `window.__vdBuildReady` promises, then seeks to 0 and publishes `window.__vd`, the protocol renderers and players use.
  */
-import { compositionApi, declaredDefaults, mountCompositions, variablesByComposition } from "./assemble.ts";
+import { applyVariables, compositionApi, declaredDefaults, mountCompositions, variablesByComposition } from "./assemble.ts";
 import { compositionRoot } from "./clips.ts";
 import { type FrameTarget, type Manifest, Player } from "./player.ts";
 
@@ -66,6 +66,7 @@ const boot = async () => {
     ...(window.__vdVariables ?? {}),
   });
   window.__verdandi = compositionApi(rootId, document.baseURI);
+  if (root) applyVariables(root, variablesByComposition.get(rootId) ?? {}, document.baseURI);
   await mountCompositions();
   // Real timers: the render clock is frozen, and a missing font or a stalled video must not hang the page.
   await timeout(Promise.all([document.fonts.ready, images(), mediaMetadata(), Promise.allSettled(window.__vdBuildReady ?? [])]), 15_000);

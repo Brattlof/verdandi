@@ -27,6 +27,8 @@ export type RenderOptions = {
   readonly quality?: Quality;
   readonly fps?: number;
   readonly crf?: number;
+  /** Chrome processes capturing at once (default: `defaultWorkers`). */
+  readonly workers?: number;
   /** Variable overrides for the root composition (and defaults for sub-compositions). */
   readonly variables?: Record<string, unknown>;
   /** Environment for Chrome and ffmpeg: the caller's, without Verdandi's secrets. */
@@ -41,6 +43,8 @@ export type RenderResult = {
   readonly duration: number;
   readonly width: number;
   readonly height: number;
+  /** Chrome processes that captured. */
+  readonly workers: number;
   readonly timings: Readonly<Record<RenderStage, number>>;
 };
 
@@ -68,11 +72,60 @@ const sourceResolver = (base: string, projectDir: string, work: string) => {
   return { local, fetchRemote };
 };
 
-const seekAndTarget = (page: Page, t: number) =>
-  page.evaluate(async (time) => {
+/** Seeks `page` to `t` and paints each active video's decoded frame over its `<video>`. */
+const drawAt = async (page: Page, t: number, videos: ReadonlyMap<string, ExtractedVideo>, base: string) => {
+  const targets = await page.evaluate(async (time) => {
     await window.__vd?.seek(time);
     return window.__vd?.frameTargets(time) ?? [];
   }, t);
+  if (!targets.length && !videos.size) return;
+  const paint = targets.flatMap((target) => {
+    const v = videos.get(target.renderId);
+    return v ? [{ renderId: target.renderId, url: `${base}/__vd/frames/${target.renderId}/${frameFile(v, target.sourceTime)}` }] : [];
+  });
+  await page.evaluate((list) => window.__vd?.paintFrames(list), paint);
+};
+
+/**
+ * How many Chrome processes capture at once: one per three cores, at most four (separate browsers scale; tabs in one
+ * barely do), and one for a short render, where starting browsers costs more than it saves.
+ */
+// ponytail: a fixed core-count heuristic; upgrade to measuring capture cost per frame when renders get long or heavy.
+export const defaultWorkers = (frames: number, cpus = navigator.hardwareConcurrency) =>
+  frames < 90 ? 1 : Math.max(1, Math.min(4, Math.floor(cpus / 3)));
+
+/**
+ * Hands frames to `write` in order, whatever order workers finish them in. A worker more than `window` frames ahead of
+ * the writer waits, so memory stays bounded.
+ */
+export const orderedWriter = (write: (frame: Uint8Array, index: number) => Promise<void> | void, window: number) => {
+  const ready = new Map<number, Uint8Array>();
+  let next = 0;
+  let waiters: (() => void)[] = [];
+  let chain = Promise.resolve();
+  const flush = async () => {
+    for (let frame = ready.get(next); frame; frame = ready.get(next)) {
+      ready.delete(next);
+      await write(frame, next);
+      next++;
+      const woken = waiters;
+      waiters = [];
+      for (const w of woken) w();
+    }
+  };
+  return {
+    async put(index: number, frame: Uint8Array) {
+      while (index - next >= window) await new Promise<void>((r) => waiters.push(r));
+      ready.set(index, frame);
+      // Chained, so one flush runs at a time and a frame set while one ends is picked up by the next.
+      chain = chain.then(flush);
+      await chain;
+    },
+    get written() {
+      return next;
+    },
+  };
+};
 
 /** Renders `options.projectDir` to `options.output`. Throws on a composition that can't render, naming why. */
 export const render = async (options: RenderOptions): Promise<RenderResult> => {
@@ -95,8 +148,9 @@ export const render = async (options: RenderOptions): Promise<RenderResult> => {
     render: { fps, ...(options.variables && { variables: options.variables }) },
     mounts: { frames: join(work, "frames") },
   });
-  const browser = await launchBrowser(env);
+  const browsers = [await launchBrowser(env)];
   try {
+    const browser = browsers[0] as (typeof browsers)[number];
     onProgress?.({ stage: "open", done: 0, total: 1 });
     const page = await openComposition(browser, `${server.url}/${options.entry ?? "index.html"}`, { width: 1920, height: 1080 });
     const manifest = (await page.evaluate(() => window.__vd?.manifest())) as Manifest;
@@ -152,30 +206,39 @@ export const render = async (options: RenderOptions): Promise<RenderResult> => {
         );
     const encoderLog = encoder ? new Response(encoder.stderr).text() : Promise.resolve("");
 
-    for (let i = 0; i < frames; i++) {
-      signal?.throwIfAborted();
-      const t = i / fps;
-      const targets = await seekAndTarget(page, t);
-      if (targets.length || videos.size) {
-        const paint = targets.flatMap((target) => {
-          const v = videos.get(target.renderId);
-          return v
-            ? [{ renderId: target.renderId, url: `${server.url}/__vd/frames/${target.renderId}/${frameFile(v, target.sourceTime)}` }]
-            : [];
-        });
-        await page.evaluate((list) => window.__vd?.paintFrames(list), paint);
-      }
-      const shot = await page.screenshot(
-        alpha || sequence
-          ? { type: "png", omitBackground: alpha, clip: { x: 0, y: 0, width, height } }
-          : { type: "jpeg", quality: quality === "draft" ? 80 : 95, optimizeForSpeed: true, clip: { x: 0, y: 0, width, height } },
-      );
+    // Workers past the first get their own Chrome, opened and sized like the first page.
+    const count = Math.max(1, Math.min(options.workers ?? defaultWorkers(frames), frames));
+    const url = `${server.url}/${options.entry ?? "index.html"}`;
+    const extra = await Promise.all(
+      Array.from({ length: count - 1 }, async () => {
+        const b = await launchBrowser(env);
+        browsers.push(b);
+        const p = await openComposition(b, url, { width, height });
+        return p;
+      }),
+    );
+    const pages = [page, ...extra];
+    const shotOptions =
+      alpha || sequence
+        ? ({ type: "png", omitBackground: alpha, clip: { x: 0, y: 0, width, height } } as const)
+        : ({ type: "jpeg", quality: quality === "draft" ? 80 : 95, optimizeForSpeed: true, clip: { x: 0, y: 0, width, height } } as const);
+    const writer = orderedWriter(async (shot, i) => {
       if (encoder) {
         encoder.stdin.write(shot);
         await encoder.stdin.flush();
       } else await Bun.write(join(seqDir, `frame_${String(i + 1).padStart(6, "0")}.png`), shot);
       onProgress?.({ stage: "capture", done: i + 1, total: frames });
-    }
+    }, count * 4);
+    // Interleaved (worker w takes frames w, w+n, …), so the writer never waits long for the frame it needs.
+    await Promise.all(
+      pages.map(async (p, w) => {
+        for (let i = w; i < frames; i += pages.length) {
+          signal?.throwIfAborted();
+          await drawAt(p, i / fps, videos, server.url);
+          await writer.put(i, await p.screenshot(shotOptions));
+        }
+      }),
+    );
     lap("capture");
 
     onProgress?.({ stage: "encode", done: 0, total: 1 });
@@ -193,9 +256,9 @@ export const render = async (options: RenderOptions): Promise<RenderResult> => {
       for (const f of readdirSync(seqDir)) copyFileSync(join(seqDir, f), join(output, f));
     }
     lap("encode");
-    return { output, frames, duration, width, height, timings };
+    return { output, frames, duration, width, height, workers: count, timings };
   } finally {
-    await browser.close().catch(() => undefined);
+    await Promise.all(browsers.map((b) => b.close().catch(() => undefined)));
     server.stop();
     rmSync(work, { recursive: true, force: true });
   }
@@ -228,14 +291,7 @@ export const snapshot = async (options: {
     const files: string[] = [];
     for (const [i, raw] of options.times.entries()) {
       const t = Math.min(Math.max(0, raw), manifest.duration);
-      const targets = await seekAndTarget(page, t);
-      const paint = targets.flatMap((target) => {
-        const v = videos.get(target.renderId);
-        return v
-          ? [{ renderId: target.renderId, url: `${server.url}/__vd/frames/${target.renderId}/${frameFile(v, target.sourceTime)}` }]
-          : [];
-      });
-      await page.evaluate((list) => window.__vd?.paintFrames(list), paint);
+      await drawAt(page, t, videos, server.url);
       const file = join(options.outDir, `frame-${String(i + 1).padStart(2, "0")}-at-${t.toFixed(2)}s.png`);
       await Bun.write(file, await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: manifest.width, height: manifest.height } }));
       files.push(file);

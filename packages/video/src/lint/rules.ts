@@ -23,6 +23,8 @@ export type FileContext = {
   readonly isRoot: boolean;
   /** Whether a path relative to this file exists in the project. */
   readonly exists: (relativePath: string) => boolean;
+  /** Every `id` and `data-composition-id` in the project's files, which a `data-start` reference may name. */
+  readonly ids: ReadonlySet<string>;
 };
 
 type Rule = (ctx: FileContext, report: (f: Omit<Finding, "file">) => void) => void;
@@ -109,6 +111,15 @@ const rules: Record<string, Rule> = {
 
   timing(ctx, report) {
     for (const t of ctx.parsed.tags) {
+      const ref = /^([A-Za-z0-9_.:-]+)(?:\s*[+-]\s*\d+(?:\.\d+)?)?$/.exec(attr(t, "data-start")?.trim() ?? "");
+      if (ref?.[1] && Number.isNaN(Number(ref[1])) && !ctx.ids.has(ref[1]))
+        report({
+          code: "unknown_start_reference",
+          severity: "error",
+          line: t.line,
+          message: `${where(t)} starts after "${ref[1]}", but no element in the project has that id, so it would start at 0.`,
+          fix: "Name the id of the clip it should follow, or use seconds.",
+        });
       if (has(t, "data-layer"))
         report({
           code: "deprecated_data_layer",
@@ -292,6 +303,23 @@ const rules: Record<string, Rule> = {
         message: "Scripts use gsap, but no <script src> loads it.",
         fix: 'Add <script src="vendor/gsap.min.js"></script> in <head>.',
       });
+    if (!ctx.isRoot)
+      for (const t of ctx.parsed.tags)
+        if (t.name === "script" && attr(t, "type") === "module")
+          report({
+            code: "module_script_in_sub_composition",
+            severity: "error",
+            line: t.line,
+            message: 'A sub-composition\'s <script type="module"> never runs: sub-composition scripts run scoped, as classic scripts.',
+            fix: "Make it a classic <script> (no type), or load the module from index.html.",
+          });
+    // Names bound to GSAP timelines: their play() and pause() aren't media control.
+    const timelines = new Set([
+      "tl",
+      ...scriptsCode(ctx).flatMap((b) =>
+        [...codeOnly(b.text).matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*gsap\s*\.\s*timeline\b/g)].map((m) => m[1] ?? ""),
+      ),
+    ]);
     for (const block of scriptsCode(ctx)) {
       const tag = ctx.parsed.tags[block.tag];
       if (tag && attr(tag, "type") && !/javascript|module/.test(attr(tag, "type") ?? "")) continue;
@@ -344,7 +372,9 @@ const rules: Record<string, Rule> = {
           message: "requestAnimationFrame runs on the wall clock, not the composition's time.",
           fix: "Animate on the timeline, or listen for the vd-seek event and draw detail.time.",
         });
-      const control = /\.\s*(play|pause)\s*\(\s*\)|\.currentTime\s*=(?!=)/.exec(code);
+      const control = [...code.matchAll(/([A-Za-z_$][\w$]*)?\s*\.\s*(?:play|pause)\s*\(\s*\)|\.currentTime\s*=(?!=)/g)].find(
+        (m) => !m[1] || !timelines.has(m[1]),
+      );
       if (control && /video|audio|media|querySelector|getElementById/.test(code))
         report({
           code: "imperative_media_control",
@@ -353,7 +383,7 @@ const rules: Record<string, Rule> = {
           message: "A script plays, pauses or seeks media; the runtime owns <video> and <audio> playback.",
           fix: "Remove it: set data-start, data-duration and data-playback-start instead.",
         });
-      const tlPlay = /\btl\s*\.\s*play\s*\(/.exec(code);
+      const tlPlay = [...code.matchAll(/([A-Za-z_$][\w$]*)\s*\.\s*play\s*\(/g)].find((m) => timelines.has(m[1] ?? ""));
       if (tlPlay)
         report({
           code: "timeline_played",
@@ -420,6 +450,21 @@ const rules: Record<string, Rule> = {
           fix: "Save the stylesheet (and its fonts) into the project.",
         });
     }
+  },
+
+  paths(ctx, report) {
+    for (const t of ctx.parsed.tags)
+      for (const name of ["src", "href", "poster", "data-composition-src"]) {
+        const v = attr(t, name);
+        if (v?.startsWith("/") && !v.startsWith("//"))
+          report({
+            code: "absolute_project_path",
+            severity: "warning",
+            line: t.line,
+            message: `${where(t)} has ${name}="${v}", a path from the server's root; the Studio serves a project under its own prefix, so it breaks there.`,
+            fix: `Make it relative to this file, e.g. ${name}="${v.slice(1)}"${ctx.isRoot ? "" : " (or ../ from compositions/)"}.`,
+          });
+      }
   },
 
   variables(ctx, report) {

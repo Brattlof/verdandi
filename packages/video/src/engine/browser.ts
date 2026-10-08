@@ -77,7 +77,11 @@ export const openComposition = async (
     if (url.startsWith("data:") || new URL(url).pathname === "/favicon.ico") return;
     if (!problems.failedRequests.some((f) => f.startsWith(`${url} (`))) problems.failedRequests.push(`${url} (${reason})`);
   };
-  page.on("requestfailed", (r) => failed(r.url(), r.failure()?.errorText ?? "failed"));
+  // Chrome cancels its own media range requests as it seeks (ERR_ABORTED); a missing file fails another way, or 404s.
+  page.on("requestfailed", (r) => {
+    const reason = r.failure()?.errorText ?? "failed";
+    if (reason !== "net::ERR_ABORTED") failed(r.url(), reason);
+  });
   page.on("response", (r) => {
     if (r.status() >= 400) failed(r.url(), `HTTP ${r.status()}`);
   });
@@ -95,4 +99,10 @@ export const openComposition = async (
   const error = await page.evaluate(() => window.__vd?.error);
   if (error) throw new Error(`The composition failed to start: ${error}${tail()}`);
   return Object.assign(page, { problems });
+};
+
+/** The Chrome renders use: `VERDANDI_CHROME`, else the installed Chrome stable; undefined when there is none. */
+export const findChrome = async (env: Env) => {
+  const path = env.VERDANDI_CHROME ?? (await Promise.resolve(puppeteer.executablePath("chrome")).catch(() => undefined));
+  return path && (await Bun.file(path).exists()) ? path : undefined;
 };

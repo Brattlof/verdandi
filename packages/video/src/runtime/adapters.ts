@@ -2,7 +2,7 @@
  * How each animation runtime is moved to a time. Every adapter is seek-only: nothing in a composition runs on its own
  * clock, so the same time always draws the same frame.
  */
-import type { Clips } from "./clips.ts";
+import { type Clips, compositionRoot } from "./clips.ts";
 
 type Timeline = {
   totalTime: (t: number, suppressEvents?: boolean) => unknown;
@@ -45,7 +45,7 @@ export const timelinesAdapter = (clips: Clips): Adapter => ({
     }
   },
   duration() {
-    const root = document.querySelector("[data-composition-id]")?.getAttribute("data-composition-id");
+    const root = compositionRoot()?.getAttribute("data-composition-id");
     const tl = root ? window.__timelines[root] : undefined;
     const d = isTimeline(tl) ? tl.duration() : Number.NaN;
     return Number.isFinite(d) && d > 0 && d < 7200 ? d : undefined;

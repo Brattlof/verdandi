@@ -1,0 +1,18 @@
+{
+  "name": "count-up",
+  "title": "Count-up stat",
+  "description": "A big centred number that counts up from zero to a value, with a prefix, a suffix and a label beneath, an accent line growing with the count, held, then faded out. Transparent, with light text for dark backgrounds; set Ink to a dark colour for bright ones.",
+  "tags": ["number", "stat", "counter", "count", "kpi", "metric", "data"],
+  "duration": 4,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "value", "type": "number", "label": "Value", "default": 1250000 },
+    { "id": "decimals", "type": "number", "label": "Decimals", "default": 0 },
+    { "id": "prefix", "type": "string", "label": "Prefix", "default": "$" },
+    { "id": "suffix", "type": "string", "label": "Suffix", "default": "" },
+    { "id": "label", "type": "string", "label": "Label", "default": "Saved on model spend this year" },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" }
+  ]
+}

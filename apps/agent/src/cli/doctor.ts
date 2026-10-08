@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { SqliteClient } from "@effect/sql-sqlite-bun";
 import { describeFailure, formatBytes } from "@verdandi/contracts";
 import { findClaude } from "@verdandi/harness-claude-code";
+import { findChrome } from "@verdandi/video";
 import { Effect, Result } from "effect";
 import { attachmentFiles, attachmentsDir, referencedAttachmentsSql } from "../attachments/attachments.ts";
 import { migrations } from "../event-store/migrations.ts";
@@ -20,10 +21,10 @@ export type Check = { readonly name: string; readonly status: Status; readonly d
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/** The first line `<path> --version` prints, or undefined when it can't be run. */
-const version = async (path: string) => {
+/** The first line `<path> --version` (or `flag`) prints, or undefined when it can't be run. */
+const version = async (path: string, flag = "--version") => {
   try {
-    const proc = Bun.spawn([path, "--version"], { env: childEnv(), stdout: "pipe", stderr: "ignore" });
+    const proc = Bun.spawn([path, flag], { env: childEnv(), stdout: "pipe", stderr: "ignore" });
     const out = await new Response(proc.stdout).text();
     return (await proc.exited) === 0 ? out.trim().split(/\r?\n/)[0] : undefined;
   } catch {
@@ -40,9 +41,9 @@ const bun = (): Check => {
   }
 };
 
-const tool = async (name: string, path: string | undefined, missing: Check): Promise<Check> => {
+const tool = async (name: string, path: string | undefined, missing: Check, flag?: string): Promise<Check> => {
   if (path === undefined) return missing;
-  const v = await version(path);
+  const v = await version(path, flag);
   return v === undefined
     ? { name, status: "warn", detail: `found at ${path}, but \`--version\` failed. Check that it runs from a terminal.` }
     : { name, status: "ok", detail: `${v} (${path})` };
@@ -240,28 +241,53 @@ const server = async (home: string): Promise<Check> => {
     : { name, status: "fail", detail: `the token in server.json was rejected. Restart verdandid to rewrite it.` };
 };
 
+type Tools = {
+  readonly claude: string | undefined;
+  readonly git: string | undefined;
+  readonly ffmpeg: string | undefined;
+  readonly chrome: string | undefined;
+};
+
 /** Every check, in order. `tools` holds the binaries found on PATH; tests pass their own. */
-export const diagnose = async (
-  home: string,
-  tools: { readonly claude: string | undefined; readonly git: string | undefined } = {
+export const diagnose = async (home: string, given?: Tools): Promise<readonly Check[]> => {
+  const tools = given ?? {
     claude: findClaude(),
     git: Bun.which("git") ?? undefined,
-  },
-): Promise<readonly Check[]> => [
-  bun(),
-  await tool("Claude Code", tools.claude, {
-    name: "Claude Code",
-    status: "fail",
-    detail: "not found on PATH. Install it (https://docs.claude.com/en/docs/claude-code) and run `claude` once to log in.",
-  }),
-  await tool("git", tools.git, { name: "git", status: "warn", detail: "not found on PATH. Install git to see diffs." }),
-  writable(home),
-  database(home),
-  attachments(home),
-  await cleanup(home),
-  await providers(home),
-  await server(home),
-];
+    ffmpeg: process.env.VERDANDI_FFMPEG ?? Bun.which("ffmpeg") ?? undefined,
+    chrome: await findChrome(process.env),
+  };
+  return [
+    bun(),
+    await tool("Claude Code", tools.claude, {
+      name: "Claude Code",
+      status: "fail",
+      detail: "not found on PATH. Install it (https://docs.claude.com/en/docs/claude-code) and run `claude` once to log in.",
+    }),
+    await tool("git", tools.git, { name: "git", status: "warn", detail: "not found on PATH. Install git to see diffs." }),
+    await tool(
+      "ffmpeg",
+      tools.ffmpeg,
+      {
+        name: "ffmpeg",
+        status: "warn",
+        detail: "not found on PATH. Install FFmpeg to render videos (verdandi video), or set VERDANDI_FFMPEG.",
+      },
+      // ffmpeg prints its version for -version; --version exits non-zero.
+      "-version",
+    ),
+    await tool("Chrome", tools.chrome, {
+      name: "Chrome",
+      status: "warn",
+      detail: "not found. Install Google Chrome to check and render videos (verdandi video), or set VERDANDI_CHROME.",
+    }),
+    writable(home),
+    database(home),
+    attachments(home),
+    await cleanup(home),
+    await providers(home),
+    await server(home),
+  ];
+};
 
 /** `verdandi doctor`: one line per check; exits non-zero when any check fails. */
 export const doctor = async (argv: readonly string[]) => {

@@ -1,0 +1,73 @@
+<template>
+  <div
+    id="caption-karaoke-root"
+    data-composition-id="caption-karaoke"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"words","type":"string","label":"Words (JSON [{text,start,end}] in seconds)","default":"[{\"text\":\"Make\",\"start\":0.3,\"end\":0.6},{\"text\":\"videos\",\"start\":0.65,\"end\":1.02},{\"text\":\"from\",\"start\":1.07,\"end\":1.37},{\"text\":\"plain\",\"start\":1.42,\"end\":1.76},{\"text\":\"HTML.\",\"start\":1.81,\"end\":2.14},{\"text\":\"Every\",\"start\":2.44,\"end\":2.78},{\"text\":\"frame\",\"start\":2.83,\"end\":3.16},{\"text\":\"is\",\"start\":3.21,\"end\":3.44},{\"text\":\"seeked,\",\"start\":3.49,\"end\":3.9},{\"text\":\"so\",\"start\":4.2,\"end\":4.43},{\"text\":\"renders\",\"start\":4.48,\"end\":4.88},{\"text\":\"repeat\",\"start\":4.93,\"end\":5.3},{\"text\":\"exactly.\",\"start\":5.35,\"end\":5.79},{\"text\":\"Captions\",\"start\":6.09,\"end\":6.53},{\"text\":\"follow\",\"start\":6.58,\"end\":6.95},{\"text\":\"each\",\"start\":7,\"end\":7.3},{\"text\":\"word\",\"start\":7.35,\"end\":7.65},{\"text\":\"as\",\"start\":7.7,\"end\":7.93},{\"text\":\"it\",\"start\":7.98,\"end\":8.21},{\"text\":\"is\",\"start\":8.26,\"end\":8.49},{\"text\":\"spoken.\",\"start\":8.54,\"end\":8.94}]"},{"id":"color","type":"color","label":"Text","default":"#f4f1ea"},{"id":"highlight","type":"color","label":"Spoken word","default":"#ffd166"}]'
+  >
+    <style>
+      .stage { position: absolute; left: 0; right: 0; bottom: 120px; height: 140px; font-family: system-ui, sans-serif; }
+      .line { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: center; opacity: 0; }
+      .pill {
+        white-space: nowrap; padding: 18px 36px 22px; border-radius: 20px; background: rgba(8, 8, 10, 0.62);
+        font-size: 68px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.1;
+      }
+      .word { display: inline-block; margin: 0 0.2em; color: var(--color, #f4f1ea); opacity: 0.55; transform-origin: 50% 70%; text-shadow: 0 3px 14px rgba(0, 0, 0, 0.5); }
+    </style>
+    <div class="stage"></div>
+    <script>
+      // Lines and word highlights are timeline tweens placed at each word's own time, so any frame can be seeked to.
+      const vars = __verdandi.getVariables();
+      let words = vars.words;
+      if (typeof words === "string") {
+        try { words = JSON.parse(words); } catch { words = []; }
+      }
+      words = (Array.isArray(words) ? words : [])
+        .filter((w) => w && typeof w.text === "string" && Number.isFinite(+w.start) && Number.isFinite(+w.end))
+        .map((w) => ({ text: w.text, start: +w.start, end: Math.max(+w.end, +w.start + 0.05) }))
+        .sort((a, b) => a.start - b.start);
+
+      // Phrases end at a sentence's end or a pause over half a second; a phrase over six words splits into even lines.
+      const lines = [];
+      let phrase = [];
+      for (const [i, w] of words.entries()) {
+        phrase.push(w);
+        const next = words[i + 1];
+        if (next && !/[.!?]["')\]]?$/.test(w.text) && next.start - w.end <= 0.5) continue;
+        const size = Math.ceil(phrase.length / Math.ceil(phrase.length / 6));
+        for (let j = 0; j < phrase.length; j += size) lines.push(phrase.slice(j, j + size));
+        phrase = [];
+      }
+
+      const stage = document.querySelector(".stage");
+      const tl = gsap.timeline({ paused: true });
+      for (const [i, ws] of lines.entries()) {
+        const el = document.createElement("div");
+        el.className = "line";
+        const pill = document.createElement("div");
+        pill.className = "pill";
+        el.append(pill);
+        const spans = ws.map((w) => {
+          const s = document.createElement("span");
+          s.className = "word";
+          s.textContent = w.text;
+          pill.append(s);
+          return s;
+        });
+        stage.append(el);
+        const start = Math.max(0, ws[0].start - 0.12);
+        const nextStart = lines[i + 1] ? Math.max(0, lines[i + 1][0].start - 0.12) : Infinity;
+        const end = ws[ws.length - 1].end;
+        const out = Math.max(end, Math.min(end + 0.5, nextStart - 0.12));
+        tl.fromTo(el, { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.18, ease: "power2.out" }, start);
+        tl.to(el, { opacity: 0, y: -8, duration: 0.12, ease: "power1.in" }, out);
+        for (const [j, w] of ws.entries()) {
+          tl.to(spans[j], { color: vars.highlight, opacity: 1, scale: 1.06, duration: 0.08, ease: "power2.out" }, w.start);
+          tl.to(spans[j], { color: vars.color, scale: 1, duration: 0.12, ease: "power1.out" }, w.end);
+        }
+      }
+      window.__timelines["caption-karaoke"] = tl;
+    </script>
+  </div>
+</template>

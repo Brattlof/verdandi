@@ -1,0 +1,50 @@
+<template>
+  <div
+    id="count-up-root"
+    data-composition-id="count-up"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"value","type":"number","label":"Value","default":1250000},{"id":"decimals","type":"number","label":"Decimals","default":0},{"id":"prefix","type":"string","label":"Prefix","default":"$"},{"id":"suffix","type":"string","label":"Suffix","default":""},{"id":"label","type":"string","label":"Label","default":"Saved on model spend this year"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 120px; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); text-align: center; }
+      .figure { display: flex; align-items: baseline; justify-content: center; font-size: 220px; font-weight: 800; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .affix { font-size: 0.6em; font-weight: 700; color: var(--accent, #e0a458); }
+      .prefix { margin-right: 0.08em; }
+      .suffix { margin-left: 0.06em; }
+      .line { width: 560px; height: 8px; margin: 56px 0 40px; border-radius: 4px; background: var(--accent, #e0a458); transform-origin: center; }
+      .label { margin: 0; max-width: 1300px; font-size: 48px; font-weight: 500; letter-spacing: 0.01em; opacity: 0.8; text-wrap: balance; }
+    </style>
+    <div class="stage">
+      <div class="figure"><span class="affix prefix" data-var-text="prefix">$</span><span class="num">0</span><span class="affix suffix" data-var-text="suffix"></span></div>
+      <div class="line"></div>
+      <p class="label" data-var-text="label">Saved on model spend this year</p>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      const target = Number(vars.value) || 0;
+      const decimals = Math.min(Math.max(Math.round(Number(vars.decimals) || 0), 0), 6);
+      // A fixed locale, so every render groups digits the same way.
+      const format = new Intl.NumberFormat("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+      const num = document.querySelector(".num");
+      const figure = document.querySelector(".figure");
+      // Shrink long numbers to fit the frame, measured at the final value.
+      num.textContent = format.format(target);
+      const fit = Math.min(1, 1680 / Math.max(figure.scrollWidth, 1));
+      figure.style.fontSize = `${Math.floor(220 * fit)}px`;
+      for (const el of document.querySelectorAll(".affix")) if (!el.textContent.trim()) el.remove();
+
+      const counter = { v: 0 };
+      const show = () => { num.textContent = format.format(Number(counter.v.toFixed(decimals))); };
+      show();
+
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".figure", { opacity: 0, y: 40, scale: 0.94 }, { opacity: 1, y: 0, scale: 1, duration: 0.6, ease: "power3.out" }, 0.1)
+        .fromTo(counter, { v: 0 }, { v: target, duration: 2.1, ease: "power3.out", onUpdate: show }, 0.2)
+        .fromTo(".line", { scaleX: 0 }, { scaleX: 1, duration: 2.1, ease: "power3.out" }, 0.2)
+        .fromTo(".label", { opacity: 0, y: 20 }, { opacity: 0.8, y: 0, duration: 0.6, ease: "power3.out" }, 0.5)
+        .to(".stage", { opacity: 0, duration: 0.45, ease: "power1.in" }, 3.5);
+      window.__timelines["count-up"] = tl;
+    </script>
+  </div>
+</template>

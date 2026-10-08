@@ -29,7 +29,8 @@ export const positive = (raw: string | null | undefined) => {
 };
 
 /** Two times are the same instant when they differ by less than a microsecond (sums of decimal seconds drift). */
-export const sameInstant = (a: number, b: number) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(a), Math.abs(b));
+export const sameInstant = (a: number, b: number) =>
+  Number.isFinite(a) && Number.isFinite(b) ? Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(a), Math.abs(b)) : a === b;
 
 /** A clip shows over the half-open window [start, end). */
 export const inWindow = (t: number, start: number, end: number) => (t >= start || sameInstant(t, start)) && t < end && !sameInstant(t, end);

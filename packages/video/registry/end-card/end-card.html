@@ -1,0 +1,40 @@
+<template>
+  <div
+    id="end-card-root"
+    data-composition-id="end-card"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"logo","type":"string","label":"Logo text","default":"VERDANDI"},{"id":"headline","type":"string","label":"Headline","default":"Start routing your agents today"},{"id":"url","type":"string","label":"URL","default":"verdandi.dev"},{"id":"accent","type":"color","label":"Accent","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"},{"id":"background","type":"color","label":"Background","default":"#121214"}]'
+  >
+    <style>
+      .bg { position: absolute; inset: 0; background: var(--background, #121214); }
+      .glow { position: absolute; left: 50%; top: 50%; width: 1600px; height: 1600px; margin: -800px 0 0 -800px; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent, #e0a458) 16%, transparent), transparent); }
+      .stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 160px; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); text-align: center; }
+      .logo { display: flex; align-items: center; gap: 18px; font-size: 34px; font-weight: 800; letter-spacing: 0.32em; margin-right: -0.32em; }
+      .mark { width: 22px; height: 22px; border-radius: 4px; background: var(--accent, #e0a458); transform: rotate(45deg); }
+      .headline { margin: 72px 0 64px; max-width: 1500px; font-size: 104px; font-weight: 780; line-height: 1.08; letter-spacing: -0.02em; text-wrap: balance; }
+      .pill { display: inline-flex; align-items: center; gap: 20px; padding: 26px 52px; border-radius: 999px; border: 3px solid var(--accent, #e0a458); font-size: 46px; font-weight: 600; letter-spacing: 0.01em; white-space: nowrap; }
+      .arrow { color: var(--accent, #e0a458); font-weight: 700; }
+    </style>
+    <div class="bg"></div>
+    <div class="glow"></div>
+    <div class="stage">
+      <div class="logo"><span class="mark"></span><span data-var-text="logo">VERDANDI</span></div>
+      <h2 class="headline" data-var-text="headline">Start routing your agents today</h2>
+      <div class="pill"><span data-var-text="url">verdandi.dev</span><span class="arrow">→</span></div>
+    </div>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".bg", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power1.out" }, 0)
+        .fromTo(".glow", { opacity: 0, scale: 0.7 }, { opacity: 1, scale: 1, duration: 1.6, ease: "power2.out" }, 0.1)
+        .fromTo(".stage", { scale: 0.92 }, { scale: 1, duration: 1.4, ease: "power3.out" }, 0.15)
+        .fromTo(".logo", { opacity: 0, y: -16 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0.2)
+        .fromTo(".headline", { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.35)
+        .fromTo(".pill", { opacity: 0, y: 24, scale: 0.9 }, { opacity: 1, y: 0, scale: 1, duration: 0.7, ease: "back.out(1.6)" }, 0.65)
+        .fromTo(".arrow", { x: -10 }, { x: 0, duration: 0.5, ease: "power2.out" }, 1.1)
+        // A slow drift through the hold keeps the frame alive.
+        .to(".stage", { scale: 1.03, duration: 3.45, ease: "none" }, 1.55);
+      window.__timelines["end-card"] = tl;
+    </script>
+  </div>
+</template>

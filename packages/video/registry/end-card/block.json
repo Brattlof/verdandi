@@ -1,0 +1,17 @@
+{
+  "name": "end-card",
+  "title": "End card",
+  "description": "A call-to-action end screen: a small logo wordmark, a headline and a URL in an accent pill, scaling gently in and holding to the end. Paints its own full-frame background (dark by default; set Background and Ink for a bright one), so it works over anything.",
+  "tags": ["end", "outro", "cta", "call-to-action", "closing", "url", "subscribe", "end-screen"],
+  "duration": 5,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "logo", "type": "string", "label": "Logo text", "default": "VERDANDI" },
+    { "id": "headline", "type": "string", "label": "Headline", "default": "Start routing your agents today" },
+    { "id": "url", "type": "string", "label": "URL", "default": "verdandi.dev" },
+    { "id": "accent", "type": "color", "label": "Accent", "default": "#e0a458" },
+    { "id": "ink", "type": "color", "label": "Ink", "default": "#f4f1ea" },
+    { "id": "background", "type": "color", "label": "Background", "default": "#121214" }
+  ]
+}

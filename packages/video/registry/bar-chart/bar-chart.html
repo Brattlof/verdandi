@@ -1,0 +1,79 @@
+<template>
+  <div
+    id="bar-chart-root"
+    data-composition-id="bar-chart"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"title","type":"string","label":"Title","default":"Cost per completed task"},{"id":"data","type":"string","label":"Data (JSON)","default":"[{\"label\":\"Always Opus\",\"value\":0.84},{\"label\":\"Always Sonnet\",\"value\":0.41},{\"label\":\"Routed\",\"value\":0.23},{\"label\":\"Routed + memory\",\"value\":0.19}]"},{"id":"prefix","type":"string","label":"Value prefix","default":"$"},{"id":"suffix","type":"string","label":"Value suffix","default":""},{"id":"decimals","type":"number","label":"Decimals","default":2},{"id":"accent","type":"color","label":"Bar colour","default":"#e0a458"},{"id":"ink","type":"color","label":"Ink","default":"#f4f1ea"}]'
+  >
+    <style>
+      .stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; color: var(--ink, #f4f1ea); }
+      .chart { width: 1520px; }
+      .title { margin: 0 0 64px; font-size: 64px; font-weight: 750; letter-spacing: -0.015em; line-height: 1.1; }
+      .rows { display: flex; flex-direction: column; gap: 28px; }
+      .row { display: grid; grid-template-columns: 360px 1fr; align-items: center; column-gap: 40px; height: 72px; }
+      .label { font-size: 38px; font-weight: 500; text-align: right; opacity: 0.82; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .track { position: relative; height: 100%; border-left: 3px solid color-mix(in srgb, var(--ink, #f4f1ea) 35%, transparent); }
+      .bar { position: absolute; left: 0; top: 8px; bottom: 8px; border-radius: 0 6px 6px 0; background: var(--accent, #e0a458); transform-origin: left center; }
+      .value { position: absolute; top: 50%; transform: translateY(-50%); margin-left: 24px; font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    </style>
+    <div class="stage">
+      <div class="chart">
+        <h2 class="title" data-var-text="title">Cost per completed task</h2>
+        <div class="rows"></div>
+      </div>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      let data = [];
+      try {
+        data = JSON.parse(String(vars.data));
+      } catch {
+        console.warn("[bar-chart] data isn't valid JSON; expected [{\"label\":\"A\",\"value\":40}, …]");
+      }
+      if (!Array.isArray(data)) data = [];
+      data = data.filter((d) => d && typeof d === "object").slice(0, 6).map((d) => ({ label: String(d.label ?? ""), value: Number(d.value) || 0 }));
+      const decimals = Math.min(Math.max(Math.round(Number(vars.decimals) || 0), 0), 4);
+      const format = new Intl.NumberFormat("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+      const text = (v) => `${vars.prefix ?? ""}${format.format(Number(v.toFixed(decimals)))}${vars.suffix ?? ""}`;
+      const max = Math.max(...data.map((d) => d.value), 0) || 1;
+      // The longest bar leaves room for its value label to its right.
+      const room = 0.8;
+
+      const rows = document.querySelector(".rows");
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".title", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0.1)
+        .fromTo(".track", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power1.out" }, 0.3);
+      data.forEach((d, i) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        const label = document.createElement("div");
+        label.className = "label";
+        label.textContent = d.label;
+        const track = document.createElement("div");
+        track.className = "track";
+        const bar = document.createElement("div");
+        bar.className = "bar";
+        const share = (Math.max(d.value, 0) / max) * room;
+        bar.style.width = `${share * 100}%`;
+        const value = document.createElement("div");
+        value.className = "value";
+        value.style.left = `${share * 100}%`;
+        track.append(bar, value);
+        row.append(label, track);
+        rows.append(row);
+
+        const at = 0.55 + i * 0.22;
+        const counter = { v: 0 };
+        const show = () => { value.textContent = text(counter.v); };
+        show();
+        tl.fromTo(label, { opacity: 0, x: -24 }, { opacity: 0.82, x: 0, duration: 0.5, ease: "power3.out" }, at)
+          .fromTo(bar, { scaleX: 0 }, { scaleX: 1, duration: 1.1, ease: "power3.out" }, at + 0.05)
+          .fromTo(value, { opacity: 0, x: -share * track.offsetWidth }, { opacity: 1, x: 0, duration: 1.1, ease: "power3.out" }, at + 0.05)
+          .fromTo(counter, { v: 0 }, { v: d.value, duration: 1.1, ease: "power3.out", onUpdate: show }, at + 0.05);
+      });
+      tl.to(".chart", { opacity: 0, y: -20, duration: 0.5, ease: "power2.in" }, 5.4);
+      window.__timelines["bar-chart"] = tl;
+    </script>
+  </div>
+</template>

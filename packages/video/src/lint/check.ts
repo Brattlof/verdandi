@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import { type Env, launchBrowser, openComposition } from "../engine/browser.ts";
 import { serveProject } from "../engine/server.ts";
 import type { Manifest } from "../runtime/player.ts";
+import { type ContrastSample, contrastNow } from "./contrast.ts";
 import { type LintResult, lintProject, summarize } from "./lint.ts";
 import type { Finding } from "./rules.ts";
 
@@ -44,7 +45,7 @@ const clipTweens = () => {
 
 /** Runs in the page at time `t`: visible text outside the canvas, or cut off by an ancestor that clips it. */
 const layoutAt = (t: number, tolerance: number) => {
-  const root = document.querySelector("[data-composition-id]");
+  const root = document.querySelector('[data-composition-id][data-root="true"]') ?? document.querySelector("[data-composition-id]");
   if (!root) return [];
   const canvas = root.getBoundingClientRect();
   const out: PageIssue[] = [];
@@ -77,10 +78,12 @@ const layoutAt = (t: number, tolerance: number) => {
         message: `Text in ${name(el)} runs outside the canvas at ${t.toFixed(2)}s.`,
         fix: "Shrink or reposition it, or mark it data-layout-ignore if it leaves on purpose.",
       });
-    // The root clips everything to the canvas; that is text_outside_canvas, not clipping by a box.
-    for (let a = el.parentElement; a && a !== root; a = a.parentElement) {
+    // The text's own element counts too (its overflow cuts it off just the same). The root clips everything to the
+    // canvas; that is text_outside_canvas, not clipping by a box. An ellipsis is a deliberate cut.
+    for (let a: Element | null = el; a && a !== root; a = a.parentElement) {
       const s = getComputedStyle(a);
       if (s.overflow === "visible" && s.overflowX === "visible" && s.overflowY === "visible") continue;
+      if (s.textOverflow === "ellipsis") break;
       const box = a.getBoundingClientRect();
       if (
         r.left < box.left - tolerance ||
@@ -155,6 +158,9 @@ export const checkProject = async (options: {
       await opened.evaluate(`window.__vdLayout = ${layoutAt.toString()}`);
       samples = Array.from({ length: n }, (_, i) => ((i + 0.5) / n) * manifest.duration);
       const frames = new Set<string>();
+      // Contrast at up to three of the sample times: enough to catch a scene, cheap enough for every check.
+      const contrastTimes = new Set(samples.filter((_, i) => i % Math.ceil(samples.length / 3) === 0));
+      const failing = new Map<string, { sample: ContrastSample; times: number[] }>();
       for (const t of samples) {
         const found = await opened.evaluate(
           async (time, tol) => {
@@ -165,9 +171,27 @@ export const checkProject = async (options: {
           tolerance,
         );
         issues.push(...found);
+        if (contrastTimes.has(t))
+          for (const c of await contrastNow(opened, manifest.width, manifest.height))
+            if (c.ratio < c.required) {
+              const key = `${c.name}|${c.text}`;
+              const seen = failing.get(key) ?? { sample: c, times: [] };
+              seen.times.push(t);
+              failing.set(key, seen);
+            }
         frames.add(Bun.hash(await opened.screenshot({ type: "jpeg", quality: 50 })).toString());
       }
-      if (manifest.duration >= 3 && n > 1 && frames.size === 1)
+      for (const { sample: c, times } of failing.values())
+        issues.push({
+          code: "contrast_aa_failure",
+          // Seen at two sample times it is how the text looks, not a moment of an entrance.
+          severity: times.length >= 2 ? "error" : "warning",
+          message: `"${c.text}" in ${c.name} has contrast ${c.ratio.toFixed(2)}:1 (${c.fg} on about ${c.bg}) at ${times.map((t) => `${t.toFixed(2)}s`).join(", ")}; WCAG AA asks ${c.required}:1.`,
+          fix: "Darken or lighten the text or what is behind it, or add a backdrop (a shadow, scrim or panel).",
+        });
+      // check doesn't decode video frames, so a composition carried by its videos would look still here.
+      const hasVideo = manifest.media.some((m) => m.kind === "video" && !m.hidden);
+      if (manifest.duration >= 3 && n > 1 && frames.size === 1 && !hasVideo)
         issues.push({
           code: "sweep_static",
           severity: "warning",
@@ -175,6 +199,14 @@ export const checkProject = async (options: {
           fix: "Check that the timeline is registered under the root's id and that clips have data-start.",
         });
     }
+    // GSAP only warns when a selector matches nothing: a typo'd target, or an element a later edit removed.
+    for (const message of new Set(opened?.problems.warnings.filter((w) => /GSAP target .* not found/i.test(w))))
+      issues.push({
+        code: "gsap_target_not_found",
+        severity: "warning",
+        message: `${message}: a tween animates nothing.`,
+        fix: "Fix the selector, or remove the tween for an element that's gone.",
+      });
     for (const message of new Set(opened?.problems.errors))
       issues.push({ code: "console_error", severity: "error", message: `The page reported: ${message}`, fix: "Fix what it reports." });
     for (const url of new Set(opened?.problems.failedRequests))

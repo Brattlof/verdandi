@@ -1,0 +1,91 @@
+<template>
+  <div
+    id="progress-steps-root"
+    data-composition-id="progress-steps"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"title","type":"string","label":"Heading","default":"From idea to video"},{"id":"steps","type":"string","label":"Steps (JSON array of 3 to 5 labels)","default":"[\"Write\",\"Preview\",\"Check\",\"Render\"]"},{"id":"accent","type":"color","label":"Lit","default":"#e0a458"},{"id":"color","type":"color","label":"Text","default":"#f4f1ea"}]'
+  >
+    <style>
+      .wrap { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 120px; font-family: system-ui, sans-serif; color: var(--color, #f4f1ea); }
+      .title { margin: 0; font-size: 72px; font-weight: 700; letter-spacing: -0.015em; }
+      .track { position: relative; width: 1440px; height: 180px; }
+      .rail, .fill { position: absolute; top: 44px; height: 6px; border-radius: 3px; }
+      .rail { background: rgba(255, 255, 255, 0.14); }
+      .fill { background: var(--accent, #e0a458); transform-origin: left center; }
+      .step { position: absolute; top: 0; width: 280px; margin-left: -140px; display: flex; flex-direction: column; align-items: center; gap: 28px; }
+      .marker { position: relative; width: 94px; height: 94px; }
+      .ring, .lit { position: absolute; inset: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 38px; font-weight: 700; }
+      .ring { background: #1a1a1d; box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.22); color: rgba(255, 255, 255, 0.6); }
+      .lit { background: var(--accent, #e0a458); color: #17140f; box-shadow: 0 0 0 10px rgba(255, 255, 255, 0.06), 0 12px 36px rgba(0, 0, 0, 0.4); }
+      .lit svg { width: 44px; height: 44px; }
+      .label { margin: 0; font-size: 36px; font-weight: 600; white-space: nowrap; }
+    </style>
+    <div class="wrap">
+      <p class="title" data-var-text="title">From idea to video</p>
+      <div class="track">
+        <div class="rail"></div>
+        <div class="fill"></div>
+      </div>
+    </div>
+    <script>
+      const vars = __verdandi.getVariables();
+      let steps = vars.steps;
+      if (typeof steps === "string") {
+        try { steps = JSON.parse(steps); } catch { steps = []; }
+      }
+      steps = (Array.isArray(steps) ? steps : [])
+        .map((s) => (typeof s === "string" ? s : s && typeof s.label === "string" ? s.label : ""))
+        .filter(Boolean)
+        .slice(0, 5);
+      if (steps.length < 2) steps = ["Start", "Finish"];
+
+      const track = document.querySelector(".track");
+      const width = 1440;
+      const inset = 140;
+      const x = (i) => inset + ((width - 2 * inset) * i) / (steps.length - 1);
+      for (const el of document.querySelectorAll(".rail, .fill")) {
+        el.style.left = `${x(0)}px`;
+        el.style.width = `${x(steps.length - 1) - x(0)}px`;
+      }
+      const check = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>';
+      const nodes = steps.map((label, i) => {
+        const step = document.createElement("div");
+        step.className = "step";
+        step.style.left = `${x(i)}px`;
+        const marker = document.createElement("div");
+        marker.className = "marker";
+        const ring = document.createElement("div");
+        ring.className = "ring";
+        ring.textContent = String(i + 1);
+        const lit = document.createElement("div");
+        lit.className = "lit";
+        lit.innerHTML = check;
+        const text = document.createElement("p");
+        text.className = "label";
+        text.textContent = label;
+        marker.append(ring, lit);
+        step.append(marker, text);
+        track.append(step);
+        return { step, ring, lit, text };
+      });
+
+      const first = 0.9;
+      const gap = Math.min(1.1, 3.6 / (steps.length - 1));
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".title", { opacity: 0, y: 24 }, { opacity: 1, y: 0, duration: 0.6, ease: "power3.out" }, 0)
+        .fromTo(".rail", { scaleX: 0, transformOrigin: "left center" }, { scaleX: 1, duration: 0.7, ease: "power2.inOut" }, 0.1)
+        .fromTo(nodes.map((n) => n.step), { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.45, stagger: 0.08, ease: "power2.out" }, 0.2)
+        .fromTo(".fill", { scaleX: 0 }, { scaleX: 1, duration: gap * (steps.length - 1), ease: "none" }, first);
+      for (const [i, n] of nodes.entries()) {
+        const at = first + gap * i;
+        tl.fromTo(n.lit, { opacity: 0, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(2)" }, at)
+          .set(n.ring, { opacity: 0 }, at + 0.1)
+          .fromTo(n.text, { color: "rgba(255, 255, 255, 0.55)" }, { color: vars.accent, duration: 0.3 }, at)
+          .to(n.text, { color: vars.color, duration: 0.4 }, at + Math.min(gap, 0.9));
+      }
+      tl.to(".wrap", { opacity: 0, duration: 0.45, ease: "power2.in" }, 5.5);
+      window.__timelines["progress-steps"] = tl;
+    </script>
+  </div>
+</template>

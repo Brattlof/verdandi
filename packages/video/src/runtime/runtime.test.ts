@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Browser, Page } from "puppeteer-core";
@@ -21,11 +21,13 @@ const index = `<!doctype html><html><head><script src="gsap.min.js"></script>
 
 const card = `<template><div id="card-root" data-composition-id="card" data-composition-variables='[{"id":"title","type":"string","label":"Title","default":"One"}]'>
 <style>p { color: rgb(0, 128, 0) } :root { background: rgb(1, 2, 3) }</style>
-<p class="t"></p>
+<p class="t"></p><b class="v" data-var-text="title">placeholder</b>
+<div class="nested" data-composition-id="badge" data-composition-src="parts/badge.html" data-start="0" data-duration="1"></div>
 <script>
   document.querySelector(".t").textContent = __verdandi.getVariables().title;
   const tl = gsap.timeline({ paused: true });
   tl.to(".t", { x: 100, duration: 1, ease: "none" });
+  gsap.set("#card-root", { attr: { "data-hit": "yes" } });
   window.__timelines.card = tl;
 </script>
 </div></template>`;
@@ -39,6 +41,12 @@ beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "vd-runtime-"));
   writeFileSync(join(dir, "index.html"), index);
   writeFileSync(join(dir, "card.html"), card);
+  mkdirSync(join(dir, "parts"));
+  // Named relative to card.html, the file that mounts it, not to the page.
+  writeFileSync(
+    join(dir, "parts", "badge.html"),
+    `<template><div data-composition-id="badge" data-composition-variables='[{"id":"pic","type":"image","label":"Picture","default":"b.png"}]'><i class="badge">ok</i><img class="pic" data-var-src="pic"></div></template>`,
+  );
   copyFileSync(gsapPath(), join(dir, "gsap.min.js"));
   server = await serveProject(dir, { render: { fps: 30 } });
   browser = await launchBrowser(process.env, 320, 180);
@@ -55,7 +63,7 @@ const at = (t: number) =>
   page.evaluate(async (time) => {
     await window.__vd?.seek(time);
     const style = (sel: string) => getComputedStyle(document.querySelector(sel) as Element);
-    const hosts = [...document.querySelectorAll("[data-vd-composition-file]")];
+    const hosts = [...document.querySelectorAll('[data-vd-composition-file="card.html"]')];
     return {
       a: { visibility: style("#a").visibility, opacity: Number(style("#a").opacity) },
       b: style("#b").visibility,
@@ -63,6 +71,11 @@ const at = (t: number) =>
         id: h.getAttribute("data-composition-id"),
         visibility: getComputedStyle(h).visibility,
         text: h.querySelector(".t")?.textContent,
+        bound: h.querySelector(".v")?.textContent,
+        nested: h.querySelector(".badge")?.textContent,
+        rootHit: h.querySelector("[data-vd-authored-id]")?.getAttribute("data-hit"),
+        pic: h.querySelector<HTMLImageElement>(".pic")?.getAttribute("src"),
+        cssVar: getComputedStyle(h).getPropertyValue("--title"),
         color: getComputedStyle(h.querySelector(".t") as Element).color,
         background: getComputedStyle(h).backgroundColor,
         x: new DOMMatrix(getComputedStyle(h.querySelector(".t") as Element).transform).m41,
@@ -86,6 +99,12 @@ test("each mount of a sub-composition gets its own id, variables, scoped styles 
   expect(first?.id).toBe("card");
   expect(second?.id).toBe("card__vd2");
   expect([first?.text, second?.text]).toEqual(["One", "Two"]);
+  expect([first?.bound, second?.bound, second?.cssVar]).toEqual(["One", "Two", "Two"]);
+  expect([first?.nested, second?.nested]).toEqual(["ok", "ok"]);
+  // The file's own root, by the id it was written with, in each mount.
+  expect([first?.rootHit, second?.rootHit]).toEqual(["yes", "yes"]);
+  // A variable's path is relative to the file that declares it, like an authored src.
+  expect(first?.pic).toEndWith("/parts/b.png");
   expect(second).toMatchObject({ visibility: "visible", color: "rgb(0, 128, 0)", background: "rgb(1, 2, 3)" });
   expect(second?.x).toBeCloseTo(50);
   expect(first?.visibility).toBe("hidden");
@@ -97,5 +116,10 @@ test("the manifest reports the declared duration and every clip's resolved windo
   const manifest = await page.evaluate(() => window.__vd?.manifest());
   expect(manifest?.duration).toBe(4);
   expect(manifest?.clips.find((c) => c.id === "b")).toMatchObject({ start: 1.5, end: 2.5 });
-  expect(manifest?.clips.filter((c) => c.kind === "composition").map((c) => c.compositionId)).toEqual(["card", "card__vd2"]);
+  expect(manifest?.clips.filter((c) => c.kind === "composition").map((c) => c.compositionId)).toEqual([
+    "card",
+    "badge",
+    "card__vd2",
+    "badge__vd2",
+  ]);
 });

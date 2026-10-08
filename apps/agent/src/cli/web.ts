@@ -24,8 +24,9 @@ const launch = async (command: string[]) => {
  * never serves it (ADR 0026): `apps/web` is loaded only here, on demand. It relays to the profile's running verdandid,
  * or runs one in this process meanwhile. The page's token rides in the URL fragment, which browsers never send to a
  * server, so it stays out of logs and `Referer` headers. `--host` also opens it to the local network or tailnet.
+ * `fragment` adds to the opened URL's hash, e.g. `view=video&project=…` for `verdandi video preview`.
  */
-export const web = async (argv: readonly string[]) => {
+export const web = async (argv: readonly string[], fragment = "") => {
   const home = resolveHome(argv);
   const host = flag(argv, "--host");
   const port = flag(argv, "--port");
@@ -38,7 +39,7 @@ export const web = async (argv: readonly string[]) => {
   // With a LAN gate, --port is the gate's, the one other devices use, and the web server takes any free loopback port.
   const ui = serveWeb(served.server, port === undefined || lan ? 0 : Number(port));
   const gate = lan && host ? startLanGate(host, port === undefined ? 0 : Number(port), ui.port, ui.gateSecret) : undefined;
-  const url = `http://127.0.0.1:${ui.port}/#token=${ui.token}`;
+  const url = `http://127.0.0.1:${ui.port}/#token=${ui.token}${fragment && `&${fragment}`}`;
   console.log(
     `Verdandi's web UI at http://127.0.0.1:${ui.port}/ (home: ${home}); Ctrl+C stops it${served.stop ? ", and the verdandid it runs" : ""}.`,
   );

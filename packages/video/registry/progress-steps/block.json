@@ -1,0 +1,15 @@
+{
+  "name": "progress-steps",
+  "title": "Progress steps",
+  "description": "A horizontal tracker of three to five steps whose markers and connecting line light up one after another.",
+  "tags": ["steps", "progress", "process", "timeline", "tracker", "how-it-works"],
+  "duration": 6,
+  "width": 1920,
+  "height": 1080,
+  "variables": [
+    { "id": "title", "type": "string", "label": "Heading", "default": "From idea to video" },
+    { "id": "steps", "type": "string", "label": "Steps (JSON array of 3 to 5 labels)", "default": "[\"Write\",\"Preview\",\"Check\",\"Render\"]" },
+    { "id": "accent", "type": "color", "label": "Lit", "default": "#e0a458" },
+    { "id": "color", "type": "color", "label": "Text", "default": "#f4f1ea" }
+  ]
+}

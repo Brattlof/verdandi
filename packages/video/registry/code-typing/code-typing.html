@@ -1,0 +1,103 @@
+<template>
+  <div
+    id="code-typing-root"
+    data-composition-id="code-typing"
+    data-width="1920"
+    data-height="1080"
+    data-composition-variables='[{"id":"code","type":"string","label":"Code","default":"// Render a composition to video\nimport { render } from \"verdandi/video\";\n\nconst video = await render({\n  project: \"./launch\",\n  format: \"mp4\",\n  fps: 30,\n});\nconsole.log(`Saved ${video.path}`);"},{"id":"title","type":"string","label":"File name","default":"render.ts"},{"id":"speed","type":"number","label":"Characters per second (sped up to fit the block)","default":40},{"id":"accent","type":"color","label":"Caret","default":"#e0a458"}]'
+  >
+    <style>
+      .wrap { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+      .window {
+        width: 1360px; border-radius: 18px; overflow: hidden; background: #16171c;
+        box-shadow: 0 50px 140px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.07);
+      }
+      .bar { position: relative; height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 24px; background: #1f2027; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+      .dot { width: 16px; height: 16px; border-radius: 50%; }
+      .title {
+        position: absolute; left: 0; right: 0; text-align: center; margin: 0;
+        font-family: system-ui, sans-serif; font-size: 22px; color: #9a9caa; letter-spacing: 0.01em;
+      }
+      .body { display: flex; gap: 36px; padding: 40px 48px 48px 32px; font-family: ui-monospace, Menlo, monospace; font-size: 32px; line-height: 1.55; }
+      .gutter, .code { margin: 0; font: inherit; white-space: pre; }
+      .gutter { min-width: 2ch; text-align: right; color: #6e7285; }
+      .code { color: #d7dae6; }
+      .caret { display: inline-block; width: 0.55ch; height: 1.15em; margin-left: 1px; vertical-align: -0.2em; background: var(--accent, #e0a458); }
+      .k { color: #c792ea; }
+      .s { color: #c3e88d; }
+      .n { color: #f78c6c; }
+      .c { color: #8a8fa6; font-style: italic; }
+      .f { color: #82aaff; }
+    </style>
+    <div class="wrap">
+      <div class="window">
+        <div class="bar">
+          <div class="dot" style="background: #ff5f57"></div>
+          <div class="dot" style="background: #febc2e"></div>
+          <div class="dot" style="background: #28c840"></div>
+          <p class="title" data-var-text="title">render.ts</p>
+        </div>
+        <div class="body">
+          <pre class="gutter"></pre>
+          <pre class="code"><span class="caret"></span></pre>
+        </div>
+      </div>
+    </div>
+    <script>
+      const blockDuration = 8;
+      const vars = __verdandi.getVariables();
+      const code = String(vars.code ?? "").replace(/\r\n?/g, "\n");
+      const speed = Number(vars.speed) > 0 ? Number(vars.speed) : 40;
+
+      // One span per token; typing shows each span's first characters, so colours never re-flow.
+      const tokenPattern = /(\/\/[^\n]*|#[^\n]*)|("(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?|`(?:\\.|[^`\\])*`?)|(\b\d+(?:\.\d+)?\b)|\b(const|let|var|function|return|if|else|for|while|import|from|export|default|async|await|class|new|true|false|null|undefined|def|print|fn|pub|use|type|interface)\b|([A-Za-z_$][\w$]*)(?=\s*\()/g;
+      const tokens = [];
+      let last = 0;
+      for (const m of code.matchAll(tokenPattern)) {
+        if (m.index > last) tokens.push({ cls: "", text: code.slice(last, m.index) });
+        const cls = m[1] ? "c" : m[2] ? "s" : m[3] ? "n" : m[4] ? "k" : "f";
+        tokens.push({ cls, text: m[0] });
+        last = m.index + m[0].length;
+      }
+      if (last < code.length) tokens.push({ cls: "", text: code.slice(last) });
+
+      const pre = document.querySelector(".code");
+      const caret = document.querySelector(".caret");
+      const gutter = document.querySelector(".gutter");
+      const spans = tokens.map((t) => {
+        const s = document.createElement("span");
+        if (t.cls) s.className = t.cls;
+        pre.insertBefore(s, caret);
+        return s;
+      });
+      const totalLines = code.split("\n").length;
+      // Reserve the finished code's height so the window never grows while typing.
+      pre.style.minHeight = `${totalLines * 1.55}em`;
+
+      const show = (n) => {
+        let left = n;
+        for (const [i, t] of tokens.entries()) {
+          spans[i].textContent = left > 0 ? t.text.slice(0, left) : "";
+          left -= t.text.length;
+        }
+        const lines = code.slice(0, n).split("\n").length;
+        gutter.textContent = Array.from({ length: lines }, (_, i) => i + 1).join("\n");
+      };
+      show(0);
+
+      const typeStart = 0.8;
+      const typeTime = Math.min(code.length / speed, blockDuration - typeStart - 1.6);
+      const typed = { n: 0 };
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo(".window", { opacity: 0, y: 40, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.6, ease: "power3.out" }, 0)
+        .to(typed, { n: code.length, duration: typeTime, ease: "none", onUpdate: () => show(Math.round(typed.n)) }, typeStart);
+      const blinkStart = typeStart + typeTime + 0.1;
+      // GSAP's steps(1) jumps halfway, so each 0.9 s repeat is on, then off; the caret ends lit.
+      const blinks = Math.max(1, Math.floor((blockDuration - 0.5 - blinkStart) / 0.9));
+      tl.fromTo(caret, { opacity: 1 }, { opacity: 0, duration: 0.9, ease: "steps(1)", repeat: blinks - 1 }, blinkStart)
+        .set(caret, { opacity: 1 }, blinkStart + blinks * 0.9)
+        .to(".window", { opacity: 0, y: -24, duration: 0.45, ease: "power2.in" }, blockDuration - 0.5);
+      window.__timelines["code-typing"] = tl;
+    </script>
+  </div>
+</template>

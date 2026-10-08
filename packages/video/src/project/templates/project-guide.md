@@ -2,6 +2,8 @@
 
 This folder is a Verdandi video composition: HTML that renders to video. `index.html` is the root composition.
 
+- The `#title` heading in a new project and its tween in the script are a sample: remove both together when you
+  replace them, or the timeline animates an element that no longer exists.
 - Run `verdandi video lint` after every edit, `verdandi video snapshot --at <seconds>` to look at frames, and
   `verdandi video render` only once the user approved what they saw.
 - The root element carries `data-composition-id`, `data-width`, `data-height` and `data-duration` (seconds).

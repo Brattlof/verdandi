@@ -42,10 +42,14 @@ const usage = `Usage:
   verdandi routing replay [--policy <file>] [--project <path>] [--home <dir>]   how saved tasks would route under a proposed policy (or each project's current one), with the estimated cost change; reads the database read-only
   verdandi trajectories export --format jsonl|routing [--project <path>] [--since <date>] [--out <file>] [--home <dir>]   saved tasks as chat conversations with tool calls (jsonl) or as what the router knew, the route and how it went (routing), one JSON line per task, secrets masked; projects listed under excludeProjects in the home's trajectories.yaml are left out; reads the database read-only
   verdandi video init <dir> [--resolution landscape|portrait|square|landscape-4k|portrait-4k|square-4k]   start a video project: an HTML composition (index.html) with GSAP vendored for offline renders
-  verdandi video render [dir] [--output <file>] [--format mp4|webm|mov|gif|png-sequence] [--quality draft|standard|high] [--fps <n>] [--crf <n>] [--entry <page>] [--variables <json>]   render a composition to video in headless Chrome and ffmpeg (default renders/<dir>.mp4)
+  verdandi video render [dir] [--output <file>] [--format mp4|webm|mov|gif|png-sequence] [--quality draft|standard|high] [--fps <n>] [--crf <n>] [--workers <n>] [--entry <page>] [--variables <json>]   render a composition to video in headless Chrome and ffmpeg (default renders/<dir>.mp4)
   verdandi video snapshot [dir] [--at <s,s,…> | --frames <n>] [--output <dir>]   PNG frames of a composition at those times (default 5 evenly spaced), into snapshots/
   verdandi video lint [dir] [--json] [--verbose]   check a composition's source against the contract (exit 1 on errors)
   verdandi video check [dir] [--samples <n>] [--strict] [--json]   lint, then run it in headless Chrome: errors, failed loads, clips past the end, text off the canvas or clipped, nothing moving (--strict fails on warnings)
+  verdandi video add <block> [--project <dir>] [--vars <json>] [--force]   copy a ready-made block (lower thirds, titles, charts, captions…) into the project's compositions/ and print the element that mounts it
+  verdandi video catalog [query] [--json]   list the blocks, or those matching every word of the query
+  verdandi video skills [--force] [--home <dir>]   install the video skills into the profile, for every harness; edited copies are kept unless --force
+  verdandi video preview [dir] [--home <dir>] [--port <n>] [--no-open]   open the project in the web UI's video Studio (preview, timeline, editor, renders) until Ctrl+C
   verdandi video timeline [dir] [--json]   the composition's tracks and clips with their resolved start and end
   verdandi decisions eval [--candidate <module>] [--home <dir>]   replay logged decisions through a candidate backend (a module default-exporting a decision Backend; default: today's rules) and print, per question kind, its agreement with the logged answers and, where the task's outcome is known, accuracy and Brier score; reads the database read-only`;
 
