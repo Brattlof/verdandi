@@ -12,7 +12,8 @@ import { createElement, useCallback, useEffect, useRef, useState } from "react";
 import type { Connection } from "../client.ts";
 import { RuneText } from "../ui/runes.tsx";
 import { CodeEditor } from "./editor.tsx";
-import { seconds, setAttribute } from "./patch.ts";
+import { emptyHistory, type History, record, redoStep, undoStep } from "./history.ts";
+import { assetMarkup, insertIntoComposition, seconds, setAttribute } from "./patch.ts";
 import type { VerdandiPlayer } from "./player.ts";
 import "./player.ts";
 import { Timeline } from "./timeline.tsx";
@@ -143,6 +144,7 @@ export const StudioPage = ({ connection }: { connection: Connection }) => {
 const Studio = ({ connection, initial, onClose }: { connection: Connection; initial: VideoView; onClose: () => void }) => {
   const projectId = initial.projectId as VideoProjectId;
   const [files, setFiles] = useState(initial.files);
+  const [assets, setAssets] = useState(initial.assets);
   const [jobs, setJobs] = useState<ReadonlyMap<string, VideoRenderJob>>(new Map(initial.renders.map((j) => [j.jobId, j])));
   const [manifest, setManifest] = useState<VideoManifest>();
   const [time, setTime] = useState(0);
@@ -153,6 +155,46 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
   const player = useRef<VerdandiPlayer>(null);
   const fileRef = useRef(file);
   fileRef.current = file;
+  // ponytail: history lives in this page and ends with it; keep it server-side if edits must survive a reload.
+  const [history, setHistory] = useState<History>(emptyHistory);
+  const historyRef = useRef(history);
+  historyRef.current = history;
+
+  /** Writes `after` over `before` (at `version`), remembering it for undo; false when it didn't write. */
+  const write = useCallback(
+    async (path: string, before: string, after: string, version: string | null, label: string) => {
+      const result = await connection.video((rpc) => rpc.VideoFileWrite({ projectId, path, content: after, expectedVersion: version }));
+      if (!result.ok) {
+        if (!(result.reason === "Conflict" && path === fileRef.current?.path)) setNotice(result.message);
+        return result;
+      }
+      setHistory((h) => record(h, { label, path, before, after }));
+      return result;
+    },
+    [connection, projectId],
+  );
+
+  /** Undoes (or redoes) the latest edit, unless the file changed since: then it says so and leaves it. */
+  const step = useCallback(
+    async (direction: "undo" | "redo") => {
+      const found = direction === "undo" ? undoStep(historyRef.current) : redoStep(historyRef.current);
+      if (!found) return;
+      const { edit, next } = found;
+      const [expected, target] = direction === "undo" ? [edit.after, edit.before] : [edit.before, edit.after];
+      const now = await connection.video((rpc) => rpc.VideoFileRead({ projectId, path: edit.path }));
+      if (!now.ok) return setNotice(now.message);
+      if (now.value.content !== expected)
+        return setNotice(
+          `${edit.path} changed since "${edit.label}", so ${direction === "undo" ? "undoing" : "redoing"} it would lose that change.`,
+        );
+      const result = await connection.video((rpc) =>
+        rpc.VideoFileWrite({ projectId, path: edit.path, content: target, expectedVersion: now.value.version }),
+      );
+      if (!result.ok) return setNotice(result.message);
+      setHistory(next);
+    },
+    [connection, projectId],
+  );
 
   const read = useCallback(
     async (p: string) => {
@@ -175,10 +217,12 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
         async (message: VideoFeed) => {
           if (message.kind === "snapshot") {
             setFiles(message.view.files);
+            setAssets(message.view.assets);
             setJobs(new Map(message.view.renders.map((j) => [j.jobId, j])));
           } else if (message.kind === "render") setJobs((m) => new Map(m).set(message.job.jobId, message.job));
           else {
             setFiles(message.files);
+            setAssets(message.assets);
             const changed = message.paths.filter((p) => !p.startsWith("renders/"));
             if (!changed.length) return;
             player.current?.load(player.current.currentTime);
@@ -200,36 +244,47 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
   const save = useCallback(async () => {
     const open = fileRef.current;
     if (!open || open.draft === open.saved) return;
-    const result = await connection.video((rpc) =>
-      rpc.VideoFileWrite({ projectId, path: open.path, content: open.draft, expectedVersion: open.version }),
-    );
+    const result = await write(open.path, open.saved, open.draft, open.version, `Edit ${open.path}`);
     if (result.ok) {
       setFile({ ...open, saved: open.draft, version: result.value.version });
       setConflict(undefined);
     } else if (result.reason === "Conflict" && result.current)
       setConflict({ content: result.current.content, version: result.current.version });
     else setNotice(result.message);
-  }, [connection, projectId]);
+  }, [write]);
 
   /** Writes one attribute of the clip with `clip.id`, in whichever HTML file declares it. */
   const patchClip = useCallback(
-    async (clip: VideoClip, name: string, value: string | null) => {
+    async (clip: VideoClip, name: string, value: string | null, label: string) => {
       if (!clip.id) return;
       for (const p of files.filter((f) => f.endsWith(".html"))) {
         const result = await connection.video((rpc) => rpc.VideoFileRead({ projectId, path: p }));
         if (!result.ok) continue;
         const next = setAttribute(result.value.content, clip.id, name, value);
         if (next === undefined) continue;
-        const written = await connection.video((rpc) =>
-          rpc.VideoFileWrite({ projectId, path: p, content: next, expectedVersion: result.value.version }),
-        );
-        if (!written.ok) setNotice(written.message);
+        await write(p, result.value.content, next, result.value.version, label);
         return;
       }
       setNotice(`No HTML file in the project has an element with id="${clip.id}".`);
     },
-    [connection, files, projectId],
+    [connection, files, projectId, write],
   );
+
+  // Mod+Z and Mod+Shift+Z outside the code editor, which keeps its own undo for unsaved typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        !(e.metaKey || e.ctrlKey) ||
+        e.key.toLowerCase() !== "z" ||
+        (e.target as Element | null)?.closest?.(".cm-editor, input, select, textarea")
+      )
+        return;
+      e.preventDefault();
+      void step(e.shiftKey ? "redo" : "undo");
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, [step]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -240,6 +295,22 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
         <span className="min-w-0 flex-1 truncate font-medium" title={initial.path}>
           {initial.path}
         </span>
+        <button
+          type="button"
+          onClick={() => void step("undo")}
+          disabled={!history.undo.length}
+          title={history.undo.at(-1) ? `Undo ${history.undo.at(-1)?.label} (⌘Z)` : "Nothing to undo"}
+        >
+          Undo
+        </button>
+        <button
+          type="button"
+          onClick={() => void step("redo")}
+          disabled={!history.redo.length}
+          title={history.redo.at(-1) ? `Redo ${history.redo.at(-1)?.label} (⌘⇧Z)` : "Nothing to redo"}
+        >
+          Redo
+        </button>
         <RenderControls connection={connection} projectId={projectId} onError={setNotice} />
       </header>
       {notice && (
@@ -283,14 +354,42 @@ const Studio = ({ connection, initial, onClose }: { connection: Connection; init
               manifest={manifest}
               time={time}
               onSeek={(t) => player.current?.seek(t)}
-              onMove={(clip, start) => void patchClip(clip, "data-start", seconds(start))}
-              onTrim={(clip, d) => void patchClip(clip, "data-duration", seconds(d))}
-              onToggleHidden={(clip) => void patchClip(clip, "data-hidden", clip.hidden ? null : "")}
+              onMove={(clip, start) => void patchClip(clip, "data-start", seconds(start), `Move ${clip.id}`)}
+              onTrim={(clip, d) => void patchClip(clip, "data-duration", seconds(d), `Trim ${clip.id}`)}
+              onToggleHidden={(clip) =>
+                void patchClip(clip, "data-hidden", clip.hidden ? null : "", `${clip.hidden ? "Show" : "Hide"} ${clip.id}`)
+              }
             />
           ) : (
             <p role="status" className="text-muted">
               Loading the composition…
             </p>
+          )}
+          {manifest && (
+            <Assets
+              assets={assets}
+              onError={setNotice}
+              onUpload={async (file) => {
+                const data = await new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ""));
+                  reader.onerror = () => reject(reader.error);
+                  reader.readAsDataURL(file);
+                });
+                const result = await connection.video((rpc) => rpc.VideoAssetUpload({ projectId, name: file.name, data }));
+                if (!result.ok) setNotice(result.message);
+              }}
+              onInsert={async (asset) => {
+                const page = await connection.video((rpc) => rpc.VideoFileRead({ projectId, path: "index.html" }));
+                if (!page.ok) return setNotice(page.message);
+                const taken = new Set(manifest.clips.flatMap((c) => c.id ?? []));
+                const track = Math.max(-1, ...manifest.clips.map((c) => c.track)) + 1;
+                const { id, markup } = assetMarkup(asset, time, track, taken);
+                const next = insertIntoComposition(page.value.content, manifest.id, markup);
+                if (!next) return setNotice(`index.html has no element with data-composition-id="${manifest.id}" to put ${asset} in.`);
+                await write("index.html", page.value.content, next, page.value.version, `Insert ${id}`);
+              }}
+            />
           )}
           <Renders
             jobs={[...jobs.values()].sort((a, b) => b.startedAt - a.startedAt)}
@@ -494,3 +593,65 @@ const Renders = ({ jobs, base, connection }: { jobs: readonly VideoRenderJob[]; 
       </ul>
     </section>
   );
+
+/** Over this, a file goes into assets/ by hand (a message carries at most this much). */
+const uploadLimit = 14 * 1024 * 1024;
+
+/** The project's media, uploaded into assets/ and put on a new track at the playhead with Insert. */
+const Assets = ({
+  assets,
+  onUpload,
+  onInsert,
+  onError,
+}: {
+  assets: readonly string[];
+  onError: (message: string) => void;
+  onUpload: (file: File) => Promise<void>;
+  onInsert: (asset: string) => Promise<void>;
+}) => {
+  const [busy, setBusy] = useState<string>();
+  return (
+    <section aria-label="Assets">
+      <div className="mb-1 flex items-center gap-2">
+        <h2 className="eyebrow flex-1 text-muted">Assets</h2>
+        <label className="cursor-pointer rounded-md border border-line px-2 py-1 text-xs hover:bg-hover">
+          {busy ? `Uploading ${busy}…` : "Upload"}
+          <input
+            type="file"
+            className="sr-only"
+            accept="video/*,audio/*,image/*"
+            multiple
+            disabled={!!busy}
+            onChange={async (e) => {
+              const list = [...(e.target.files ?? [])];
+              e.target.value = "";
+              for (const file of list) {
+                if (file.size > uploadLimit) {
+                  onError(`${file.name} is over 14 MB: copy it into the project's assets/ folder instead; it shows up here.`);
+                  continue;
+                }
+                setBusy(file.name);
+                await onUpload(file);
+              }
+              setBusy(undefined);
+            }}
+          />
+        </label>
+      </div>
+      {assets.length === 0 ? (
+        <p className="text-xs text-muted">No media in assets/ yet.</p>
+      ) : (
+        <ul className="flex flex-col gap-1">
+          {assets.map((a) => (
+            <li key={a} className="flex items-center gap-2 rounded-md border border-line bg-card px-3 py-1.5">
+              <span className="min-w-0 flex-1 truncate">{a.replace(/^assets\//, "")}</span>
+              <button type="button" className="text-xs" onClick={() => void onInsert(a)} title="Put it on a new track at the playhead">
+                Insert
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+};

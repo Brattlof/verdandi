@@ -33,6 +33,8 @@ export const VideoView = Schema.Struct({
   path: Schema.String,
   /** Text files the Studio can edit, relative to the project, sorted. */
   files: Schema.Array(Schema.String),
+  /** Media under `assets/`, relative to the project, sorted. */
+  assets: Schema.Array(Schema.String),
   renders: Schema.Array(VideoRenderJob),
 });
 export type VideoView = typeof VideoView.Type;
@@ -44,7 +46,12 @@ export type VideoFile = typeof VideoFile.Type;
 /** The project, then each change: files changed on disk (by anyone), and every render's progress. */
 export const VideoFeed = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("snapshot"), view: VideoView }),
-  Schema.Struct({ kind: Schema.Literal("changed"), paths: Schema.Array(Schema.String), files: Schema.Array(Schema.String) }),
+  Schema.Struct({
+    kind: Schema.Literal("changed"),
+    paths: Schema.Array(Schema.String),
+    files: Schema.Array(Schema.String),
+    assets: Schema.Array(Schema.String),
+  }),
   Schema.Struct({ kind: Schema.Literal("render"), job: VideoRenderJob }),
 ]);
 export type VideoFeed = typeof VideoFeed.Type;

@@ -489,6 +489,19 @@ export class Api extends RpcGroup.make(
     error: VideoUnavailable,
   }),
   Rpc.make("VideoRenderCancel", { payload: { jobId: Schema.String }, error: VideoUnavailable }),
+  /**
+   * Saves a media file into the project's `assets/` under `name` (a new name if it's taken), returning its path. At most
+   * about 14 MB, base64 in one message; larger files are copied into `assets/` directly.
+   */
+  Rpc.make("VideoAssetUpload", {
+    payload: {
+      projectId: VideoProjectId,
+      name: Schema.String.check(Schema.isMaxLength(200)),
+      data: Schema.String.check(Schema.isMaxLength(19 * 1024 * 1024)),
+    },
+    success: Schema.Struct({ path: Schema.String }),
+    error: VideoUnavailable,
+  }),
   /** The project's view, then each file change and render update. */
   Rpc.make("VideoSubscribe", {
     payload: { projectId: VideoProjectId, subscriptionId: Schema.String },

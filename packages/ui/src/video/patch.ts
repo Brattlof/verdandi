@@ -34,3 +34,38 @@ export const setAttribute = (source: string, id: string, name: string, value: st
 
 /** Seconds as an attribute value: at most three decimals, no trailing zeros. */
 export const seconds = (s: number) => String(Math.round(s * 1000) / 1000);
+
+/** `source` with `markup` inserted as the first child of the composition `compositionId`, or undefined without one. */
+export const insertIntoComposition = (source: string, compositionId: string, markup: string) => {
+  const open = new RegExp(`<[a-zA-Z][\\w-]*(?=[^>]*\\sdata-composition-id\\s*=\\s*(["'])${escapeRegex(compositionId)}\\1)[^>]*>`).exec(
+    source,
+  );
+  if (!open) return undefined;
+  const at = open.index + open[0].length;
+  const indent = /\n([ \t]*)[^\n]*$/.exec(source.slice(0, open.index))?.[1] ?? "";
+  return `${source.slice(0, at)}\n${indent}  ${markup}${source.slice(at)}`;
+};
+
+const kinds = { video: /\.(?:mp4|webm|mov|m4v)$/i, audio: /\.(?:mp3|wav|m4a|aac|ogg)$/i } as const;
+
+/** The element that plays `asset` from `start` on `track`, with an id not in `taken`. */
+export const assetMarkup = (asset: string, start: number, track: number, taken: ReadonlySet<string>) => {
+  const stem =
+    (asset.split("/").pop() ?? "asset")
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^\w-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "asset";
+  let id = /^[A-Za-z]/.test(stem) ? stem : `asset-${stem}`;
+  for (let n = 2; taken.has(id); n++) id = `${stem}-${n}`;
+  const timing = `data-start="${seconds(start)}" data-track-index="${track}"`;
+  if (kinds.video.test(asset))
+    return {
+      id,
+      markup: `<video id="${id}" class="clip" src="${asset}" muted ${timing} style="inset: 0; width: 100%; height: 100%; object-fit: cover"></video>`,
+    };
+  if (kinds.audio.test(asset)) return { id, markup: `<audio id="${id}" src="${asset}" ${timing}></audio>` };
+  return {
+    id,
+    markup: `<img id="${id}" class="clip" src="${asset}" alt="" ${timing} data-duration="3" style="inset: 0; width: 100%; height: 100%; object-fit: contain">`,
+  };
+};

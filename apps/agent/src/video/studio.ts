@@ -50,6 +50,11 @@ export class VideoStudio extends Context.Service<
       options: { readonly format: VideoFormat; readonly quality: VideoQuality; readonly fps: number },
     ) => Effect.Effect<VideoRenderJob, VideoUnavailable>;
     readonly renderCancel: (jobId: string) => Effect.Effect<void, VideoUnavailable>;
+    readonly upload: (
+      projectId: VideoProjectId,
+      name: string,
+      base64: string,
+    ) => Effect.Effect<{ readonly path: string }, VideoUnavailable>;
     readonly feed: (projectId: VideoProjectId) => Stream.Stream<VideoFeed, VideoUnavailable>;
     /** The preview's response for `/video/<id>/<path>`, or undefined for a project that isn't open. */
     readonly serve: (projectId: string, path: string, headers: Headers) => Promise<Response> | undefined;
@@ -90,6 +95,20 @@ const listFiles = (root: string) =>
     .filter((f) => !skipped.test(f))
     .sort();
 
+/** Media files under `assets/`: what the Studio's assets panel lists and inserts. */
+const listAssets = (root: string) =>
+  existsSync(join(root, "assets"))
+    ? [...new Bun.Glob("assets/**/*.{mp4,webm,mov,m4v,mp3,wav,m4a,aac,ogg,png,jpg,jpeg,gif,webp,svg,avif}").scanSync({ cwd: root })]
+        .map((f) => f.replaceAll("\\", "/"))
+        .sort()
+    : [];
+
+/** An upload's name, safe as one file name: no folders, no leading dots, nothing but letters, digits, `.`, `-` and `_`. */
+export const assetName = (name: string) => {
+  const base = (name.split(/[\\/]/).pop() ?? "").replace(/[^\w.-]+/g, "-").replace(/^[.-]+/, "");
+  return base && /\.[a-z0-9]+$/i.test(base) ? base : undefined;
+};
+
 const stamp = () => new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
 
 export const VideoStudioLive = Layer.effect(
@@ -115,6 +134,7 @@ export const VideoStudioLive = Layer.effect(
       projectId: p.id,
       path: p.path,
       files: listFiles(p.path),
+      assets: listAssets(p.path),
       renders: [...jobs.values()].filter((j) => j.projectId === p.id).map((j) => j.job),
     });
 
@@ -160,7 +180,7 @@ export const VideoStudioLive = Layer.effect(
                 // Editors save in bursts (temp file, rename); one message per quiet 60 ms.
                 timer = setTimeout(() => {
                   const p = projects.get(id);
-                  if (p) publish(p, { kind: "changed", paths: [...pending].sort(), files: listFiles(real) });
+                  if (p) publish(p, { kind: "changed", paths: [...pending].sort(), files: listFiles(real), assets: listAssets(real) });
                   pending = new Set();
                 }, 60);
               });
@@ -254,6 +274,24 @@ export const VideoStudioLive = Layer.effect(
               ),
           );
           return job;
+        }),
+
+      upload: (projectId, name, base64) =>
+        Effect.gen(function* () {
+          const p = yield* project(projectId);
+          const safe = assetName(name);
+          if (!safe)
+            return yield* new VideoUnavailable({
+              reason: "InvalidPath",
+              message: `"${name}" isn't a file name with an extension, like clip.mp4.`,
+            });
+          const dot = safe.lastIndexOf(".");
+          // Never overwrite: a taken name gets -2, -3, … before its extension.
+          let path = `assets/${safe}`;
+          for (let n = 2; existsSync(join(p.path, path)); n++) path = `assets/${safe.slice(0, dot)}-${n}${safe.slice(dot)}`;
+          mkdirSync(join(p.path, "assets"), { recursive: true });
+          writeFileSync(join(p.path, path), Buffer.from(base64, "base64"));
+          return { path };
         }),
 
       renderCancel: (jobId) => {
