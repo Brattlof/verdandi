@@ -6,7 +6,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "0.127.0",
+    "@anthropic-ai/sdk": "0.128.0",
     "@verdandi/contracts": "workspace:*",
     "effect": "4.0.0-rc.115"
   },
