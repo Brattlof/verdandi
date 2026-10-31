@@ -7,25 +7,25 @@
     "./styles.css": "./src/styles.css"
   },
   "dependencies": {
-    "@base-ui/react": "1.8.0",
+    "@base-ui/react": "1.9.0",
     "@codemirror/lang-css": "6.3.1",
     "@codemirror/lang-html": "6.4.12",
     "@codemirror/lang-javascript": "6.2.5",
-    "@codemirror/language": "6.12.4",
-    "@codemirror/state": "6.7.5",
-    "@codemirror/view": "6.43.13",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.14",
     "@fontsource-variable/crimson-pro": "5.3.0",
     "@fontsource-variable/ibm-plex-sans": "5.3.0",
     "@fontsource-variable/jetbrains-mono": "5.3.0",
-    "@lezer/highlight": "1.2.4",
-    "@tanstack/react-virtual": "3.14.13",
+    "@lezer/highlight": "1.2.5",
+    "@tanstack/react-virtual": "3.14.21",
     "@verdandi/contracts": "workspace:*",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "codemirror": "6.0.2",
     "effect": "4.0.0-rc.115",
-    "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
     "@types/react": "19.3.0",
