@@ -5,8 +5,8 @@
   "dependencies": {
     "@effect/platform-bun": "4.0.0-rc.115",
     "@effect/sql-sqlite-bun": "4.0.0-rc.115",
-    "@opentui/core": "0.5.11",
-    "@opentui/react": "0.5.11",
+    "@opentui/core": "0.6.8",
+    "@opentui/react": "0.6.8",
     "@verdandi/contracts": "workspace:*",
     "@verdandi/decisions": "workspace:*",
     "@verdandi/harness-claude-code": "workspace:*",
@@ -18,7 +18,7 @@
     "@verdandi/video": "workspace:*",
     "@verdandi/web": "workspace:*",
     "effect": "4.0.0-rc.115",
-    "react": "19.3.0"
+    "react": "19.3.1"
   },
   "bin": {
     "verdandi": "./src/bin.ts"
